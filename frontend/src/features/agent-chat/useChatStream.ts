@@ -90,6 +90,7 @@ export function useChatStream(): UseChatStreamReturn {
 
       let eventName = ''
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- SSE infinite loop, exits via `if (done) break`
       while (true) {
         const { value, done } = await reader.read()
         armIdleTimer() // any byte resets the watchdog — data OR backend heartbeat ping
@@ -210,6 +211,7 @@ export function useChatStream(): UseChatStreamReturn {
       }
       setState((s) => ({ ...s, phase: 'error', error: err?.message ?? 'stream failed' }))
     } finally {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- idleTimer may legitimately be null when stream errors before arming
       if (idleTimer) clearTimeout(idleTimer)
       if (abortRef.current === ctrl) {
         abortRef.current = null

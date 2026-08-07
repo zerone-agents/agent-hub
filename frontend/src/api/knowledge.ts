@@ -432,6 +432,7 @@ async function unwrap<T>(
 ): Promise<T> {
   const res = await promise;
   const body = res.data;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- axios res.data typed as Envelope<T> but runtime may be undefined for empty/error responses
   if (body && !body.success) {
     throw new Error(body.error ?? body.message ?? "请求失败");
   }

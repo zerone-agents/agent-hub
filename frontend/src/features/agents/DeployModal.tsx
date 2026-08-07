@@ -487,6 +487,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
   const handleCopy = async (which: 'url' | 'key', text: string) => {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: clipboard API may be undefined in non-HTTPS / older browsers despite TS lib typing it as required
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text)
       } else {

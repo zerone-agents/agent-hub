@@ -8,7 +8,7 @@ import {
 } from '@phosphor-icons/react'
 
 /** Map AGENT_ICON_OPTIONS names to Phosphor React components. */
-const ICON_MAP: Record<string, PhosphorIcon> = {
+const ICON_MAP: Partial<Record<string, PhosphorIcon>> = {
   ChatCircleDots, ChartBar, ShieldCheck, Crosshair, UserCircle, Terminal,
   Robot, Brain, Lightbulb, Cpu, MagicWand, Detective, Compass, Rocket,
   GearSix, Code, GraduationCap, GlobeHemisphereWest, PuzzlePiece, Eye,

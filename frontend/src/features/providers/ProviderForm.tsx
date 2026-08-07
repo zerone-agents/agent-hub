@@ -8,7 +8,7 @@ interface ProviderFormProps {
   onClose: () => void
 }
 
-const PRESET_FORMS: Record<string, ComponentType<any>> = {
+const PRESET_FORMS: Partial<Record<string, ComponentType<any>>> = {
   'glm-cn': GenericProviderForm,
   'kimi-cn': GenericProviderForm,
   'bailian': GenericProviderForm,

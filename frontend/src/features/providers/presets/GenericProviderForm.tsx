@@ -149,7 +149,7 @@ interface FormValues {
   lockedApiKey: string
 }
 
-const FIELD_DEFINITIONS: Record<string, { label: string; labelEn: string; type: PresetField['type']; required: boolean; secret: boolean }> = {
+const FIELD_DEFINITIONS: Partial<Record<string, { label: string; labelEn: string; type: PresetField['type']; required: boolean; secret: boolean }>> = {
   name: { label: '名称', labelEn: 'Name', type: 'text', required: true, secret: false },
   base_url: { label: 'API 地址', labelEn: 'API URL', type: 'text', required: true, secret: false },
   api_key: { label: 'API 密钥', labelEn: 'API Key', type: 'password', required: false, secret: true },
@@ -207,6 +207,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
       const next = { ...prev }
       let changed = false
       for (const rule of activeRules) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record index returns T not T | undefined; first-time key access genuinely needs the default
         if (!next[rule.key] && rule.default) {
           next[rule.key] = { type: rule.type, value: rule.default }
           changed = true
@@ -234,7 +235,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
       })
       setDefaultModels(editingProvider.defaultModels.map((m) => ({ ...m })))
       setFields(editingProvider.fields.map((f) => ({ ...f })))
-      setAttributes({ ...(editingProvider.attributes || {}) })
+      setAttributes({ ...editingProvider.attributes })
       setInitialMaskedAPIKey(editingProvider.lockedApiKey)
     } else {
       form.resetFields()
@@ -285,7 +286,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const handleTestConnection = async () => {
     setProbing(true)
     try {
-      if (isEdit && editingProvider) {
+      if (editingProvider) {
         const values = form.getFieldsValue(['lockedApiKey'])
         const res = await probeProvider.mutateAsync({
           id: editingProvider.id,
@@ -326,7 +327,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const handleSubmit = async () => {
     const values = await form.validateFields()
 
-    if (isEdit && editingProvider) {
+    if (editingProvider) {
       const data: Partial<Provider> = {
         name: values.name,
         description: values.description,
@@ -476,7 +477,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             />
             <Select
               size="small"
-              value={model.modelType || (isOcr ? 'ocr' : 'llm')}
+              value={model.modelType}
               onChange={(v) => { handleModelChange(i, 'modelType', v); }}
               options={modelTypeOptions}
             />

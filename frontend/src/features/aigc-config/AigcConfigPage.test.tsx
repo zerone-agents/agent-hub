@@ -52,8 +52,8 @@ describe('AigcConfigPage', () => {
     const pattern = /模型 AIGC 码在[\s\S]*模型管理[\s\S]*自动分配/
     expect(
       screen.getByText((_, node) => {
-        if (node === null || node.textContent === null) return false
-        if (!pattern.test(node.textContent)) return false
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- testing-library matcher types node as Element, but runtime may pass null
+        if (!node || !node.textContent || !pattern.test(node.textContent)) return false
         // pick the smallest matching element (no descendant also matches)
         return !Array.from(node.querySelectorAll('*')).some((c) =>
           pattern.test(c.textContent)

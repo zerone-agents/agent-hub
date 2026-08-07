@@ -135,14 +135,14 @@ export default function AgentListPage() {
 
   // 按 group 分组，组内按 name 排序
   const groupedAgents = useMemo(() => {
-    const grouped = filteredAgents.reduce<Record<string, Agent[]>>((acc, agent) => {
+    const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
       const group = agent.group ?? '默认分组'
       if (!acc[group]) acc[group] = []
       acc[group].push(agent)
       return acc
     }, {})
     // 组内按标识首字母排序
-    Object.values(grouped).forEach((list) => list.sort((a, b) => a.name.localeCompare(b.name)))
+    Object.values(grouped).forEach((list) => (list ?? []).sort((a, b) => a.name.localeCompare(b.name)))
     return grouped
   }, [filteredAgents])
 
@@ -380,7 +380,7 @@ export default function AgentListPage() {
 
   // Protocol → display metadata. Used by the provider dropdown's optionRender
   // to append a colored protocol tag after each provider name.
-  const protocolMeta: Record<string, { label: string; color: string }> = {
+  const protocolMeta: Partial<Record<string, { label: string; color: string }>> = {
     anthropic: { label: 'Anthropic', color: 'orange' },
     openai: { label: 'OpenAI', color: 'emerald' },
     mineru: { label: 'MinerU', color: 'geekblue' },
@@ -405,7 +405,7 @@ export default function AgentListPage() {
   const modelSuggestions = useMemo(() => {
     const provider = providers.find(p => p.id === selectedProviderId)
     if (!provider) return []
-    return (provider.defaultModels || [])
+    return provider.defaultModels
       .filter((m) => m.modelType === 'llm' || m.modelType === 'vlm')
       .map(m => ({
         value: m.modelId,
@@ -417,7 +417,7 @@ export default function AgentListPage() {
   const modelDisplayNameMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const p of providers) {
-      for (const mo of (p.defaultModels || [])) {
+      for (const mo of p.defaultModels) {
         m.set(`${p.id}::${mo.modelId}`, mo.displayName)
       }
     }
@@ -466,11 +466,11 @@ export default function AgentListPage() {
             <div className={styles.sectionHeader}>
               <div className={styles.sectionGroupTitle}>
                 <span>{group}</span>
-                <span className={styles.sectionCount}>{groupedAgents[group].length}</span>
+                <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>
             </div>
             <CardGrid>
-              {groupedAgents[group].map((agent) => (
+              {(groupedAgents[group] ?? []).map((agent) => (
                 <AgentCard
                   key={agent.name}
                   agent={agent}

@@ -35,7 +35,7 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getAccessToken()
-    if (token && config.headers) {
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
     return config
@@ -72,10 +72,8 @@ apiClient.interceptors.response.use(
           const { accessToken, refreshToken: newRefreshToken } = response.data.data
           setTokens(accessToken, newRefreshToken)
 
-          if (originalRequest.headers) {
-            originalRequest.headers['X-Refresh-Attempt'] = 'true'
-            originalRequest.headers.Authorization = `Bearer ${String(accessToken)}`
-          }
+          originalRequest.headers['X-Refresh-Attempt'] = 'true'
+          originalRequest.headers.Authorization = `Bearer ${String(accessToken)}`
           return apiClient(originalRequest)
         }
       } catch {
