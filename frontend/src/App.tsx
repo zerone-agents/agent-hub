@@ -68,7 +68,7 @@ export default function App() {
     const colors = selectedTheme[appearance]
 
     Object.entries(colors).forEach(([key, value]) => {
-      root.style.setProperty(cssVariableNames[key as keyof ThemeColors], value)
+      root.style.setProperty(cssVariableNames[key as keyof ThemeColors], value as string)
     })
     root.dataset.theme = selectedTheme.id
     root.dataset.appearance = appearance

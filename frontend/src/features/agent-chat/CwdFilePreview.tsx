@@ -420,7 +420,7 @@ export default function CwdFilePreview(props: Props) {
       } catch (err) {
         if (controller.signal.aborted) return
         const msg = err instanceof Error ? err.message : String(err)
-        if (msg === 'Aborted' || (err as any)?.name === 'AbortError') return
+        if (msg === 'Aborted' || (err instanceof Error && err.name === 'AbortError')) return
         setState({
           ...initialState,
           loading: false,

@@ -3,6 +3,7 @@ import { Popconfirm } from 'antd'
 import { Plus, Trash, ChatCircleDots } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { AgentChatSession } from '@/api/agent-chat'
+import type { ApiEnvelope } from '@/api/client'
 import {
   useAgentChatSessions,
   useCreateAgentChatSession,
@@ -136,7 +137,7 @@ export default function ChatSessionList({
     setCreating(true)
     try {
       const res = await createSession.mutateAsync(undefined)
-      const sess = (res.data)?.data as AgentChatSession | undefined
+      const sess = (res.data as ApiEnvelope<AgentChatSession>)?.data
       if (sess) onSelect(sess)
     } finally {
       setCreating(false)

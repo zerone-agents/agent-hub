@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { skillApi } from '@/api/skills'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export interface SkillMdEntry {
   path: string
@@ -26,10 +26,9 @@ export function useSkillMd(name: string | null) {
       if (!name) return []
       try {
         const res = await skillApi.getSkillMd(name)
-        if (!res.data.success) throw new Error(res.data.message)
-        const entries = (res.data.data as { entries?: SkillMdEntry[] }).entries
-        return entries ?? []
-      } catch (err) {
+        const payload = unwrapResponse<{ entries?: SkillMdEntry[] } | null>(res)
+        return payload?.entries ?? []
+      } catch (err: unknown) {
         throw new Error(parseApiError(err))
       }
     },

@@ -229,7 +229,7 @@ export function parseContent(content: string): ContentPart[] | null {
   const trimmed = content.trim()
   if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return null
   try {
-    const parsed = JSON.parse(trimmed)
+    const parsed: unknown = JSON.parse(trimmed)
     if (Array.isArray(parsed)) return parsed as ContentPart[]
     if (typeof parsed === 'object') return [parsed as ContentPart]
     return null

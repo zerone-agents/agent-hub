@@ -15,6 +15,7 @@ import { useSkills } from '@/queries/useSkills'
 import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
 import { agentApi } from '@/api/agents'
+import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
@@ -311,7 +312,7 @@ export default function AgentListPage() {
           baseUrl: fieldValues.base_url || '',
         },
       })
-      const result = res.data.data as { success?: boolean; latencyMs?: number; error?: string } | undefined
+      const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>)?.data
       if (result?.success) {
         message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         setTestPassed(true)

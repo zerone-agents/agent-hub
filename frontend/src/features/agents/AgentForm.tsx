@@ -162,14 +162,14 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   }, [open, editingAgent, form])
 
   const selectIcon = (name: string) => {
-    const current = form.getFieldValue('iconName')
+    const current = form.getFieldValue('iconName') as FormValues['iconName']
     if (current === name) {
       form.setFieldsValue({ iconName: '' })
       return
     }
     const opt = AGENT_ICON_OPTIONS.find((o) => o.name === name)
-    const currentColor = form.getFieldValue('iconColor')
-    const currentBg = form.getFieldValue('iconBgColor')
+    const currentColor = form.getFieldValue('iconColor') as FormValues['iconColor'] | undefined
+    const currentBg = form.getFieldValue('iconBgColor') as FormValues['iconBgColor'] | undefined
     form.setFieldsValue({
       iconName: name,
       iconColor: currentColor ?? opt?.defaultColor ?? '',
@@ -333,7 +333,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
                     />
                   ))}
               </div>
-              <Input size="small" placeholder="#EBF0FF" value={form.getFieldValue('iconBgColor')}
+              <Input size="small" placeholder="#EBF0FF" value={form.getFieldValue('iconBgColor') as string}
                 onChange={(e) => { form.setFieldsValue({ iconBgColor: e.target.value }); }} />
             </div>
           </Form.Item>

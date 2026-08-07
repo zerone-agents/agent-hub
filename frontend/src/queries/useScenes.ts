@@ -1,16 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { sceneApi, type Scene, type SceneCreatePayload, type SceneUpdatePayload } from '@/api/scenes'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useScenes() {
   return useQuery<Scene[]>({
     queryKey: ['scenes'],
-    queryFn: async () => {
-      const res = await sceneApi.adminList()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
-    }
+    queryFn: async () =>
+      unwrapResponse<Scene[]>(await sceneApi.adminList()) ?? []
   })
 }
 
@@ -60,9 +57,7 @@ export function useAgentScenes(agentName: string) {
   return useQuery<Scene[]>({
     queryKey: ['agent-scenes', agentName],
     queryFn: async () => {
-      const res = await sceneApi.list()
-      if (!res.data.success) throw new Error(res.data.message)
-      const all = (res.data.data ?? []) as Scene[]
+      const all = unwrapResponse<Scene[]>(await sceneApi.list()) ?? []
       return all
         .filter((s) => s.enabled && s.agent === agentName)
         .sort((a, b) => a.name.localeCompare(b.name))
