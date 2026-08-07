@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, Star, Medal, UsersThree, ArrowDown, PencilSimple, Trash } from '@phosphor-icons/react'
+import { PlusIcon, StarIcon, MedalIcon, UsersThreeIcon, ArrowDownIcon, PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
@@ -144,10 +144,10 @@ export default function SkillListPage() {
             disabled={!skill.url}
             onClick={() => handleDownload(skill)}
           >
-            <ArrowDown size={14} />
+            <ArrowDownIcon size={14} />
           </button>
           <button type="button" className={styles.actBtn} title="编辑" onClick={() => { showEdit(skill); }}>
-            <PencilSimple size={14} />
+            <PencilSimpleIcon size={14} />
           </button>
           <Popconfirm
             title="确认删除？"
@@ -158,7 +158,7 @@ export default function SkillListPage() {
             onConfirm={() => { deleteSkill.mutate(skill.name); }}
           >
             <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <Trash size={14} />
+              <TrashIcon size={14} />
             </button>
           </Popconfirm>
         </div>
@@ -174,7 +174,7 @@ export default function SkillListPage() {
           <div className={styles.pageSub}>管理 AI 技能包，上传 zip 文件并关联到 Agent</div>
         </div>
         <PrimaryButton
-          icon={<Plus size={16} weight="bold" />}
+          icon={<PlusIcon size={16} weight="bold" />}
           onClick={() => { setEditingSkill(null); setFormOpen(true) }}
         >
           新建技能
@@ -193,7 +193,7 @@ export default function SkillListPage() {
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : filteredSkills.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><Star size={48} weight="thin" color={t.textMuted} /></div>
+          <div style={{ marginBottom: 20 }}><StarIcon size={48} weight="thin" color={t.textMuted} /></div>
           <div className={styles.emptyTitle}>{keywords ? '未找到匹配的技能' : '暂无技能'}</div>
           <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '创建您的第一个技能包以开始使用'}</div>
         </div>
@@ -203,7 +203,7 @@ export default function SkillListPage() {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionTitle}>
-                  <Medal size={18} weight="duotone" />
+                  <MedalIcon size={18} weight="duotone" />
                   专家技能
                 </div>
                 <span className={styles.sectionCount}>{expertSkills.length}</span>
@@ -215,7 +215,7 @@ export default function SkillListPage() {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionTitle}>
-                  <UsersThree size={18} weight="duotone" />
+                  <UsersThreeIcon size={18} weight="duotone" />
                   社区技能
                 </div>
                 <span className={styles.sectionCount}>{communitySkills.length}</span>

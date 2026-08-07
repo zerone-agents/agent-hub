@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Form, Input, Select, Spin, message, Checkbox, Button } from 'antd'
-import { X, Plus, Trash, Plug } from '@phosphor-icons/react'
+import { XIcon, PlusIcon, TrashIcon, PlugIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Provider, CatalogModel, PresetField, AttrValue, AttrRule } from '@/api/providers'
@@ -385,7 +385,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
       <div className={styles.modalHead}>
         <div className={styles.modalTitle}>{isEdit ? '编辑 Provider' : '新建 Provider'}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -505,12 +505,12 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               {model.aigcCode ?? '—'}
             </span>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveModel(i); }}>
-              <Trash size={13} />
+              <TrashIcon size={13} />
             </button>
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddModel}>
-          <Plus size={14} /> 添加模型
+          <PlusIcon size={14} /> 添加模型
         </button>
 
         {/* 表单字段定义 */}
@@ -536,12 +536,12 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               密钥 <Checkbox checked={field.secret} disabled />
             </label>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveField(i); }}>
-              <Trash size={13} />
+              <TrashIcon size={13} />
             </button>
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddField}>
-          <Plus size={14} /> 添加字段
+          <PlusIcon size={14} /> 添加字段
         </button>
 
         {/* 动态属性（按 protocol + attr-rules 渲染） */}
@@ -605,7 +605,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
 
       <div className={styles.modalFoot}>
         <Button
-          icon={probing ? <Spin size="small" /> : <Plug size={14} />}
+          icon={probing ? <Spin size="small" /> : <PlugIcon size={14} />}
           onClick={handleTestConnection}
           loading={probing}
         >

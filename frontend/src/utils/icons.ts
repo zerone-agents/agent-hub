@@ -1,23 +1,23 @@
 import {
-  ChatCircleDots, ChartBar, ShieldCheck, Crosshair, UserCircle, Terminal,
-  Robot, Brain, Lightbulb, Cpu, MagicWand, Detective, Compass, Rocket,
-  GearSix, Code, GraduationCap, GlobeHemisphereWest, PuzzlePiece, Eye,
-  Megaphone, Notebook, FirstAidKit, Scales, PresentationChart, ClipboardText,
-  Headset, Wrench, Lightning, CurrencyDollar,
+  ChatCircleDotsIcon, ChartBar, ShieldCheckIcon, Crosshair, UserCircleIcon, Terminal,
+  RobotIcon, Brain, Lightbulb, CpuIcon, MagicWand, Detective, Compass, RocketIcon,
+  GearSix, Code, GraduationCap, GlobeHemisphereWest, PuzzlePiece, EyeIcon,
+  Megaphone, Notebook, FirstAidKit, Scales, PresentationChart, ClipboardTextIcon,
+  Headset, WrenchIcon, Lightning, CurrencyDollar,
   type Icon as PhosphorIcon
 } from '@phosphor-icons/react'
 
 /** Map AGENT_ICON_OPTIONS names to Phosphor React components. */
 const ICON_MAP: Partial<Record<string, PhosphorIcon>> = {
-  ChatCircleDots, ChartBar, ShieldCheck, Crosshair, UserCircle, Terminal,
-  Robot, Brain, Lightbulb, Cpu, MagicWand, Detective, Compass, Rocket,
-  GearSix, Code, GraduationCap, GlobeHemisphereWest, PuzzlePiece, Eye,
-  Megaphone, Notebook, FirstAidKit, Scales, PresentationChart, ClipboardText,
-  Headset, Wrench, Lightning, CurrencyDollar
+  ChatCircleDotsIcon, ChartBar, ShieldCheckIcon, Crosshair, UserCircleIcon, Terminal,
+  RobotIcon, Brain, Lightbulb, CpuIcon, MagicWand, Detective, Compass, RocketIcon,
+  GearSix, Code, GraduationCap, GlobeHemisphereWest, PuzzlePiece, EyeIcon,
+  Megaphone, Notebook, FirstAidKit, Scales, PresentationChart, ClipboardTextIcon,
+  Headset, WrenchIcon, Lightning, CurrencyDollar
 }
 
 export function getIconComponent(name: string): PhosphorIcon {
-  return ICON_MAP[name] ?? UserCircle
+  return ICON_MAP[name] ?? UserCircleIcon
 }
 
 /** Lighten a hex color towards white by the given amount (0-1). */

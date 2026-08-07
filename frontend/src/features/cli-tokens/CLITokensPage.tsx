@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Popconfirm, Spin } from 'antd'
-import { Plus } from '@phosphor-icons/react'
+import { PlusIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { ColumnsType } from 'antd/es/table'
@@ -88,7 +88,7 @@ export default function CLITokensPage() {
             管理 CLI 认证 Token，用于 zhub CLI 工具的长期身份验证
           </div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={() => { setModalOpen(true); }}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setModalOpen(true); }}>
           创建 CLI Token
         </PrimaryButton>
       </div>

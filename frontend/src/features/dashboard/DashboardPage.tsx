@@ -1,14 +1,14 @@
 import { useState, type ComponentType } from 'react'
 import {
-  Books,
-  Cpu,
-  Cube,
-  Chats,
-  FilmSlate,
-  PlugsConnected,
-  Robot,
-  Sparkle,
-  Wrench
+  BooksIcon,
+  CpuIcon,
+  CubeIcon,
+  ChatsIcon,
+  FilmSlateIcon,
+  PlugsConnectedIcon,
+  RobotIcon,
+  SparkleIcon,
+  WrenchIcon
 } from '@phosphor-icons/react'
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
@@ -547,13 +547,13 @@ const typeLabel: Record<ActivityItem['type'], string> = {
 }
 
 const typeIcon: Record<ActivityItem['type'], ComponentType<{ size?: number; weight?: 'fill' | 'regular' | 'bold' | 'light' | 'thin' | 'duotone' }>> = {
-  agent: Robot,
-  tool: Wrench,
-  skill: Sparkle,
-  scene: FilmSlate,
-  provider: PlugsConnected,
-  mcp: Cube,
-  knowledge: Books
+  agent: RobotIcon,
+  tool: WrenchIcon,
+  skill: SparkleIcon,
+  scene: FilmSlateIcon,
+  provider: PlugsConnectedIcon,
+  mcp: CubeIcon,
+  knowledge: BooksIcon
 }
 
 function buildTrend(activities: ActivityItem[]) {
@@ -634,14 +634,14 @@ export default function DashboardPage() {
   const documentCount = knowledgeDatasets.reduce((sum, dataset) => sum + dataset.doc_num, 0)
   const chunkCount = knowledgeDatasets.reduce((sum, dataset) => sum + dataset.chunk_num, 0)
   const resources: ResourceItem[] = [
-    { label: 'Agent', value: agents.length, icon: Robot, path: '/agents', color: 'var(--chart-1)' },
-    { label: '工具', value: tools.length, icon: Wrench, path: '/tools', color: 'var(--chart-2)' },
-    { label: 'MCP 配置', value: mcps.length, icon: PlugsConnected, path: '/mcps', color: 'var(--primary)' },
-    { label: '技能', value: skills.length, icon: Sparkle, path: '/skills', color: 'var(--chart-3)' },
-    { label: '提供方', value: providers.length, icon: Cpu, path: '/providers', color: 'var(--chart-5)' },
-    { label: '模型', value: modelCount, icon: Cube, path: '/providers', color: 'var(--chart-1)' },
-    { label: '知识库', value: knowledgeDatasets.length, icon: Books, path: '/knowledge', color: 'var(--chart-2)' },
-    { label: '场景', value: scenes.length, icon: FilmSlate, path: '/scenes', color: 'var(--chart-4)' }
+    { label: 'Agent', value: agents.length, icon: RobotIcon, path: '/agents', color: 'var(--chart-1)' },
+    { label: '工具', value: tools.length, icon: WrenchIcon, path: '/tools', color: 'var(--chart-2)' },
+    { label: 'MCP 配置', value: mcps.length, icon: PlugsConnectedIcon, path: '/mcps', color: 'var(--primary)' },
+    { label: '技能', value: skills.length, icon: SparkleIcon, path: '/skills', color: 'var(--chart-3)' },
+    { label: '提供方', value: providers.length, icon: CpuIcon, path: '/providers', color: 'var(--chart-5)' },
+    { label: '模型', value: modelCount, icon: CubeIcon, path: '/providers', color: 'var(--chart-1)' },
+    { label: '知识库', value: knowledgeDatasets.length, icon: BooksIcon, path: '/knowledge', color: 'var(--chart-2)' },
+    { label: '场景', value: scenes.length, icon: FilmSlateIcon, path: '/scenes', color: 'var(--chart-4)' }
   ]
   const resourceActivities: ActivityItem[] = [
     ...agents.map((item: Agent) => ({ title: item.config.title?.zh ?? item.name, time: item.createdAt ?? '', type: 'agent' as const })),
@@ -704,7 +704,7 @@ export default function DashboardPage() {
               </div>
               <div className={styles.heroMetric}>
                 <div className={styles.heroMetricValue}>{chatSessionTotal}</div>
-                <div className={styles.heroMetricLabel}><Chats size={11} /> 聊天会话</div>
+                <div className={styles.heroMetricLabel}><ChatsIcon size={11} /> 聊天会话</div>
               </div>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { Spin, Tabs, Tag } from 'antd'
-import { ArrowLeft } from '@phosphor-icons/react'
+import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useNavigate, useParams, useLocation, Outlet } from 'react-router-dom'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
@@ -57,7 +57,7 @@ export default function KnowledgeDetailPage() {
   return (
     <div className={styles.page}>
       <button type="button" className={styles.back} onClick={() => { navigate('/knowledge'); }}>
-        <ArrowLeft size={14} />
+        <ArrowLeftIcon size={14} />
         返回知识库列表
       </button>
 

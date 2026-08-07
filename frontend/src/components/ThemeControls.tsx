@@ -1,4 +1,4 @@
-import { Desktop, Moon, Palette, Sun } from '@phosphor-icons/react'
+import { DesktopIcon, MoonIcon, PaletteIcon, SunIcon } from '@phosphor-icons/react'
 import { Dropdown, Tooltip } from 'antd'
 import { createStyles } from 'antd-style'
 import { themes, type ThemePreference } from '@/styles/themes'
@@ -49,9 +49,9 @@ const appearanceOptions: {
   label: string
   icon: React.ReactNode
 }[] = [
-  { key: 'light', label: '浅色', icon: <Sun size={16} /> },
-  { key: 'dark', label: '深色', icon: <Moon size={16} /> },
-  { key: 'system', label: '跟随系统', icon: <Desktop size={16} /> }
+  { key: 'light', label: '浅色', icon: <SunIcon size={16} /> },
+  { key: 'dark', label: '深色', icon: <MoonIcon size={16} /> },
+  { key: 'system', label: '跟随系统', icon: <DesktopIcon size={16} /> }
 ]
 
 export default function ThemeControls() {
@@ -62,7 +62,7 @@ export default function ThemeControls() {
   const setPreference = useThemeStore((state) => state.setPreference)
 
   const AppearanceIcon =
-    preference === 'dark' ? Moon : preference === 'light' ? Sun : Desktop
+    preference === 'dark' ? MoonIcon : preference === 'light' ? SunIcon : DesktopIcon
 
   return (
     <div className={styles.controls} aria-label="主题设置">
@@ -78,14 +78,14 @@ export default function ThemeControls() {
               key: theme.id,
               label: theme.label,
               icon: (
-                <Palette size={16} color={theme.light.primary} weight="fill" />
+                <PaletteIcon size={16} color={theme.light.primary} weight="fill" />
               )
             }))
         }}
       >
         <Tooltip title="切换配色">
           <button type="button" className={styles.button} aria-label="切换配色">
-            <Palette size={18} />
+            <PaletteIcon size={18} />
           </button>
         </Tooltip>
       </Dropdown>

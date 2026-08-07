@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Popconfirm } from 'antd'
-import { Plus, Trash, ChatCircleDots } from '@phosphor-icons/react'
+import { PlusIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { AgentChatSession } from '@/api/agent-chat'
 import type { ApiEnvelope } from '@/api/client'
@@ -149,7 +149,7 @@ export default function ChatSessionList({
       <div className={styles.head}>
         <h2 className={styles.title}>会话</h2>
         <PrimaryButton
-          icon={<Plus size={14} weight="bold" />}
+          icon={<PlusIcon size={14} weight="bold" />}
           loading={creating}
           disabled={!!streamingSessionId}
           onClick={handleNew}
@@ -161,7 +161,7 @@ export default function ChatSessionList({
       <div className={styles.list}>
         {sessions.length === 0 ? (
           <div className={styles.empty}>
-            <ChatCircleDots size={32} weight="thin" color={t.textMuted} />
+            <ChatCircleDotsIcon size={32} weight="thin" color={t.textMuted} />
             <span>暂无会话</span>
           </div>
         ) : (
@@ -197,7 +197,7 @@ export default function ChatSessionList({
                     title="删除"
                     onClick={(e) => { e.stopPropagation(); }}
                   >
-                    <Trash size={13} />
+                    <TrashIcon size={13} />
                   </button>
                 </Popconfirm>
               )}

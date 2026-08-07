@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, PencilSimple, Trash, Clock, Plug, SquaresFour } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon, ClockIcon, PlugIcon, SquaresFourIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useProviders, useDeleteProvider, useProbeProvider } from '@/queries/useProviders'
@@ -318,7 +318,7 @@ export default function ProviderListPage() {
         }
         footerLeft={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Clock size={12} />
+            <ClockIcon size={12} />
             {formatTime(provider.createdAt)}
           </span>
         }
@@ -331,7 +331,7 @@ export default function ProviderListPage() {
               onClick={() => handleProbe(provider.id)}
               disabled={probingId === provider.id}
             >
-              {probingId === provider.id ? <Spin size="small" /> : <Plug size={14} />}
+              {probingId === provider.id ? <Spin size="small" /> : <PlugIcon size={14} />}
             </button>
             <button
               type="button"
@@ -339,7 +339,7 @@ export default function ProviderListPage() {
               title="编辑"
               onClick={() => { showEdit(provider); }}
             >
-              <PencilSimple size={14} />
+              <PencilSimpleIcon size={14} />
             </button>
             <Popconfirm
               title="确认删除？"
@@ -354,7 +354,7 @@ export default function ProviderListPage() {
                 className={`${styles.actBtn} ${styles.actBtnDanger}`}
                 title="删除"
               >
-                <Trash size={14} />
+                <TrashIcon size={14} />
               </button>
             </Popconfirm>
           </div>
@@ -383,7 +383,7 @@ export default function ProviderListPage() {
           <div className={styles.pageTitle}>模型管理</div>
           <div className={styles.pageSub}>管理 Vendor Preset 配置和模型列表</div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={showCreate}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
           新建 Provider
         </PrimaryButton>
       </div>
@@ -403,7 +403,7 @@ export default function ProviderListPage() {
       ) : filteredProviders.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <Plug size={48} weight="thin" color={t.textMuted} />
+            <PlugIcon size={48} weight="thin" color={t.textMuted} />
           </div>
           <div className={styles.emptyTitle}>{keywords ? '未找到匹配的 Provider' : '暂无 Provider'}</div>
           <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '添加您的第一个 Provider 配置'}</div>
@@ -412,7 +412,7 @@ export default function ProviderListPage() {
         <>
           {renderSection(<><AnthropicBrand size={18} style={{ marginRight: 6 }} />Anthropic</>, anthropicProviders)}
           {renderSection(<><OpenAIBrand size={18} style={{ marginRight: 6 }} />OpenAI</>, openaiProviders)}
-          {renderSection(<><SquaresFour size={18} weight="duotone" style={{ marginRight: 6 }} />其他</>, otherProviders)}
+          {renderSection(<><SquaresFourIcon size={18} weight="duotone" style={{ marginRight: 6 }} />其他</>, otherProviders)}
         </>
       )}
 

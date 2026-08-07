@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { createStyles } from 'antd-style'
-import { Download, Warning } from '@phosphor-icons/react'
+import { DownloadIcon, WarningIcon } from '@phosphor-icons/react'
 import { agentFilesApi, type FileEntry } from '@/api/agent-files'
 import { parseApiError } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -496,7 +496,7 @@ export default function CwdFilePreview(props: Props) {
           onClick={handleDownload}
           aria-label="下载"
         >
-          <Download size={14} />
+          <DownloadIcon size={14} />
           下载
         </button>
       </div>
@@ -505,14 +505,14 @@ export default function CwdFilePreview(props: Props) {
 
       {!state.loading && state.error && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>加载失败：{state.error}</span>
         </div>
       )}
 
       {!state.loading && state.kind === 'too-large' && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
             文件较大（超过 {(PREVIEW_BYTE_CAP / 1024).toFixed(0)} KB），仅提供下载。
           </span>
@@ -537,7 +537,7 @@ export default function CwdFilePreview(props: Props) {
           aria-label={selectedFile.name}
         >
           <div className={styles.notice}>
-            <Warning size={24} className={styles.noticeIcon} />
+            <WarningIcon size={24} className={styles.noticeIcon} />
             <span className={styles.noticeText}>PDF 预览不可用，请使用下载按钮</span>
           </div>
         </object>
@@ -552,7 +552,7 @@ export default function CwdFilePreview(props: Props) {
 
       {!state.loading && state.kind === 'binary' && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
             不支持预览{state.mime ? `（${state.mime}）` : ''}
           </span>

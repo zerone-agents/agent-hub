@@ -1,7 +1,7 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { Modal, Form, Input, Select, Upload, Spin, Button } from 'antd'
 import type { UploadProps } from 'antd'
-import { X, UploadSimple } from '@phosphor-icons/react'
+import { XIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
@@ -224,7 +224,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
       <div className={styles.head}>
         <div className={styles.title}>{editingSkill ? '编辑技能' : '新建技能'}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -258,7 +258,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
           <div className={styles.section} style={{ marginTop: 20 }}>上传文件</div>
           <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".zip" maxCount={1}>
             <button type="button" className={styles.uploadBtn}>
-              <UploadSimple size={16} />
+              <UploadSimpleIcon size={16} />
               {selectedFile ? selectedFile.name : '选择 .zip 文件'}
             </button>
           </Upload>

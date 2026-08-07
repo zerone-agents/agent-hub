@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Empty } from 'antd'
-import { Stop } from '@phosphor-icons/react'
+import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
 import type { AgentChatSession } from '@/api/agent-chat'
@@ -104,7 +104,7 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-import { ArrowLeft } from '@phosphor-icons/react'
+import { ArrowLeftIcon } from '@phosphor-icons/react'
 
 export default function AgentChatPage() {
   const { styles } = useStyles()
@@ -173,7 +173,6 @@ export default function AgentChatPage() {
     if (!isStreaming) return
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault()
-      e.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
     return () => { window.removeEventListener('beforeunload', handler); }
@@ -280,7 +279,7 @@ export default function AgentChatPage() {
                 className={styles.mobileBack}
                 onClick={() => { setSelected(null); }}
               >
-                <ArrowLeft size={16} />
+                <ArrowLeftIcon size={16} />
                 返回会话列表
               </button>
               <div className={styles.messages} ref={scrollRef} onScroll={handleScroll}>
@@ -303,7 +302,7 @@ export default function AgentChatPage() {
               {isStreaming && (
                 <div className={styles.stopBar}>
                   <button type="button" className={styles.stopBtn} onClick={() => { stream.reset(); }}>
-                    <Stop size={12} weight="fill" /> 停止回复
+                    <StopIcon size={12} weight="fill" /> 停止回复
                   </button>
                 </div>
               )}

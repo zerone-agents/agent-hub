@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, Tooltip, Empty } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import type { ColumnsType } from 'antd/es/table'
-import { Plus, PencilSimple, Trash, Database } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon, DatabaseIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useNavigate } from 'react-router-dom'
@@ -128,7 +128,7 @@ export default function KnowledgeListPage() {
               setFormOpen(true)
             }}
           >
-            <PencilSimple size={14} />
+            <PencilSimpleIcon size={14} />
           </button>
           <Popconfirm
             title="确认删除？"
@@ -139,7 +139,7 @@ export default function KnowledgeListPage() {
             onConfirm={() => { deleteKnowledge.mutate(record.id); }}
           >
             <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <Trash size={14} />
+              <TrashIcon size={14} />
             </button>
           </Popconfirm>
         </div>
@@ -155,7 +155,7 @@ export default function KnowledgeListPage() {
           <div className={styles.pageSub}>管理知识库、文档、分块与检索测试</div>
         </div>
         <PrimaryButton
-          icon={<Plus size={16} weight="bold" />}
+          icon={<PlusIcon size={16} weight="bold" />}
           onClick={() => {
             setEditing(null)
             setFormOpen(true)
@@ -189,7 +189,7 @@ export default function KnowledgeListPage() {
           locale={{
             emptyText: (
               <Empty
-                image={<Database size={48} color={t.textMuted} />}
+                image={<DatabaseIcon size={48} color={t.textMuted} />}
                 description={keywords ? '未找到匹配的知识库' : '还没有知识库，点击右上角新建'}
               />
             )

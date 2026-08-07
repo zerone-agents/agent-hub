@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, SquaresFour, Plug } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent } from '@/api/agents'
@@ -444,7 +444,7 @@ export default function AgentListPage() {
           <div className={styles.pageTitle}>Agent 管理</div>
           <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={showCreate}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
           新建代理
         </PrimaryButton>
       </div>
@@ -461,7 +461,7 @@ export default function AgentListPage() {
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : agents.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><SquaresFour size={48} weight="thin" color={t.textMuted} /></div>
+          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={t.textMuted} /></div>
           <div className={styles.emptyTitle}>暂无代理</div>
           <div className={styles.emptyDesc}>创建您的第一个代理以开始使用</div>
         </div>
@@ -672,7 +672,7 @@ export default function AgentListPage() {
             <Button onClick={() => { setModelOpen(false); }}>取消</Button>
             <div className={styles.footRight}>
               <Button onClick={handleTest} disabled={!canTest} loading={testing}>
-                <Plug size={14} /> 测试
+                <PlugIcon size={14} /> 测试
               </Button>
               <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
                 确认
@@ -743,21 +743,23 @@ export default function AgentListPage() {
                   }}
                   options={modelSuggestions}
                   allowClear
-                  filterOption={(input, option) => {
-                    const value = (option?.value ?? '').toLowerCase()
-                    const label = (option?.label ?? '').toLowerCase()
-                    const query = input.toLowerCase()
-                    return value.includes(query) || label.includes(query)
+                  showSearch={{
+                    filterOption: (input, option) => {
+                      const value = (option?.value ?? '').toLowerCase()
+                      const label = (option?.label ?? '').toLowerCase()
+                      const query = input.toLowerCase()
+                      return value.includes(query) || label.includes(query)
+                    },
+                    onSearch: (value) => {
+                      const query = value.toLowerCase()
+                      const hasMatch = modelSuggestions.some(m =>
+                        m.value.toLowerCase().includes(query) ||
+                        m.label.toLowerCase().includes(query)
+                      )
+                      setModelDropdownOpen(hasMatch)
+                    },
                   }}
                   open={modelDropdownOpen}
-                  onSearch={(value) => {
-                    const query = value.toLowerCase()
-                    const hasMatch = modelSuggestions.some(m =>
-                      m.value.toLowerCase().includes(query) ||
-                      m.label.toLowerCase().includes(query)
-                    )
-                    setModelDropdownOpen(hasMatch)
-                  }}
                   onBlur={() => { setModelDropdownOpen(false); }}
                   onFocus={() => { setModelDropdownOpen(modelSuggestions.length > 0); }}
                   onSelect={() => { setModelDropdownOpen(false); }}

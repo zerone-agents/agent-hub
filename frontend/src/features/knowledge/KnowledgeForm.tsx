@@ -14,7 +14,7 @@ import {
   Typography,
 } from "antd";
 import type { Rule } from "antd/es/form";
-import { LockKey } from "@phosphor-icons/react";
+import { LockKeyIcon } from "@phosphor-icons/react";
 import { useCreateKnowledge, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
 import { useMultiragModels } from "@/queries/useMultirag";
@@ -341,8 +341,7 @@ function ParserConfigFields({
                 options={layoutOptions}
                 loading={layoutLoading}
                 placeholder="选择解析布局"
-                showSearch
-                optionFilterProp="label"
+                showSearch={{ optionFilterProp: 'label' }}
               />
             ) : (
               <Select options={LAYOUT_OPTIONS} />
@@ -540,7 +539,7 @@ export function DatasetFields({
         <Select options={PERMISSION_OPTIONS} />
       </Form.Item>
       <Form.Item label="解析方法" name="parser_id">
-        <Select options={PARSER_OPTIONS} showSearch optionFilterProp="label" />
+        <Select options={PARSER_OPTIONS} showSearch={{ optionFilterProp: 'label' }} />
       </Form.Item>
       <Form.Item
         label="Embedding 模型"
@@ -557,7 +556,7 @@ export function DatasetFields({
           <Input
             readOnly
             suffix={
-              <Tag variant="filled" icon={<LockKey size={12} />}>
+              <Tag variant="filled" icon={<LockKeyIcon size={12} />}>
                 已锁定
               </Tag>
             }
@@ -567,8 +566,7 @@ export function DatasetFields({
             options={embeddingOptions}
             loading={embeddingLoading}
             placeholder="选择 Embedding 模型"
-            showSearch
-            optionFilterProp="label"
+            showSearch={{ optionFilterProp: 'label' }}
           />
         ) : (
           <Input placeholder="如 bge-m3、text-embedding-3-small" />

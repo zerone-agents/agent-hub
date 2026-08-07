@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Modal, Form, Input, Switch, Button } from 'antd'
-import { X } from '@phosphor-icons/react'
+import { XIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Tool } from '@/api/tools'
@@ -135,7 +135,7 @@ export default function ToolForm({ open, editingTool, onClose }: ToolFormProps) 
       <div className={styles.modalHead}>
         <div className={styles.modalTitle}>{editingTool ? '编辑工具' : '新建工具'}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
