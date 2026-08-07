@@ -1,0 +1,10 @@
+name: my-mcp
+title: 我的 MCP
+description: 这是一个示例 MCP 服务
+transportType: http
+url: http://localhost:3001/sse
+headers:
+  Authorization: Bearer xxxx
+  X-Api-Key: sk-xxxx
+retryMaxRetries: 3
+retryTimeoutMs: 5000

@@ -1,0 +1,40 @@
+# Example agent definition for zhub CLI
+# Create with: zhub agent create --file ./agent.yaml
+
+# Agent identifier (kebab-case, globally unique, required)
+id: research-agent
+
+# Client platform visibility (optional; both default to false on create)
+desktop: true
+mobile: false
+isDefault: false
+
+# Native agent config. Flat aliases are also accepted, but do not mix duplicate fields.
+config:
+  title:
+    zh: 研究员
+    en: Research Agent
+  description:
+    zh: 负责深度搜索、信息整合和结构化总结
+    en: Performs deep research, synthesis, and structured summarization
+
+  # Model ID from the provider's defaultModels list
+  modelId: claude-sonnet-4-5
+  providerId: 1
+
+  systemPrompt: |
+    你是一个研究员 agent，擅长深度搜索、信息整合和结构化总结。
+    在回答用户问题前，先搜索相关资料，然后给出有引用来源的结构化回答。
+
+  maxTurns: 20
+
+  # Max session context turns: controls how many history turns are sent to the LLM (optional, empty = unlimited)
+  maxSessionTurns: 50
+
+  # Permission mode: auto | always_ask | never_ask (optional, default auto)
+  permissionMode: auto
+
+  # Icon settings (optional)
+  iconName: MagnifyingGlass
+  iconColor: "#1A3A5C"
+  iconBgColor: "#E8F0F7"

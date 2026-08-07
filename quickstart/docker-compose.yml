@@ -1,0 +1,23 @@
+# agent-hub Quick Start
+# This is a minimal setup for local development/evaluation.
+# For production, see docs/deployment.md
+
+services:
+  # hub: agent-hub backend + frontend
+  # hub:
+  #   image: ghcr.io/zerone-agents/agent-hub:latest
+  #   ports: ["8080:8080"]
+  #   env_file: .env
+  #   depends_on: [postgres, redis]
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   volumes: [postgres_data:/var/lib/postgresql/data]
+  #
+  # redis:
+  #   image: redis:7-alpine
+
+volumes:
+  postgres_data:
+
+# TODO: Fill in service definitions based on actual deployment requirements

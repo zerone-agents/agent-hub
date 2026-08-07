@@ -1,0 +1,4 @@
+name: my-tool
+title: 我的工具
+description: 这是一个示例工具
+isDefault: false

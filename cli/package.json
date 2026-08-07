@@ -1,0 +1,36 @@
+{
+  "name": "@zerone-agent/zhub",
+  "version": "0.3.2",
+  "description": "Zerone Hub CLI — manage agents, skills, tools, MCPs, and providers from the terminal",
+  "bin": {
+    "zhub": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "prepublishOnly": "bun test && bun run typecheck"
+  },
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0"
+  },
+  "dependencies": {
+    "cli-table3": "^0.6.5",
+    "clipanion": "^3.2.1",
+    "jszip": "^3.10.1",
+    "ofetch": "^1.4.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/jszip": "^3.4.1",
+    "typescript": "^5.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

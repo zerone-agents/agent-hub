@@ -1,0 +1,4 @@
+# Local env files (e.g., VITE_BYPASS_AUTH for preview)
+.env
+.env.*
+!.env.example

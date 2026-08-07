@@ -1,0 +1,35 @@
+# Example provider definition for zhub CLI
+# Create with: zhub provider create --file ./provider.yaml
+
+# Provider key (lowercase, unique)
+key: anthropic
+
+# Display name
+name: Anthropic
+
+# Protocol: anthropic | openai
+protocol: anthropic
+
+# Auth style: api_key | bearer
+authStyle: api_key
+
+# API base URL
+baseUrl: https://api.anthropic.com
+
+# API key (write-only, cannot be read back after creation)
+lockedApiKey: sk-ant-xxxxxxxxxxxx
+
+# Available models
+defaultModels:
+  - modelId: claude-sonnet-4-5
+    displayName: Claude Sonnet 4.5
+    contextWindow: 200000
+  - modelId: claude-opus-4
+    displayName: Claude Opus 4
+    contextWindow: 200000
+
+# Icon key (matches frontend icon registry)
+iconKey: anthropic
+
+# Is this a built-in provider? (false for custom)
+builtin: false

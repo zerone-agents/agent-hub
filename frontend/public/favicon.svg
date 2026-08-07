@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Zerone Hub">
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="#D96F4F"/>
+  <rect
+    x="3.75"
+    y="3.75"
+    width="56.5"
+    height="56.5"
+    rx="16.25"
+    fill="none"
+    stroke="#B9573B"
+    stroke-width="1.5"
+  />
+  <polygon points="14,30 18,26 31,39 27,43" fill="#FFF9F5"/>
+  <polygon points="27,39 31,43 51,23 47,19" fill="#FFF9F5"/>
+  <circle cx="16" cy="28" r="5" fill="#FFF9F5"/>
+  <circle cx="29" cy="41" r="5" fill="#FFF9F5"/>
+  <circle cx="49" cy="21" r="5" fill="#FFF9F5"/>
+  <circle cx="16" cy="28" r="2" fill="#D96F4F"/>
+  <circle cx="29" cy="41" r="2" fill="#D96F4F"/>
+  <circle cx="49" cy="21" r="2" fill="#D96F4F"/>
+</svg>

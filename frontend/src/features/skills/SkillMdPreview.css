@@ -1,0 +1,201 @@
+.skill-md-preview {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/*
+  lobe-ui Markdown renders <article style="--lobe-markdown-font-size: 16px">.
+  Override with 13px so the whole tree scales down proportionally.
+*/
+.skill-md-preview [data-code-type="markdown"] {
+  --lobe-markdown-font-size: 13px !important;
+  line-height: 1.6 !important;
+  max-height: 480px;
+  overflow: hidden;
+  position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+.skill-md-preview > *:first-child {
+  margin-top: 0;
+}
+
+.skill-md-preview p {
+  margin: 0.5em 0;
+}
+
+.skill-md-preview h1,
+.skill-md-preview h2,
+.skill-md-preview h3,
+.skill-md-preview h4 {
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.8em 0 0.4em;
+  color: var(--text);
+}
+
+.skill-md-preview h1,
+.skill-md-preview h2 {
+  border-bottom: 1px solid var(--ink-light);
+  padding-bottom: 0.3em;
+}
+
+/* lobe-ui ships a global .markdown h2 rule of equal specificity that is
+   inserted later, so !important is needed to enforce our own header sizing. */
+.skill-md-preview h1 {
+  font-size: 1.625em !important; /* 26px */
+}
+
+.skill-md-preview h2 {
+  font-size: 1.375em !important; /* 22px */
+}
+
+.skill-md-preview h3 {
+  font-size: 1.125em !important; /* 18px */
+}
+
+.skill-md-preview h4 {
+  font-size: 1em !important; /* 13px */
+}
+
+.skill-md-preview ul,
+.skill-md-preview ol {
+  padding-left: 1.4em;
+  margin: 0.5em 0;
+}
+
+.skill-md-preview li {
+  margin: 0.25em 0;
+}
+
+.skill-md-preview blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 0.75em;
+  border-left: 3px solid var(--ink-light);
+  background: var(--ink-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.skill-md-preview code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--ink-subtle);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.skill-md-preview pre {
+  margin: 0.75em 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--ink-subtle);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.skill-md-preview pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: var(--text);
+  font-size: 0.85em;
+}
+
+.skill-md-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.85em;
+}
+
+.skill-md-preview th,
+.skill-md-preview td {
+  border: 1px solid var(--ink-lighter);
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.skill-md-preview th {
+  background: var(--ink-subtle);
+  font-weight: 600;
+}
+
+.skill-md-preview tr:nth-child(even) {
+  background: var(--ink-subtle);
+}
+
+.skill-md-preview a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.skill-md-preview a:hover {
+  color: var(--ink-hover);
+  border-bottom-color: var(--ink-hover);
+}
+
+.skill-md-preview hr {
+  border: none;
+  border-top: 1px solid var(--ink-light);
+  margin: 1em 0;
+}
+
+.skill-md-preview img {
+  max-width: 100%;
+  border-radius: var(--radius);
+  display: block;
+}
+
+.skill-md-preview strong {
+  font-weight: 600;
+}
+
+.skill-md-preview em {
+  font-style: italic;
+}
+
+/* Frontmatter table rendered above the Markdown body */
+.skill-md-preview__frontmatter {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+  font-size: 0.85em;
+}
+
+.skill-md-preview__frontmatter td {
+  border: 1px solid var(--ink-lighter);
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.skill-md-preview__frontmatter td:first-child {
+  width: 120px;
+  min-width: 120px;
+  white-space: nowrap;
+  background: var(--ink-subtle);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.skill-md-preview__frontmatter td:last-child {
+  color: var(--text);
+  word-break: break-word;
+  overflow: hidden;
+}
+
+.skill-md-preview__frontmatter-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  width: 100%;
+}

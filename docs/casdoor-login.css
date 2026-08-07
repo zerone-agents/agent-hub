@@ -1,0 +1,146 @@
+<style>
+
+/* ============================================================
+   Zerone Hub × Casdoor — Terracotta Theme（精简版）
+   对齐 frontend/src/styles/tokens.css & themes.ts
+
+   原则：只写改变视觉的规则，不覆盖 antd 默认值
+   用法：整文件复制粘贴到 Casdoor → 界面定制 → 表单 CSS
+   ============================================================ */
+
+
+/* ============================================================
+   0. 全局
+   ============================================================ */
+
+/* ============================================================
+   1. 登录卡片
+   ============================================================ */
+
+.login-panel {
+  width: fit-content !important;
+  min-width: 440px !important;
+  max-width: calc(100vw - 32px) !important;
+  padding: 40px !important;
+  background: #fbfaf8 !important;
+  border: 1px solid #dcd7d0 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 50px rgba(33, 31, 29, 0.13) !important;
+  animation: zhFadeIn 0.5s ease !important;
+  overflow: hidden !important;
+}
+
+/* ============================================================
+   2. 品牌区
+   ============================================================ */
+
+img.panel-logo {
+  width: 280px !important;
+  margin-bottom: 18px !important;
+  padding: 0 6px 0 0 !important;
+}
+
+/* ============================================================
+   3. 输入框（外层带边框，内层 input 透明）
+   ============================================================ */
+
+/* 外层容器（.ant-input-password 同时也是 affix-wrapper） */
+.ant-input-affix-wrapper,
+.ant-input-password,
+.ant-input {
+  background: #f3f1ed !important;
+  border: 1px solid #dcd7d0 !important;
+  height: 40px !important;
+  color: #211f1d !important;
+  padding: 0 12px !important;
+}
+
+.ant-input-affix-wrapper:hover,
+.ant-input-password:hover {
+  border-color: #d96f4f !important;
+}
+
+.ant-input-affix-wrapper-focused,
+.ant-input-affix-wrapper:focus-within,
+.ant-input-password-focused,
+.ant-input-password:focus-within {
+  border-color: #d96f4f !important;
+  box-shadow: 0 0 0 3px rgba(217, 111, 79, 0.14) !important;
+  background: #fbfaf8 !important;
+}
+
+/* 内层 input 完全透明（不要内层边框） */
+.ant-input-affix-wrapper input,
+.ant-input-password input {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  height: auto !important;
+}
+
+/* Chrome autofill 蓝色背景修复 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #f3f1ed inset !important;
+  -webkit-text-fill-color: #211f1d !important;
+  caret-color: #211f1d !important;
+  transition: background-color 99999s ease-in-out 0s !important;
+}
+
+/* ============================================================
+   4. 主按钮（胶囊形 + 赤陶色 + 常规字重 + 14px）
+   ============================================================ */
+
+.login-form .ant-btn-primary,
+.login-form button[type="submit"],
+.signup-form button[type="submit"] {
+  height: 40px !important;
+  background: #d96f4f !important;
+  box-shadow: none !important;
+}
+
+.login-form .ant-btn-primary:hover:not(:disabled),
+.login-form button[type="submit"]:hover,
+.signup-form button[type="submit"]:hover {
+  background: #c86042 !important;
+  box-shadow: 0 8px 24px rgba(33, 31, 29, 0.09) !important;
+}
+
+/* ============================================================
+   5. 次要元素
+   ============================================================ */
+
+/* 链接（赤陶色） */
+.login-form a,
+.login-panel a,
+.signup-form a,
+.forget-content a {
+  color: #d96f4f !important;
+}
+.login-form a:hover,
+.login-panel a:hover,
+.signup-form a:hover,
+.forget-content a:hover {
+  color: #c86042 !important;
+}
+
+/* ============================================================
+   6. 注册页：label 左对齐（antd 默认右对齐）
+   ============================================================ */
+
+.login-form .ant-form-item-label,
+.ant-form-item-label {
+  text-align: left !important;
+}
+
+/* label 列固定 100px（覆盖 antd 栅格 ant-col-sm-8 = 33.33%） */
+.ant-form-item .ant-form-item-label {
+  flex: 0 0 100px !important;
+  max-width: 100px !important;
+}
+
+</style>

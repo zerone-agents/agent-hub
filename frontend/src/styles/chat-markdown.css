@@ -1,0 +1,230 @@
+/* Chat markdown styles — scoped to .msg-text so they never leak to SkillList */
+
+.msg-text {
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/*
+  lobe-ui Markdown renders <article style="--lobe-markdown-font-size: 16px">.
+  That inline style drives every internal element size (p, h1, h2, code, …).
+  Override with !important so the whole tree scales down together.
+*/
+.msg-text [data-code-type="markdown"] {
+  --lobe-markdown-font-size: var(--text-sm) !important;
+  line-height: 1.6 !important;
+}
+
+.msg-text > *:first-child {
+  margin-top: 0;
+}
+
+.msg-text > *:last-child {
+  margin-bottom: 0;
+}
+
+.msg-text p {
+  margin: 0.5em 0;
+}
+
+.msg-text h1,
+.msg-text h2,
+.msg-text h3,
+.msg-text h4 {
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.8em 0 0.4em;
+  color: var(--text);
+}
+
+.msg-text h1,
+.msg-text h2 {
+  border-bottom: 1px solid var(--ink-light);
+  padding-bottom: 0.3em;
+}
+
+.msg-text h1 {
+  font-size: var(--text-xl);
+}
+
+.msg-text h2 {
+  font-size: var(--text-lg);
+}
+
+.msg-text h3 {
+  font-size: var(--text-base);
+}
+
+.msg-text h4 {
+  font-size: var(--text-sm);
+}
+
+.msg-text ul,
+.msg-text ol {
+  padding-left: 1.4em;
+  margin: 0.5em 0;
+}
+
+.msg-text li {
+  margin: 0.25em 0;
+}
+
+.msg-text blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 0.75em;
+  border-left: 3px solid var(--ink-light);
+  background: var(--ink-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.msg-text code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--ink-subtle);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.msg-text pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.msg-text pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+/*
+  Lobe's single-line highlighter omits the `.ant-highlighter` class but adds
+  horizontal wrapper padding. The nested pre already owns the shared 16px
+  code inset, so remove the wrapper inset to align it with multiline blocks.
+  This intentionally affects layout only; color still comes from softAccent.
+*/
+.msg-text [data-code-type="highlighter"]:not(.ant-highlighter) {
+  padding-inline: 0;
+  height: auto;
+  align-items: stretch;
+}
+
+.msg-text [data-code-type="highlighter"] {
+  margin-block: 0;
+}
+
+/* Keep the hover language label beside the copy action without adding height. */
+.msg-text [data-code-type="highlighter"].ant-highlighter {
+  position: relative;
+}
+
+.msg-text .ant-highlighter-highlighter-hover-lang {
+  position: absolute;
+  inset-inline-end: 40px;
+  top: 11px;
+  transform: none;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.msg-text [data-code-type="highlighter"]:not(.ant-highlighter) pre {
+  display: block;
+}
+
+/* Match multiline code blocks: reveal the single-line copy control on hover. */
+.msg-text [data-code-type="highlighter"]:not(.ant-highlighter) > [role="button"] {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.msg-text [data-code-type="highlighter"]:not(.ant-highlighter):hover > [role="button"],
+.msg-text [data-code-type="highlighter"]:not(.ant-highlighter):focus-within > [role="button"] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.msg-text table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.75em 0;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  border: 0.5px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.msg-text th,
+.msg-text td {
+  padding: var(--space-2);
+  text-align: left;
+  border: 0;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--border) 55%, transparent);
+  box-shadow: none;
+}
+
+.msg-text th {
+  background: var(--markdown-accent);
+  font-weight: 600;
+}
+
+.msg-text tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.msg-text a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.msg-text a:hover {
+  color: var(--ink-hover);
+  border-bottom-color: var(--ink-hover);
+}
+
+.msg-text hr {
+  border: none;
+  border-top: 1px solid var(--ink-light);
+  margin: 1em 0;
+}
+
+.msg-text img {
+  max-width: 100%;
+  border-radius: var(--radius);
+  display: block;
+}
+
+.msg-text strong {
+  font-weight: 600;
+}
+
+.msg-text em {
+  font-style: italic;
+}
+
+/*
+  User-bubble hook. Current ChatView uses the same `--surface` background for
+  `.msg-bubble--user` and `.msg-bubble--assistant`, so base styles apply.
+  Add overrides here if the user bubble background changes in the future.
+*/
+.msg-text--user {
+  /* intentionally inherits base styles */
+}

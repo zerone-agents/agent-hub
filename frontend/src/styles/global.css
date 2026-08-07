@@ -1,0 +1,247 @@
+/* Global reset + base styles. tokens.css owns the design-token layer. */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--paper);
+  color: var(--text);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline-color: var(--ring);
+}
+
+* {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.ant-card,
+.ant-modal-content,
+.ant-drawer-content,
+.ant-popover-inner,
+.ant-dropdown-menu {
+  border: 1px solid var(--border);
+  box-shadow: var(--elevation-2);
+}
+
+.ant-btn,
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-segmented {
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease !important;
+}
+
+.ant-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ant-btn-primary.ant-btn-primary,
+.ant-btn-primary.ant-btn-primary:hover:not(:disabled),
+.ant-btn-primary.ant-btn-primary:focus-visible:not(:disabled),
+.ant-btn-primary.ant-btn-primary:active:not(:disabled) {
+  color: var(--primary-foreground) !important;
+}
+
+.ant-btn-primary.ant-btn-primary svg {
+  color: currentColor !important;
+}
+
+.ant-btn-primary.ant-btn-primary:not(:disabled) {
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease !important;
+}
+
+.ant-btn-primary.ant-btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+
+.ant-btn-primary.ant-btn-primary:active:not(:disabled) {
+  box-shadow: none;
+}
+
+.ant-table-wrapper .ant-table {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Popconfirm (删除确认等) — 统一按钮样式 */
+.ant-popconfirm {
+  border: 1px solid var(--border);
+  box-shadow: var(--elevation-2);
+}
+
+.ant-popconfirm .ant-btn-primary,
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous,
+.ant-popconfirm .ant-btn-primary:hover:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:hover:not(:disabled),
+.ant-popconfirm .ant-btn-primary:focus-visible:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:focus-visible:not(:disabled),
+.ant-popconfirm .ant-btn-primary:active:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:active:not(:disabled) {
+  color: var(--primary-foreground) !important;
+}
+
+.ant-popconfirm .ant-btn-primary svg,
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous svg {
+  color: currentColor !important;
+}
+
+.ant-popconfirm .ant-btn-primary:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:not(:disabled) {
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease !important;
+}
+
+.ant-popconfirm .ant-btn-primary:hover:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+
+.ant-popconfirm .ant-btn-primary:active:not(:disabled),
+.ant-popconfirm .ant-btn-primary.ant-btn-dangerous:active:not(:disabled) {
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* DeployModal 步骤条动效（轻量）：当前步骤呼吸脉冲，完成步骤打勾弹入 */
+.deploy-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.deploy-step-icon-process {
+  background: var(--primary);
+  animation: deploy-step-pulse 2s ease-out infinite;
+}
+
+.deploy-step-icon-finish {
+  background: var(--success);
+  color: #fff;
+  animation: deploy-step-pop 0.3s ease;
+}
+
+.deploy-step-icon-error {
+  background: var(--destructive, #dc2626);
+  color: #fff;
+  font-weight: 700;
+}
+
+.deploy-step-icon-wait {
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+@keyframes deploy-step-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes deploy-step-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* DeployModal 实时状态行：内容变化时淡入（配合 key={statusLine} 重新挂载） */
+.deploy-status-line {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  animation: deploy-status-fade 0.3s ease;
+}
+
+@keyframes deploy-status-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

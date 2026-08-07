@@ -1,0 +1,282 @@
+package services
+
+import (
+	"fmt"
+	"sort"
+	"time"
+
+	"control-panel/internal/domain/agent"
+	repository "control-panel/internal/infrastructure/persistence"
+)
+
+type ToolService struct {
+	repo      *repository.ToolRepository
+	agentRepo *repository.AgentRepository
+}
+
+func NewToolService() *ToolService {
+	return &ToolService{
+		repo:      repository.NewToolRepository(),
+		agentRepo: repository.NewAgentRepository(),
+	}
+}
+
+// builtinTools lists the built-in tools that must always exist in the database.
+// Order matters only for determinism; each row is seeded idempotently.
+var builtinTools = []agent.Tool{
+	{Name: "Skill", Title: "技能加载", Description: "加载专门的技能，为特定任务提供领域专用指令和工作流程", IsDefault: false},
+	{Name: "Task", Title: "任务派发", Description: "将子任务派发给指定的子 Agent 执行，获取其结果", IsDefault: false},
+	{Name: "MultiTask", Title: "并行任务派发", Description: "一次性将多个子任务并行派发给子 Agent 执行", IsDefault: false},
+}
+
+// SeedBuiltins ensures built-in tools exist in the database. Idempotent: rows
+// that already exist (matched by Name) are left untouched. This covers both
+// first-time bootstrap and the upgrade path where only "Skill" pre-exists.
+func (s *ToolService) SeedBuiltins() error {
+	for i := range builtinTools {
+		t := builtinTools[i]
+		exists, err := s.repo.ExistsByName(t.Name)
+		if err != nil {
+			return fmt.Errorf("检查内置 %s tool 失败: %w", t.Name, err)
+		}
+		if exists {
+			continue
+		}
+		if err := s.repo.Create(&t); err != nil {
+			return fmt.Errorf("创建内置 %s tool 失败: %w", t.Name, err)
+		}
+	}
+	return nil
+}
+
+type ToolDTO struct {
+	ID          uint64 `json:"id"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"isDefault"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+type CreateToolInput struct {
+	Name        string `json:"name" binding:"required"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"isDefault"`
+}
+
+type UpdateToolInput struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	IsDefault   *bool   `json:"isDefault"`
+}
+
+func toolToDTO(t *agent.Tool) *ToolDTO {
+	return &ToolDTO{
+		ID:          t.ID,
+		Name:        t.Name,
+		Title:       t.Title,
+		Description: t.Description,
+		IsDefault:   t.IsDefault,
+		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   t.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func (s *ToolService) ListAll() ([]*ToolDTO, error) {
+	tools, err := s.repo.ListAll()
+	if err != nil {
+		return nil, fmt.Errorf("获取 Tool 列表失败: %w", err)
+	}
+	dtos := make([]*ToolDTO, 0, len(tools))
+	for _, t := range tools {
+		dtos = append(dtos, toolToDTO(t))
+	}
+	return dtos, nil
+}
+
+func (s *ToolService) GetByName(name string) (*ToolDTO, error) {
+	t, err := s.repo.GetByName(name)
+	if err != nil {
+		return nil, fmt.Errorf("Tool 不存在: %w", err)
+	}
+	return toolToDTO(t), nil
+}
+
+func (s *ToolService) Create(input *CreateToolInput) (*ToolDTO, error) {
+	if err := ValidateToolName(input.Name); err != nil {
+		return nil, err
+	}
+
+	exists, err := s.repo.ExistsByName(input.Name)
+	if err != nil {
+		return nil, fmt.Errorf("检查 Tool 存在性失败: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("Tool '%s' 已存在", input.Name)
+	}
+
+	t := &agent.Tool{
+		Name:        input.Name,
+		Title:       input.Title,
+		Description: input.Description,
+		IsDefault:   input.IsDefault,
+	}
+
+	if err := s.repo.Create(t); err != nil {
+		return nil, fmt.Errorf("创建 Tool 失败: %w", err)
+	}
+
+	if input.IsDefault {
+		if err := s.repo.AddToolToAllAgents(t.ID); err != nil {
+			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
+		}
+	}
+
+	return toolToDTO(t), nil
+}
+
+func (s *ToolService) Update(name string, input *UpdateToolInput) (*ToolDTO, error) {
+	t, err := s.repo.GetByName(name)
+	if err != nil {
+		return nil, fmt.Errorf("Tool 不存在: %w", err)
+	}
+
+	if input.Title != nil {
+		t.Title = *input.Title
+	}
+	if input.Description != nil {
+		t.Description = *input.Description
+	}
+
+	if input.IsDefault != nil && *input.IsDefault && !t.IsDefault {
+		if err := s.repo.AddToolToAllAgents(t.ID); err != nil {
+			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
+		}
+	}
+	if input.IsDefault != nil {
+		t.IsDefault = *input.IsDefault
+	}
+
+	if err := s.repo.Update(t); err != nil {
+		return nil, fmt.Errorf("更新 Tool 失败: %w", err)
+	}
+
+	return toolToDTO(t), nil
+}
+
+func (s *ToolService) Delete(name string) error {
+	t, err := s.repo.GetByName(name)
+	if err != nil {
+		return fmt.Errorf("Tool '%s' 不存在", name)
+	}
+	return s.repo.Delete(t.ID)
+}
+
+func (s *ToolService) GetAgentTools(agentName string) ([]string, error) {
+	agentCfg, err := s.agentRepo.GetByName(agentName)
+	if err != nil {
+		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+	}
+	return s.repo.GetToolsByAgent(agentCfg.ID)
+}
+
+func (s *ToolService) UpdateAgentTools(agentName string, toolNames []string) error {
+	agentCfg, err := s.agentRepo.GetByName(agentName)
+	if err != nil {
+		return fmt.Errorf("Agent '%s' 不存在", agentName)
+	}
+
+	defaultToolNames, err := s.repo.GetDefaultToolNames()
+	if err != nil {
+		return fmt.Errorf("获取默认 Tool 失败: %w", err)
+	}
+	toolNames = mergeStringSlices(toolNames, defaultToolNames)
+
+	toolIDs := make([]uint64, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		t, err := s.repo.GetByName(toolName)
+		if err != nil {
+			return fmt.Errorf("Tool '%s' 不存在", toolName)
+		}
+		toolIDs = append(toolIDs, t.ID)
+	}
+	return s.repo.ReplaceAgentTools(agentCfg.ID, toolIDs)
+}
+
+func (s *ToolService) SeedIfEmpty() error {
+	tools, err := s.repo.ListAll()
+	if err != nil {
+		return fmt.Errorf("获取 Tool 列表失败: %w", err)
+	}
+	if len(tools) > 0 {
+		return nil
+	}
+
+	presets := []struct {
+		Name, Title, Description string
+	}{
+		{"Bash", "执行命令", "在持久化的 shell 会话中执行 bash 命令，支持超时和工作目录设置"},
+		{"Read", "读取文件", "读取文件内容，支持文本文件、图片和 PDF，带行号显示"},
+		{"Write", "写入文件", "将内容写入文件，不存在则创建，存在则覆盖"},
+		{"Edit", "编辑文件", "对文件执行精确的字符串替换，支持多行匹配"},
+		{"Glob", "搜索文件", "按 glob 模式匹配查找文件，支持递归搜索"},
+		{"Grep", "搜索内容", "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行"},
+	}
+
+	for _, p := range presets {
+		t := &agent.Tool{
+			Name:        p.Name,
+			Title:       p.Title,
+			Description: p.Description,
+		}
+		if err := s.repo.Create(t); err != nil {
+			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", p.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func mergeStringSlices(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	for _, v := range base {
+		seen[v] = true
+	}
+	for _, v := range extra {
+		seen[v] = true
+	}
+	result := make([]string, 0, len(seen))
+	for k := range seen {
+		result = append(result, k)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// BackfillSubagentToolBindings ensures every agent that has at least one
+// subagent is also bound to the built-in Task and MultiTask tools. This is
+// intended to run once at startup, after SeedBuiltins, to migrate agents
+// created before the auto-mount logic existed. The operation is idempotent:
+// agents already correctly bound are left as-is (EnsureAgentToolBinding
+// counts before insert).
+func (s *ToolService) BackfillSubagentToolBindings() error {
+	agents, err := s.agentRepo.ListAll()
+	if err != nil {
+		return fmt.Errorf("列出 Agent 失败: %w", err)
+	}
+	for _, a := range agents {
+		subs, err := s.agentRepo.GetSubagents(a.ID)
+		if err != nil {
+			return fmt.Errorf("获取 Agent %s 的 subagent 失败: %w", a.Name, err)
+		}
+		if len(subs) == 0 {
+			continue
+		}
+		if err := syncSubagentToolBindings(s.agentRepo, s.repo, a.ID, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
