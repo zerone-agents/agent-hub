@@ -548,7 +548,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             </div>
             {activeRules.map((rule) => {
               const current = attributes[rule.key]
-              const value = current?.value ?? rule.default ?? ''
+              const value = current.value
               if (rule.type === 'bool') {
                 return (
                   <Form.Item key={rule.key} label={rule.label}>

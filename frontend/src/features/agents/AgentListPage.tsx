@@ -123,10 +123,10 @@ export default function AgentListPage() {
     return agents.filter((agent) => {
       const fields = [
         agent.name,
-        agent.config?.title?.zh,
-        agent.config?.title?.en,
-        agent.config?.description?.zh,
-        agent.config?.description?.en,
+        agent.config.title?.zh,
+        agent.config.title?.en,
+        agent.config.description?.zh,
+        agent.config.description?.en,
         agent.group
       ]
       return fields.some((f) => f?.toLowerCase().includes(kw))
@@ -215,8 +215,8 @@ export default function AgentListPage() {
   const handleEditModel = (agent: Agent) => {
     setCurrentName(agent.name)
     setCurrentAgent(agent)
-    const pid = agent.config?.providerId ?? null
-    const mid = agent.config?.modelId ?? ''
+    const pid = agent.config.providerId ?? null
+    const mid = agent.config.modelId ?? ''
     setSelectedProviderId(pid)
     setSelectedModelId(mid)
     setTestPassed(false)
@@ -228,7 +228,7 @@ export default function AgentListPage() {
     const provider = providers.find(p => p.id === pid)
     if (provider) {
       for (const f of provider.fields) {
-        const override = agent.config?.fieldOverrides?.[f.key]
+        const override = agent.config.fieldOverrides?.[f.key]
         if (override !== undefined) {
           initial[f.key] = override
         } else if (f.key === 'name') {
@@ -240,7 +240,7 @@ export default function AgentListPage() {
     }
     // api_key comes back masked from the backend; show it so the user knows
     // a key is configured, but skip it on save/test unless changed.
-    const maskedApiKey = agent.config?.fieldOverrides?.api_key
+    const maskedApiKey = agent.config.fieldOverrides?.api_key
     setInitialApiKey(maskedApiKey ?? '')
     if (maskedApiKey) {
       initial.api_key = maskedApiKey
@@ -357,7 +357,7 @@ export default function AgentListPage() {
   // Options for selects
   const subagentOptions = agents
     .filter((a) => a.name !== currentName)
-    .map((a) => ({ value: a.name, label: a.config?.title?.zh ?? a.config?.title?.en ?? a.name }))
+    .map((a) => ({ value: a.name, label: a.config.title?.zh ?? a.config.title?.en ?? a.name }))
 
   const toolOptions = tools.map((tl) => ({ value: tl.name, label: tl.name, disabled: defaultToolNames.has(tl.name) }))
 
@@ -425,8 +425,8 @@ export default function AgentListPage() {
   }, [providers])
 
   const getModelDisplayName = (agent: Agent): string => {
-    const pid = agent.config?.providerId
-    const mid = agent.config?.modelId
+    const pid = agent.config.providerId
+    const mid = agent.config.modelId
     if (!pid || !mid) return ''
     const name = modelDisplayNameMap.get(`${pid}::${mid}`)
     return name ?? mid
@@ -684,8 +684,8 @@ export default function AgentListPage() {
           <>
             {/* Provider/Model offline warning */}
             {(() => {
-              const pid = currentAgent?.config?.providerId
-              const mid = currentAgent?.config?.modelId
+              const pid = currentAgent?.config.providerId
+              const mid = currentAgent?.config.modelId
               if (pid && mid && !modelDisplayNameMap.has(`${pid}::${mid}`)) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>

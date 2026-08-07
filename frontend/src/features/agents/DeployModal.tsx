@@ -413,7 +413,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   }
 
   const handleLaunch = () => {
-    if (agent?.name) {
+    if (agent.name) {
       window.open(`/static/agents/${encodeURIComponent(agent.name)}/chat`, '_blank', 'noopener,noreferrer')
     }
   }
@@ -423,7 +423,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     setConfirmOpen(true)
   }
 
-  const isMissingConfig = !agent.config?.providerId || !agent.config?.modelId
+  const isMissingConfig = !agent.config.providerId || !agent.config.modelId
 
   const deploymentStatus = status?.status ?? 'not_found'
   const isRunning = deploymentStatus === 'running'
@@ -437,14 +437,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   const canLaunch = isRunning && status?.health === 'healthy'
 
   const provider = useMemo(
-    () => providers.find((p) => p.id === agent.config?.providerId),
-    [providers, agent.config?.providerId]
+    () => providers.find((p) => p.id === agent.config.providerId),
+    [providers, agent.config.providerId]
   )
 
   const description = useMemo(() => {
-    const d = agent.config?.description
+    const d = agent.config.description
     return d?.zh ?? d?.en ?? ''
-  }, [agent.config?.description])
+  }, [agent.config.description])
 
   const statusClass = useMemo(() => {
     if (isRunning) return `${styles.statusTag} ${styles.statusRunning}`
@@ -547,7 +547,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         <div className={styles.infoCard}>
           <div className={styles.infoHead}>
             <div>
-              <h3 className={styles.infoTitle}>{agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}</h3>
+              <h3 className={styles.infoTitle}>{agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}</h3>
               {description && <p className={styles.infoDesc}>{description}</p>}
             </div>
             <span className={statusClass}>{statusText}</span>
@@ -555,11 +555,11 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           <div className={styles.infoGrid}>
             <div>
               <div className={styles.infoLabel}>Provider</div>
-              <div className={styles.infoValue}>{provider?.name ?? (agent.config?.providerId != null ? `#${agent.config.providerId}` : '-')}</div>
+              <div className={styles.infoValue}>{provider?.name ?? (agent.config.providerId != null ? `#${agent.config.providerId}` : '-')}</div>
             </div>
             <div>
               <div className={styles.infoLabel}>Model</div>
-              <div className={styles.infoValue}>{agent.config?.modelId ?? '-'}</div>
+              <div className={styles.infoValue}>{agent.config.modelId ?? '-'}</div>
             </div>
             <div>
               <div className={styles.infoLabel}>端口</div>
@@ -839,7 +839,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
       <Modal
         open={confirmOpen}
-        title={`重新部署 ${agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}`}
+        title={`重新部署 ${agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}`}
         onCancel={() => {
           setConfirmOpen(false)
           setRotateKey(false)

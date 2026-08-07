@@ -126,7 +126,7 @@ export function useChatStream(): UseChatStreamReturn {
             const partial = data.partial ?? {}
             if (partial.type === 'text') {
               const last = parts[parts.length - 1]
-              if (last?.type === 'text') {
+              if (last.type === 'text') {
                 last.text += partial.text ?? ''
               } else {
                 parts.push({ type: 'text', text: partial.text ?? '' })
@@ -134,7 +134,7 @@ export function useChatStream(): UseChatStreamReturn {
               publish()
             } else if (partial.type === 'thinking') {
               const last = parts[parts.length - 1]
-              if (last?.type === 'reasoning') {
+              if (last.type === 'reasoning') {
                 last.reasoning += partial.text ?? ''
               } else {
                 parts.push({ type: 'reasoning', reasoning: partial.text ?? '' })

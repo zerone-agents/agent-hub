@@ -205,7 +205,7 @@ function statusMeta(doc: KnowledgeDocument): {
   color: "processing" | "success" | "error" | "warning" | "default";
   percent: number;
 } {
-  const percent = Math.round((doc.progress ?? 0) * 100);
+  const percent = Math.round((doc.progress) * 100);
   if (doc.run === "1") return { label: "解析中", color: "processing", percent };
   if (doc.run === "3" || percent >= 100)
     return { label: "已完成", color: "success", percent: 100 };
@@ -215,7 +215,7 @@ function statusMeta(doc: KnowledgeDocument): {
 }
 
 function metadataSummary(doc: KnowledgeDocument): string {
-  const fields = doc.meta_fields ?? [];
+  const fields = doc.meta_fields;
   if (fields.length === 0) return "-";
   const names = fields
     .map((item) => String(item.name ?? item.key ?? item.field ?? "").trim())
@@ -509,6 +509,7 @@ export default function KnowledgeDocumentsPage() {
               <span className={styles.primaryText}>{value || "未命名"}</span>
             </Tooltip>
             <span className={styles.secondaryText}>
+              {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: API may omit suffix */}
               {(record.suffix ?? record.type ?? "file")
                 .toString()
                 .toUpperCase()}{" "}

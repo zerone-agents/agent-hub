@@ -81,10 +81,12 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
   // new zip with fewer skills). Keeps the rendered entry in bounds.
   const idx = Math.min(activeIdx, Math.max(0, entries.length - 1))
   const active = entries[idx]
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- entries[idx] may be undefined at runtime when idx is out of bounds
   const { frontmatter, body } = active?.content
     ? parseSkillFrontmatter(active.content)
     : { frontmatter: null, body: '' }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same reason as above
   const hasContent = entries.length > 0 && !!active?.content
 
   return (

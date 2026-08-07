@@ -107,7 +107,7 @@ export default function ToolListPage() {
       const kw = keywords.toLowerCase()
       result = tools.filter((tool) => {
         const fields = [tool.title, tool.name, tool.description]
-        return fields.some((f) => f?.toLowerCase().includes(kw))
+        return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }
     return result.sort((a, b) => a.name.localeCompare(b.name))
@@ -164,7 +164,7 @@ export default function ToolListPage() {
           {filteredTools.map((tool) => (
             <EntityCard
               key={tool.name}
-              icon={tool.name[0]?.toUpperCase()}
+              icon={tool.name[0].toUpperCase()}
               title={tool.title || tool.name}
               subtitle={tool.name}
               headerExtra={

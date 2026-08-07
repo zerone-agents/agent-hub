@@ -630,7 +630,7 @@ export default function DashboardPage() {
     return <div className={styles.empty}>仪表盘数据加载失败，请稍后刷新重试</div>
   }
 
-  const modelCount = providers.reduce((sum, provider) => sum + (provider.defaultModels?.length ?? 0), 0)
+  const modelCount = providers.reduce((sum, provider) => sum + (provider.defaultModels.length), 0)
   const documentCount = knowledgeDatasets.reduce((sum, dataset) => sum + dataset.doc_num, 0)
   const chunkCount = knowledgeDatasets.reduce((sum, dataset) => sum + dataset.chunk_num, 0)
   const resources: ResourceItem[] = [
@@ -644,12 +644,12 @@ export default function DashboardPage() {
     { label: '场景', value: scenes.length, icon: FilmSlate, path: '/scenes', color: 'var(--chart-4)' }
   ]
   const resourceActivities: ActivityItem[] = [
-    ...agents.map((item: Agent) => ({ title: item.config?.title?.zh ?? item.name, time: item.createdAt ?? '', type: 'agent' as const })),
-    ...tools.map((item: Tool) => ({ title: item.title || item.name, time: item.createdAt ?? '', type: 'tool' as const })),
-    ...skills.map((item: Skill) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt ?? '', type: 'skill' as const })),
-    ...scenes.map((item: Scene) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt ?? '', type: 'scene' as const })),
-    ...providers.map((item: Provider) => ({ title: item.name, time: item.createdAt ?? '', type: 'provider' as const })),
-    ...mcps.map((item: Mcp) => ({ title: item.title || item.name, time: item.createdAt ?? '', type: 'mcp' as const })),
+    ...agents.map((item: Agent) => ({ title: item.config.title?.zh ?? item.name, time: item.createdAt ?? '', type: 'agent' as const })),
+    ...tools.map((item: Tool) => ({ title: item.title || item.name, time: item.createdAt, type: 'tool' as const })),
+    ...skills.map((item: Skill) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt, type: 'skill' as const })),
+    ...scenes.map((item: Scene) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt, type: 'scene' as const })),
+    ...providers.map((item: Provider) => ({ title: item.name, time: item.createdAt, type: 'provider' as const })),
+    ...mcps.map((item: Mcp) => ({ title: item.title || item.name, time: item.createdAt, type: 'mcp' as const })),
     ...knowledgeDatasets.map((item: KnowledgeDataset) => ({
       title: item.display_name || item.name,
       time: item.create_date ?? (item.create_time ? new Date(item.create_time).toISOString() : ''),

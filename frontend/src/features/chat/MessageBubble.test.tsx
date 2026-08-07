@@ -47,7 +47,7 @@ describe('MessageBubble Raw mode AIGC display', () => {
     // The <pre> element holds the full raw text (content + aigc)
     const pre = document.querySelector('pre')
     expect(pre).toBeTruthy()
-    const raw = pre!.textContent ?? ''
+    const raw = pre!.textContent
     expect(raw).toContain('—— AIGC Label ——')
     expect(raw).toContain('ContentProducer')
     expect(raw).toContain('ProduceID')

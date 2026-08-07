@@ -181,7 +181,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
           retryMaxRetries: detail.retryMaxRetries ?? null,
           retryTimeoutMs: detail.retryTimeoutMs ?? null,
         })
-        setHeaderPairs(Object.entries(detail.headers ?? {}).map(([k, v]) => ({ key: k, value: v })))
+        setHeaderPairs(Object.entries(detail.headers).map(([k, v]) => ({ key: k, value: v })))
         // 编辑模式：用后端存储的 tools 初始化显示
         if (detail.tools && detail.tools.length > 0) {
           setProbedResult({
