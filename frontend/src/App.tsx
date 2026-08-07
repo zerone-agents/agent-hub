@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ConfigProvider } from 'antd'
 import { RouterProvider } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -48,10 +48,27 @@ const cssVariableNames: Record<keyof ThemeColors, string> = {
   sidebarRing: '--sidebar-ring'
 }
 
+// One-shot SSO token extraction. Done at module load (before React mounts)
+// so the credentials are already stored when RequireAuth runs its first
+// render. Previously this lived inside the App component behind a useRef
+// guard, but reading a ref during render violates react-hooks/refs and
+// reassigning module-scope let from within a component violates
+// react-hooks/globals — both are side effects during render.
+if (typeof window !== 'undefined') {
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('token')
+  if (token) {
+    setTokens(token, params.get('refreshToken') ?? undefined)
+    window.history.replaceState({}, '', window.location.pathname)
+  }
+}
+
 export default function App() {
   // Extract token from URL before the router renders so that RequireAuth
   // sees the credentials on its first render (Casdoor SSO callback).
-  const tokenInitialized = useRef(false)
+  // The init runs once at module load — equivalent to the previous
+  // `useRef(true)` "init once" guard, but without reading a ref during render
+  // (which violates react-hooks/refs).
   const themeId = useThemeStore((state) => state.themeId)
   const appearance = useThemeStore((state) => state.appearance)
   const syncSystemAppearance = useThemeStore(
@@ -80,16 +97,6 @@ export default function App() {
     media.addEventListener('change', syncSystemAppearance)
     return () => { media.removeEventListener('change', syncSystemAppearance); }
   }, [syncSystemAppearance])
-
-  if (!tokenInitialized.current && typeof window !== 'undefined') {
-    tokenInitialized.current = true
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
-    if (token) {
-      setTokens(token, params.get('refreshToken') ?? undefined)
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-  }
 
   return (
     <ErrorBoundary>

@@ -197,12 +197,13 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const modelTypeOptions = isOcr ? OCR_MODEL_TYPE_OPTIONS : MODEL_TYPE_OPTIONS
 
   const activeRules: AttrRule[] = useMemo(
-    () => (protocol && attrRules?.[protocol]) || [],
+    () => (protocol ? attrRules?.[protocol] ?? [] : []),
     [protocol, attrRules]
   )
 
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- merge attribute defaults from active rules into local state; functional update returns prev when nothing changed
     setAttributes((prev) => {
       const next = { ...prev }
       let changed = false
@@ -233,6 +234,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         builtin: editingProvider.builtin,
         lockedApiKey: editingProvider.lockedApiKey,
       })
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync local form state with the editing target on modal open; all four setStates are coupled to the antd form.setFieldsValue above
       setDefaultModels(editingProvider.defaultModels.map((m) => ({ ...m })))
       setFields(editingProvider.fields.map((f) => ({ ...f })))
       setAttributes({ ...editingProvider.attributes })
@@ -245,6 +247,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         iconKey: 'anthropic',
         builtin: false,
       })
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset local form state for the create-new branch
       setDefaultModels([])
       setFields([])
       setAttributes({})
@@ -294,9 +297,9 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result?.success) {
-          message.success(`连接成功 · ${String(result.latencyMs)}ms`)
+          message.success(`连接成功 · ${result.latencyMs}ms`)
         } else {
-          message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
+          message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
         }
       } else {
         const values = await form.validateFields(['baseUrl', 'lockedApiKey', 'protocol', 'authStyle'])
@@ -313,9 +316,9 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result2 = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result2?.success) {
-          message.success(`连接成功 · ${String(result2.latencyMs)}ms`)
+          message.success(`连接成功 · ${result2.latencyMs}ms`)
         } else {
-          message.error(`连接失败 · ${String(result2?.error ?? '未知错误')}`)
+          message.error(`连接失败 · ${result2?.error ?? '未知错误'}`)
         }
       }
     } finally {

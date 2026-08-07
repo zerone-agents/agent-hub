@@ -99,6 +99,7 @@ export default function CwdFilePanel({ agentName }: Props) {
   // When agent changes, drop the stale selection. The expanded state is
   // per-agent (separate localStorage key) so we re-read on agentName change.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset on agent switch; both setStates are coupled to agentName change
     setSelected(null)
     setExpanded(readExpanded(agentName))
   }, [agentName])

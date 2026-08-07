@@ -100,7 +100,10 @@ export function useChatStream(): UseChatStreamReturn {
       armIdleTimer() // fetch handshake may take time; re-arm once streaming starts
       setState((s) => ({ ...s, phase: 'streaming' }))
 
-      const reader = resp.body!.getReader()
+      // Body is non-null for SSE responses from our backend; if it ever is null,
+      // .getReader() on a synthetic empty stream ends the loop cleanly via `done`.
+      const body = resp.body ?? new ReadableStream<Uint8Array>()
+      const reader = body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
 

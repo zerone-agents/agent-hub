@@ -138,7 +138,7 @@ export default function AgentListPage() {
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
       const group = agent.group ?? '默认分组'
-      if (!acc[group]) acc[group] = []
+      acc[group] ??= []
       acc[group].push(agent)
       return acc
     }, {})
@@ -312,15 +312,15 @@ export default function AgentListPage() {
           baseUrl: fieldValues.base_url || '',
         },
       })
-      const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>)?.data
+      const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
       if (result?.success) {
-        message.success(`连接成功 · ${String(result.latencyMs)}ms`)
+        message.success(`连接成功 · ${result.latencyMs}ms`)
         setTestPassed(true)
       } else {
-        message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
+        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
         setTestPassed(false)
       }
-    } catch (err: any) {
+    } catch {
       setTestPassed(false)
     } finally {
       setTesting(false)
@@ -353,7 +353,7 @@ export default function AgentListPage() {
       setModelOpen(false)
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : '未知错误'
-      message.error(`保存失败 · ${String(errMsg)}`)
+      message.error(`保存失败 · ${errMsg}`)
     } finally {
       setSaving(false)
     }
@@ -744,8 +744,8 @@ export default function AgentListPage() {
                   options={modelSuggestions}
                   allowClear
                   filterOption={(input, option) => {
-                    const value = String(option?.value ?? '').toLowerCase()
-                    const label = String(option?.label ?? '').toLowerCase()
+                    const value = (option?.value ?? '').toLowerCase()
+                    const label = (option?.label ?? '').toLowerCase()
                     const query = input.toLowerCase()
                     return value.includes(query) || label.includes(query)
                   }}

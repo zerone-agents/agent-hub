@@ -74,8 +74,8 @@ apiClient.interceptors.response.use(
           setTokens(accessToken, newRefreshToken)
 
           originalRequest.headers['X-Refresh-Attempt'] = 'true'
-          originalRequest.headers.Authorization = `Bearer ${String(accessToken)}`
-          return apiClient(originalRequest)
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`
+          return await apiClient(originalRequest)
         }
       } catch {
         clearTokens()
@@ -105,6 +105,7 @@ export interface ApiEnvelope<T = unknown> {
  * Unwrap an axios response into its data payload, throwing on backend errors.
  * Eliminates `any` propagation from `res.data` across query/mutation hooks.
  */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- T is the caller-specified return type; the rule doesn't recognize this ergonomic pattern
 export function unwrapResponse<T>(res: { data: unknown }): T {
   const body = res.data as ApiEnvelope<T>
   if (!body.success) {

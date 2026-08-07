@@ -217,8 +217,10 @@ function statusMeta(doc: KnowledgeDocument): {
 function metadataSummary(doc: KnowledgeDocument): string {
   const fields = doc.meta_fields;
   if (fields.length === 0) return "-";
+  const pickStr = (v: unknown): string =>
+    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" || typeof v === "bigint" ? String(v) : "";
   const names = fields
-    .map((item) => String(item.name ?? item.key ?? item.field ?? "").trim())
+    .map((item) => pickStr(item.name ?? item.key ?? item.field).trim())
     .filter(Boolean);
   if (names.length === 0) return `${fields.length} 项`;
   return (
@@ -268,8 +270,11 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-modal state on close so the next open starts clean
       setFiles([]);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-close reset
       setError("");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-close reset
       setAutoParse(true);
     }
   }, [open]);
@@ -511,7 +516,6 @@ export default function KnowledgeDocumentsPage() {
             <span className={styles.secondaryText}>
               {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: API may omit suffix */}
               {(record.suffix ?? record.type ?? "file")
-                .toString()
                 .toUpperCase()}{" "}
               · {formatBytes(record.size)}
             </span>

@@ -341,14 +341,15 @@ function fileToBase64(file: File): Promise<ImageFileReadResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = String(reader.result ?? "");
+      const raw = reader.result;
+      const dataUrl = typeof raw === "string" ? raw : "";
       const marker = "base64,";
       const markerIndex = dataUrl.indexOf(marker);
       const base64 =
         markerIndex >= 0 ? dataUrl.slice(markerIndex + marker.length) : dataUrl;
       resolve({ dataUrl, base64 });
     };
-    reader.onerror = () => { reject(reader.error); };
+    reader.onerror = () => { reject(reader.error instanceof Error ? reader.error : new Error(String(reader.error))); };
     reader.readAsDataURL(file);
   });
 }
@@ -379,8 +380,11 @@ function ChunkImage({
     let active = true;
     let objectURL = "";
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset fetch-lifecycle status before kicking off a new image fetch; coupled to the request below
     setStatus("loading");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- same fetch-lifecycle reset
     setErrorMessage("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- same fetch-lifecycle reset
     setImageSrc("");
 
     knowledgeApi.images
@@ -499,8 +503,11 @@ function ChunkEditor({
 
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form-local state on modal open; values are coupled to the antd form.setFieldsValue call below
     setImageBase64("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-open reset
     setImagePreviewUrl("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-open reset
     setPreviewMode("edit");
     form.setFieldsValue({
       content: editing?.content ?? "",
@@ -708,6 +715,7 @@ export default function KnowledgeChunksPage() {
     currentIds.every((chunkId) => selectedIds.includes(chunkId));
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drop stale selections whenever the page result changes; this is the canonical "filter derived state against new source" sync pattern
     setSelectedIds((current) =>
       current.filter((chunkId) => currentIds.includes(chunkId)),
     );

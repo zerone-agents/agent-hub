@@ -131,13 +131,13 @@ export default function ChatSessionList({
   const deleteSession = useDeleteAgentChatSession(agentName)
   const [creating, setCreating] = useState(false)
 
-  const sessions = (data?.items ?? []) as AgentChatSession[]
+  const sessions = (data?.items ?? [])
 
   const handleNew = async () => {
     setCreating(true)
     try {
       const res = await createSession.mutateAsync(undefined)
-      const sess = (res.data as ApiEnvelope<AgentChatSession>)?.data
+      const sess = (res.data as ApiEnvelope<AgentChatSession>).data
       if (sess) onSelect(sess)
     } finally {
       setCreating(false)

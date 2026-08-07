@@ -272,10 +272,10 @@ describe('CwdFilePreview', () => {
       .mockReturnValue('blob:fake-url')
     const revokeObjectURLSpy = vi
       .spyOn(URL, 'revokeObjectURL')
-      .mockImplementation(() => {})
+      .mockImplementation(() => undefined)
     const anchorClickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(() => {})
+      .mockImplementation(() => undefined)
 
     renderWith(
       <CwdFilePreview

@@ -297,7 +297,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       }
       setError(null)
       return payload
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
       return null
     }
@@ -306,6 +306,13 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   // Single recursive chain: each tick captures the current generation at
   // schedule time and re-validates it both before fetching and before
   // rescheduling, so stale chains die instead of forking.
+  //
+  // The poll function is recursive (it reschedules itself on each tick). To
+  // avoid referencing `schedulePoll` before its declaration (which violates
+  // react-hooks/immutability) we hold the latest instance in a ref and have
+  // the callback go through the ref. The ref is populated by a separate
+  // effect below so the recursion always sees the current closure.
+  const schedulePollRef = useRef<(delay: number) => void>(() => undefined)
   const schedulePoll = useCallback(
     (delay: number) => {
       const gen = pollGenRef.current
@@ -316,16 +323,24 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         if (current && Date.now() < suppressHealthyRef.current) {
           current.health = undefined
         }
-        schedulePoll(isMidState(current) ? POLL_FAST_MS : POLL_SLOW_MS)
+        schedulePollRef.current(isMidState(current) ? POLL_FAST_MS : POLL_SLOW_MS)
       }, delay)
     },
     [fetchStatus]
   )
+  useEffect(() => {
+    schedulePollRef.current = schedulePoll
+  }, [schedulePoll])
 
   useEffect(() => {
     if (open) {
       const gen = pollGenRef.current
+      // Resetting error/loading state on open is intentional synchronization
+      // with the modal lifecycle — these resets are coupled to the polling
+      // kickoff below and must fire on the same effect tick.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-open lifecycle reset
       setError(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-open lifecycle reset
       setStatusLoaded(false)
       void fetchStatus().then(() => {
         // A close/re-mount (or StrictMode's extra effect cycle) bumps the
@@ -337,8 +352,11 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       })
     } else {
       clearTimer()
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
       setStatus(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
       setStatusLoaded(false)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
       setError(null)
     }
     return () => { clearTimer(); }
@@ -358,7 +376,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       }
       // Kick off fast polling immediately after deploy response
       schedulePoll(POLL_FAST_MS)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -370,7 +388,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     try {
       await agentApi.stopDeployment(agent.name)
       await fetchStatus()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -389,7 +407,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         setStatus(payload)
       }
       schedulePoll(POLL_FAST_MS)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -405,7 +423,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         await agentApi.deleteDeployment(agent.name)
       }
       await fetchStatus()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)

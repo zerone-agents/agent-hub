@@ -107,6 +107,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-related local state on modal open; coupled to the antd form.setFieldsValue below
       setSelectedFile(null)
       setUploadError('')
       setSkillMdEntries([])
@@ -132,6 +133,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
   // Bundle zip 会在预览区显示 tab 切换。
   useEffect(() => {
     if (editingSkill && !selectedFile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror remote SKILL.md query state into local state so the preview component can consume it
       setSkillMdLoading(remoteLoading)
       if (remoteError) {
         setSkillMdError(remoteError.message)
@@ -168,7 +170,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
         setSkillMdEntries(entries)
         setSkillMdLoading(false)
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         setSkillMdEntries([])
         setSkillMdError(err instanceof Error ? err.message : '解析 SKILL.md 失败')
         setSkillMdLoading(false)

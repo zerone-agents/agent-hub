@@ -100,7 +100,7 @@ describe('identifier charset', () => {
 
     it('interpolates the label into every message so each form reads naturally', () => {
       const rules = identifierFormRules('代理标识')
-      expect(rules.every((r) => String(r.message).includes('代理标识'))).toBe(true)
+      expect(rules.every((r) => r.message.includes('代理标识'))).toBe(true)
     })
   })
 

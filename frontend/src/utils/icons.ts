@@ -17,7 +17,7 @@ const ICON_MAP: Partial<Record<string, PhosphorIcon>> = {
 }
 
 export function getIconComponent(name: string): PhosphorIcon {
-  return ICON_MAP[name] || UserCircle
+  return ICON_MAP[name] ?? UserCircle
 }
 
 /** Lighten a hex color towards white by the given amount (0-1). */

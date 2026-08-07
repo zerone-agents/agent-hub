@@ -29,7 +29,7 @@ export function useIssueCLIToken() {
 
 export function useRevokeCLIToken() {
   const qc = useQueryClient()
-  return useMutation<void, Error, number>({
+  return useMutation<unknown, Error, number>({
     mutationFn: (id) => cliTokensApi.revoke(id).then(() => undefined),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['cli-tokens'] })

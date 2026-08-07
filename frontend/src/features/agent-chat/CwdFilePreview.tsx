@@ -320,6 +320,7 @@ export default function CwdFilePreview(props: Props) {
     }
 
     if (!selectedFile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset preview state when no file is selected; this is the sync-handoff counterpart of the in-flight fetch below
       setState(initialState)
       return
     }

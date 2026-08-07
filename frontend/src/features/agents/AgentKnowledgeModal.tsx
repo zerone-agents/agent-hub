@@ -60,6 +60,7 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync targetKeys with the latest boundIds every time the modal opens or bound ids refetch
       setTargetKeys(boundIds)
     }
   }, [open, boundIds])

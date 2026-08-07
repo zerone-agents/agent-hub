@@ -251,7 +251,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
             allowClear
             suffixIcon={<CaretDown size={14} />}
             filterOption={(inputValue, option) => {
-              const label = String(option?.label ?? '').toLowerCase()
+              const label = (option?.label ?? '').toLowerCase()
               return label.includes(inputValue.toLowerCase())
             }}
           />

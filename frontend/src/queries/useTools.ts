@@ -6,8 +6,10 @@ import { parseApiError, unwrapResponse } from '@/api/client'
 export function useTools() {
   return useQuery<Tool[]>({
     queryKey: ['tools'],
-    queryFn: async () =>
-      unwrapResponse<Tool[]>(await toolApi.list()) ?? []
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive: backend may omit data field
+      return unwrapResponse<Tool[]>(await toolApi.list()) ?? []
+    }
   })
 }
 

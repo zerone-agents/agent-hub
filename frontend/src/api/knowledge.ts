@@ -210,14 +210,15 @@ function pick(raw: RawObject, ...keys: string[]): unknown {
 
 function str(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
   if (value === undefined || value === null) return fallback;
-  return String(value);
+  return fallback;
 }
 
 function optionalStr(value: unknown): string | undefined {
   if (typeof value === "string") return value === "" ? undefined : value;
-  if (value === undefined || value === null) return undefined;
-  return String(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  return undefined;
 }
 
 function num(value: unknown, fallback = 0): number {
@@ -441,17 +442,24 @@ async function unwrap<T>(
 
 export function buildQuery(params: Record<string, unknown>): string {
   const query = new URLSearchParams();
+  const toPrimitive = (v: unknown): string | undefined => {
+    if (typeof v === "string") return v;
+    if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") return String(v);
+    return undefined;
+  };
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
     if (Array.isArray(value)) {
       for (const item of value) {
         if (item !== undefined && item !== null && item !== "") {
-          query.append(key, String(item));
+          const s = toPrimitive(item);
+          if (s !== undefined) query.append(key, s);
         }
       }
       continue;
     }
-    query.set(key, String(value));
+    const s = toPrimitive(value);
+    if (s !== undefined) query.set(key, s);
   }
   const qs = query.toString();
   return qs ? `?${qs}` : "";
@@ -482,7 +490,7 @@ export const knowledgeApi = {
     }
     try {
       const res = await apiClient.get<{ data?: HealthStatus }>(`${BASE}/health`)
-      const data = res.data?.data
+      const data = res.data.data
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
@@ -493,12 +501,12 @@ export const knowledgeApi = {
       // When MULTIRAG is unconfigured the backend returns 503 with success:false,
       // but the data envelope still contains configured/connected/status.
       const axiosErr = err as AxiosErrShape
-      const data = axiosErr?.response?.data?.data
+      const data = axiosErr.response?.data?.data
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
         status: data?.status ?? 'unavailable',
-        message: axiosErr?.response?.data?.error ?? data?.message ?? axiosErr?.message,
+        message: axiosErr.response?.data?.error ?? data?.message ?? axiosErr.message,
       }
     }
   },

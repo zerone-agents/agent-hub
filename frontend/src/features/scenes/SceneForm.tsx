@@ -94,9 +94,11 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
         }
       })
     } else {
+      const agentId = values.agentId
+      if (agentId === null) return
       await createScene.mutateAsync({
         name: values.name,
-        agentId: values.agentId!,
+        agentId,
         title: values.title,
         titleEn: values.titleEn,
         prompt: values.prompt,

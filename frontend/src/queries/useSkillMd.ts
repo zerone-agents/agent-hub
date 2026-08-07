@@ -29,7 +29,7 @@ export function useSkillMd(name: string | null) {
         const payload = unwrapResponse<{ entries?: SkillMdEntry[] } | null>(res)
         return payload?.entries ?? []
       } catch (err: unknown) {
-        throw new Error(parseApiError(err))
+        throw new Error(parseApiError(err), { cause: err })
       }
     },
     enabled: !!name,

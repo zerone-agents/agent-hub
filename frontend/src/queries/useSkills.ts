@@ -7,7 +7,7 @@ export function useSkills() {
   return useQuery<Skill[]>({
     queryKey: ['skills'],
     queryFn: async () =>
-      unwrapResponse<Skill[]>(await skillApi.adminList()) ?? []
+      unwrapResponse<Skill[]>(await skillApi.adminList())
   })
 }
 
