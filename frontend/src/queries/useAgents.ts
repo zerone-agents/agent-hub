@@ -17,7 +17,7 @@ export function useCreateAgent() {
   return useMutation({
     mutationFn: (data: Partial<Agent>) => agentApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('代理已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -30,7 +30,7 @@ export function useUpdateAgent() {
     mutationFn: ({ name, data }: { name: string; data: Partial<Agent> }) =>
       agentApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('代理已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -42,7 +42,7 @@ export function useDeleteAgent() {
   return useMutation({
     mutationFn: (name: string) => agentApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('代理已删除')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -55,7 +55,7 @@ export function useUpdateSubagents() {
     mutationFn: ({ name, subagents }: { name: string; subagents: string[] }) =>
       agentApi.updateSubagents(name, subagents),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('子代理已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -68,7 +68,7 @@ export function useUpdateAgentTools() {
     mutationFn: ({ name, toolNames }: { name: string; toolNames: string[] }) =>
       agentApi.updateTools(name, toolNames),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('工具已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -81,7 +81,7 @@ export function useUpdateAgentSkills() {
     mutationFn: ({ name, skillNames }: { name: string; skillNames: string[] }) =>
       agentApi.updateSkills(name, skillNames),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('技能已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -104,8 +104,8 @@ export function useUpdateAgentKnowledgeDatasets() {
     mutationFn: ({ name, datasetIds }: { name: string; datasetIds: string[] }) =>
       agentApi.updateKnowledgeDatasets(name, datasetIds),
     onSuccess: (_res, variables) => {
-      qc.invalidateQueries({ queryKey: ['agents', variables.name, 'knowledge'] })
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'knowledge'] })
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('知识库已更新')
     },
     onError: (err) => message.error(parseApiError(err))

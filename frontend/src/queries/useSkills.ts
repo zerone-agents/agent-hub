@@ -16,7 +16,7 @@ export function useCreateSkill() {
   return useMutation({
     mutationFn: (formData: FormData) => skillApi.create(formData),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['skills'] })
+      void qc.invalidateQueries({ queryKey: ['skills'] })
       message.success('技能已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -29,7 +29,7 @@ export function useUpdateSkill() {
     mutationFn: ({ name, data }: { name: string; data: SkillUpdatePayload }) =>
       skillApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['skills'] })
+      void qc.invalidateQueries({ queryKey: ['skills'] })
       message.success('技能已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -41,7 +41,7 @@ export function useDeleteSkill() {
   return useMutation({
     mutationFn: (name: string) => skillApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['skills'] })
+      void qc.invalidateQueries({ queryKey: ['skills'] })
       message.success('技能已删除')
     },
     onError: (err) => message.error(parseApiError(err))

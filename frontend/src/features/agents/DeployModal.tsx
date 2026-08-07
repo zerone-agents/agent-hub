@@ -327,7 +327,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       const gen = pollGenRef.current
       setError(null)
       setStatusLoaded(false)
-      fetchStatus().then(() => {
+      void fetchStatus().then(() => {
         // A close/re-mount (or StrictMode's extra effect cycle) bumps the
         // generation before this fetch resolves; only the live effect may
         // start a polling chain.
@@ -849,7 +849,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setConfirmOpen(false); setRotateKey(false) }}>取消</Button>
-            <PrimaryButton onClick={() => { handleDeploy(true, rotateKey); setConfirmOpen(false); setRotateKey(false) }}>
+            <PrimaryButton onClick={() => { void handleDeploy(true, rotateKey); setConfirmOpen(false); setRotateKey(false) }}>
               确认重新部署
             </PrimaryButton>
           </div>

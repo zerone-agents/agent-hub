@@ -20,7 +20,7 @@ export function useIssueCLIToken() {
     mutationFn: ({ name, ttlDays }) =>
       cliTokensApi.issue(name, ttlDays).then((r) => r.data.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cli-tokens'] })
+      void qc.invalidateQueries({ queryKey: ['cli-tokens'] })
       message.success('Token 已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -32,7 +32,7 @@ export function useRevokeCLIToken() {
   return useMutation<void, Error, number>({
     mutationFn: (id) => cliTokensApi.revoke(id).then(() => undefined),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cli-tokens'] })
+      void qc.invalidateQueries({ queryKey: ['cli-tokens'] })
       message.success('Token 已撤销')
     },
     onError: (err) => message.error(parseApiError(err))

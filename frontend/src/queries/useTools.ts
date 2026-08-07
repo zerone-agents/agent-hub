@@ -16,7 +16,7 @@ export function useCreateTool() {
   return useMutation({
     mutationFn: (data: Partial<Tool>) => toolApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -29,7 +29,7 @@ export function useUpdateTool() {
     mutationFn: ({ name, data }: { name: string; data: Partial<Tool> }) =>
       toolApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -41,7 +41,7 @@ export function useDeleteTool() {
   return useMutation({
     mutationFn: (name: string) => toolApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已删除')
     },
     onError: (err) => message.error(parseApiError(err))

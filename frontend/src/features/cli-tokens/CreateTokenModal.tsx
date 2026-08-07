@@ -118,7 +118,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
                 type="link"
                 size="small"
                 onClick={() => {
-                  navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); })
+                  void navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); })
                 }}
               >
                 复制

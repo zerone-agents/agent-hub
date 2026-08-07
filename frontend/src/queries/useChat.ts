@@ -41,7 +41,7 @@ export function useDeleteChatSession() {
   return useMutation({
     mutationFn: (id: string) => chatApi.deleteSession(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['chat-sessions'] })
+      void qc.invalidateQueries({ queryKey: ['chat-sessions'] })
       message.success('会话已删除')
     },
     onError: (err) => message.error(parseApiError(err))
