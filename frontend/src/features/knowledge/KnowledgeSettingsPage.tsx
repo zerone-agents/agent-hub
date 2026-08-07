@@ -137,6 +137,7 @@ export default function KnowledgeSettingsPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- react-query data typed as T | undefined but lint infers dataset as always falsy
   if (isLoading && !dataset) {
     return (
       <div className={styles.loadingWrap}>

@@ -249,7 +249,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
       payload.tools = probedResult.tools
     }
 
-    if (isEdit && editingMcp) {
+    if (editingMcp) {
       await updateMcp.mutateAsync({ name: editingMcp.name, data: payload })
     } else {
       await createMcp.mutateAsync({ ...payload, name: values.name })

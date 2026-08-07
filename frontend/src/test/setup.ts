@@ -65,6 +65,7 @@ if (!isUsableStorage(globalThis.localStorage)) {
 }
 
 // jsdom does not implement matchMedia; antd / lobe-ui expect it.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement matchMedia despite TS lib typing it as required
 if (!window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -82,6 +83,7 @@ if (!window.matchMedia) {
 }
 
 // jsdom lacks ResizeObserver; antd uses it for layout measurement.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement ResizeObserver despite TS lib typing it as required
 if (!window.ResizeObserver) {
   window.ResizeObserver = class {
     observe() {}

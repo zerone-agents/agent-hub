@@ -145,7 +145,7 @@ const TYPE_LABELS: Record<string, string> = {
 function getCapabilities(provider: Provider): string[] {
   const set = new Set<string>()
   for (const m of provider.defaultModels) {
-    if (m.modelType) set.add(m.modelType)
+    set.add(m.modelType)
   }
   return Array.from(set)
 }

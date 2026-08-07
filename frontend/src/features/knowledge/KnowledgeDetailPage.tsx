@@ -61,6 +61,7 @@ export default function KnowledgeDetailPage() {
         返回知识库列表
       </button>
 
+      {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- react-query data typed as T | undefined but lint infers dataset as always falsy */}
       {isLoading && !dataset ? (
         <div className={styles.loadingWrap}>
           <Spin />

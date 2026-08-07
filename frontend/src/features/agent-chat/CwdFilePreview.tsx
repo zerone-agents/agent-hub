@@ -267,7 +267,6 @@ export async function fetchText(
       }
       const { done, value } = await reader.read()
       if (done) break
-      if (!value) continue
       const remaining = PREVIEW_BYTE_CAP - total
       if (value.byteLength > remaining) {
         const slice = value.subarray(0, remaining)
@@ -464,7 +463,6 @@ export default function CwdFilePreview(props: Props) {
   // authorization". Going through fetch lets us attach the bearer token
   // (the axios interceptor doesn't run for <a> navigation).
   const handleDownload = async () => {
-    if (!selectedFile) return
     try {
       const res = await agentFilesApi.getContent(agentName, fullPath(selectedFile))
       if (!res.ok) {

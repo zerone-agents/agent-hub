@@ -114,7 +114,7 @@ export default function SceneWelcome({ agentName, onPick, disabled }: SceneWelco
             <button
               type="button"
               className={`${styles.card}${disabled ? ` ${styles.cardDisabled}` : ''}`}
-              onClick={() => !disabled && onPick(scene)}
+              onClick={() => { if (!disabled) onPick(scene) }}
             >
               <div className={styles.cardTitle}>{scene.title}</div>
               <div className={styles.cardPreview}>{scene.prompt}</div>

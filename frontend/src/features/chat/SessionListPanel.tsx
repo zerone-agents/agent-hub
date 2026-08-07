@@ -90,7 +90,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   const modelDisplayNameMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const p of providers) {
-      for (const mo of (p.defaultModels || [])) {
+      for (const mo of p.defaultModels) {
         if (mo.selectionId) {
           m.set(`${p.id}::${mo.selectionId}`, mo.displayName || mo.modelId)
         }
