@@ -25,7 +25,7 @@ export function useCreateProvider() {
   return useMutation({
     mutationFn: (data: Partial<Provider>) => providerApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] })
+      void qc.invalidateQueries({ queryKey: ['providers'] })
       message.success('Provider 已创建')
     },
     onError: (err) => message.error(parseApiError(err)),
@@ -38,7 +38,7 @@ export function useUpdateProvider() {
     mutationFn: ({ id, data }: { id: number; data: Partial<Provider> }) =>
       providerApi.update(id, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] })
+      void qc.invalidateQueries({ queryKey: ['providers'] })
       message.success('Provider 已更新')
     },
     onError: (err) => message.error(parseApiError(err)),
@@ -50,7 +50,7 @@ export function useDeleteProvider() {
   return useMutation({
     mutationFn: (id: number) => providerApi.delete(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] })
+      void qc.invalidateQueries({ queryKey: ['providers'] })
       message.success('Provider 已删除')
     },
     onError: (err) => message.error(parseApiError(err)),

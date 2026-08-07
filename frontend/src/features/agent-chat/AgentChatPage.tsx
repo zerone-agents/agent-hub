@@ -214,15 +214,15 @@ export default function AgentChatPage() {
         )
       }
       stream.reset()
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-messages', name, selected.id],
       })
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-sessions', name],
       })
     }
     if (stream.state.phase === 'error' && selected) {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-messages', name, selected.id],
       })
     }

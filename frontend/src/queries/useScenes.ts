@@ -16,7 +16,7 @@ export function useCreateScene() {
   return useMutation({
     mutationFn: (data: SceneCreatePayload) => sceneApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['scenes'] })
+      void qc.invalidateQueries({ queryKey: ['scenes'] })
       message.success('场景已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -29,7 +29,7 @@ export function useUpdateScene() {
     mutationFn: ({ name, data }: { name: string; data: SceneUpdatePayload }) =>
       sceneApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['scenes'] })
+      void qc.invalidateQueries({ queryKey: ['scenes'] })
       message.success('场景已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -41,7 +41,7 @@ export function useDeleteScene() {
   return useMutation({
     mutationFn: (name: string) => sceneApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['scenes'] })
+      void qc.invalidateQueries({ queryKey: ['scenes'] })
       message.success('场景已删除')
     },
     onError: (err) => message.error(parseApiError(err))

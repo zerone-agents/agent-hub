@@ -23,7 +23,7 @@ export function useCreateMcp() {
   return useMutation({
     mutationFn: (data: McpInput) => mcpApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['mcps'] })
+      void qc.invalidateQueries({ queryKey: ['mcps'] })
       message.success('MCP 已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -36,7 +36,7 @@ export function useUpdateMcp() {
     mutationFn: ({ name, data }: { name: string; data: McpInput }) =>
       mcpApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['mcps'] })
+      void qc.invalidateQueries({ queryKey: ['mcps'] })
       message.success('MCP 已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -48,7 +48,7 @@ export function useDeleteMcp() {
   return useMutation({
     mutationFn: (name: string) => mcpApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['mcps'] })
+      void qc.invalidateQueries({ queryKey: ['mcps'] })
       message.success('MCP 已删除')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -69,7 +69,7 @@ export function useUpdateAgentMcps() {
     mutationFn: ({ agentName, mcpNames }: { agentName: string; mcpNames: string[] }) =>
       mcpApi.updateAgentMcps(agentName, mcpNames),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agent-mcps'] })
+      void qc.invalidateQueries({ queryKey: ['agent-mcps'] })
       message.success('Agent MCP 关系已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -84,7 +84,7 @@ export function useProbeMcp() {
       return unwrapResponse<McpProbeResult>(res)
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['mcps'] })
+      void qc.invalidateQueries({ queryKey: ['mcps'] })
       if (data.status === 'success') {
         message.success('探测完成')
       } else {

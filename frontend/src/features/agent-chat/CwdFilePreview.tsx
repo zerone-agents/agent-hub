@@ -330,7 +330,7 @@ export default function CwdFilePreview(props: Props) {
     const path = fullPath(selectedFile)
     setState({ ...initialState, loading: true, downloadName: selectedFile.name })
 
-    ;(async () => {
+    ;void (async () => {
       try {
         // HEAD precheck: we want Content-Length and Content-Type without
         // pulling the body. If the file is over the cap we render the
