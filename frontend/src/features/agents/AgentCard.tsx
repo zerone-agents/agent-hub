@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import { PencilSimple, Trash, DiamondsFour, Wrench, Star, Cpu, Plus, PlugsConnected, Rocket, Books } from '@phosphor-icons/react'
 import { Popconfirm } from 'antd'
 import { createStyles } from 'antd-style'
@@ -72,8 +73,11 @@ export default function AgentCard({
 
   const IconCmp = agent.config.iconName ? getIconComponent(agent.config.iconName) : null
   const iconColor = agent.config.iconColor ?? '#6B7280'
+  // Render via createElement rather than JSX (<IconCmp />) so the linter
+  // doesn't mistake IconCmp for a component defined during render —
+  // getIconComponent returns a stable component reference (icon from catalog).
   const icon = IconCmp ? (
-    <IconCmp size={20} weight="duotone" color={iconColor} />
+    createElement(IconCmp, { size: 20, weight: 'duotone', color: iconColor })
   ) : agent.config.icon ? (
     <img src={agent.config.icon} alt={agent.name} className={styles.iconImg} />
   ) : (

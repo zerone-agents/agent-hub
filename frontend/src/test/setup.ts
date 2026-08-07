@@ -35,7 +35,7 @@ class InMemoryStorage implements Storage {
     this.store.delete(key)
   }
   setItem(key: string, value: string) {
-    this.store.set(key, String(value))
+    this.store.set(key, value)
   }
 }
 
@@ -86,9 +86,9 @@ if (!window.matchMedia) {
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement ResizeObserver despite TS lib typing it as required
 if (!window.ResizeObserver) {
   window.ResizeObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
+    observe(): void { /* no-op: jsdom stub */ }
+    unobserve(): void { /* no-op: jsdom stub */ }
+    disconnect(): void { /* no-op: jsdom stub */ }
   }
 }
 

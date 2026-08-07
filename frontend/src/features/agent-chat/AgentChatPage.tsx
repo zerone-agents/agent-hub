@@ -119,7 +119,7 @@ export default function AgentChatPage() {
 
   const STREAMING_MSG_ID = '__streaming__'
 
-  const history = (msgData?.items ?? []) as ChatMessage[]
+  const history = (msgData?.items ?? [])
 
   // Treat the in-flight stream as a transient assistant message rendered by the
   // same MessageBubble component as persisted messages. When the stream ends we

@@ -39,7 +39,7 @@ export function useRotateAigcKey() {
 
 export function useClearAigcConfig() {
   const qc = useQueryClient()
-  return useMutation<void>({
+  return useMutation({
     mutationFn: () => aigcApi.clear().then(() => undefined),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['aigc-config'] })

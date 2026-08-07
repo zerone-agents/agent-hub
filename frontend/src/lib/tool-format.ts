@@ -88,7 +88,7 @@ function inferLang(filePath: string): string {
   if (!filePath) return 'text'
   const base = basename(filePath)
   if (!base.includes('.')) return 'text'
-  const ext = base.split('.').pop()!.toLowerCase()
+  const ext = (base.split('.').pop() ?? '').toLowerCase()
   return EXT_LANG[ext] ?? 'text'
 }
 
@@ -108,7 +108,7 @@ function formatCellValue(value: unknown): string {
   try {
     return JSON.stringify(value)
   } catch {
-    return String(value)
+    return typeof value === 'bigint' ? String(value) : '[unserializable]'
   }
 }
 
@@ -136,7 +136,7 @@ function renderParagraphLayout(entries: [string, unknown][]): string {
       try {
         body = JSON.stringify(v)
       } catch {
-        body = String(v)
+        body = typeof v === 'bigint' ? String(v) : '[unserializable]'
       }
     }
     if (typeof v === 'string' && v.includes('\n')) {

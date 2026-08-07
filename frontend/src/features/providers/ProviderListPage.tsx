@@ -221,9 +221,9 @@ export default function ProviderListPage() {
       const envelope = res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>
       const result = envelope.data
       if (result?.success) {
-        message.success(`连接成功 · ${String(result.latencyMs)}ms`)
+        message.success(`连接成功 · ${result.latencyMs}ms`)
       } else {
-        message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
+        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
       }
     } finally {
       setProbingId(null)

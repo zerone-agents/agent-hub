@@ -181,6 +181,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
           retryMaxRetries: detail.retryMaxRetries ?? null,
           retryTimeoutMs: detail.retryTimeoutMs ?? null,
         })
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- sync dynamic-field state with loaded detail; coupled to the antd form.setFieldsValue above
         setHeaderPairs(Object.entries(detail.headers).map(([k, v]) => ({ key: k, value: v })))
         // 编辑模式：用后端存储的 tools 初始化显示
         if (detail.tools && detail.tools.length > 0) {
@@ -195,6 +196,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
     } else {
       form.resetFields()
       form.setFieldsValue({ transportType: 'sse', retryMaxRetries: null, retryTimeoutMs: null })
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset dynamic-field state for the create-new branch
       setHeaderPairs([])
       setProbedResult(null)
     }
@@ -371,12 +373,12 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
               >
                 探测连接
               </Button>
-              {probedResult && probedResult.status === 'success' && (
+              {probedResult?.status === 'success' && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: t.success }}>
                   ✓ 连接成功{probedResult.tools ? `，发现 ${probedResult.tools.length} 个工具` : ''}
                 </span>
               )}
-              {probedResult && probedResult.status === 'failed' && (
+              {probedResult?.status === 'failed' && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: t.danger }}>
                   ✗ {probedResult.error ?? '连接失败'}
                 </span>

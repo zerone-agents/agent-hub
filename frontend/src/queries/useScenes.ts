@@ -7,7 +7,7 @@ export function useScenes() {
   return useQuery<Scene[]>({
     queryKey: ['scenes'],
     queryFn: async () =>
-      unwrapResponse<Scene[]>(await sceneApi.adminList()) ?? []
+      unwrapResponse<Scene[]>(await sceneApi.adminList())
   })
 }
 
@@ -57,7 +57,7 @@ export function useAgentScenes(agentName: string) {
   return useQuery<Scene[]>({
     queryKey: ['agent-scenes', agentName],
     queryFn: async () => {
-      const all = unwrapResponse<Scene[]>(await sceneApi.list()) ?? []
+      const all = unwrapResponse<Scene[]>(await sceneApi.list())
       return all
         .filter((s) => s.enabled && s.agent === agentName)
         .sort((a, b) => a.name.localeCompare(b.name))

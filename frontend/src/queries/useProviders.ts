@@ -6,7 +6,7 @@ import { parseApiError, unwrapResponse } from '@/api/client'
 export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
   return useQuery<Provider[]>({
     queryKey: ['providers', type ?? 'all'],
-    queryFn: async () => unwrapResponse<Provider[]>(await providerApi.list(type)) ?? [],
+    queryFn: async () => unwrapResponse<Provider[]>(await providerApi.list(type)),
   })
 }
 
@@ -16,7 +16,7 @@ export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
 export function useProviderAttrRules() {
   return useQuery<AttrRules>({
     queryKey: ['provider-attr-rules'],
-    queryFn: async () => unwrapResponse<AttrRules>(await providerApi.attrRules()) ?? {},
+    queryFn: async () => unwrapResponse<AttrRules>(await providerApi.attrRules()),
   })
 }
 

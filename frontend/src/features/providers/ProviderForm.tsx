@@ -8,7 +8,9 @@ interface ProviderFormProps {
   onClose: () => void
 }
 
-const PRESET_FORMS: Partial<Record<string, ComponentType<any>>> = {
+type PresetFormComponent = ComponentType<ProviderFormProps>
+
+const PRESET_FORMS: Partial<Record<string, PresetFormComponent>> = {
   'glm-cn': GenericProviderForm,
   'kimi-cn': GenericProviderForm,
   'bailian': GenericProviderForm,
@@ -20,7 +22,7 @@ const PRESET_FORMS: Partial<Record<string, ComponentType<any>>> = {
 
 export default function ProviderForm({ open, editingProvider, onClose }: ProviderFormProps) {
   const FormComponent = editingProvider
-    ? PRESET_FORMS[editingProvider.key] || GenericProviderForm
+    ? PRESET_FORMS[editingProvider.key] ?? GenericProviderForm
     : GenericProviderForm
 
   return <FormComponent open={open} editingProvider={editingProvider} onClose={onClose} />

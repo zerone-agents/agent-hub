@@ -156,8 +156,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
-  if (value === undefined || value === null) return fallback;
-  return String(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  return fallback;
 }
 
 function numberValue(value: unknown, fallback: number): number {
@@ -723,8 +723,7 @@ export default function KnowledgeForm({
     const modelMap = new Map<number, Set<string>>();
     const addTarget = (decoded: ReturnType<typeof decodeCandidateValue>) => {
       if (
-        !decoded ||
-        decoded.source !== "local" ||
+        decoded?.source !== "local" ||
         !decoded.providerId ||
         !decoded.rawValue
       )

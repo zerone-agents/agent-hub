@@ -6,14 +6,18 @@ import { parseApiError, unwrapResponse } from '@/api/client'
 export function useMcps() {
   return useQuery<Mcp[]>({
     queryKey: ['mcps'],
-    queryFn: async () => unwrapResponse<Mcp[]>(await mcpApi.list()) ?? []
+    queryFn: async () => unwrapResponse<Mcp[]>(await mcpApi.list())
   })
 }
 
 export function useMcp(name: string | null) {
   return useQuery<McpDetail>({
     queryKey: ['mcp', name],
-    queryFn: async () => unwrapResponse<McpDetail>(await mcpApi.get(name!)),
+    queryFn: async () => {
+      // enabled gate guarantees name is non-null at call time
+      if (name === null) throw new Error('useMcp: name is null despite enabled gate')
+      return unwrapResponse<McpDetail>(await mcpApi.get(name))
+    },
     enabled: !!name
   })
 }
@@ -58,7 +62,11 @@ export function useDeleteMcp() {
 export function useAgentMcps(agentName: string | null) {
   return useQuery<string[]>({
     queryKey: ['agent-mcps', agentName],
-    queryFn: async () => unwrapResponse<string[]>(await mcpApi.getAgentMcps(agentName!)) ?? [],
+    queryFn: async () => {
+      // enabled gate guarantees agentName is non-null at call time
+      if (agentName === null) throw new Error('useAgentMcps: agentName is null despite enabled gate')
+      return unwrapResponse<string[]>(await mcpApi.getAgentMcps(agentName))
+    },
     enabled: !!agentName
   })
 }
@@ -80,8 +88,10 @@ export function useProbeMcp() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ name, config }: { name?: string; config?: McpProbeInput }) => {
-      const res = name ? await mcpApi.probeByName(name) : await mcpApi.probeByConfig(config!)
-      return unwrapResponse<McpProbeResult>(res)
+      // Caller must supply exactly one of name/config; throw otherwise.
+      if (name) return unwrapResponse<McpProbeResult>(await mcpApi.probeByName(name))
+      if (!config) throw new Error('useProbeMcp: name or config is required')
+      return unwrapResponse<McpProbeResult>(await mcpApi.probeByConfig(config))
     },
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ['mcps'] })

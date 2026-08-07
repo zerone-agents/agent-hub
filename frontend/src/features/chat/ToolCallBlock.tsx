@@ -91,7 +91,9 @@ function resultToString(result: unknown): string {
   try {
     return JSON.stringify(result, null, 2)
   } catch {
-    return String(result)
+    return typeof result === 'number' || typeof result === 'boolean' || typeof result === 'bigint'
+      ? String(result)
+      : '[unserializable]'
   }
 }
 

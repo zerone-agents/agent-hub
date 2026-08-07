@@ -42,7 +42,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
     try {
       const { name, ttlDays } = await form.validateFields() as { name: string; ttlDays: number }
       const result = await issueToken.mutateAsync({ name, ttlDays })
-      setIssuedToken(result.token ?? '')
+      setIssuedToken(result.token)
       form.resetFields()
       setCopied(false)
     } catch {

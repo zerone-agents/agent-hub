@@ -38,6 +38,14 @@ export default tseslint.config(
           allowRegExp: false
         }
       ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_'
+        }
+      ],
       // Allow async functions in JSX event handler positions and callback
       // arguments — React's idiomatic pattern is `onClick={async () => {...}}`
       // and wrapping every such handler in `void` adds noise without catching

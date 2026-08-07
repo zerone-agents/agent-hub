@@ -74,6 +74,7 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
   const pathsKey = entries.map((e) => e.path).join('|')
   const [activeIdx, setActiveIdx] = useState(0)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset tab to first entry whenever the entry-set identity changes (new zip picked / modal reopened / remote data arrived)
     setActiveIdx(0)
   }, [pathsKey])
 
@@ -135,7 +136,7 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
                     <tr key={key}>
                       <td>{key}</td>
                       <td className="skill-md-preview__frontmatter-value">
-                        <span className="skill-md-preview__frontmatter-text" title={String(value)}>
+                        <span className="skill-md-preview__frontmatter-text" title={value}>
                           {value}
                         </span>
                       </td>

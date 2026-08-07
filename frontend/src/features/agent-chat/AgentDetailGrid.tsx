@@ -46,11 +46,17 @@ type Props = Pick<
 export default function AgentDetailGrid(props: Props) {
   const { styles } = useStyles()
 
-  const hasTools = props.allowedTools && props.allowedTools.length > 0
-  const hasMcps = props.mcpServers && Object.keys(props.mcpServers).length > 0
-  const hasSubagents = props.subagents && Object.keys(props.subagents).length > 0
-  const hasDatasets = props.datasets && Object.keys(props.datasets).length > 0
-  const hasSkills = props.availableSkills && props.availableSkills.length > 0
+  const allowedTools = props.allowedTools
+  const mcpServers = props.mcpServers
+  const subagents = props.subagents
+  const datasets = props.datasets
+  const availableSkills = props.availableSkills
+
+  const hasTools = !!allowedTools && allowedTools.length > 0
+  const hasMcps = !!mcpServers && Object.keys(mcpServers).length > 0
+  const hasSubagents = !!subagents && Object.keys(subagents).length > 0
+  const hasDatasets = !!datasets && Object.keys(datasets).length > 0
+  const hasSkills = !!availableSkills && availableSkills.length > 0
   // Limits row keys off maxSessionTurns (the optional one). maxTurns always
   // has a runtime default, so rendering on maxTurns alone would force the
   // grid to never return null for bare agents and break the existing
@@ -76,7 +82,7 @@ export default function AgentDetailGrid(props: Props) {
         <div className={styles.row}>
           <div className={styles.rowLabel} id="agent-detail-tools-label">Tools</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-tools-label">
-            {props.allowedTools!.map((tool) => (
+            {allowedTools.map((tool) => (
               <Tag key={tool}>{tool}</Tag>
             ))}
           </div>
@@ -86,7 +92,7 @@ export default function AgentDetailGrid(props: Props) {
         <div className={styles.row}>
           <div className={styles.rowLabel} id="agent-detail-mcp-label">MCP</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-mcp-label">
-            {Object.entries(props.mcpServers!).map(([name, server]) => (
+            {Object.entries(mcpServers).map(([name, server]) => (
               <McpServerTooltip key={name} name={name} server={server} />
             ))}
           </div>
@@ -96,7 +102,7 @@ export default function AgentDetailGrid(props: Props) {
         <div className={styles.row}>
           <div className={styles.rowLabel} id="agent-detail-subagents-label">Subagents</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-subagents-label">
-            {Object.entries(props.subagents!).map(([name, info]) =>
+            {Object.entries(subagents).map(([name, info]) =>
               info.description ? (
                 <Tooltip key={name} title={info.description} placement="bottom">
                   <Tag className={styles.subagentTag} tabIndex={0}>
@@ -114,7 +120,7 @@ export default function AgentDetailGrid(props: Props) {
         <div className={styles.row}>
           <div className={styles.rowLabel} id="agent-detail-datasets-label">Datasets</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-datasets-label">
-            {Object.values(props.datasets!).map((desc) => (
+            {Object.values(datasets).map((desc) => (
               <Tooltip key={desc} title={desc}>
                 <Tag>{desc.length > 10 ? `${desc.slice(0, 10)}…` : desc}</Tag>
               </Tooltip>
@@ -126,7 +132,7 @@ export default function AgentDetailGrid(props: Props) {
         <div className={styles.row}>
           <div className={styles.rowLabel} id="agent-detail-skills-label">Skills</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-skills-label">
-            {props.availableSkills!.map((skill) => (
+            {availableSkills.map((skill) => (
               <Tooltip key={skill.name} title={skill.description}>
                 <Tag className={styles.subagentTag} tabIndex={0}>
                   {skill.name}
