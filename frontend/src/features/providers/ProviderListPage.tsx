@@ -219,9 +219,9 @@ export default function ProviderListPage() {
       const res = await probeProvider.mutateAsync({ id })
       const result = res.data.data
       if (result?.success) {
-        message.success(`连接成功 · ${result.latencyMs}ms`)
+        message.success(`连接成功 · ${String(result.latencyMs)}ms`)
       } else {
-        message.error(`连接失败 · ${result?.error || '未知错误'}`)
+        message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
       }
     } finally {
       setProbingId(null)

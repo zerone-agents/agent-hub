@@ -64,5 +64,5 @@ export function getBreadcrumbs(pathname: string, knowledgeName?: string): Breadc
   const item = NAV_ITEMS.find((i) => i.path === `/${first}`)
   if (!item) return [{ label: '首页' }]
   if (!second) return [home, { label: item.label }]
-  return [home, { label: item.label, path: item.path }, { label: knowledgeName || '详情' }]
+  return [home, { label: item.label, path: item.path }, { label: knowledgeName ?? '详情' }]
 }

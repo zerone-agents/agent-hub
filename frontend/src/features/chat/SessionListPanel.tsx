@@ -115,8 +115,8 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
       (s.model || '').toLowerCase().includes(q) ||
       (s.agent_id || '').toLowerCase().includes(q) ||
       (s.user_id || '').toLowerCase().includes(q) ||
-      (s.display_name || '').toLowerCase().includes(q) ||
-      (s.user_name || '').toLowerCase().includes(q)
+      (s.display_name ?? '').toLowerCase().includes(q) ||
+      (s.user_name ?? '').toLowerCase().includes(q)
     )
   }, [sessions, search])
 
@@ -153,7 +153,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
               <div className={styles.body}>
                 <div className={styles.itemTitle}>{session.title || '未命名会话'}</div>
                 <div className={styles.meta}>
-                  <span>{session.display_name || session.user_name || session.user_id?.slice(0, 8) || '-'}</span>
+                  <span>{session.display_name ?? session.user_name ?? (session.user_id?.slice(0, 8) || '-')}</span>
                   <span className={styles.dot}>·</span>
                   <span>{resolveModelLabel(session)}</span>
                   <span className={styles.dot}>·</span>

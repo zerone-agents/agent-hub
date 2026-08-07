@@ -74,7 +74,7 @@ apiClient.interceptors.response.use(
 
           if (originalRequest.headers) {
             originalRequest.headers['X-Refresh-Attempt'] = 'true'
-            originalRequest.headers.Authorization = `Bearer ${accessToken}`
+            originalRequest.headers.Authorization = `Bearer ${String(accessToken)}`
           }
           return apiClient(originalRequest)
         }

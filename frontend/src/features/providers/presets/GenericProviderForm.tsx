@@ -293,9 +293,9 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result = res.data.data
         if (result?.success) {
-          message.success(`连接成功 · ${result.latencyMs}ms`)
+          message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         } else {
-          message.error(`连接失败 · ${result?.error || '未知错误'}`)
+          message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
         }
       } else {
         const values = await form.validateFields(['baseUrl', 'lockedApiKey', 'protocol', 'authStyle'])
@@ -312,9 +312,9 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result = res.data.data
         if (result?.success) {
-          message.success(`连接成功 · ${result.latencyMs}ms`)
+          message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         } else {
-          message.error(`连接失败 · ${result?.error || '未知错误'}`)
+          message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
         }
       }
     } finally {
@@ -484,7 +484,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               <Input
                 size="small"
                 placeholder="200000"
-                value={model.contextWindow || ''}
+                value={model.contextWindow ?? ''}
                 onChange={(e) => { handleModelChange(i, 'contextWindow', parseInt(e.target.value) || 0); }}
               />
             )}
@@ -498,7 +498,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               className={styles.aigcChip}
               title="由系统自动分配，用于 AIGC 内容标识"
             >
-              {model.aigcCode || '—'}
+              {model.aigcCode ?? '—'}
             </span>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveModel(i); }}>
               <Trash size={13} />

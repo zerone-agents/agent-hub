@@ -75,7 +75,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
           <div className={styles.metaRow}>
             {session.user_id && (
               <span className={styles.chip}>
-                {session.display_name || session.user_name || session.user_id.slice(0, 8)}
+                {session.display_name ?? session.user_name ?? session.user_id.slice(0, 8)}
               </span>
             )}
             {session.model && <span className={styles.chip}>{session.model}</span>}

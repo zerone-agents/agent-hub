@@ -11,7 +11,7 @@ export function useMultiragModels(type: 'embedding' | 'ocr') {
     queryKey: multiragKeys.models(type),
     queryFn: async () => {
       const res = await multiragApi.getModels(type)
-      if (!res.data.success) throw new Error(res.data.message || 'Failed to load')
+      if (!res.data.success) throw new Error(res.data.message ?? 'Failed to load')
       return res.data.data ?? []
     },
   })

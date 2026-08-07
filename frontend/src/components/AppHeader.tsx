@@ -162,7 +162,7 @@ interface AppHeaderProps {
 }
 
 function getAvatarInitial(name?: string) {
-  const firstCharacter = Array.from(name?.trim() || '')[0]
+  const firstCharacter = Array.from(name?.trim() ?? '')[0]
   return firstCharacter ? firstCharacter.toLocaleUpperCase() : 'U'
 }
 
@@ -261,7 +261,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           <ThemeControls />
           <Dropdown menu={{ items: dropdownItems }} trigger={['click']}>
             <div className={styles.userArea}>
-              <span className={styles.userName}>{user?.name || 'Admin'}</span>
+              <span className={styles.userName}>{user?.name ?? 'Admin'}</span>
               <Avatar className={styles.avatar} size={28}>
                 {getAvatarInitial(user?.name)}
               </Avatar>

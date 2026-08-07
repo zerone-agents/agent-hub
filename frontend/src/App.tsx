@@ -86,7 +86,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
     if (token) {
-      setTokens(token, params.get('refreshToken') || undefined)
+      setTokens(token, params.get('refreshToken') ?? undefined)
       window.history.replaceState({}, '', window.location.pathname)
     }
   }

@@ -425,7 +425,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
   const isMissingConfig = !agent.config?.providerId || !agent.config?.modelId
 
-  const deploymentStatus = status?.status || 'not_found'
+  const deploymentStatus = status?.status ?? 'not_found'
   const isRunning = deploymentStatus === 'running'
   const isArchived = deploymentStatus === 'archived'
   const isStoppedOrError =
@@ -443,7 +443,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
   const description = useMemo(() => {
     const d = agent.config?.description
-    return d?.zh || d?.en || ''
+    return d?.zh ?? d?.en ?? ''
   }, [agent.config?.description])
 
   const statusClass = useMemo(() => {
@@ -547,7 +547,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         <div className={styles.infoCard}>
           <div className={styles.infoHead}>
             <div>
-              <h3 className={styles.infoTitle}>{agent.config?.title?.zh || agent.config?.title?.en || agent.name}</h3>
+              <h3 className={styles.infoTitle}>{agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}</h3>
               {description && <p className={styles.infoDesc}>{description}</p>}
             </div>
             <span className={statusClass}>{statusText}</span>
@@ -559,19 +559,19 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             </div>
             <div>
               <div className={styles.infoLabel}>Model</div>
-              <div className={styles.infoValue}>{agent.config?.modelId || '-'}</div>
+              <div className={styles.infoValue}>{agent.config?.modelId ?? '-'}</div>
             </div>
             <div>
               <div className={styles.infoLabel}>端口</div>
-              <div className={styles.infoValue}>{status?.hostPort || '-'}</div>
+              <div className={styles.infoValue}>{status?.hostPort ?? '-'}</div>
             </div>
           </div>
         </div>
 
         {/* 工具 / 子代理 */}
         {(() => {
-          const tools = agent.tools || []
-          const subagents = agent.subagents || []
+          const tools = agent.tools ?? []
+          const subagents = agent.subagents ?? []
           if (tools.length === 0 && subagents.length === 0) return null
           return (
             <div className={styles.capabilityWrap}>
@@ -583,7 +583,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* 技能 */}
         {(() => {
-          const items = agent.skills || []
+          const items = agent.skills ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -599,7 +599,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* 知识库 */}
         {(() => {
-          const items = agent.datasets || []
+          const items = agent.datasets ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -615,7 +615,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* MCP */}
         {(() => {
-          const items = agent.mcps || []
+          const items = agent.mcps ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -640,7 +640,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 type="button"
                 className={styles.apiAction}
                 title="复制 URL"
-                onClick={() => handleCopy('url', status.runtimeUrl || '')}
+                onClick={() => handleCopy('url', status.runtimeUrl ?? '')}
               >
                 {copied === 'url' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
               </button>
@@ -663,7 +663,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                   type="button"
                   className={styles.apiAction}
                   title="复制 Key"
-                  onClick={() => handleCopy('key', status.apiKey || '')}
+                  onClick={() => handleCopy('key', status.apiKey ?? '')}
                 >
                   {copied === 'key' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
                 </button>
@@ -839,7 +839,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
       <Modal
         open={confirmOpen}
-        title={`重新部署 ${agent.config?.title?.zh || agent.config?.title?.en || agent.name}`}
+        title={`重新部署 ${agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}`}
         onCancel={() => {
           setConfirmOpen(false)
           setRotateKey(false)

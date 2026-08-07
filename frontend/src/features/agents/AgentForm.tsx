@@ -135,21 +135,21 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       if (editingAgent) {
         form.setFieldsValue({
           name: editingAgent.name,
-          permissionMode: editingAgent.config?.permissionMode || 'auto',
-          titleZh: editingAgent.config?.title?.zh || '',
-          titleEn: editingAgent.config?.title?.en || '',
-          descriptionZh: editingAgent.config?.description?.zh || '',
-          descriptionEn: editingAgent.config?.description?.en || '',
-          iconName: editingAgent.config?.iconName || '',
-          iconColor: editingAgent.config?.iconColor || '',
-          iconBgColor: editingAgent.config?.iconBgColor || '',
-          maxTurns: editingAgent.config?.maxTurns || 50,
+          permissionMode: editingAgent.config?.permissionMode ?? 'auto',
+          titleZh: editingAgent.config?.title?.zh ?? '',
+          titleEn: editingAgent.config?.title?.en ?? '',
+          descriptionZh: editingAgent.config?.description?.zh ?? '',
+          descriptionEn: editingAgent.config?.description?.en ?? '',
+          iconName: editingAgent.config?.iconName ?? '',
+          iconColor: editingAgent.config?.iconColor ?? '',
+          iconBgColor: editingAgent.config?.iconBgColor ?? '',
+          maxTurns: editingAgent.config?.maxTurns ?? 50,
           maxSessionTurns: editingAgent.config?.maxSessionTurns,
-          systemPrompt: editingAgent.config?.systemPrompt || '',
+          systemPrompt: editingAgent.config?.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
-          group: editingAgent.group || ''
+          group: editingAgent.group ?? ''
         })
       } else {
         form.resetFields()
@@ -172,8 +172,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
     const currentBg = form.getFieldValue('iconBgColor')
     form.setFieldsValue({
       iconName: name,
-      iconColor: currentColor || opt?.defaultColor || '',
-      iconBgColor: currentBg || (opt ? lightenHex(opt.defaultColor) : '')
+      iconColor: currentColor ?? opt?.defaultColor ?? '',
+      iconBgColor: currentBg ?? (opt ? lightenHex(opt.defaultColor) : '')
     })
   }
 
@@ -183,7 +183,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       systemPrompt: v.systemPrompt,
       permissionMode: v.permissionMode,
       maxTurns: v.maxTurns,
-      maxSessionTurns: v.maxSessionTurns || undefined,
+      maxSessionTurns: v.maxSessionTurns ?? undefined,
       title: v.titleZh ? { zh: v.titleZh, ...(v.titleEn ? { en: v.titleEn } : {}) } : undefined,
       description: v.descriptionZh
         ? { zh: v.descriptionZh, ...(v.descriptionEn ? { en: v.descriptionEn } : {}) }

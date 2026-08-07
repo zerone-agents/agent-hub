@@ -187,7 +187,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
           titleEn: values.titleEn,
           description: values.description,
           descriptionEn: values.descriptionEn,
-          file: selectedFile || undefined
+          file: selectedFile ?? undefined
         }
       })
     } else {

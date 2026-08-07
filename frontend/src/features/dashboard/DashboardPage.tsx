@@ -644,7 +644,7 @@ export default function DashboardPage() {
     { label: '场景', value: scenes.length, icon: FilmSlate, path: '/scenes', color: 'var(--chart-4)' }
   ]
   const resourceActivities: ActivityItem[] = [
-    ...agents.map((item: Agent) => ({ title: item.config?.title?.zh || item.name, time: item.createdAt ?? '', type: 'agent' as const })),
+    ...agents.map((item: Agent) => ({ title: item.config?.title?.zh ?? item.name, time: item.createdAt ?? '', type: 'agent' as const })),
     ...tools.map((item: Tool) => ({ title: item.title || item.name, time: item.createdAt ?? '', type: 'tool' as const })),
     ...skills.map((item: Skill) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt ?? '', type: 'skill' as const })),
     ...scenes.map((item: Scene) => ({ title: item.title || item.titleEn || item.name, time: item.createdAt ?? '', type: 'scene' as const })),
@@ -652,7 +652,7 @@ export default function DashboardPage() {
     ...mcps.map((item: Mcp) => ({ title: item.title || item.name, time: item.createdAt ?? '', type: 'mcp' as const })),
     ...knowledgeDatasets.map((item: KnowledgeDataset) => ({
       title: item.display_name || item.name,
-      time: item.create_date || (item.create_time ? new Date(item.create_time).toISOString() : ''),
+      time: item.create_date ?? (item.create_time ? new Date(item.create_time).toISOString() : ''),
       type: 'knowledge' as const
     }))
   ].sort((a, b) => +new Date(b.time) - +new Date(a.time))

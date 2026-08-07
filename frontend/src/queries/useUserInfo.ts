@@ -32,9 +32,9 @@ export function useUserInfo({ enabled = true }: UseUserInfoOptions = {}) {
       if (!res.data.success) return null
       const d = res.data.data
       return {
-        id: d.user_id || d.id || '',
-        email: d.email || '',
-        name: d.display_name || d.username || d.email?.split('@')[0] || '',
+        id: d.user_id ?? d.id ?? '',
+        email: d.email ?? '',
+        name: d.display_name ?? d.username ?? d.email?.split('@')[0] ?? '',
         avatar: d.avatar
       }
     },

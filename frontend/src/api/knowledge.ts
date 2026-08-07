@@ -433,7 +433,7 @@ async function unwrap<T>(
   const res = await promise;
   const body = res.data;
   if (body && !body.success) {
-    throw new Error(body.error || body.message || "请求失败");
+    throw new Error(body.error ?? body.message ?? "请求失败");
   }
   return body.data;
 }
@@ -475,7 +475,7 @@ export const knowledgeApi = {
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
-        status: data?.status || 'unknown',
+        status: data?.status ?? 'unknown',
         message: data?.message,
       }
     } catch (err: any) {
@@ -485,8 +485,8 @@ export const knowledgeApi = {
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
-        status: data?.status || 'unavailable',
-        message: err?.response?.data?.error || data?.message || err?.message,
+        status: data?.status ?? 'unavailable',
+        message: err?.response?.data?.error ?? data?.message ?? err?.message,
       }
     }
   },

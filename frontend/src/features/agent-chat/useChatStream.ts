@@ -208,7 +208,7 @@ export function useChatStream(): UseChatStreamReturn {
         // User abort: silent
         return
       }
-      setState((s) => ({ ...s, phase: 'error', error: err?.message || 'stream failed' }))
+      setState((s) => ({ ...s, phase: 'error', error: err?.message ?? 'stream failed' }))
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
       if (abortRef.current === ctrl) {
