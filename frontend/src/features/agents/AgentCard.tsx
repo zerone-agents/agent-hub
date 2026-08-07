@@ -70,14 +70,14 @@ export default function AgentCard({
 }: AgentCardProps) {
   const { styles } = useStyles()
 
-  const IconCmp = agent.config?.iconName ? getIconComponent(agent.config.iconName) : null
-  const iconColor = agent.config?.iconColor ?? '#6B7280'
+  const IconCmp = agent.config.iconName ? getIconComponent(agent.config.iconName) : null
+  const iconColor = agent.config.iconColor ?? '#6B7280'
   const icon = IconCmp ? (
     <IconCmp size={20} weight="duotone" color={iconColor} />
-  ) : agent.config?.icon ? (
+  ) : agent.config.icon ? (
     <img src={agent.config.icon} alt={agent.name} className={styles.iconImg} />
   ) : (
-    agent.name[0]?.toUpperCase()
+    agent.name[0].toUpperCase()
   )
 
   const defaultBadgeStyle: React.CSSProperties = {
@@ -101,7 +101,7 @@ export default function AgentCard({
   return (
     <EntityCard
       icon={icon}
-      title={agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}
+      title={agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}
       subtitle={agent.name}
       headerExtra={
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -110,7 +110,7 @@ export default function AgentCard({
           {agent.mobileEnabled && <span style={platformBadgeStyle}>手机端</span>}
         </div>
       }
-      description={agent.config?.description?.zh ?? agent.config?.description?.en ?? '暂无描述'}
+      description={agent.config.description?.zh ?? agent.config.description?.en ?? '暂无描述'}
       bodyExtra={
         <div className={styles.stats}>
           <span className={styles.statLink} onClick={() => { onEditSubagents(agent); }}>

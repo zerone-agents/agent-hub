@@ -182,7 +182,7 @@ function renderLayout(entries: [string, unknown][]): string {
 }
 
 export function detectResultLang(s: string): 'json' | 'text' {
-  if (!s?.trim()) return 'text'
+  if (!s.trim()) return 'text'
   try {
     JSON.parse(s)
     return 'json'

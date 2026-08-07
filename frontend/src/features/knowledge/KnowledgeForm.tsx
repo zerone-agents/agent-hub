@@ -216,7 +216,7 @@ function parseExtraParserConfig(
 /** Advanced parser_config must be a JSON object (or empty). */
 const parserConfigExtraRule: Rule = {
   validator: (_rule, value: string) => {
-    const text = (value ?? "").trim();
+    const text = (value).trim();
     if (text === "") return Promise.resolve();
     try {
       parseExtraParserConfig(text);
@@ -285,7 +285,7 @@ export function formValuesToInput(
     ...parseExtraParserConfig(values.parser_config_extra),
     layout_recognize: decodeRefValue(values.layout_recognize) || "DeepDOC",
     chunk_token_num: numberValue(values.chunk_token_num, 512),
-    delimiter: values.delimiter ?? "",
+    delimiter: values.delimiter,
     enable_children: booleanValue(values.enable_children, false),
     image_table_context_window: contextWindow,
     image_context_size: contextWindow,
@@ -294,20 +294,20 @@ export function formValuesToInput(
     auto_questions: numberValue(values.auto_questions, 0),
     toc_extraction: booleanValue(values.toc_extraction, false),
     html4excel: booleanValue(values.html4excel, false),
-    mineru_parse_method: values.mineru_parse_method ?? "auto",
-    mineru_lang: values.mineru_lang ?? "English",
+    mineru_parse_method: values.mineru_parse_method,
+    mineru_lang: values.mineru_lang,
     mineru_formula_enable: booleanValue(values.mineru_formula_enable, true),
     mineru_table_enable: booleanValue(values.mineru_table_enable, true),
   };
   if (
     booleanValue(values.enable_children, false) ||
-    (values.children_delimiter ?? "").trim()
+    (values.children_delimiter).trim()
   ) {
-    parserConfig.children_delimiter = values.children_delimiter ?? "";
+    parserConfig.children_delimiter = values.children_delimiter;
   }
   const input: DatasetFormInput = {
     name: values.name.trim(),
-    description: values.description ?? "",
+    description: values.description,
     permission: values.permission,
     parser_id: values.parser_id,
     parser_config: parserConfig,
@@ -678,7 +678,7 @@ export default function KnowledgeForm({
   }, [editing?.embd_id, embdRawToValue, embeddingGroups]);
 
   const layoutOptions = useMemo<SelectOptionGroup[]>(() => {
-    const saved = editing?.parser_config?.layout_recognize;
+    const saved = editing?.parser_config.layout_recognize;
     if (typeof saved === "string" && saved && !layoutRawToValue.has(saved)) {
       return [
         {
@@ -695,7 +695,7 @@ export default function KnowledgeForm({
     }
     return groupsToAntdOptions(layoutGroups);
   }, [
-    editing?.parser_config?.layout_recognize,
+    editing?.parser_config.layout_recognize,
     layoutRawToValue,
     layoutGroups,
   ]);

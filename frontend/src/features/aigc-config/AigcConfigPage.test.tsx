@@ -56,7 +56,7 @@ describe('AigcConfigPage', () => {
         if (!pattern.test(node.textContent)) return false
         // pick the smallest matching element (no descendant also matches)
         return !Array.from(node.querySelectorAll('*')).some((c) =>
-          pattern.test(c.textContent ?? '')
+          pattern.test(c.textContent)
         )
       })
     ).toBeInTheDocument()

@@ -80,7 +80,7 @@ export default function SkillListPage() {
     const kw = keywords.toLowerCase()
     return skills.filter((skill) => {
       const fields = [skill.title, skill.titleEn, skill.name, skill.description, skill.descriptionEn]
-      return fields.some((f) => f?.toLowerCase().includes(kw))
+      return fields.some((f) => f.toLowerCase().includes(kw))
     })
   }, [skills, keywords])
 
@@ -106,7 +106,7 @@ export default function SkillListPage() {
   const renderSkillCard = (skill: Skill) => (
     <EntityCard
       key={skill.name}
-      icon={skill.name[0]?.toUpperCase()}
+      icon={skill.name[0].toUpperCase()}
       title={skill.title || skill.titleEn || skill.name}
       subtitle={skill.name}
       headerExtra={
@@ -128,7 +128,7 @@ export default function SkillListPage() {
       bodyExtra={
         skill.url ? (
           <div className={styles.fileMeta}>
-            {formatFileSize(skill.fileSize)} · {skill.fileHash?.slice(0, 8)}
+            {formatFileSize(skill.fileSize)} · {skill.fileHash.slice(0, 8)}
           </div>
         ) : null
       }

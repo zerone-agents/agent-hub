@@ -107,7 +107,7 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
   }
 
   const agentOptions = agents.map((a) => ({
-    label: a.config?.title?.zh ?? a.config?.title?.en ?? a.name,
+    label: a.config.title?.zh ?? a.config.title?.en ?? a.name,
     value: a.id
   }))
 

@@ -507,8 +507,8 @@ export const knowledgeApi = {
         apiClient.get(`${BASE}/datasets${qs}`),
       );
       return {
-        total: num(data?.total),
-        datasets: (data?.datasets ?? []).map(normalizeDataset),
+        total: num(data.total),
+        datasets: (data.datasets).map(normalizeDataset),
       };
     },
 
@@ -516,14 +516,14 @@ export const knowledgeApi = {
       const data = await unwrap<RawObject>(
         apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     create: async (input: DatasetFormInput): Promise<KnowledgeDataset> => {
       const data = await unwrap<RawObject>(
         apiClient.post(`${BASE}/datasets`, toDatasetBody(input)),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     update: async (
@@ -536,7 +536,7 @@ export const knowledgeApi = {
           toDatasetBody(input),
         ),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     remove: (datasetIds: string[]): Promise<unknown> =>
@@ -566,8 +566,8 @@ export const knowledgeApi = {
         ),
       );
       return {
-        total: num(data?.total),
-        documents: (data?.documents ?? []).map(normalizeDocument),
+        total: num(data.total),
+        documents: (data.documents).map(normalizeDocument),
       };
     },
 
@@ -587,7 +587,7 @@ export const knowledgeApi = {
           },
         ),
       );
-      return (data ?? []).map(normalizeDocument);
+      return (data).map(normalizeDocument);
     },
 
     update: async (
@@ -601,7 +601,7 @@ export const knowledgeApi = {
           patch,
         ),
       );
-      return normalizeDocument(data ?? {});
+      return normalizeDocument(data);
     },
 
     remove: (datasetId: string, documentIds: string[]): Promise<unknown> =>
@@ -685,9 +685,9 @@ export const knowledgeApi = {
         ),
       );
       return {
-        total: num(data?.total),
-        chunks: (data?.chunks ?? []).map(normalizeChunk),
-        document: data?.document ? normalizeDocument(data.document) : null,
+        total: num(data.total),
+        chunks: (data.chunks).map(normalizeChunk),
+        document: data.document ? normalizeDocument(data.document) : null,
       };
     },
 
@@ -702,7 +702,7 @@ export const knowledgeApi = {
           toChunkBody(input),
         ),
       );
-      return normalizeChunk(data ?? {});
+      return normalizeChunk(data);
     },
 
     update: async (
@@ -717,7 +717,7 @@ export const knowledgeApi = {
           toChunkBody(input),
         ),
       );
-      return normalizeChunk(data ?? {});
+      return normalizeChunk(data);
     },
 
     remove: (
@@ -747,7 +747,7 @@ export const knowledgeApi = {
       const data = await unwrap<RawObject>(
         apiClient.post(`${BASE}/retrieval`, input),
       );
-      return normalizeRetrievalResult(data ?? {});
+      return normalizeRetrievalResult(data);
     },
   },
 };

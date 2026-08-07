@@ -297,7 +297,7 @@ function sanitizeAllowedInlineHtml(value: string): string {
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     const element = node as HTMLElement;
     if (!ALLOWED_INLINE_TAGS.has(element.tagName))
-      return escapeHtml(element.textContent ?? "");
+      return escapeHtml(element.textContent);
     if (element.tagName === "BR") return "<br>";
     const children = Array.from(element.childNodes).map(serialize).join("");
     const tag = element.tagName.toLowerCase();
@@ -325,7 +325,7 @@ function SafeContent({
 }
 
 function formatPositions(chunk: KnowledgeChunk): string {
-  const positions = chunk.positions ?? [];
+  const positions = chunk.positions;
   if (positions.length === 0) return "-";
   const first = positions[0];
   if (Array.isArray(first)) return `位置 ${first.slice(0, 3).join(", ")}`;
@@ -333,7 +333,7 @@ function formatPositions(chunk: KnowledgeChunk): string {
 }
 
 function tagFeasText(chunk: KnowledgeChunk | null): string {
-  if (!chunk || Object.keys(chunk.tag_feas ?? {}).length === 0) return "";
+  if (!chunk || Object.keys(chunk.tag_feas).length === 0) return "";
   return JSON.stringify(chunk.tag_feas, null, 2);
 }
 
@@ -413,7 +413,7 @@ function ChunkImage({
 
   const copyImageId = async () => {
     try {
-      await navigator.clipboard?.writeText(imageId);
+      await navigator.clipboard.writeText(imageId);
       message.success("已复制 image id");
     } catch {
       message.error("复制失败");
@@ -520,7 +520,7 @@ function ChunkEditor({
     }
 
     let tagFeas: Record<string, unknown> | undefined;
-    const tagFeasTextValue = values.tag_feas_text?.trim();
+    const tagFeasTextValue = values.tag_feas_text.trim();
     if (tagFeasTextValue) {
       try {
         const parsed = JSON.parse(tagFeasTextValue) as unknown;
@@ -537,9 +537,9 @@ function ChunkEditor({
 
     const input: ChunkFormInput = {
       content: values.content,
-      important_keywords: values.important_keywords ?? [],
-      questions: values.questions ?? [],
-      tag_kwd: values.tag_kwd ?? [],
+      important_keywords: values.important_keywords,
+      questions: values.questions,
+      tag_kwd: values.tag_kwd,
       tag_feas: tagFeas,
     };
     if (!editing && imageBase64) input.image_base64 = imageBase64;
@@ -552,7 +552,7 @@ function ChunkEditor({
     onClose();
   };
 
-  const contentValue = Form.useWatch("content", form) ?? "";
+  const contentValue = Form.useWatch("content", form);
 
   return (
     <Drawer
@@ -748,7 +748,7 @@ export default function KnowledgeChunksPage() {
 
   const copyChunkId = async (chunkId: string) => {
     try {
-      await navigator.clipboard?.writeText(chunkId);
+      await navigator.clipboard.writeText(chunkId);
       message.success("已复制 chunk id");
     } catch {
       message.error("复制失败");
@@ -1003,7 +1003,7 @@ export default function KnowledgeChunksPage() {
               {document?.source_type ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="Metadata">
-              {document?.meta_fields?.length
+              {document?.meta_fields.length
                 ? `${document.meta_fields.length} 项`
                 : "-"}
             </Descriptions.Item>

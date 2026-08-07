@@ -189,7 +189,7 @@ export default function ProviderListPage() {
       const kw = keywords.toLowerCase()
       result = providers.filter((provider) => {
         const fields = [provider.name, provider.key, provider.description, provider.descriptionEn, provider.baseUrl]
-        return fields.some((f) => f?.toLowerCase().includes(kw))
+        return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }
     return result.sort((a, b) => a.name.localeCompare(b.name))
@@ -234,7 +234,7 @@ export default function ProviderListPage() {
     return (
       <EntityCard
         key={provider.id}
-        icon={provider.name[0]?.toUpperCase()}
+        icon={provider.name[0].toUpperCase()}
         title={provider.name}
         subtitle={provider.key}
         headerExtra={

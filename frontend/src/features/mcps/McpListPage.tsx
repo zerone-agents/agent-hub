@@ -221,7 +221,7 @@ export default function McpListPage() {
           {filteredMcps.map((mcp) => (
             <EntityCard
               key={mcp.name}
-              icon={(mcp.title || mcp.name)[0]?.toUpperCase()}
+              icon={(mcp.title || mcp.name)[0].toUpperCase()}
               title={mcp.title || mcp.name}
               subtitle={mcp.name}
               headerExtra={

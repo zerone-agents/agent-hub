@@ -97,10 +97,10 @@ export function useProbeMcp() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['mcps'] })
-      if (data?.status === 'success') {
+      if (data.status === 'success') {
         message.success('探测完成')
       } else {
-        message.error(data?.error ?? '探测失败')
+        message.error(data.error ?? '探测失败')
       }
     },
     onError: (err) => message.error(parseApiError(err))
