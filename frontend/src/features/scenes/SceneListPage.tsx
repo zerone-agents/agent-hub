@@ -55,7 +55,7 @@ const useStyles = createStyles(({ css }) => ({
 
 function getAgentTitle(agents: Agent[], agentName: string): string {
   const agent = agents.find((a) => a.name === agentName)
-  return agent ? (agent.config?.title?.zh || agent.config?.title?.en || agent.name) : agentName
+  return agent ? (agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name) : agentName
 }
 
 export default function SceneListPage() {

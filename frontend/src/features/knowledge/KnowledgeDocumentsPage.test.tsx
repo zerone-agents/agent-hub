@@ -7,7 +7,7 @@ import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeDocumentsPage from "./KnowledgeDocumentsPage";
 
 const h = vi.hoisted(() => ({
-  documents: [] as Array<Record<string, unknown>>,
+  documents: [] as Record<string, unknown>[],
   total: 0,
   refetchMock: vi.fn(),
   uploadMock: vi.fn(),
@@ -162,7 +162,7 @@ describe("KnowledgeDocumentsPage", () => {
     await user.click(within(modal).getByRole("button", { name: "开始上传" }));
 
     await waitFor(() =>
-      expect(h.uploadMock).toHaveBeenCalledWith([expect.any(File)]),
+      { expect(h.uploadMock).toHaveBeenCalledWith([expect.any(File)]); },
     );
     expect(h.parseMock).toHaveBeenCalledWith(["new-doc"]);
   });
@@ -206,12 +206,12 @@ describe("KnowledgeDocumentsPage", () => {
     await user.click(button);
 
     await waitFor(() =>
-      expect(h.downloadMock).toHaveBeenCalledWith("kb1", "d1"),
+      { expect(h.downloadMock).toHaveBeenCalledWith("kb1", "d1"); },
     );
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     await waitFor(() =>
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:download"),
+      { expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:download"); },
     );
   });
 
@@ -225,7 +225,7 @@ describe("KnowledgeDocumentsPage", () => {
 
     await screen.findByText("已选择 2 个文档");
     await user.click(screen.getByRole("button", { name: "批量停用文档" }));
-    await waitFor(() => expect(h.updateMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => { expect(h.updateMock).toHaveBeenCalledTimes(2); });
 
     const nextCheckboxes = screen.getAllByRole("checkbox");
     await user.click(nextCheckboxes[1]);

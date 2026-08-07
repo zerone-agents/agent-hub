@@ -136,7 +136,7 @@ export default function AgentListPage() {
   // 按 group 分组，组内按 name 排序
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[]>>((acc, agent) => {
-      const group = agent.group || '默认分组'
+      const group = agent.group ?? '默认分组'
       if (!acc[group]) acc[group] = []
       acc[group].push(agent)
       return acc
@@ -165,7 +165,7 @@ export default function AgentListPage() {
 
   const handleEditSubagents = (agent: Agent) => {
     setCurrentName(agent.name)
-    setSelectedSubagents([...(agent.subagents || [])])
+    setSelectedSubagents([...(agent.subagents ?? [])])
     setSubagentOpen(true)
   }
 
@@ -175,10 +175,10 @@ export default function AgentListPage() {
 
   const handleEditTools = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.tools || []
+    let names = agent.tools ?? []
     try {
       const res = await agentApi.getTools(agent.name)
-      if (res.data.success) names = res.data.data || []
+      if (res.data.success) names = res.data.data ?? []
     } catch { /* use fallback */ }
     const merged = Array.from(new Set([...names, ...defaultToolNames]))
     setSelectedTools(merged)
@@ -187,10 +187,10 @@ export default function AgentListPage() {
 
   const handleEditSkills = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.skills || []
+    let names = agent.skills ?? []
     try {
       const res = await agentApi.getSkills(agent.name)
-      if (res.data.success) names = res.data.data || []
+      if (res.data.success) names = res.data.data ?? []
     } catch { /* use fallback */ }
     setSelectedSkills([...names])
     setSkillOpen(true)
@@ -198,10 +198,10 @@ export default function AgentListPage() {
 
   const handleEditMcps = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.mcps || []
+    let names = agent.mcps ?? []
     try {
       const res = await agentApi.getMcps(agent.name)
-      if (res.data.success) names = res.data.data || []
+      if (res.data.success) names = res.data.data ?? []
     } catch { /* use fallback */ }
     setSelectedMcps([...names])
     setMcpOpen(true)
@@ -216,7 +216,7 @@ export default function AgentListPage() {
     setCurrentName(agent.name)
     setCurrentAgent(agent)
     const pid = agent.config?.providerId ?? null
-    const mid = agent.config?.modelId || ''
+    const mid = agent.config?.modelId ?? ''
     setSelectedProviderId(pid)
     setSelectedModelId(mid)
     setTestPassed(false)
@@ -310,10 +310,10 @@ export default function AgentListPage() {
       })
       const result = res.data.data
       if (result?.success) {
-        message.success(`连接成功 · ${result.latencyMs}ms`)
+        message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         setTestPassed(true)
       } else {
-        message.error(`连接失败 · ${result?.error || '未知错误'}`)
+        message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
         setTestPassed(false)
       }
     } catch (err: any) {
@@ -348,7 +348,7 @@ export default function AgentListPage() {
       })
       setModelOpen(false)
     } catch (err: any) {
-      message.error(`保存失败 · ${err?.message || '未知错误'}`)
+      message.error(`保存失败 · ${String(err?.message ?? '未知错误')}`)
     } finally {
       setSaving(false)
     }
@@ -357,7 +357,7 @@ export default function AgentListPage() {
   // Options for selects
   const subagentOptions = agents
     .filter((a) => a.name !== currentName)
-    .map((a) => ({ value: a.name, label: a.config?.title?.zh || a.config?.title?.en || a.name }))
+    .map((a) => ({ value: a.name, label: a.config?.title?.zh ?? a.config?.title?.en ?? a.name }))
 
   const toolOptions = tools.map((tl) => ({ value: tl.name, label: tl.name, disabled: defaultToolNames.has(tl.name) }))
 
@@ -429,7 +429,7 @@ export default function AgentListPage() {
     const mid = agent.config?.modelId
     if (!pid || !mid) return ''
     const name = modelDisplayNameMap.get(`${pid}::${mid}`)
-    return name || mid
+    return name ?? mid
   }
 
   return (

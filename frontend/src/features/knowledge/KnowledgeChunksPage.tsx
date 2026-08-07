@@ -348,7 +348,7 @@ function fileToBase64(file: File): Promise<ImageFileReadResult> {
         markerIndex >= 0 ? dataUrl.slice(markerIndex + marker.length) : dataUrl;
       resolve({ dataUrl, base64 });
     };
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => { reject(reader.error); };
     reader.readAsDataURL(file);
   });
 }
@@ -463,8 +463,8 @@ function ChunkImage({
                 objectFit: "cover",
                 opacity: status === "loaded" ? 1 : 0,
               }}
-              onLoad={() => setStatus("loaded")}
-              onError={() => setStatus("failed")}
+              onLoad={() => { setStatus("loaded"); }}
+              onError={() => { setStatus("failed"); }}
             />
           ) : null}
         </>
@@ -579,7 +579,7 @@ function ChunkEditor({
         <Space orientation="vertical" size={14} style={{ width: "100%" }}>
           <Segmented
             value={previewMode}
-            onChange={(value) => setPreviewMode(value as "edit" | "preview")}
+            onChange={(value) => { setPreviewMode(value as "edit" | "preview"); }}
             options={[
               { label: "编辑", value: "edit" },
               { label: "预览", value: "preview" },
@@ -651,7 +651,7 @@ function ChunkEditor({
                 maxCount={1}
                 showUploadList={false}
                 beforeUpload={async (file) => {
-                  const image = await fileToBase64(file as File);
+                  const image = await fileToBase64(file);
                   setImageBase64(image.base64);
                   setImagePreviewUrl(image.dataUrl);
                   return Upload.LIST_IGNORE;
@@ -760,7 +760,7 @@ export default function KnowledgeChunksPage() {
       <button
         type="button"
         className={styles.back}
-        onClick={() => navigate(`/knowledge/${id}/documents`)}
+        onClick={() => { navigate(`/knowledge/${id}/documents`); }}
       >
         <ArrowLeft size={14} />
         返回文档列表
@@ -782,7 +782,7 @@ export default function KnowledgeChunksPage() {
               <Segmented
                 value={displayMode}
                 onChange={(value) =>
-                  setDisplayMode(value as "ellipsis" | "full")
+                  { setDisplayMode(value as "ellipsis" | "full"); }
                 }
                 options={[
                   { label: "省略", value: "ellipsis" },
@@ -805,7 +805,7 @@ export default function KnowledgeChunksPage() {
               <Checkbox
                 checked={allCurrentSelected}
                 indeterminate={selectedIds.length > 0 && !allCurrentSelected}
-                onChange={(event) => toggleAll(event.target.checked)}
+                onChange={(event) => { toggleAll(event.target.checked); }}
               >
                 选择本页
               </Checkbox>
@@ -837,14 +837,14 @@ export default function KnowledgeChunksPage() {
                 <Button
                   size="small"
                   aria-label="批量启用切片"
-                  onClick={() => bulkSwitch(true)}
+                  onClick={() => { bulkSwitch(true); }}
                 >
                   启用
                 </Button>
                 <Button
                   size="small"
                   aria-label="批量停用切片"
-                  onClick={() => bulkSwitch(false)}
+                  onClick={() => { bulkSwitch(false); }}
                 >
                   停用
                 </Button>
@@ -863,7 +863,7 @@ export default function KnowledgeChunksPage() {
                 <Button
                   size="small"
                   type="text"
-                  onClick={() => setSelectedIds([])}
+                  onClick={() => { setSelectedIds([]); }}
                 >
                   清除选择
                 </Button>
@@ -882,13 +882,13 @@ export default function KnowledgeChunksPage() {
                 <Checkbox
                   checked={selectedIds.includes(chunk.id)}
                   onChange={(event) =>
-                    toggleOne(chunk.id, event.target.checked)
+                    { toggleOne(chunk.id, event.target.checked); }
                   }
                 />
                 <div className={styles.cardBody}>
                   <div className={styles.cardMeta}>
                     <Tag color={chunk.image_id ? "purple" : "blue"}>
-                      {chunk.doc_type || (chunk.image_id ? "image" : "text")}
+                      {chunk.doc_type ?? (chunk.image_id ? "image" : "text")}
                     </Tag>
                     <Tag>{formatPositions(chunk)}</Tag>
                     <Badge
@@ -934,10 +934,10 @@ export default function KnowledgeChunksPage() {
                     size="small"
                     checked={chunk.available}
                     onChange={(checked) =>
-                      switchChunks.mutate({
+                      { switchChunks.mutate({
                         chunkIds: [chunk.id],
                         available: checked,
-                      })
+                      }); }
                     }
                   />
                   <Button
@@ -950,7 +950,7 @@ export default function KnowledgeChunksPage() {
                     type="text"
                     size="small"
                     icon={<PencilSimple size={16} />}
-                    onClick={() => openEdit(chunk)}
+                    onClick={() => { openEdit(chunk); }}
                   >
                     编辑
                   </Button>
@@ -959,7 +959,7 @@ export default function KnowledgeChunksPage() {
                     okText="删除"
                     okButtonProps={{ danger: true }}
                     cancelText="取消"
-                    onConfirm={() => deleteChunks.mutate([chunk.id])}
+                    onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
                   >
                     <Button
                       type="text"
@@ -981,7 +981,7 @@ export default function KnowledgeChunksPage() {
               pageSize={PAGE_SIZE}
               total={total}
               showTotal={(count) => `共 ${count} 条`}
-              onChange={(next) => setPage(next)}
+              onChange={(next) => { setPage(next); }}
             />
           </div>
         </div>
@@ -993,14 +993,14 @@ export default function KnowledgeChunksPage() {
           </div>
           <Descriptions column={1} size="small">
             <Descriptions.Item label="名称">
-              {document?.name || "-"}
+              {document?.name ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="切片数">{total}</Descriptions.Item>
             <Descriptions.Item label="解析方法">
-              {document?.parser_id || "-"}
+              {document?.parser_id ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="来源">
-              {document?.source_type || "-"}
+              {document?.source_type ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="Metadata">
               {document?.meta_fields?.length
@@ -1021,7 +1021,7 @@ export default function KnowledgeChunksPage() {
         editing={editing}
         datasetId={id}
         documentId={documentId}
-        onClose={() => setEditorOpen(false)}
+        onClose={() => { setEditorOpen(false); }}
       />
     </div>
   );

@@ -59,7 +59,7 @@ function mockHead(contentLength: number, mime = 'text/plain', extra?: Record<str
     headers: makeHeaders({
       'content-length': String(contentLength),
       'content-type': mime,
-      ...(extra || {}),
+      ...(extra ?? {}),
     }),
   } as unknown as Response)
 }

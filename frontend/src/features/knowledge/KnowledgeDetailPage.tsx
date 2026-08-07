@@ -68,7 +68,7 @@ export default function KnowledgeDetailPage() {
       ) : (
         <>
           <div className={styles.head}>
-            <span className={styles.title}>{dataset?.name || '知识库'}</span>
+            <span className={styles.title}>{dataset?.name ?? '知识库'}</span>
             <Tag>文档 {dataset?.doc_num ?? 0}</Tag>
             <Tag>分块 {dataset?.chunk_num ?? 0}</Tag>
           </div>

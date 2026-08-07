@@ -448,9 +448,8 @@ export default function KnowledgeDocumentsPage() {
       const link = document.createElement("a");
       link.href = objectUrl;
       link.download =
-        extractDownloadFileName(response.headers["content-disposition"]) ||
-        doc.name ||
-        `document-${doc.id}`;
+        extractDownloadFileName(response.headers["content-disposition"]) ??
+        (doc.name || `document-${doc.id}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -510,7 +509,7 @@ export default function KnowledgeDocumentsPage() {
               <span className={styles.primaryText}>{value || "未命名"}</span>
             </Tooltip>
             <span className={styles.secondaryText}>
-              {(record.suffix || record.type || "file")
+              {(record.suffix ?? record.type ?? "file")
                 .toString()
                 .toUpperCase()}{" "}
               · {formatBytes(record.size)}

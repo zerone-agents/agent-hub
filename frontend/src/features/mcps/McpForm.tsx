@@ -177,7 +177,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
           title: detail.title,
           description: detail.description,
           transportType: detail.transportType,
-          url: detail.url || '',
+          url: detail.url ?? '',
           retryMaxRetries: detail.retryMaxRetries ?? null,
           retryTimeoutMs: detail.retryTimeoutMs ?? null,
         })

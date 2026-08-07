@@ -71,7 +71,7 @@ export default function AgentCard({
   const { styles } = useStyles()
 
   const IconCmp = agent.config?.iconName ? getIconComponent(agent.config.iconName) : null
-  const iconColor = agent.config?.iconColor || '#6B7280'
+  const iconColor = agent.config?.iconColor ?? '#6B7280'
   const icon = IconCmp ? (
     <IconCmp size={20} weight="duotone" color={iconColor} />
   ) : agent.config?.icon ? (
@@ -101,7 +101,7 @@ export default function AgentCard({
   return (
     <EntityCard
       icon={icon}
-      title={agent.config?.title?.zh || agent.config?.title?.en || agent.name}
+      title={agent.config?.title?.zh ?? agent.config?.title?.en ?? agent.name}
       subtitle={agent.name}
       headerExtra={
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -110,28 +110,28 @@ export default function AgentCard({
           {agent.mobileEnabled && <span style={platformBadgeStyle}>手机端</span>}
         </div>
       }
-      description={agent.config?.description?.zh || agent.config?.description?.en || '暂无描述'}
+      description={agent.config?.description?.zh ?? agent.config?.description?.en ?? '暂无描述'}
       bodyExtra={
         <div className={styles.stats}>
           <span className={styles.statLink} onClick={() => { onEditSubagents(agent); }}>
             <DiamondsFour size={12} />
-            {agent.subagents?.length || 0} 子代理
+            {agent.subagents?.length ?? 0} 子代理
           </span>
           <span className={styles.statLink} onClick={() => { onEditTools(agent); }}>
             <Wrench size={12} />
-            {agent.tools?.length || 0} 工具
+            {agent.tools?.length ?? 0} 工具
           </span>
           <span className={styles.statLink} onClick={() => { onEditSkills(agent); }}>
             <Star size={12} />
-            {agent.skills?.length || 0} 技能
+            {agent.skills?.length ?? 0} 技能
           </span>
           <span className={styles.statLink} onClick={() => { onEditMcps(agent); }}>
             <PlugsConnected size={12} />
-            {agent.mcps?.length || 0} MCP
+            {agent.mcps?.length ?? 0} MCP
           </span>
           <span className={styles.statLink} onClick={() => { onEditKnowledge(agent); }}>
             <Books size={12} />
-            {agent.datasets?.length || 0} 知识库
+            {agent.datasets?.length ?? 0} 知识库
           </span>
           <span className={styles.statLink} onClick={() => { onEditModel(agent); }}>
             <Cpu size={12} />

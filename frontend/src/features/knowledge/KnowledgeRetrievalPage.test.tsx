@@ -57,7 +57,7 @@ describe('KnowledgeRetrievalPage', () => {
     await user.type(screen.getByRole('textbox'), '如何退货？')
     await user.click(screen.getByRole('button', { name: /检索测试/ }))
 
-    await waitFor(() => expect(h.retrievalMock).toHaveBeenCalled())
+    await waitFor(() => { expect(h.retrievalMock).toHaveBeenCalled(); })
     expect(h.retrievalMock).toHaveBeenCalledWith(
       expect.objectContaining({ question: '如何退货？', dataset_ids: ['kb1'] })
     )

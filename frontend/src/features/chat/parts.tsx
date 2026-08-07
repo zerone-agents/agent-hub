@@ -110,7 +110,7 @@ export function PartReasoning({
 
 export function PartError({ message }: { message?: string }) {
   const { styles } = useStyles()
-  return <div className={styles.errorWrap}>{message || '发生错误'}</div>
+  return <div className={styles.errorWrap}>{message ?? '发生错误'}</div>
 }
 
 type PairablePart =
@@ -193,8 +193,8 @@ export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; en
           return (
             <ToolCallBlock
               key={i}
-              toolName={p.use.name || 'tool'}
-              toolId={p.use.id || ''}
+              toolName={p.use.name ?? 'tool'}
+              toolId={p.use.id ?? ''}
               input={p.use.input as Record<string, unknown> | undefined}
               result={p.result.content}
               status={p.result.isError ? 'error' : 'success'}
@@ -212,8 +212,8 @@ export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; en
         return (
           <ToolCallBlock
             key={i}
-            toolName={p.part.name || 'tool'}
-            toolId={p.part.id || ''}
+            toolName={p.part.name ?? 'tool'}
+            toolId={p.part.id ?? ''}
             input={p.part.input as Record<string, unknown> | undefined}
             status="pending"
           />

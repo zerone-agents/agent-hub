@@ -64,7 +64,7 @@ export default function StreamingMessage({ parts, phase, error }: StreamingMessa
           {phase === 'error' ? (
             <div className={styles.error}>
               <Warning size={14} weight="bold" />
-              <span>回复失败：{error || '未知错误'}</span>
+              <span>回复失败：{error ?? '未知错误'}</span>
             </div>
           ) : parts.length > 0 ? (
             <ContentParts parts={parts} />
