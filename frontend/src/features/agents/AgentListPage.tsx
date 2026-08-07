@@ -178,7 +178,8 @@ export default function AgentListPage() {
     let names = agent.tools ?? []
     try {
       const res = await agentApi.getTools(agent.name)
-      if (res.data.success) names = res.data.data ?? []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     const merged = Array.from(new Set([...names, ...defaultToolNames]))
     setSelectedTools(merged)
@@ -190,7 +191,8 @@ export default function AgentListPage() {
     let names = agent.skills ?? []
     try {
       const res = await agentApi.getSkills(agent.name)
-      if (res.data.success) names = res.data.data ?? []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     setSelectedSkills([...names])
     setSkillOpen(true)
@@ -201,7 +203,8 @@ export default function AgentListPage() {
     let names = agent.mcps ?? []
     try {
       const res = await agentApi.getMcps(agent.name)
-      if (res.data.success) names = res.data.data ?? []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     setSelectedMcps([...names])
     setMcpOpen(true)
@@ -308,7 +311,7 @@ export default function AgentListPage() {
           baseUrl: fieldValues.base_url || '',
         },
       })
-      const result = res.data.data
+      const result = res.data.data as { success?: boolean; latencyMs?: number; error?: string } | undefined
       if (result?.success) {
         message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         setTestPassed(true)
@@ -347,8 +350,9 @@ export default function AgentListPage() {
         }
       })
       setModelOpen(false)
-    } catch (err: any) {
-      message.error(`保存失败 · ${String(err?.message ?? '未知错误')}`)
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '未知错误'
+      message.error(`保存失败 · ${String(errMsg)}`)
     } finally {
       setSaving(false)
     }
