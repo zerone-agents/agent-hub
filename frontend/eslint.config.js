@@ -37,6 +37,19 @@ export default tseslint.config(
           allowNullish: true,
           allowRegExp: false
         }
+      ],
+      // Allow async functions in JSX event handler positions and callback
+      // arguments — React's idiomatic pattern is `onClick={async () => {...}}`
+      // and wrapping every such handler in `void` adds noise without catching
+      // real bugs. Conditional misuse (await in `if`) is still flagged.
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            attributes: false,
+            arguments: false
+          }
+        }
       ]
     }
   },

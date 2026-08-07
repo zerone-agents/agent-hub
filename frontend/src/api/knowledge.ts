@@ -470,8 +470,18 @@ export interface HealthStatus {
 
 export const knowledgeApi = {
   health: async (): Promise<HealthStatus> => {
+    interface HealthData {
+      configured?: boolean
+      connected?: boolean
+      status?: string
+      message?: string
+    }
+    interface AxiosErrShape {
+      response?: { data?: { data?: HealthData; error?: string }; status?: number }
+      message?: string
+    }
     try {
-      const res = await apiClient.get(`${BASE}/health`)
+      const res = await apiClient.get<{ data?: HealthStatus }>(`${BASE}/health`)
       const data = res.data?.data
       return {
         configured: !!data?.configured,
@@ -479,15 +489,16 @@ export const knowledgeApi = {
         status: data?.status ?? 'unknown',
         message: data?.message,
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // When MULTIRAG is unconfigured the backend returns 503 with success:false,
       // but the data envelope still contains configured/connected/status.
-      const data = err?.response?.data?.data
+      const axiosErr = err as AxiosErrShape
+      const data = axiosErr?.response?.data?.data
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
         status: data?.status ?? 'unavailable',
-        message: err?.response?.data?.error ?? data?.message ?? err?.message,
+        message: axiosErr?.response?.data?.error ?? data?.message ?? axiosErr?.message,
       }
     }
   },
