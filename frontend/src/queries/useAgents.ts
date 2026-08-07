@@ -1,15 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { agentApi, type Agent } from '@/api/agents'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useAgents() {
   return useQuery<Agent[]>({
     queryKey: ['agents'],
     queryFn: async () => {
-      const res = await agentApi.list()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data.agents ?? []
+      return unwrapResponse<{ agents?: Agent[] }>(await agentApi.list()).agents ?? []
     }
   })
 }
@@ -94,9 +92,7 @@ export function useAgentKnowledgeDatasets(name: string) {
   return useQuery<string[]>({
     queryKey: ['agents', name, 'knowledge'],
     queryFn: async () => {
-      const res = await agentApi.getKnowledgeDatasets(name)
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data.dataset_ids ?? []
+      return unwrapResponse<{ dataset_ids?: string[] }>(await agentApi.getKnowledgeDatasets(name)).dataset_ids ?? []
     },
     enabled: !!name
   })

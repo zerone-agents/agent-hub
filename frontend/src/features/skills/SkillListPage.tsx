@@ -7,6 +7,7 @@ import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
 import { useSkills, useDeleteSkill } from '@/queries/useSkills'
 import { skillApi } from '@/api/skills'
+import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
@@ -95,8 +96,9 @@ export default function SkillListPage() {
   const handleDownload = async (skill: Skill) => {
     try {
       const res = await skillApi.download(skill.name)
-      if (res.data.success && res.data.data?.url) {
-        window.open(res.data.data.url, '_blank')
+      const body = res.data as ApiEnvelope<{ url?: string }>
+      if (body.success && body.data?.url) {
+        window.open(body.data.url, '_blank')
       }
     } catch {
       message.error('获取下载链接失败')

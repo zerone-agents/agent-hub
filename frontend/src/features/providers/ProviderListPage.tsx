@@ -6,6 +6,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useProviders, useDeleteProvider, useProbeProvider } from '@/queries/useProviders'
 import type { Provider } from '@/api/providers'
+import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
@@ -217,7 +218,8 @@ export default function ProviderListPage() {
     setProbingId(id)
     try {
       const res = await probeProvider.mutateAsync({ id })
-      const result = res.data.data
+      const envelope = res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>
+      const result = envelope.data
       if (result?.success) {
         message.success(`连接成功 · ${String(result.latencyMs)}ms`)
       } else {

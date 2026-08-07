@@ -1,16 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { toolApi, type Tool } from '@/api/tools'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useTools() {
   return useQuery<Tool[]>({
     queryKey: ['tools'],
-    queryFn: async () => {
-      const res = await toolApi.list()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
-    }
+    queryFn: async () =>
+      unwrapResponse<Tool[]>(await toolApi.list()) ?? []
   })
 }
 

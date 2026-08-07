@@ -68,8 +68,9 @@ apiClient.interceptors.response.use(
           refresh_token: refreshToken
         })
 
-        if (response.data.success) {
-          const { accessToken, refreshToken: newRefreshToken } = response.data.data
+        const body = response.data as { success: boolean; data?: { accessToken: string; refreshToken: string } }
+        if (body.success) {
+          const { accessToken, refreshToken: newRefreshToken } = body.data ?? { accessToken: '', refreshToken: '' }
           setTokens(accessToken, newRefreshToken)
 
           originalRequest.headers['X-Refresh-Attempt'] = 'true'
@@ -88,6 +89,29 @@ apiClient.interceptors.response.use(
 )
 
 export default apiClient
+
+/**
+ * Backend response envelope. All admin API responses share this shape:
+ * `{ success: boolean, data?: T, message?: string, error?: string }`.
+ */
+export interface ApiEnvelope<T = unknown> {
+  success: boolean
+  data?: T
+  message?: string
+  error?: string
+}
+
+/**
+ * Unwrap an axios response into its data payload, throwing on backend errors.
+ * Eliminates `any` propagation from `res.data` across query/mutation hooks.
+ */
+export function unwrapResponse<T>(res: { data: unknown }): T {
+  const body = res.data as ApiEnvelope<T>
+  if (!body.success) {
+    throw new Error(body.error ?? body.message ?? '请求失败')
+  }
+  return body.data as T
+}
 
 /**
  * Convert any thrown value into a user-facing zh-CN message.

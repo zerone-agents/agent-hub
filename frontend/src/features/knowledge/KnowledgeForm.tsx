@@ -362,7 +362,7 @@ function ParserConfigFields({
       <Form.Item
         noStyle
         shouldUpdate={(prev, current) =>
-          prev.enable_children !== current.enable_children
+          (prev as DatasetFormValues).enable_children !== (current as DatasetFormValues).enable_children
         }
       >
         {({ getFieldValue }) => (
@@ -429,11 +429,11 @@ function ParserConfigFields({
       <Form.Item
         noStyle
         shouldUpdate={(prev, current) =>
-          prev.layout_recognize !== current.layout_recognize
+          (prev as DatasetFormValues).layout_recognize !== (current as DatasetFormValues).layout_recognize
         }
       >
         {({ getFieldValue }) =>
-          layoutIsMinerU(getFieldValue("layout_recognize")) ? (
+          layoutIsMinerU(getFieldValue("layout_recognize") as string | undefined | null) ? (
             <>
               <Divider titlePlacement="left" plain>
                 MinerU
@@ -640,7 +640,7 @@ export default function KnowledgeForm({
   // latter surface via the synthetic "unavailable" option below.
   useEffect(() => {
     if (!open) return;
-    const embd = form.getFieldValue("embd_id");
+    const embd = form.getFieldValue("embd_id") as unknown;
     if (
       !embeddingLocked &&
       typeof embd === "string" &&
@@ -649,7 +649,7 @@ export default function KnowledgeForm({
     ) {
       form.setFieldValue("embd_id", embdRawToValue.get(embd));
     }
-    const layout = form.getFieldValue("layout_recognize");
+    const layout = form.getFieldValue("layout_recognize") as unknown;
     if (typeof layout === "string" && layout && layoutRawToValue.has(layout)) {
       form.setFieldValue("layout_recognize", layoutRawToValue.get(layout));
     }

@@ -287,12 +287,12 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
     setProbing(true)
     try {
       if (editingProvider) {
-        const values = form.getFieldsValue(['lockedApiKey'])
+        const values = form.getFieldsValue(['lockedApiKey']) as { lockedApiKey?: string }
         const res = await probeProvider.mutateAsync({
           id: editingProvider.id,
           apiKey: values.lockedApiKey,
         })
-        const result = res.data.data
+        const result = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result?.success) {
           message.success(`连接成功 · ${String(result.latencyMs)}ms`)
         } else {
@@ -311,11 +311,11 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
           authStyle: values.authStyle,
           models: defaultModels,
         })
-        const result = res.data.data
-        if (result?.success) {
-          message.success(`连接成功 · ${String(result.latencyMs)}ms`)
+        const result2 = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
+        if (result2?.success) {
+          message.success(`连接成功 · ${String(result2.latencyMs)}ms`)
         } else {
-          message.error(`连接失败 · ${String(result?.error ?? '未知错误')}`)
+          message.error(`连接失败 · ${String(result2?.error ?? '未知错误')}`)
         }
       }
     } finally {

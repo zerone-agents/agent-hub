@@ -1,16 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { providerApi, type Provider, type ProbeConfig, type AttrRules } from '@/api/providers'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
   return useQuery<Provider[]>({
     queryKey: ['providers', type ?? 'all'],
-    queryFn: async () => {
-      const res = await providerApi.list(type)
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
-    },
+    queryFn: async () => unwrapResponse<Provider[]>(await providerApi.list(type)) ?? [],
   })
 }
 
@@ -20,11 +16,7 @@ export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
 export function useProviderAttrRules() {
   return useQuery<AttrRules>({
     queryKey: ['provider-attr-rules'],
-    queryFn: async () => {
-      const res = await providerApi.attrRules()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? {}
-    },
+    queryFn: async () => unwrapResponse<AttrRules>(await providerApi.attrRules()) ?? {},
   })
 }
 
@@ -82,7 +74,7 @@ export function useProbeConfig() {
 export function useSyncProviderMultiRAG() {
   return useMutation({
     mutationFn: ({ id, verifyOnly = false, modelIds }: { id: number; verifyOnly?: boolean; modelIds?: string[] }) =>
-      providerApi.syncMultiRAG(id, { verifyOnly, modelIds }).then((res) => res.data),
+      providerApi.syncMultiRAG(id, { verifyOnly, modelIds }).then((res) => unwrapResponse(res)),
     onError: (err) => message.error(parseApiError(err)),
   })
 }

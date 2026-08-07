@@ -1,27 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { mcpApi, type Mcp, type McpDetail, type McpInput, type McpProbeInput, type McpProbeResult } from '@/api/mcps'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useMcps() {
   return useQuery<Mcp[]>({
     queryKey: ['mcps'],
-    queryFn: async () => {
-      const res = await mcpApi.list()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
-    }
+    queryFn: async () => unwrapResponse<Mcp[]>(await mcpApi.list()) ?? []
   })
 }
 
 export function useMcp(name: string | null) {
   return useQuery<McpDetail>({
     queryKey: ['mcp', name],
-    queryFn: async () => {
-      const res = await mcpApi.get(name!)
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data
-    },
+    queryFn: async () => unwrapResponse<McpDetail>(await mcpApi.get(name!)),
     enabled: !!name
   })
 }
@@ -66,11 +58,7 @@ export function useDeleteMcp() {
 export function useAgentMcps(agentName: string | null) {
   return useQuery<string[]>({
     queryKey: ['agent-mcps', agentName],
-    queryFn: async () => {
-      const res = await mcpApi.getAgentMcps(agentName!)
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
-    },
+    queryFn: async () => unwrapResponse<string[]>(await mcpApi.getAgentMcps(agentName!)) ?? [],
     enabled: !!agentName
   })
 }
@@ -93,7 +81,7 @@ export function useProbeMcp() {
   return useMutation({
     mutationFn: async ({ name, config }: { name?: string; config?: McpProbeInput }) => {
       const res = name ? await mcpApi.probeByName(name) : await mcpApi.probeByConfig(config!)
-      return res.data.data as McpProbeResult
+      return unwrapResponse<McpProbeResult>(res)
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['mcps'] })

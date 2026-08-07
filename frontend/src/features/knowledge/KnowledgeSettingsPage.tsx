@@ -87,9 +87,9 @@ export default function KnowledgeSettingsPage() {
 
   useEffect(() => {
     if (!dataset || embeddingLocked) return;
-    const current = form.getFieldValue("embd_id");
+    const current = form.getFieldValue("embd_id") as string;
     if (current === dataset.embd_id && embdRawToValue.has(current)) {
-      form.setFieldValue("embd_id", embdRawToValue.get(current));
+      form.setFieldValue("embd_id", embdRawToValue.get(current) as string);
     }
   }, [dataset, embeddingLocked, embdRawToValue, form]);
 
