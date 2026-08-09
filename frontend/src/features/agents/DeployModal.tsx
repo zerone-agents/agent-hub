@@ -340,7 +340,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       // kickoff below and must fire on the same effect tick.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-open lifecycle reset
       setError(null)
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-open lifecycle reset
+       
       setStatusLoaded(false)
       void fetchStatus().then(() => {
         // A close/re-mount (or StrictMode's extra effect cycle) bumps the
@@ -352,11 +352,11 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       })
     } else {
       clearTimer()
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
+       
       setStatus(null)
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
+       
       setStatusLoaded(false)
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-close lifecycle reset
+       
       setError(null)
     }
     return () => { clearTimer(); }

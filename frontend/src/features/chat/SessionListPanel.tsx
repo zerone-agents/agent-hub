@@ -81,7 +81,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   const deleteSession = useDeleteChatSession()
   const [search, setSearch] = useState('')
 
-  const sessions = data?.items ?? []
+  const sessions = useMemo(() => data?.items ?? [], [data?.items])
   const total = data?.total ?? 0
 
   // 解析 (provider_id, model_selection_id) → catalog displayName。

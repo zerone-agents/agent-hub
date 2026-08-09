@@ -247,7 +247,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         iconKey: 'anthropic',
         builtin: false,
       })
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset local form state for the create-new branch
+       
       setDefaultModels([])
       setFields([])
       setAttributes({})
