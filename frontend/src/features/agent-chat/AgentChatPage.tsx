@@ -119,7 +119,7 @@ export default function AgentChatPage() {
 
   const STREAMING_MSG_ID = '__streaming__'
 
-  const history = (msgData?.items ?? [])
+  const history = useMemo(() => msgData?.items ?? [], [msgData?.items])
 
   // Treat the in-flight stream as a transient assistant message rendered by the
   // same MessageBubble component as persisted messages. When the stream ends we
@@ -183,6 +183,7 @@ export default function AgentChatPage() {
     return () => {
       stream.reset()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only cleanup; stream.reset is stable (useCallback in useChatStream)
   }, [stream.reset])
 
   // When a stream finishes, promote the streamed content into the query cache

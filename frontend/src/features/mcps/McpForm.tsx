@@ -196,7 +196,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
     } else {
       form.resetFields()
       form.setFieldsValue({ transportType: 'sse', retryMaxRetries: null, retryTimeoutMs: null })
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset dynamic-field state for the create-new branch
+       
       setHeaderPairs([])
       setProbedResult(null)
     }

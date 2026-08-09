@@ -382,9 +382,9 @@ function ChunkImage({
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset fetch-lifecycle status before kicking off a new image fetch; coupled to the request below
     setStatus("loading");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- same fetch-lifecycle reset
+     
     setErrorMessage("");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- same fetch-lifecycle reset
+     
     setImageSrc("");
 
     knowledgeApi.images
@@ -505,9 +505,9 @@ function ChunkEditor({
     if (!open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form-local state on modal open; values are coupled to the antd form.setFieldsValue call below
     setImageBase64("");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-open reset
+     
     setImagePreviewUrl("");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-open reset
+     
     setPreviewMode("edit");
     form.setFieldsValue({
       content: editing?.content ?? "",
@@ -706,7 +706,7 @@ export default function KnowledgeChunksPage() {
   const deleteChunks = useDeleteChunks(id, documentId);
   const switchChunks = useSwitchChunks(id, documentId);
 
-  const chunks = query.data?.chunks ?? [];
+  const chunks = useMemo(() => query.data?.chunks ?? [], [query.data?.chunks]);
   const total = query.data?.total ?? 0;
   const document = query.data?.document;
   const currentIds = useMemo(() => chunks.map((chunk) => chunk.id), [chunks]);

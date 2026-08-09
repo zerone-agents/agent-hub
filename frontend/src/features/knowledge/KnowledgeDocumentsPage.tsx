@@ -272,9 +272,9 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
     if (!open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-modal state on close so the next open starts clean
       setFiles([]);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-close reset
+       
       setError("");
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- same modal-close reset
+       
       setAutoParse(true);
     }
   }, [open]);

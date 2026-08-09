@@ -27,7 +27,10 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.flat.recommended.rules,
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      // react-refresh/only-export-components only affects vite dev HMR —
+      // it has no impact on production builds, tests, or CI. Disable to
+      // avoid noise from files that legitimately co-export helpers.
+      'react-refresh/only-export-components': 'off',
       '@typescript-eslint/restrict-template-expressions': [
         'error',
         {
