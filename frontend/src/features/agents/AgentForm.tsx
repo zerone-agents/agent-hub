@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { Modal, Form, Input, Select, InputNumber, Switch, AutoComplete, Button } from 'antd'
-import { X, CaretDown } from '@phosphor-icons/react'
+import { XIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, AgentConfig } from '@/api/agents'
@@ -225,7 +225,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       <div className={styles.head}>
         <div className={styles.title}>{editingAgent ? '编辑代理' : '新建代理'}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -249,10 +249,12 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
             options={groupOptions}
             placeholder="选择或输入新分组"
             allowClear
-            suffixIcon={<CaretDown size={14} />}
-            filterOption={(inputValue, option) => {
-              const label = (option?.label ?? '').toLowerCase()
-              return label.includes(inputValue.toLowerCase())
+            suffix={<CaretDownIcon size={14} />}
+            showSearch={{
+              filterOption: (inputValue, option) => {
+                const label = (option?.label ?? '').toLowerCase()
+                return label.includes(inputValue.toLowerCase())
+              },
             }}
           />
         </Form.Item>

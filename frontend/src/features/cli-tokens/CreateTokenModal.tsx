@@ -90,7 +90,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
           <Alert
             type="warning"
             showIcon
-            message="请立即保存此 Token"
+            title="请立即保存此 Token"
             description="关闭此窗口后将无法再次查看。请将 Token 安全存储。"
             style={{ marginBottom: 16 }}
           />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Markdown } from '@lobehub/ui'
 import { Segmented, Spin, Tooltip } from 'antd'
-import { FileText } from '@phosphor-icons/react'
+import { FileTextIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import { parseSkillFrontmatter } from './parseSkillFrontmatter'
@@ -99,13 +99,13 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
       )}
       {!loading && error && (
         <div className={styles.idle}>
-          <FileText size={32} weight="thin" />
+          <FileTextIcon size={32} weight="thin" />
           <span className={styles.error}>{error}</span>
         </div>
       )}
       {!loading && !error && !hasContent && (
         <div className={styles.idle}>
-          <FileText size={32} weight="thin" />
+          <FileTextIcon size={32} weight="thin" />
           <span>{placeholder}</span>
         </div>
       )}

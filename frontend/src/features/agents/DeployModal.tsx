@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography } from 'antd'
 import {
-  Rocket,
-  Stop,
-  Trash,
-  ArrowClockwise,
-  ChatsCircle,
-  Check,
-  Eye,
-  EyeSlash,
-  Copy,
-  Play,
+  RocketIcon,
+  StopIcon,
+  TrashIcon,
+  ArrowClockwiseIcon,
+  ChatsCircleIcon,
+  CheckIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  CopyIcon,
+  PlayIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -516,6 +516,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         ta.style.opacity = '0'
         document.body.appendChild(ta)
         ta.select()
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- only programmatic fallback available for non-secure (plain HTTP) contexts where navigator.clipboard is undefined
         document.execCommand('copy')
         document.body.removeChild(ta)
       }
@@ -535,7 +536,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       width={600}
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Rocket size={20} weight="duotone" />
+          <RocketIcon size={20} weight="duotone" />
           <span>部署 Agent</span>
         </div>
       }
@@ -543,7 +544,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       <div style={{ padding: '16px 0' }}>
         {isMissingConfig && (
           <Alert
-            message="未配置模型"
+            title="未配置模型"
             description="请先为 Agent 配置 Provider 和 Model，否则部署可能失败。"
             type="warning"
             showIcon
@@ -553,11 +554,10 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {error && (
           <Alert
-            message={error}
+            title={error}
             type="error"
             showIcon
-            closable
-            onClose={() => { setError(null); }}
+            closable={{ onClose: () => { setError(null); } }}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -661,7 +661,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 title="复制 URL"
                 onClick={() => handleCopy('url', status.runtimeUrl ?? '')}
               >
-                {copied === 'url' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
+                {copied === 'url' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
               </button>
             </div>
             <div className={styles.apiRow}>
@@ -675,7 +675,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 title={showApiKey ? '隐藏' : '显示'}
                 onClick={() => { setShowApiKey(!showApiKey); }}
               >
-                {showApiKey ? <EyeSlash size={13} /> : <Eye size={13} />}
+                {showApiKey ? <EyeSlashIcon size={13} /> : <EyeIcon size={13} />}
               </button>
               {status.apiKey && (
                 <button
@@ -684,7 +684,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                   title="复制 Key"
                   onClick={() => handleCopy('key', status.apiKey ?? '')}
                 >
-                  {copied === 'key' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
+                  {copied === 'key' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
                 </button>
               )}
             </div>
@@ -714,7 +714,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                       icon:
                         state === 'finish' ? (
                           <span className="deploy-step-icon deploy-step-icon-finish">
-                            <Check size={13} weight="bold" />
+                            <CheckIcon size={13} weight="bold" />
                           </span>
                         ) : state === 'process' ? (
                           <span className="deploy-step-icon deploy-step-icon-process" />
@@ -738,7 +738,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {deploymentStatus === 'error' && status && (
           <div style={{ marginBottom: 16 }}>
-            <Space direction="vertical" size="small">
+            <Space orientation="vertical" size="small">
               <Text type="danger">
                 状态: <Text strong>{status.status}</Text>
               </Text>
@@ -759,7 +759,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           {isRunning && (
             <>
               <Button
-                icon={<Stop size={16} />}
+                icon={<StopIcon size={16} />}
                 onClick={handleStop}
                 loading={loading}
               >
@@ -767,21 +767,21 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               </Button>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
               >
                 归档
               </Button>
               <Button
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
               >
                 重新部署
               </Button>
               <PrimaryButton
-                icon={<ChatsCircle size={16} weight="fill" />}
+                icon={<ChatsCircleIcon size={16} weight="fill" />}
                 onClick={handleLaunch}
                 disabled={!canLaunch || loading}
               >
@@ -792,7 +792,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
           {(isNotFound || !status) && (
             <PrimaryButton
-              icon={<Rocket size={16} />}
+              icon={<RocketIcon size={16} />}
               onClick={() => handleDeploy()}
               loading={loading}
               disabled={isMissingConfig}
@@ -805,14 +805,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             <>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete(true)}
                 loading={loading}
               >
                 彻底删除
               </Button>
               <PrimaryButton
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
                 disabled={isMissingConfig}
@@ -826,7 +826,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             <>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
               >
@@ -834,7 +834,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               </Button>
               {(deploymentStatus === 'stopped' || deploymentStatus === 'exited') ? (
                 <PrimaryButton
-                  icon={<Play size={16} weight="fill" />}
+                  icon={<PlayIcon size={16} weight="fill" />}
                   onClick={handleStart}
                   loading={loading}
                 >
@@ -842,7 +842,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 </PrimaryButton>
               ) : null}
               <Button
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
                 disabled={isMissingConfig}
@@ -874,7 +874,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         }
       >
         <Alert
-          message="重新部署将重新创建容器"
+          title="重新部署将重新创建容器"
           description="如果勾选下方选项，将生成新的 API Key，旧 API Key 会立即失效，使用旧 Key 的客户端需要重新配置。"
           type="warning"
           showIcon

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Input } from 'antd'
 import type { InputRef } from 'antd'
-import { X, Plus } from '@phosphor-icons/react'
+import { XIcon, PlusIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 
@@ -134,7 +134,7 @@ export default function EffortCell({ value, onChange }: EffortCellProps) {
             aria-label="添加 effort"
             style={{ visibility: draft.trim() ? 'visible' : 'hidden' }}
           >
-            <Plus size={12} weight="bold" />
+            <PlusIcon size={12} weight="bold" />
           </button>
         }
         onPressEnter={(e) => {
@@ -153,7 +153,7 @@ export default function EffortCell({ value, onChange }: EffortCellProps) {
                 aria-label={`删除 ${effort}`}
                 onClick={() => { onChange(efforts.filter((e) => e !== effort)); }}
               >
-                <X size={10} />
+                <XIcon size={10} />
               </button>
             </span>
           ))}

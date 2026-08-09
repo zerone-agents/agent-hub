@@ -1,5 +1,5 @@
 import { useState, memo } from 'react'
-import { User, Robot } from '@phosphor-icons/react'
+import { UserIcon, RobotIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatMessage } from '@/api/chat'
 import { formatTime } from '@/utils/time'
@@ -98,7 +98,7 @@ function MessageBubbleInner({ message: msg, enableStream }: MessageBubbleProps) 
   return (
     <div className={`${styles.row} ${isUser ? styles.rowUser : ''}`}>
       <div className={`${styles.avatar} ${avatarStyle}`}>
-        {isUser ? <User size={14} weight="bold" /> : <Robot size={14} weight="bold" />}
+        {isUser ? <UserIcon size={14} weight="bold" /> : <RobotIcon size={14} weight="bold" />}
       </div>
       <div className={`${styles.content} ${isUser ? styles.contentUser : ''}`}>
         <div className={styles.role}>{ROLE_LABELS[msg.role] || msg.role}</div>

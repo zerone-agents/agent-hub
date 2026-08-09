@@ -1,5 +1,5 @@
 import { Tooltip } from 'antd'
-import { CaretDown, CaretUp, WarningCircle } from '@phosphor-icons/react'
+import { CaretDownIcon, CaretUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 
@@ -118,7 +118,7 @@ export default function AgentDetailSummary({
   onToggle,
 }: Props) {
   const { styles, cx } = useStyles()
-  const Chevron = expanded ? CaretUp : CaretDown
+  const Chevron = expanded ? CaretUpIcon : CaretDownIcon
 
   const countEntries: [string, number][] = [
     ['Tools', counts.tools],
@@ -140,7 +140,7 @@ export default function AgentDetailSummary({
         {status === 'unavailable' && (
           <Tooltip title="Agent 配置解析失败，可能无法调用">
             <span className={styles.warning} data-testid="status-warning">
-              <WarningCircle size={14} weight="fill" />
+              <WarningCircleIcon size={14} weight="fill" />
             </span>
           </Tooltip>
         )}

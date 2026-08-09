@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CaretRight, CaretDown } from '@phosphor-icons/react'
+import { CaretRightIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import ChatMarkdown from './ChatMarkdown'
@@ -94,7 +94,7 @@ export function PartReasoning({
   return (
     <div className={styles.reasoningWrap}>
       <div className={styles.reasoningToggle} onClick={() => { setOpen(!open); }}>
-        {open ? <CaretDown size={10} /> : <CaretRight size={10} />}
+        {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
         <span>思考过程{duration ? ` · ${duration}s` : ''}</span>
       </div>
       <div style={{ marginTop: 4 }}>

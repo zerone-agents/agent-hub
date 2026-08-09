@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, Tooltip } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, PencilSimple, Trash, PlugsConnected } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon, PlugsConnectedIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useMcps, useDeleteMcp, useProbeMcp } from '@/queries/useMcps'
@@ -191,7 +191,7 @@ export default function McpListPage() {
           <div className={styles.pageTitle}>MCP 配置</div>
           <div className={styles.pageSub}>管理外部 MCP 服务器配置，供 Agent 绑定使用</div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={showCreate}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
           新建 MCP
         </PrimaryButton>
       </div>
@@ -211,7 +211,7 @@ export default function McpListPage() {
       ) : filteredMcps.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <PlugsConnected size={48} weight="thin" color={t.textMuted} />
+            <PlugsConnectedIcon size={48} weight="thin" color={t.textMuted} />
           </div>
           <div className={styles.emptyTitle}>{keywords ? '未找到匹配的 MCP' : '暂无 MCP 配置'}</div>
           <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '添加您的第一个 MCP 服务器以开始使用'}</div>
@@ -279,7 +279,7 @@ export default function McpListPage() {
                       {probingName === mcp.name ? (
                         <Spin size="small" />
                       ) : (
-                        <PlugsConnected size={14} />
+                        <PlugsConnectedIcon size={14} />
                       )}
                     </button>
                   )}
@@ -289,7 +289,7 @@ export default function McpListPage() {
                     title="编辑"
                     onClick={() => { showEdit(mcp); }}
                   >
-                    <PencilSimple size={14} />
+                    <PencilSimpleIcon size={14} />
                   </button>
                   {!mcp.isBuiltin && (
                     <Popconfirm
@@ -305,7 +305,7 @@ export default function McpListPage() {
                         className={`${styles.actBtn} ${styles.actBtnDanger}`}
                         title="删除"
                       >
-                        <Trash size={14} />
+                        <TrashIcon size={14} />
                       </button>
                     </Popconfirm>
                   )}

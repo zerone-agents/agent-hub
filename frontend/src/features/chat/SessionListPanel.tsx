@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Spin, Input, Pagination, Popconfirm } from 'antd'
-import { MagnifyingGlass, Trash, ChatCircleDots } from '@phosphor-icons/react'
+import { MagnifyingGlassIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
 import { useChatSessions, useDeleteChatSession } from '@/queries/useChat'
@@ -129,7 +129,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
           placeholder="搜索会话..."
           allowClear
           size="small"
-          prefix={<MagnifyingGlass size={14} color={t.textMuted} />}
+          prefix={<MagnifyingGlassIcon size={14} color={t.textMuted} />}
           value={search}
           onChange={(e) => { setSearch(e.target.value); }}
         />
@@ -140,7 +140,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
           <div className={styles.loading}><Spin size="small" /></div>
         ) : filtered.length === 0 ? (
           <div className={styles.empty}>
-            <ChatCircleDots size={32} weight="thin" color={t.textMuted} />
+            <ChatCircleDotsIcon size={32} weight="thin" color={t.textMuted} />
             <span>{search ? '未找到匹配会话' : '暂无聊天记录'}</span>
           </div>
         ) : (
@@ -177,7 +177,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
                   title="删除"
                   onClick={(e) => { e.stopPropagation(); }}
                 >
-                  <Trash size={13} />
+                  <TrashIcon size={13} />
                 </button>
               </Popconfirm>
             </div>

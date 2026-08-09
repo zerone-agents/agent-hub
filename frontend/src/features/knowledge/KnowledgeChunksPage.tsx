@@ -24,14 +24,14 @@ import {
   message,
 } from "antd";
 import {
-  ArrowLeft,
-  ArrowsClockwise,
-  ClipboardText,
-  FileText,
-  ImageSquare,
-  PencilSimple,
-  Plus,
-  Trash,
+  ArrowLeftIcon,
+  ArrowsClockwiseIcon,
+  ClipboardTextIcon,
+  FileTextIcon,
+  ImageSquareIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  TrashIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
 import { useNavigate, useParams } from "react-router-dom";
@@ -428,7 +428,7 @@ function ChunkImage({
     <div className={cx(styles.imageFrame, className)} style={{ width, height }}>
       {status === "failed" ? (
         <div className={styles.imageFallback}>
-          <ImageSquare size={18} />
+          <ImageSquareIcon size={18} />
           <span>图片加载失败</span>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             ID {imageId.slice(0, 8)}
@@ -566,7 +566,7 @@ function ChunkEditor({
       title={editing ? "编辑切片" : "新增切片"}
       open={open}
       onClose={onClose}
-      width={720}
+      size={720}
       destroyOnHidden
       extra={
         <Space>
@@ -664,7 +664,7 @@ function ChunkEditor({
                   return Upload.LIST_IGNORE;
                 }}
               >
-                <Button icon={<ImageSquare size={16} />}>选择图片</Button>
+                <Button icon={<ImageSquareIcon size={16} />}>选择图片</Button>
               </Upload>
               {imagePreviewUrl ? (
                 <Image width={180} src={imagePreviewUrl} alt="preview image" />
@@ -770,7 +770,7 @@ export default function KnowledgeChunksPage() {
         className={styles.back}
         onClick={() => { navigate(`/knowledge/${id}/documents`); }}
       >
-        <ArrowLeft size={14} />
+        <ArrowLeftIcon size={14} />
         返回文档列表
       </button>
 
@@ -820,7 +820,7 @@ export default function KnowledgeChunksPage() {
             </div>
             <div className={styles.actions}>
               <Button
-                icon={<ArrowsClockwise size={16} />}
+                icon={<ArrowsClockwiseIcon size={16} />}
                 loading={query.isFetching}
                 onClick={() => query.refetch()}
               >
@@ -828,7 +828,7 @@ export default function KnowledgeChunksPage() {
               </Button>
               <Button
                 type="primary"
-                icon={<Plus size={16} weight="bold" />}
+                icon={<PlusIcon size={16} weight="bold" />}
                 onClick={openCreate}
               >
                 新增切片
@@ -864,7 +864,7 @@ export default function KnowledgeChunksPage() {
                   cancelText="取消"
                   onConfirm={bulkDelete}
                 >
-                  <Button size="small" danger icon={<Trash size={14} />}>
+                  <Button size="small" danger icon={<TrashIcon size={14} />}>
                     删除
                   </Button>
                 </Popconfirm>
@@ -951,13 +951,13 @@ export default function KnowledgeChunksPage() {
                   <Button
                     type="text"
                     size="small"
-                    icon={<ClipboardText size={16} />}
+                    icon={<ClipboardTextIcon size={16} />}
                     onClick={() => void copyChunkId(chunk.id)}
                   />
                   <Button
                     type="text"
                     size="small"
-                    icon={<PencilSimple size={16} />}
+                    icon={<PencilSimpleIcon size={16} />}
                     onClick={() => { openEdit(chunk); }}
                   >
                     编辑
@@ -973,7 +973,7 @@ export default function KnowledgeChunksPage() {
                       type="text"
                       size="small"
                       danger
-                      icon={<Trash size={16} />}
+                      icon={<TrashIcon size={16} />}
                     >
                       删除
                     </Button>
@@ -996,7 +996,7 @@ export default function KnowledgeChunksPage() {
 
         <aside className={styles.sidePanel}>
           <div className={styles.panelTitle}>
-            <FileText size={18} weight="duotone" />
+            <FileTextIcon size={18} weight="duotone" />
             文档信息
           </div>
           <Descriptions column={1} size="small">
