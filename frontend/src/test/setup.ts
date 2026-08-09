@@ -3,8 +3,17 @@ import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
 // Unmount React components after each test to avoid leaks.
-afterEach(() => {
+// Then wait for any pending React scheduler macrotasks (flushPassiveEffects
+// callbacks scheduled via MessageChannel) to complete before jsdom tears
+// down the environment. Without this wait, React 19's scheduler may
+// access `window.event` after jsdom is gone, producing:
+//   ReferenceError: window is not defined
+//   react-dom-client.development.js:17920 → schedulerEvent = window.event
+// The wait is ~0ms (just yields to the macrotask queue) but eliminates
+// the race that required CI reruns ~30% of the time.
+afterEach(async () => {
   cleanup()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 // Node >=22 ships an experimental `localStorage` global. Its state varies by
