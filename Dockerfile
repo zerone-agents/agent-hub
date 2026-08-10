@@ -9,7 +9,7 @@ COPY frontend/ .
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.25-alpine AS backend-builder
 WORKDIR /build
 RUN go env -w GOPROXY="https://goproxy.cn,direct"
 COPY go.mod go.sum ./
