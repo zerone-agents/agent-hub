@@ -111,18 +111,21 @@ jobs:
           # 剥掉 git tag 的 "hub-" 前缀：hub-v1.2.3 → v1.2.3
           TAG="${GITHUB_REF_NAME#hub-}"
 
-          # 所有要推送的目标镜像全路径（registry/namespace/repo）
+          # 所有要推送的目标镜像全路径（含 registry host）。
+          # 约定：
+          #   REGISTRY_IMAGE  = SWR 完整路径（如 swr.cn-east-3.myhuaweicloud.com/zerone/agent-hub）
+          #   DOCKERHUB_IMAGE = Docker Hub 不含 host 的 namespace/repo（如 zeroneai/agent-hub）
           # 任一变量未配置则跳过该 registry，避免 CI 因漏配直接挂掉。
           declare -a TARGETS=()
-          if [ -n "${{ vars.REGISTRY_HOST }}" ] && [ -n "${{ vars.REGISTRY_IMAGE }}" ]; then
-            TARGETS+=("${{ vars.REGISTRY_HOST }}/${{ vars.REGISTRY_IMAGE }}")
+          if [ -n "${{ vars.REGISTRY_IMAGE }}" ]; then
+            TARGETS+=("${{ vars.REGISTRY_IMAGE }}")
           fi
           if [ -n "${{ vars.DOCKERHUB_IMAGE }}" ]; then
             TARGETS+=("docker.io/${{ vars.DOCKERHUB_IMAGE }}")
           fi
 
           if [ ${#TARGETS[@]} -eq 0 ]; then
-            echo "❌ 未配置任何 registry（REGISTRY_HOST/REGISTRY_IMAGE 或 DOCKERHUB_IMAGE 至少需要一个）"
+            echo "❌ 未配置任何 registry（REGISTRY_IMAGE 或 DOCKERHUB_IMAGE 至少需要一个）"
             exit 1
           fi
 
