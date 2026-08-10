@@ -238,13 +238,15 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 	}
 
 	type probeOverrideRequest struct {
-		APIKey string `json:"apiKey"`
+		APIKey  string                  `json:"apiKey"`
+		BaseURL string                  `json:"baseUrl"`
+		Models  []provider.CatalogModel `json:"models"`
 	}
 	var overrideReq probeOverrideRequest
 	// Body is optional; ignore bind errors when no body is sent.
 	_ = c.ShouldBindJSON(&overrideReq)
 
-	result, err := h.service.ProbeWithOverride(id, overrideReq.APIKey)
+	result, err := h.service.ProbeWithOverride(id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
 	if err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())

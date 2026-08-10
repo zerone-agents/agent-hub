@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
-import { providerApi, type Provider, type ProbeConfig, type AttrRules } from '@/api/providers'
+import { providerApi, type Provider, type ProbeConfig, type AttrRules, type CatalogModel } from '@/api/providers'
 import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
@@ -59,7 +59,8 @@ export function useDeleteProvider() {
 
 export function useProbeProvider() {
   return useMutation({
-    mutationFn: ({ id, apiKey }: { id: number; apiKey?: string }) => providerApi.probe(id, apiKey),
+    mutationFn: ({ id, ...payload }: { id: number; apiKey?: string; baseUrl?: string; models?: CatalogModel[] }) =>
+      providerApi.probe(id, payload),
     onError: (err) => message.error(parseApiError(err)),
   })
 }

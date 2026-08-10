@@ -16,6 +16,11 @@ vi.mock('@/api/agents', () => ({
   },
 }))
 
+// 避免在测试环境引入 QueryClientProvider；知识库名称映射对这些用例无影响
+vi.mock('@/queries/useKnowledge', () => ({
+  useKnowledgeList: () => ({ data: { datasets: [] } }),
+}))
+
 const makeAgent = (overrides?: Partial<Agent['config']>): Agent => ({
   id: 1,
   name: 'general',

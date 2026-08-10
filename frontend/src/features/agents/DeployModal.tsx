@@ -16,6 +16,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { agentApi } from '@/api/agents'
 import { parseApiError } from '@/api/client'
+import { useKnowledgeList } from '@/queries/useKnowledge'
 import type { Agent, DeploymentStatus } from '@/api/agents'
 import type { Provider } from '@/api/providers'
 import { tokens as t } from '@/styles/tokens'
@@ -459,6 +460,13 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     [providers, agent.config.providerId]
   )
 
+  // agent.datasets 存的是 dataset UUID，展示时映射为知识库名称
+  const { data: knowledgeData } = useKnowledgeList({ page: 1, page_size: 1000 })
+  const datasetNameMap = useMemo(
+    () => new Map((knowledgeData?.datasets ?? []).map((d) => [d.id, d.name])),
+    [knowledgeData]
+  )
+
   const description = useMemo(() => {
     const d = agent.config.description
     return d?.zh ?? d?.en ?? ''
@@ -625,7 +633,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <div className={styles.capabilityTitle}>知识库</div>
               <div className={styles.capabilityTags}>
                 {items.map((item) => (
-                  <Tag key={item} className={styles.capabilityTag}>{item}</Tag>
+                  <Tag key={item} className={styles.capabilityTag}>{datasetNameMap.get(item) ?? item}</Tag>
                 ))}
               </div>
             </div>
