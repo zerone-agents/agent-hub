@@ -16,6 +16,7 @@ export interface AgentConfig {
   iconBgColor?: string
   providerId?: number | null
   modelId?: string
+  modelSelectionId?: string
   fieldOverrides?: Record<string, string>
   source?: string
   isDefault?: boolean

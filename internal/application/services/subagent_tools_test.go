@@ -46,6 +46,7 @@ func setupSubagentToolsTestDB(t *testing.T) *gorm.DB {
 			icon_bg_color VARCHAR(64) DEFAULT '',
 			provider_id INTEGER,
 			model_id VARCHAR(64) DEFAULT '',
+			model_selection_id VARCHAR(128) DEFAULT '',
 			field_overrides TEXT,
 			source VARCHAR(16) NOT NULL DEFAULT 'remote',
 			desktop_enabled INTEGER NOT NULL DEFAULT 0,

@@ -551,6 +551,9 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	if v, ok := config["modelId"].(string); ok {
 		cfg.ModelID = v
 	}
+	if v, ok := config["modelSelectionId"].(string); ok {
+		cfg.ModelSelectionID = v
+	}
 	if v, ok := config["title"].(map[string]interface{}); ok {
 		cfg.Title = ifaceMapToStrMap(v)
 	}
@@ -618,6 +621,7 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 		m["providerId"] = nil
 	}
 	m["modelId"] = cfg.ModelID
+	m["modelSelectionId"] = cfg.ModelSelectionID
 
 	// Handle fieldOverrides (decrypt secret fields, mask api_key for display)
 	if cfg.FieldOverrides != "" && cfg.ProviderID != nil {
