@@ -10,7 +10,8 @@ import type { SkillMdEntry } from './parseSkillMd'
 // Strip simple markdown syntax (headings, bold) so text assertions still work.
 vi.mock('@lobehub/ui', () => ({
   Markdown: ({ children }: { children: React.ReactNode }) => {
-    const text = String(children)
+    const raw = typeof children === 'string' ? children : ''
+    const text = raw
       .replace(/^#{1,6}\s+/gm, '')  // strip heading markers
       .replace(/\*\*(.+?)\*\*/g, '$1')  // strip bold
     return <div data-testid="mock-markdown">{text}</div>
