@@ -105,8 +105,8 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 // list endpoints. Returns ok=false after writing the 400 response.
 func parseTypeQuery(c *gin.Context) (typeFilter string, ok bool) {
 	typeFilter = c.Query("type")
-	if typeFilter != "" && typeFilter != string(provider.TypeLLM) && typeFilter != string(provider.TypeOCR) && typeFilter != string(provider.TypeEmbedding) && typeFilter != string(provider.TypeVLM) {
-		respondError(c, http.StatusBadRequest, fmt.Sprintf("type 不支持: %s（可选: llm, ocr, embedding, vlm）", typeFilter))
+	if typeFilter != "" && typeFilter != string(provider.TypeLLM) && typeFilter != string(provider.TypeOCR) && typeFilter != string(provider.TypeEmbedding) && typeFilter != string(provider.TypeVLM) && typeFilter != "chat" {
+		respondError(c, http.StatusBadRequest, fmt.Sprintf("type 不支持: %s（可选: llm, ocr, embedding, vlm, chat）", typeFilter))
 		return "", false
 	}
 	return typeFilter, true
