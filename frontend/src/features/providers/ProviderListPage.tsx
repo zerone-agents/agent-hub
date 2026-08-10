@@ -305,7 +305,7 @@ export default function ProviderListPage() {
             {visibleModels.length > 0 && (
               <div className={styles.modelChips}>
                 {visibleModels.map((m) => (
-                  <span key={m.modelId} className={styles.chip}>
+                  <span key={m.selectionId || m.modelId} className={styles.chip}>
                     {m.displayName}
                   </span>
                 ))}

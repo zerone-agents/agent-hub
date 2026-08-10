@@ -160,9 +160,25 @@ func (s *ProviderService) SeedIfEmpty() error {
 
 // ── Read ────────────────────────────────────────────────────────
 
+// matchProviderType reports whether a model's type satisfies the requested
+// filter. "chat" is a pseudo-type that matches both llm and vlm models, since
+// VLM providers are usable as chat agents even when they have no pure-llm
+// entries.
+func matchProviderType(filter, modelType string) bool {
+	if filter == "" {
+		return true
+	}
+	if filter == "chat" {
+		return modelType == "llm" || modelType == "vlm"
+	}
+	return filter == modelType
+}
+
+
 // ListAll returns all providers. When typeFilter is non-empty ("llm" or
-// "ocr" or "embedding"), only providers that have at least one model of
-// that type are returned.
+// "ocr" or "embedding" or "vlm" — plus the pseudo-type "chat" which matches
+// both llm and vlm), only providers that have at least one model of that
+// type are returned.
 func (s *ProviderService) ListAll(typeFilter string) ([]provider.Provider, error) {
 	summaries, err := s.repo.ListAll()
 	if err != nil {
@@ -179,7 +195,7 @@ func (s *ProviderService) ListAll(typeFilter string) ([]provider.Provider, error
 	providerHasType := make(map[uint64]bool)
 	for _, m := range allModels {
 		modelsByProvider[m.ProviderID] = append(modelsByProvider[m.ProviderID], m)
-		if typeFilter != "" && m.ModelType == typeFilter {
+		if matchProviderType(typeFilter, m.ModelType) {
 			providerHasType[m.ProviderID] = true
 		}
 	}

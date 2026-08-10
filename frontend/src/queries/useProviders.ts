@@ -3,7 +3,7 @@ import { message } from 'antd'
 import { providerApi, type Provider, type ProbeConfig, type AttrRules, type CatalogModel } from '@/api/providers'
 import { parseApiError, unwrapResponse } from '@/api/client'
 
-export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm') {
+export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat') {
   return useQuery<Provider[]>({
     queryKey: ['providers', type ?? 'all'],
     queryFn: async () => unwrapResponse<Provider[]>(await providerApi.list(type)),

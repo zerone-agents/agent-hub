@@ -99,7 +99,7 @@ export interface SyncMultiRAGRequest {
 }
 
 export const providerApi = {
-  list: (type?: 'llm' | 'ocr' | 'embedding' | 'vlm') =>
+  list: (type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat') =>
     apiClient.get('/api/v1/admin/providers', { params: type ? { type } : {} }),
   get: (id: number) => apiClient.get(`/api/v1/admin/providers/${id}`),
   create: (data: Partial<Provider>) => apiClient.post('/api/v1/admin/providers', data),

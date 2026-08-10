@@ -71,7 +71,7 @@ export default function AgentListPage() {
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
   const { data: skills = [] } = useSkills()
-  const { data: providers = [] } = useProviders('llm')
+  const { data: providers = [] } = useProviders('chat')
   const { data: mcps = [] } = useMcps()
   const updateAgent = useUpdateAgent()
   const deleteAgent = useDeleteAgent()
