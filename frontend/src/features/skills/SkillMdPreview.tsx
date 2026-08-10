@@ -1,7 +1,6 @@
-import { useEffect, useState, lazy, Suspense } from 'react'
+import { useEffect, useState } from 'react'
+import { Markdown } from '@lobehub/ui'
 import { Segmented, Spin, Tooltip } from 'antd'
-// Lazy-load @lobehub/ui Markdown — pulls in 3.6 MB of dependencies
-const Markdown = lazy(() => import('@lobehub/ui').then((m) => ({ default: m.Markdown })))
 import { FileTextIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
@@ -146,9 +145,7 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
                 </tbody>
               </table>
             )}
-            <Suspense fallback={<Spin size="small" />}>
-              <Markdown>{body}</Markdown>
-            </Suspense>
+            <Markdown>{body}</Markdown>
           </div>
         </>
       )}
