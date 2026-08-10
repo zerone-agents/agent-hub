@@ -22,7 +22,7 @@ type AgentConfig struct {
 	ProviderID       *uint64           `gorm:"column:provider_id;index"`
 	ModelID          string            `gorm:"column:model_id;type:varchar(64)"`
 	ModelSelectionID string            `gorm:"column:model_selection_id;type:varchar(128);default:''"` // 区分同 modelId 的多条 catalog 记录（如不同 contextWindow 的同款模型）
-	FieldOverrides   string            `gorm:"column:field_overrides;type:text"` // JSON，secret fields encrypted
+	FieldOverrides   string            `gorm:"column:field_overrides;type:text"`                       // JSON，secret fields encrypted
 	Source           string            `gorm:"type:varchar(16);not null;default:'remote'"`
 	DesktopEnabled   bool              `gorm:"not null;default:false;index"`
 	MobileEnabled    bool              `gorm:"not null;default:false"`
