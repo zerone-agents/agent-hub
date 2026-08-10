@@ -1,0 +1,114 @@
+name: Release
+
+# 打 `hub-v*` tag 时触发：跑完整 lint + test 通过后，构建镜像并推送
+# `${REGISTRY_IMAGE}:vX.Y.Z` 和 `${REGISTRY_IMAGE}:latest`。
+#
+# tag 命名约定：git tag 用 `hub-v*` 前缀（避免和其他仓库 / 项目的 tag
+# 撞名），构建 docker 镜像时剥掉 `hub-` 前缀，image tag 用 `v*`
+# （符合 docker / semver 生态习惯）。
+
+on:
+  push:
+    tags:
+      - 'hub-v*'
+
+env:
+  GOPROXY: "https://mirrors.aliyun.com/goproxy/,https://goproxy.huaweicloud.com,direct"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go vet ./...
+      - name: Check gofmt
+        run: |
+          output=$(gofmt -l .)
+          if [ -n "$output" ]; then
+            echo "以下文件未通过 gofmt 格式检查:"
+            echo "$output"
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go build ./...
+      - run: go test -v ./...
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type check and run full test suite
+        run: |
+          npx tsc --noEmit &
+          TSC_PID=$!
+          npm run test:run
+          TEST_EXIT=$?
+          wait $TSC_PID
+          TSC_EXIT=$?
+          if [ $TEST_EXIT -ne 0 ] || [ $TSC_EXIT -ne 0 ]; then
+            exit 1
+          fi
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx eslint .
+
+  push:
+    runs-on: ubuntu-latest
+    needs: [lint, test, frontend-test, frontend-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.REGISTRY_HOST }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        run: |
+          IMAGE="${{ vars.REGISTRY_IMAGE }}"
+          # 剥掉 git tag 的 "hub-" 前缀：hub-v1.2.3 → v1.2.3
+          TAG="${GITHUB_REF_NAME#hub-}"
+          echo "Building $IMAGE:$TAG (from git tag $GITHUB_REF_NAME)"
+          docker build --provenance=false -f Dockerfile -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
+          docker tag "$IMAGE:$TAG" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
+
+      - name: Logout from Registry
+        if: always()
+        run: docker logout ${{ vars.REGISTRY_HOST }}
