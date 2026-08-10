@@ -174,7 +174,6 @@ func matchProviderType(filter, modelType string) bool {
 	return filter == modelType
 }
 
-
 // ListAll returns all providers. When typeFilter is non-empty ("llm" or
 // "ocr" or "embedding" or "vlm" — plus the pseudo-type "chat" which matches
 // both llm and vlm), only providers that have at least one model of that
