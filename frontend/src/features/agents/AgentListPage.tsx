@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, SquaresFour, Plug } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent } from '@/api/agents'
@@ -15,6 +15,7 @@ import { useSkills } from '@/queries/useSkills'
 import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
 import { agentApi } from '@/api/agents'
+import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
@@ -123,10 +124,10 @@ export default function AgentListPage() {
     return agents.filter((agent) => {
       const fields = [
         agent.name,
-        agent.config?.title?.zh,
-        agent.config?.title?.en,
-        agent.config?.description?.zh,
-        agent.config?.description?.en,
+        agent.config.title?.zh,
+        agent.config.title?.en,
+        agent.config.description?.zh,
+        agent.config.description?.en,
         agent.group
       ]
       return fields.some((f) => f?.toLowerCase().includes(kw))
@@ -135,14 +136,14 @@ export default function AgentListPage() {
 
   // 按 group 分组，组内按 name 排序
   const groupedAgents = useMemo(() => {
-    const grouped = filteredAgents.reduce<Record<string, Agent[]>>((acc, agent) => {
-      const group = agent.group || '默认分组'
-      if (!acc[group]) acc[group] = []
+    const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
+      const group = agent.group ?? '默认分组'
+      acc[group] ??= []
       acc[group].push(agent)
       return acc
     }, {})
     // 组内按标识首字母排序
-    Object.values(grouped).forEach((list) => list.sort((a, b) => a.name.localeCompare(b.name)))
+    Object.values(grouped).forEach((list) => (list ?? []).sort((a, b) => a.name.localeCompare(b.name)))
     return grouped
   }, [filteredAgents])
 
@@ -165,7 +166,7 @@ export default function AgentListPage() {
 
   const handleEditSubagents = (agent: Agent) => {
     setCurrentName(agent.name)
-    setSelectedSubagents([...(agent.subagents || [])])
+    setSelectedSubagents([...(agent.subagents ?? [])])
     setSubagentOpen(true)
   }
 
@@ -175,10 +176,11 @@ export default function AgentListPage() {
 
   const handleEditTools = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.tools || []
+    let names = agent.tools ?? []
     try {
       const res = await agentApi.getTools(agent.name)
-      if (res.data.success) names = res.data.data || []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     const merged = Array.from(new Set([...names, ...defaultToolNames]))
     setSelectedTools(merged)
@@ -187,10 +189,11 @@ export default function AgentListPage() {
 
   const handleEditSkills = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.skills || []
+    let names = agent.skills ?? []
     try {
       const res = await agentApi.getSkills(agent.name)
-      if (res.data.success) names = res.data.data || []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     setSelectedSkills([...names])
     setSkillOpen(true)
@@ -198,10 +201,11 @@ export default function AgentListPage() {
 
   const handleEditMcps = async (agent: Agent) => {
     setCurrentName(agent.name)
-    let names = agent.mcps || []
+    let names = agent.mcps ?? []
     try {
       const res = await agentApi.getMcps(agent.name)
-      if (res.data.success) names = res.data.data || []
+      const body = res.data as { success: boolean; data?: string[] }
+      if (body.success) names = body.data ?? []
     } catch { /* use fallback */ }
     setSelectedMcps([...names])
     setMcpOpen(true)
@@ -215,8 +219,8 @@ export default function AgentListPage() {
   const handleEditModel = (agent: Agent) => {
     setCurrentName(agent.name)
     setCurrentAgent(agent)
-    const pid = agent.config?.providerId ?? null
-    const mid = agent.config?.modelId || ''
+    const pid = agent.config.providerId ?? null
+    const mid = agent.config.modelId ?? ''
     setSelectedProviderId(pid)
     setSelectedModelId(mid)
     setTestPassed(false)
@@ -228,7 +232,7 @@ export default function AgentListPage() {
     const provider = providers.find(p => p.id === pid)
     if (provider) {
       for (const f of provider.fields) {
-        const override = agent.config?.fieldOverrides?.[f.key]
+        const override = agent.config.fieldOverrides?.[f.key]
         if (override !== undefined) {
           initial[f.key] = override
         } else if (f.key === 'name') {
@@ -240,7 +244,7 @@ export default function AgentListPage() {
     }
     // api_key comes back masked from the backend; show it so the user knows
     // a key is configured, but skip it on save/test unless changed.
-    const maskedApiKey = agent.config?.fieldOverrides?.api_key
+    const maskedApiKey = agent.config.fieldOverrides?.api_key
     setInitialApiKey(maskedApiKey ?? '')
     if (maskedApiKey) {
       initial.api_key = maskedApiKey
@@ -308,15 +312,15 @@ export default function AgentListPage() {
           baseUrl: fieldValues.base_url || '',
         },
       })
-      const result = res.data.data
+      const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
       if (result?.success) {
         message.success(`连接成功 · ${result.latencyMs}ms`)
         setTestPassed(true)
       } else {
-        message.error(`连接失败 · ${result?.error || '未知错误'}`)
+        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
         setTestPassed(false)
       }
-    } catch (err: any) {
+    } catch {
       setTestPassed(false)
     } finally {
       setTesting(false)
@@ -347,8 +351,9 @@ export default function AgentListPage() {
         }
       })
       setModelOpen(false)
-    } catch (err: any) {
-      message.error(`保存失败 · ${err?.message || '未知错误'}`)
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '未知错误'
+      message.error(`保存失败 · ${errMsg}`)
     } finally {
       setSaving(false)
     }
@@ -357,7 +362,7 @@ export default function AgentListPage() {
   // Options for selects
   const subagentOptions = agents
     .filter((a) => a.name !== currentName)
-    .map((a) => ({ value: a.name, label: a.config?.title?.zh || a.config?.title?.en || a.name }))
+    .map((a) => ({ value: a.name, label: a.config.title?.zh ?? a.config.title?.en ?? a.name }))
 
   const toolOptions = tools.map((tl) => ({ value: tl.name, label: tl.name, disabled: defaultToolNames.has(tl.name) }))
 
@@ -380,7 +385,7 @@ export default function AgentListPage() {
 
   // Protocol → display metadata. Used by the provider dropdown's optionRender
   // to append a colored protocol tag after each provider name.
-  const protocolMeta: Record<string, { label: string; color: string }> = {
+  const protocolMeta: Partial<Record<string, { label: string; color: string }>> = {
     anthropic: { label: 'Anthropic', color: 'orange' },
     openai: { label: 'OpenAI', color: 'emerald' },
     mineru: { label: 'MinerU', color: 'geekblue' },
@@ -405,7 +410,7 @@ export default function AgentListPage() {
   const modelSuggestions = useMemo(() => {
     const provider = providers.find(p => p.id === selectedProviderId)
     if (!provider) return []
-    return (provider.defaultModels || [])
+    return provider.defaultModels
       .filter((m) => m.modelType === 'llm' || m.modelType === 'vlm')
       .map(m => ({
         value: m.modelId,
@@ -417,7 +422,7 @@ export default function AgentListPage() {
   const modelDisplayNameMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const p of providers) {
-      for (const mo of (p.defaultModels || [])) {
+      for (const mo of p.defaultModels) {
         m.set(`${p.id}::${mo.modelId}`, mo.displayName)
       }
     }
@@ -425,11 +430,11 @@ export default function AgentListPage() {
   }, [providers])
 
   const getModelDisplayName = (agent: Agent): string => {
-    const pid = agent.config?.providerId
-    const mid = agent.config?.modelId
+    const pid = agent.config.providerId
+    const mid = agent.config.modelId
     if (!pid || !mid) return ''
     const name = modelDisplayNameMap.get(`${pid}::${mid}`)
-    return name || mid
+    return name ?? mid
   }
 
   return (
@@ -439,7 +444,7 @@ export default function AgentListPage() {
           <div className={styles.pageTitle}>Agent 管理</div>
           <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={showCreate}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
           新建代理
         </PrimaryButton>
       </div>
@@ -456,7 +461,7 @@ export default function AgentListPage() {
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : agents.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><SquaresFour size={48} weight="thin" color={t.textMuted} /></div>
+          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={t.textMuted} /></div>
           <div className={styles.emptyTitle}>暂无代理</div>
           <div className={styles.emptyDesc}>创建您的第一个代理以开始使用</div>
         </div>
@@ -466,11 +471,11 @@ export default function AgentListPage() {
             <div className={styles.sectionHeader}>
               <div className={styles.sectionGroupTitle}>
                 <span>{group}</span>
-                <span className={styles.sectionCount}>{groupedAgents[group].length}</span>
+                <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>
             </div>
             <CardGrid>
-              {groupedAgents[group].map((agent) => (
+              {(groupedAgents[group] ?? []).map((agent) => (
                 <AgentCard
                   key={agent.name}
                   agent={agent}
@@ -667,7 +672,7 @@ export default function AgentListPage() {
             <Button onClick={() => { setModelOpen(false); }}>取消</Button>
             <div className={styles.footRight}>
               <Button onClick={handleTest} disabled={!canTest} loading={testing}>
-                <Plug size={14} /> 测试
+                <PlugIcon size={14} /> 测试
               </Button>
               <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
                 确认
@@ -684,8 +689,8 @@ export default function AgentListPage() {
           <>
             {/* Provider/Model offline warning */}
             {(() => {
-              const pid = currentAgent?.config?.providerId
-              const mid = currentAgent?.config?.modelId
+              const pid = currentAgent?.config.providerId
+              const mid = currentAgent?.config.modelId
               if (pid && mid && !modelDisplayNameMap.has(`${pid}::${mid}`)) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>
@@ -738,21 +743,23 @@ export default function AgentListPage() {
                   }}
                   options={modelSuggestions}
                   allowClear
-                  filterOption={(input, option) => {
-                    const value = String(option?.value ?? '').toLowerCase()
-                    const label = String(option?.label ?? '').toLowerCase()
-                    const query = input.toLowerCase()
-                    return value.includes(query) || label.includes(query)
+                  showSearch={{
+                    filterOption: (input, option) => {
+                      const value = (option?.value ?? '').toLowerCase()
+                      const label = (option?.label ?? '').toLowerCase()
+                      const query = input.toLowerCase()
+                      return value.includes(query) || label.includes(query)
+                    },
+                    onSearch: (value) => {
+                      const query = value.toLowerCase()
+                      const hasMatch = modelSuggestions.some(m =>
+                        m.value.toLowerCase().includes(query) ||
+                        m.label.toLowerCase().includes(query)
+                      )
+                      setModelDropdownOpen(hasMatch)
+                    },
                   }}
                   open={modelDropdownOpen}
-                  onSearch={(value) => {
-                    const query = value.toLowerCase()
-                    const hasMatch = modelSuggestions.some(m =>
-                      m.value.toLowerCase().includes(query) ||
-                      m.label.toLowerCase().includes(query)
-                    )
-                    setModelDropdownOpen(hasMatch)
-                  }}
                   onBlur={() => { setModelDropdownOpen(false); }}
                   onFocus={() => { setModelDropdownOpen(modelSuggestions.length > 0); }}
                   onSelect={() => { setModelDropdownOpen(false); }}

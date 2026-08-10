@@ -1,5 +1,5 @@
 import { Input } from 'antd'
-import { MagnifyingGlass } from '@phosphor-icons/react'
+import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 
 export interface NameSearchProps {
   placeholder?: string
@@ -26,7 +26,7 @@ export default function NameSearch({
       <Input
         placeholder={placeholder}
         allowClear
-        prefix={<MagnifyingGlass size={14} color="var(--text-muted, #999)" />}
+        prefix={<MagnifyingGlassIcon size={14} color="var(--text-muted, #999)" />}
         style={{ maxWidth }}
         onChange={(e) => { onSearch(e.target.value.trim()); }}
       />

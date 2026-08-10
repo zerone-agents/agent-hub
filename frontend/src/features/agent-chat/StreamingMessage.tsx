@@ -1,4 +1,4 @@
-import { Robot, Warning } from '@phosphor-icons/react'
+import { RobotIcon, WarningIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ContentPart } from '@/features/chat/parts'
 import { ContentParts } from '@/features/chat/parts'
@@ -56,15 +56,15 @@ export default function StreamingMessage({ parts, phase, error }: StreamingMessa
   return (
     <div className={styles.row}>
       <div className={styles.avatar}>
-        <Robot size={14} weight="bold" />
+        <RobotIcon size={14} weight="bold" />
       </div>
       <div className={styles.content}>
         <div className={styles.role}>助手</div>
         <div className={styles.bubble}>
           {phase === 'error' ? (
             <div className={styles.error}>
-              <Warning size={14} weight="bold" />
-              <span>回复失败：{error || '未知错误'}</span>
+              <WarningIcon size={14} weight="bold" />
+              <span>回复失败：{error ?? '未知错误'}</span>
             </div>
           ) : parts.length > 0 ? (
             <ContentParts parts={parts} />

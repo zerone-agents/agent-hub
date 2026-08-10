@@ -18,7 +18,7 @@ export function useSaveAigcConfig() {
   return useMutation<AigcConfig, Error, { uscc: string; companyName: string }>({
     mutationFn: ({ uscc, companyName }) => aigcApi.save(uscc, companyName).then((r) => r.data.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['aigc-config'] })
+      void qc.invalidateQueries({ queryKey: ['aigc-config'] })
       message.success('AIGC 标识配置已保存')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -30,7 +30,7 @@ export function useRotateAigcKey() {
   return useMutation<AigcConfig>({
     mutationFn: () => aigcApi.rotateKey().then((r) => r.data.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['aigc-config'] })
+      void qc.invalidateQueries({ queryKey: ['aigc-config'] })
       message.success('签名密钥已重新生成')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -39,10 +39,10 @@ export function useRotateAigcKey() {
 
 export function useClearAigcConfig() {
   const qc = useQueryClient()
-  return useMutation<void>({
+  return useMutation({
     mutationFn: () => aigcApi.clear().then(() => undefined),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['aigc-config'] })
+      void qc.invalidateQueries({ queryKey: ['aigc-config'] })
       message.success('AIGC 标识配置已清除')
     },
     onError: (err) => message.error(parseApiError(err))

@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, Star, Medal, UsersThree, ArrowDown, PencilSimple, Trash } from '@phosphor-icons/react'
+import { PlusIcon, StarIcon, MedalIcon, UsersThreeIcon, ArrowDownIcon, PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
 import { useSkills, useDeleteSkill } from '@/queries/useSkills'
 import { skillApi } from '@/api/skills'
+import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
@@ -58,9 +59,9 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export default function SkillListPage() {
@@ -80,7 +81,7 @@ export default function SkillListPage() {
     const kw = keywords.toLowerCase()
     return skills.filter((skill) => {
       const fields = [skill.title, skill.titleEn, skill.name, skill.description, skill.descriptionEn]
-      return fields.some((f) => f?.toLowerCase().includes(kw))
+      return fields.some((f) => f.toLowerCase().includes(kw))
     })
   }, [skills, keywords])
 
@@ -95,8 +96,9 @@ export default function SkillListPage() {
   const handleDownload = async (skill: Skill) => {
     try {
       const res = await skillApi.download(skill.name)
-      if (res.data.success && res.data.data?.url) {
-        window.open(res.data.data.url, '_blank')
+      const body = res.data as ApiEnvelope<{ url?: string }>
+      if (body.success && body.data?.url) {
+        window.open(body.data.url, '_blank')
       }
     } catch {
       message.error('获取下载链接失败')
@@ -106,7 +108,7 @@ export default function SkillListPage() {
   const renderSkillCard = (skill: Skill) => (
     <EntityCard
       key={skill.name}
-      icon={skill.name[0]?.toUpperCase()}
+      icon={skill.name[0].toUpperCase()}
       title={skill.title || skill.titleEn || skill.name}
       subtitle={skill.name}
       headerExtra={
@@ -128,7 +130,7 @@ export default function SkillListPage() {
       bodyExtra={
         skill.url ? (
           <div className={styles.fileMeta}>
-            {formatFileSize(skill.fileSize)} · {skill.fileHash?.slice(0, 8)}
+            {formatFileSize(skill.fileSize)} · {skill.fileHash.slice(0, 8)}
           </div>
         ) : null
       }
@@ -142,10 +144,10 @@ export default function SkillListPage() {
             disabled={!skill.url}
             onClick={() => handleDownload(skill)}
           >
-            <ArrowDown size={14} />
+            <ArrowDownIcon size={14} />
           </button>
           <button type="button" className={styles.actBtn} title="编辑" onClick={() => { showEdit(skill); }}>
-            <PencilSimple size={14} />
+            <PencilSimpleIcon size={14} />
           </button>
           <Popconfirm
             title="确认删除？"
@@ -156,7 +158,7 @@ export default function SkillListPage() {
             onConfirm={() => { deleteSkill.mutate(skill.name); }}
           >
             <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <Trash size={14} />
+              <TrashIcon size={14} />
             </button>
           </Popconfirm>
         </div>
@@ -172,7 +174,7 @@ export default function SkillListPage() {
           <div className={styles.pageSub}>管理 AI 技能包，上传 zip 文件并关联到 Agent</div>
         </div>
         <PrimaryButton
-          icon={<Plus size={16} weight="bold" />}
+          icon={<PlusIcon size={16} weight="bold" />}
           onClick={() => { setEditingSkill(null); setFormOpen(true) }}
         >
           新建技能
@@ -191,7 +193,7 @@ export default function SkillListPage() {
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : filteredSkills.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><Star size={48} weight="thin" color={t.textMuted} /></div>
+          <div style={{ marginBottom: 20 }}><StarIcon size={48} weight="thin" color={t.textMuted} /></div>
           <div className={styles.emptyTitle}>{keywords ? '未找到匹配的技能' : '暂无技能'}</div>
           <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '创建您的第一个技能包以开始使用'}</div>
         </div>
@@ -201,7 +203,7 @@ export default function SkillListPage() {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionTitle}>
-                  <Medal size={18} weight="duotone" />
+                  <MedalIcon size={18} weight="duotone" />
                   专家技能
                 </div>
                 <span className={styles.sectionCount}>{expertSkills.length}</span>
@@ -213,7 +215,7 @@ export default function SkillListPage() {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionTitle}>
-                  <UsersThree size={18} weight="duotone" />
+                  <UsersThreeIcon size={18} weight="duotone" />
                   社区技能
                 </div>
                 <span className={styles.sectionCount}>{communitySkills.length}</span>

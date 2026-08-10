@@ -1,14 +1,14 @@
 import type { Icon } from '@phosphor-icons/react'
 import {
-  Gauge,
-  Robot,
-  Wrench,
-  PlugsConnected,
-  Sparkle,
-  Cube,
-  FilmSlate,
-  Books,
-  Chats
+  GaugeIcon,
+  RobotIcon,
+  WrenchIcon,
+  PlugsConnectedIcon,
+  SparkleIcon,
+  CubeIcon,
+  FilmSlateIcon,
+  BooksIcon,
+  ChatsIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -22,15 +22,15 @@ export interface NavItem {
  * Static navigation items. Not reactive — derived from constants, not a store.
  */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { id: 'dashboard', label: '仪表盘', path: '/dashboard', icon: Gauge },
-  { id: 'agents', label: 'Agent管理', path: '/agents', icon: Robot },
-  { id: 'tools', label: '工具管理', path: '/tools', icon: Wrench },
-  { id: 'mcps', label: 'MCP配置', path: '/mcps', icon: PlugsConnected },
-  { id: 'skills', label: '技能管理', path: '/skills', icon: Sparkle },
-  { id: 'providers', label: '模型管理', path: '/providers', icon: Cube },
-  { id: 'knowledge', label: '知识库管理', path: '/knowledge', icon: Books },
-  { id: 'scenes', label: '场景管理', path: '/scenes', icon: FilmSlate },
-  { id: 'chat', label: '聊天记录', path: '/chat', icon: Chats }
+  { id: 'dashboard', label: '仪表盘', path: '/dashboard', icon: GaugeIcon },
+  { id: 'agents', label: 'Agent管理', path: '/agents', icon: RobotIcon },
+  { id: 'tools', label: '工具管理', path: '/tools', icon: WrenchIcon },
+  { id: 'mcps', label: 'MCP配置', path: '/mcps', icon: PlugsConnectedIcon },
+  { id: 'skills', label: '技能管理', path: '/skills', icon: SparkleIcon },
+  { id: 'providers', label: '模型管理', path: '/providers', icon: CubeIcon },
+  { id: 'knowledge', label: '知识库管理', path: '/knowledge', icon: BooksIcon },
+  { id: 'scenes', label: '场景管理', path: '/scenes', icon: FilmSlateIcon },
+  { id: 'chat', label: '聊天记录', path: '/chat', icon: ChatsIcon }
 ] as const
 
 const SETTINGS_LABELS: Record<string, string> = {
@@ -64,5 +64,5 @@ export function getBreadcrumbs(pathname: string, knowledgeName?: string): Breadc
   const item = NAV_ITEMS.find((i) => i.path === `/${first}`)
   if (!item) return [{ label: '首页' }]
   if (!second) return [home, { label: item.label }]
-  return [home, { label: item.label, path: item.path }, { label: knowledgeName || '详情' }]
+  return [home, { label: item.label, path: item.path }, { label: knowledgeName ?? '详情' }]
 }

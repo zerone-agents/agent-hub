@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChatCircleDots, ArrowLeft } from '@phosphor-icons/react'
+import { ChatCircleDotsIcon, ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
 import { tokens as t } from '@/styles/tokens'
@@ -86,14 +86,14 @@ export default function ChatViewPage() {
             className={styles.mobileBack}
             onClick={() => { setSelectedSession(null); }}
           >
-            <ArrowLeft size={16} />
+            <ArrowLeftIcon size={16} />
             返回会话列表
           </button>
           <MessageViewer session={selectedSession} />
         </div>
       ) : (
         <div className={styles.emptyPane}>
-          <ChatCircleDots size={56} weight="thin" color={t.textMuted} />
+          <ChatCircleDotsIcon size={56} weight="thin" color={t.textMuted} />
           <div className={styles.emptyTitle}>选择一个会话</div>
           <div className={styles.emptyDesc}>从左侧列表中选择会话以查看对话内容</div>
         </div>

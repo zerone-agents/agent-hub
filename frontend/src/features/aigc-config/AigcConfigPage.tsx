@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Form, Input, Popconfirm, Spin, Tag, Typography } from 'antd'
 import { createStyles } from 'antd-style'
-import { Plus } from '@phosphor-icons/react'
+import { PlusIcon } from '@phosphor-icons/react'
 import PrimaryButton from '@/components/PrimaryButton'
 import {
   useAigcConfig,
@@ -120,7 +120,7 @@ export default function AigcConfigPage() {
         >
           <Input placeholder="与营业执照一致的公司全称" />
         </Form.Item>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} htmlType="submit" loading={save.isPending}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} htmlType="submit" loading={save.isPending}>
           保存配置
         </PrimaryButton>
       </Form>

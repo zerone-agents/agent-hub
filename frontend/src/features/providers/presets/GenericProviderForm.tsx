@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Form, Input, Select, Spin, message, Checkbox, Button } from 'antd'
-import { X, Plus, Trash, Plug } from '@phosphor-icons/react'
+import { XIcon, PlusIcon, TrashIcon, PlugIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Provider, CatalogModel, PresetField, AttrValue, AttrRule } from '@/api/providers'
@@ -149,7 +149,7 @@ interface FormValues {
   lockedApiKey: string
 }
 
-const FIELD_DEFINITIONS: Record<string, { label: string; labelEn: string; type: PresetField['type']; required: boolean; secret: boolean }> = {
+const FIELD_DEFINITIONS: Partial<Record<string, { label: string; labelEn: string; type: PresetField['type']; required: boolean; secret: boolean }>> = {
   name: { label: '名称', labelEn: 'Name', type: 'text', required: true, secret: false },
   base_url: { label: 'API 地址', labelEn: 'API URL', type: 'text', required: true, secret: false },
   api_key: { label: 'API 密钥', labelEn: 'API Key', type: 'password', required: false, secret: true },
@@ -197,16 +197,18 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const modelTypeOptions = isOcr ? OCR_MODEL_TYPE_OPTIONS : MODEL_TYPE_OPTIONS
 
   const activeRules: AttrRule[] = useMemo(
-    () => (protocol && attrRules?.[protocol]) || [],
+    () => (protocol ? attrRules?.[protocol] ?? [] : []),
     [protocol, attrRules]
   )
 
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- merge attribute defaults from active rules into local state; functional update returns prev when nothing changed
     setAttributes((prev) => {
       const next = { ...prev }
       let changed = false
       for (const rule of activeRules) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record index returns T not T | undefined; first-time key access genuinely needs the default
         if (!next[rule.key] && rule.default) {
           next[rule.key] = { type: rule.type, value: rule.default }
           changed = true
@@ -232,9 +234,10 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         builtin: editingProvider.builtin,
         lockedApiKey: editingProvider.lockedApiKey,
       })
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync local form state with the editing target on modal open; all four setStates are coupled to the antd form.setFieldsValue above
       setDefaultModels(editingProvider.defaultModels.map((m) => ({ ...m })))
       setFields(editingProvider.fields.map((f) => ({ ...f })))
-      setAttributes({ ...(editingProvider.attributes || {}) })
+      setAttributes({ ...editingProvider.attributes })
       setInitialMaskedAPIKey(editingProvider.lockedApiKey)
     } else {
       form.resetFields()
@@ -244,6 +247,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         iconKey: 'anthropic',
         builtin: false,
       })
+       
       setDefaultModels([])
       setFields([])
       setAttributes({})
@@ -285,19 +289,19 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const handleTestConnection = async () => {
     setProbing(true)
     try {
-      if (isEdit && editingProvider) {
-        const values = form.getFieldsValue(['lockedApiKey', 'baseUrl'])
+      if (editingProvider) {
+        const values = form.getFieldsValue(['lockedApiKey', 'baseUrl']) as { lockedApiKey?: string; baseUrl?: string }
         const res = await probeProvider.mutateAsync({
           id: editingProvider.id,
           apiKey: values.lockedApiKey,
           baseUrl: values.baseUrl,
           models: defaultModels,
         })
-        const result = res.data.data
+        const result = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result?.success) {
           message.success(`连接成功 · ${result.latencyMs}ms`)
         } else {
-          message.error(`连接失败 · ${result?.error || '未知错误'}`)
+          message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
         }
       } else {
         const values = await form.validateFields(['baseUrl', 'lockedApiKey', 'protocol', 'authStyle'])
@@ -312,11 +316,11 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
           authStyle: values.authStyle,
           models: defaultModels,
         })
-        const result = res.data.data
-        if (result?.success) {
-          message.success(`连接成功 · ${result.latencyMs}ms`)
+        const result2 = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
+        if (result2?.success) {
+          message.success(`连接成功 · ${result2.latencyMs}ms`)
         } else {
-          message.error(`连接失败 · ${result?.error || '未知错误'}`)
+          message.error(`连接失败 · ${result2?.error ?? '未知错误'}`)
         }
       }
     } finally {
@@ -328,7 +332,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
   const handleSubmit = async () => {
     const values = await form.validateFields()
 
-    if (isEdit && editingProvider) {
+    if (editingProvider) {
       const data: Partial<Provider> = {
         name: values.name,
         description: values.description,
@@ -383,7 +387,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
       <div className={styles.modalHead}>
         <div className={styles.modalTitle}>{isEdit ? '编辑 Provider' : '新建 Provider'}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -478,7 +482,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             />
             <Select
               size="small"
-              value={model.modelType || (isOcr ? 'ocr' : 'llm')}
+              value={model.modelType}
               onChange={(v) => { handleModelChange(i, 'modelType', v); }}
               options={modelTypeOptions}
             />
@@ -486,7 +490,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               <Input
                 size="small"
                 placeholder="200000"
-                value={model.contextWindow || ''}
+                value={model.contextWindow ?? ''}
                 onChange={(e) => { handleModelChange(i, 'contextWindow', parseInt(e.target.value) || 0); }}
               />
             )}
@@ -500,15 +504,15 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               className={styles.aigcChip}
               title="由系统自动分配，用于 AIGC 内容标识"
             >
-              {model.aigcCode || '—'}
+              {model.aigcCode ?? '—'}
             </span>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveModel(i); }}>
-              <Trash size={13} />
+              <TrashIcon size={13} />
             </button>
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddModel}>
-          <Plus size={14} /> 添加模型
+          <PlusIcon size={14} /> 添加模型
         </button>
 
         {/* 表单字段定义 */}
@@ -534,12 +538,12 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
               密钥 <Checkbox checked={field.secret} disabled />
             </label>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveField(i); }}>
-              <Trash size={13} />
+              <TrashIcon size={13} />
             </button>
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddField}>
-          <Plus size={14} /> 添加字段
+          <PlusIcon size={14} /> 添加字段
         </button>
 
         {/* 动态属性（按 protocol + attr-rules 渲染） */}
@@ -550,7 +554,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             </div>
             {activeRules.map((rule) => {
               const current = attributes[rule.key]
-              const value = current?.value ?? rule.default ?? ''
+              const value = current.value
               if (rule.type === 'bool') {
                 return (
                   <Form.Item key={rule.key} label={rule.label}>
@@ -603,7 +607,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
 
       <div className={styles.modalFoot}>
         <Button
-          icon={probing ? <Spin size="small" /> : <Plug size={14} />}
+          icon={probing ? <Spin size="small" /> : <PlugIcon size={14} />}
           onClick={handleTestConnection}
           loading={probing}
         >

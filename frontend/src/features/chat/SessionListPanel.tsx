@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Spin, Input, Pagination, Popconfirm } from 'antd'
-import { MagnifyingGlass, Trash, ChatCircleDots } from '@phosphor-icons/react'
+import { MagnifyingGlassIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
 import { useChatSessions, useDeleteChatSession } from '@/queries/useChat'
@@ -81,7 +81,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   const deleteSession = useDeleteChatSession()
   const [search, setSearch] = useState('')
 
-  const sessions = data?.items ?? []
+  const sessions = useMemo(() => data?.items ?? [], [data?.items])
   const total = data?.total ?? 0
 
   // 解析 (provider_id, model_selection_id) → catalog displayName。
@@ -90,7 +90,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   const modelDisplayNameMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const p of providers) {
-      for (const mo of (p.defaultModels || [])) {
+      for (const mo of p.defaultModels) {
         if (mo.selectionId) {
           m.set(`${p.id}::${mo.selectionId}`, mo.displayName || mo.modelId)
         }
@@ -115,8 +115,8 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
       (s.model || '').toLowerCase().includes(q) ||
       (s.agent_id || '').toLowerCase().includes(q) ||
       (s.user_id || '').toLowerCase().includes(q) ||
-      (s.display_name || '').toLowerCase().includes(q) ||
-      (s.user_name || '').toLowerCase().includes(q)
+      (s.display_name ?? '').toLowerCase().includes(q) ||
+      (s.user_name ?? '').toLowerCase().includes(q)
     )
   }, [sessions, search])
 
@@ -129,7 +129,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
           placeholder="搜索会话..."
           allowClear
           size="small"
-          prefix={<MagnifyingGlass size={14} color={t.textMuted} />}
+          prefix={<MagnifyingGlassIcon size={14} color={t.textMuted} />}
           value={search}
           onChange={(e) => { setSearch(e.target.value); }}
         />
@@ -140,7 +140,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
           <div className={styles.loading}><Spin size="small" /></div>
         ) : filtered.length === 0 ? (
           <div className={styles.empty}>
-            <ChatCircleDots size={32} weight="thin" color={t.textMuted} />
+            <ChatCircleDotsIcon size={32} weight="thin" color={t.textMuted} />
             <span>{search ? '未找到匹配会话' : '暂无聊天记录'}</span>
           </div>
         ) : (
@@ -153,7 +153,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
               <div className={styles.body}>
                 <div className={styles.itemTitle}>{session.title || '未命名会话'}</div>
                 <div className={styles.meta}>
-                  <span>{session.display_name || session.user_name || session.user_id?.slice(0, 8) || '-'}</span>
+                  <span>{session.display_name ?? session.user_name ?? (session.user_id.slice(0, 8) || '-')}</span>
                   <span className={styles.dot}>·</span>
                   <span>{resolveModelLabel(session)}</span>
                   <span className={styles.dot}>·</span>
@@ -177,7 +177,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
                   title="删除"
                   onClick={(e) => { e.stopPropagation(); }}
                 >
-                  <Trash size={13} />
+                  <TrashIcon size={13} />
                 </button>
               </Popconfirm>
             </div>

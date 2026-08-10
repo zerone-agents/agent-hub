@@ -21,16 +21,16 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import type { TableRowSelection } from "antd/es/table/interface";
 import {
-  ArrowsClockwise,
-  DownloadSimple,
-  FileText,
-  FunnelSimple,
-  ListBullets,
-  PencilSimple,
-  Play,
-  Stop,
-  Trash,
-  UploadSimple,
+  ArrowsClockwiseIcon,
+  DownloadSimpleIcon,
+  FileTextIcon,
+  FunnelSimpleIcon,
+  ListBulletsIcon,
+  PencilSimpleIcon,
+  PlayIcon,
+  StopIcon,
+  TrashIcon,
+  UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
 import { useNavigate, useParams } from "react-router-dom";
@@ -205,7 +205,7 @@ function statusMeta(doc: KnowledgeDocument): {
   color: "processing" | "success" | "error" | "warning" | "default";
   percent: number;
 } {
-  const percent = Math.round((doc.progress ?? 0) * 100);
+  const percent = Math.round((doc.progress) * 100);
   if (doc.run === "1") return { label: "解析中", color: "processing", percent };
   if (doc.run === "3" || percent >= 100)
     return { label: "已完成", color: "success", percent: 100 };
@@ -215,10 +215,12 @@ function statusMeta(doc: KnowledgeDocument): {
 }
 
 function metadataSummary(doc: KnowledgeDocument): string {
-  const fields = doc.meta_fields ?? [];
+  const fields = doc.meta_fields;
   if (fields.length === 0) return "-";
+  const pickStr = (v: unknown): string =>
+    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" || typeof v === "bigint" ? String(v) : "";
   const names = fields
-    .map((item) => String(item.name ?? item.key ?? item.field ?? "").trim())
+    .map((item) => pickStr(item.name ?? item.key ?? item.field).trim())
     .filter(Boolean);
   if (names.length === 0) return `${fields.length} 项`;
   return (
@@ -268,8 +270,11 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-modal state on close so the next open starts clean
       setFiles([]);
+       
       setError("");
+       
       setAutoParse(true);
     }
   }, [open]);
@@ -322,7 +327,7 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
           }}
         >
           <p className="ant-upload-drag-icon">
-            <UploadSimple size={26} />
+            <UploadSimpleIcon size={26} />
           </p>
           <p className="ant-upload-text">拖入文件，或点击选择</p>
           <p className="ant-upload-hint">
@@ -357,7 +362,7 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
                   size="small"
                   type="text"
                   danger
-                  icon={<Trash size={15} />}
+                  icon={<TrashIcon size={15} />}
                   onClick={() =>
                     { setFiles((current) =>
                       current.filter(
@@ -448,9 +453,8 @@ export default function KnowledgeDocumentsPage() {
       const link = document.createElement("a");
       link.href = objectUrl;
       link.download =
-        extractDownloadFileName(response.headers["content-disposition"]) ||
-        doc.name ||
-        `document-${doc.id}`;
+        extractDownloadFileName(response.headers["content-disposition"]) ??
+        (doc.name || `document-${doc.id}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -503,15 +507,15 @@ export default function KnowledgeDocumentsPage() {
       render: (value: string, record) => (
         <div className={styles.documentName}>
           <span className={styles.fileIcon}>
-            <FileText size={18} weight="duotone" />
+            <FileTextIcon size={18} weight="duotone" />
           </span>
           <span className={styles.nameText}>
             <Tooltip title={value} placement="topLeft">
               <span className={styles.primaryText}>{value || "未命名"}</span>
             </Tooltip>
             <span className={styles.secondaryText}>
-              {(record.suffix || record.type || "file")
-                .toString()
+              {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: API may omit suffix */}
+              {(record.suffix ?? record.type ?? "file")
                 .toUpperCase()}{" "}
               · {formatBytes(record.size)}
             </span>
@@ -612,7 +616,7 @@ export default function KnowledgeDocumentsPage() {
               type="link"
               size="small"
               aria-label={`停止解析 ${record.name}`}
-              icon={<Stop size={14} />}
+              icon={<StopIcon size={14} />}
               onClick={() => { stopParsing.mutate([record.id]); }}
             >
               停止
@@ -622,7 +626,7 @@ export default function KnowledgeDocumentsPage() {
               type="link"
               size="small"
               aria-label={`解析文档 ${record.name}`}
-              icon={<Play size={14} />}
+              icon={<PlayIcon size={14} />}
               onClick={() => { parseDocuments.mutate([record.id]); }}
             >
               解析
@@ -631,7 +635,7 @@ export default function KnowledgeDocumentsPage() {
           <Button
             type="link"
             size="small"
-            icon={<ListBullets size={14} />}
+            icon={<ListBulletsIcon size={14} />}
             onClick={() =>
               { navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
             }
@@ -642,7 +646,7 @@ export default function KnowledgeDocumentsPage() {
             type="link"
             size="small"
             aria-label={`下载 ${record.name}`}
-            icon={<DownloadSimple size={14} />}
+            icon={<DownloadSimpleIcon size={14} />}
             loading={downloadingId === record.id}
             onClick={() => void handleDownload(record)}
           >
@@ -651,7 +655,7 @@ export default function KnowledgeDocumentsPage() {
           <Button
             type="link"
             size="small"
-            icon={<PencilSimple size={14} />}
+            icon={<PencilSimpleIcon size={14} />}
             onClick={() => {
               setRenaming(record);
               setRenameValue(record.name);
@@ -719,7 +723,7 @@ export default function KnowledgeDocumentsPage() {
             }}
           />
           <Button
-            icon={<FunnelSimple size={16} />}
+            icon={<FunnelSimpleIcon size={16} />}
             onClick={() => {
               setKeywords("");
               setRunFilter([]);
@@ -732,7 +736,7 @@ export default function KnowledgeDocumentsPage() {
         </div>
         <div className={styles.actions}>
           <Button
-            icon={<ArrowsClockwise size={16} />}
+            icon={<ArrowsClockwiseIcon size={16} />}
             loading={query.isFetching}
             onClick={() => query.refetch()}
           >
@@ -740,7 +744,7 @@ export default function KnowledgeDocumentsPage() {
           </Button>
           <Button
             type="primary"
-            icon={<UploadSimple size={16} />}
+            icon={<UploadSimpleIcon size={16} />}
             onClick={() => { setUploadOpen(true); }}
           >
             上传文档
@@ -771,7 +775,7 @@ export default function KnowledgeDocumentsPage() {
             <Button
               size="small"
               aria-label="批量解析文档"
-              icon={<Play size={14} />}
+              icon={<PlayIcon size={14} />}
               onClick={bulkParse}
             >
               解析
@@ -779,7 +783,7 @@ export default function KnowledgeDocumentsPage() {
             <Button
               size="small"
               aria-label="批量停止解析文档"
-              icon={<Stop size={14} />}
+              icon={<StopIcon size={14} />}
               onClick={bulkStop}
             >
               停止
@@ -792,7 +796,7 @@ export default function KnowledgeDocumentsPage() {
               cancelText="取消"
               onConfirm={bulkDelete}
             >
-              <Button size="small" danger icon={<Trash size={14} />}>
+              <Button size="small" danger icon={<TrashIcon size={14} />}>
                 删除
               </Button>
             </Popconfirm>

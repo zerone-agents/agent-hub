@@ -1,15 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { toolApi, type Tool } from '@/api/tools'
-import { parseApiError } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 
 export function useTools() {
   return useQuery<Tool[]>({
     queryKey: ['tools'],
     queryFn: async () => {
-      const res = await toolApi.list()
-      if (!res.data.success) throw new Error(res.data.message)
-      return res.data.data ?? []
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive: backend may omit data field
+      return unwrapResponse<Tool[]>(await toolApi.list()) ?? []
     }
   })
 }
@@ -19,7 +18,7 @@ export function useCreateTool() {
   return useMutation({
     mutationFn: (data: Partial<Tool>) => toolApi.create(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -32,7 +31,7 @@ export function useUpdateTool() {
     mutationFn: ({ name, data }: { name: string; data: Partial<Tool> }) =>
       toolApi.update(name, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -44,7 +43,7 @@ export function useDeleteTool() {
   return useMutation({
     mutationFn: (name: string) => toolApi.delete(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tools'] })
+      void qc.invalidateQueries({ queryKey: ['tools'] })
       message.success('工具已删除')
     },
     onError: (err) => message.error(parseApiError(err))

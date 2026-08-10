@@ -51,7 +51,7 @@ export function useCreateKnowledge() {
   return useMutation({
     mutationFn: (input: DatasetFormInput) => knowledgeApi.datasets.create(input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       message.success('知识库已创建')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -64,8 +64,8 @@ export function useUpdateKnowledge() {
     mutationFn: ({ id, data }: { id: string; data: DatasetFormInput }) =>
       knowledgeApi.datasets.update(id, data),
     onSuccess: (_res, variables) => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasetDetail(variables.id) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasetDetail(variables.id) })
       message.success('知识库已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -77,7 +77,7 @@ export function useDeleteKnowledge() {
   return useMutation({
     mutationFn: (id: string) => knowledgeApi.datasets.remove([id]),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       message.success('知识库已删除')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -101,8 +101,8 @@ export function useUploadDocuments(datasetId: string) {
   return useMutation({
     mutationFn: (files: File[]) => knowledgeApi.documents.upload(datasetId, files),
     onSuccess: (docs) => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       message.success(`已上传 ${docs.length} 个文档`)
     },
     onError: (err) => message.error(parseApiError(err))
@@ -115,7 +115,7 @@ export function useUpdateDocument(datasetId: string) {
     mutationFn: ({ documentId, patch }: { documentId: string; patch: Record<string, unknown> }) =>
       knowledgeApi.documents.update(datasetId, documentId, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       message.success('文档已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -127,8 +127,8 @@ export function useDeleteDocuments(datasetId: string) {
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.remove(datasetId, documentIds),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       message.success('文档已删除')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -140,7 +140,7 @@ export function useParseDocuments(datasetId: string) {
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.parse(datasetId, documentIds),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       message.success('已加入解析队列')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -152,7 +152,7 @@ export function useStopParsingDocuments(datasetId: string) {
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.stopParse(datasetId, documentIds),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       message.success('已停止解析')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -176,8 +176,8 @@ export function useCreateChunk(datasetId: string, documentId: string) {
   return useMutation({
     mutationFn: (input: ChunkFormInput) => knowledgeApi.chunks.create(datasetId, documentId, input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       message.success('分块已新增')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -190,7 +190,7 @@ export function useUpdateChunk(datasetId: string, documentId: string) {
     mutationFn: ({ chunkId, input }: { chunkId: string; input: ChunkFormInput }) =>
       knowledgeApi.chunks.update(datasetId, documentId, chunkId, input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
       message.success('分块已保存')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -202,8 +202,8 @@ export function useDeleteChunks(datasetId: string, documentId: string) {
   return useMutation({
     mutationFn: (chunkIds: string[]) => knowledgeApi.chunks.remove(datasetId, documentId, chunkIds),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
-      qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       message.success('分块已删除')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -216,7 +216,7 @@ export function useSwitchChunks(datasetId: string, documentId: string) {
     mutationFn: ({ chunkIds, available }: { chunkIds: string[]; available: boolean }) =>
       knowledgeApi.chunks.switch(datasetId, documentId, chunkIds, available),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
     },
     onError: (err) => message.error(parseApiError(err))
   })

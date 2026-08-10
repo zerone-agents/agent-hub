@@ -1,5 +1,5 @@
 import { Spin, Tabs, Tag } from 'antd'
-import { ArrowLeft } from '@phosphor-icons/react'
+import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useNavigate, useParams, useLocation, Outlet } from 'react-router-dom'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
@@ -57,10 +57,11 @@ export default function KnowledgeDetailPage() {
   return (
     <div className={styles.page}>
       <button type="button" className={styles.back} onClick={() => { navigate('/knowledge'); }}>
-        <ArrowLeft size={14} />
+        <ArrowLeftIcon size={14} />
         返回知识库列表
       </button>
 
+      {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- react-query data typed as T | undefined but lint infers dataset as always falsy */}
       {isLoading && !dataset ? (
         <div className={styles.loadingWrap}>
           <Spin />
@@ -68,7 +69,7 @@ export default function KnowledgeDetailPage() {
       ) : (
         <>
           <div className={styles.head}>
-            <span className={styles.title}>{dataset?.name || '知识库'}</span>
+            <span className={styles.title}>{dataset?.name ?? '知识库'}</span>
             <Tag>文档 {dataset?.doc_num ?? 0}</Tag>
             <Tag>分块 {dataset?.chunk_num ?? 0}</Tag>
           </div>

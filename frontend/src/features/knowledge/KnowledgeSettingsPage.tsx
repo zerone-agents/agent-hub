@@ -87,9 +87,12 @@ export default function KnowledgeSettingsPage() {
 
   useEffect(() => {
     if (!dataset || embeddingLocked) return;
-    const current = form.getFieldValue("embd_id");
-    if (current === dataset.embd_id && embdRawToValue.has(current)) {
-      form.setFieldValue("embd_id", embdRawToValue.get(current));
+    const current = form.getFieldValue("embd_id") as string;
+    if (current === dataset.embd_id) {
+      const mapped = embdRawToValue.get(current);
+      if (mapped !== undefined) {
+        form.setFieldValue("embd_id", mapped);
+      }
     }
   }, [dataset, embeddingLocked, embdRawToValue, form]);
 
@@ -137,6 +140,7 @@ export default function KnowledgeSettingsPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- react-query data typed as T | undefined but lint infers dataset as always falsy
   if (isLoading && !dataset) {
     return (
       <div className={styles.loadingWrap}>

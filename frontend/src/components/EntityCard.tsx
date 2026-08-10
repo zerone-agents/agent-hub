@@ -127,7 +127,7 @@ export default function EntityCard({
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <div className={styles.icon}>{icon || firstLetter}</div>
+        <div className={styles.icon}>{icon ?? firstLetter}</div>
         <div className={styles.titleWrap}>
           <div className={styles.title}>{title}</div>
           {subtitle && <div className={styles.subtitle}>{subtitle}</div>}
@@ -136,7 +136,7 @@ export default function EntityCard({
       </div>
       {description && <div className={styles.description}>{description}</div>}
       {bodyExtra && <div className={styles.bodyExtra}>{bodyExtra}</div>}
-      {(footerLeft || footerRight) && (
+      {(footerLeft ?? footerRight) && (
         <div className={styles.footer}>
           {footerLeft && <div className={styles.footerLeft}>{footerLeft}</div>}
           {footerRight && <div className={styles.footerRight}>{footerRight}</div>}

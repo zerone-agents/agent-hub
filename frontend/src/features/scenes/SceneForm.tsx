@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Modal, Form, Input, Select, Switch, Tooltip, Button } from 'antd'
-import { X } from '@phosphor-icons/react'
+import { XIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Scene } from '@/api/scenes'
@@ -94,9 +94,11 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
         }
       })
     } else {
+      const agentId = values.agentId
+      if (agentId === null) return
       await createScene.mutateAsync({
         name: values.name,
-        agentId: values.agentId!,
+        agentId,
         title: values.title,
         titleEn: values.titleEn,
         prompt: values.prompt,
@@ -107,7 +109,7 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
   }
 
   const agentOptions = agents.map((a) => ({
-    label: a.config?.title?.zh || a.config?.title?.en || a.name,
+    label: a.config.title?.zh ?? a.config.title?.en ?? a.name,
     value: a.id
   }))
 
@@ -125,7 +127,7 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
       <div className={styles.head}>
         <div className={styles.title}>{editingScene ? '编辑场景' : '新建场景'}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -137,8 +139,7 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
         <Form.Item label="关联 Agent" name="agentId" rules={[{ required: true, message: '请选择关联 Agent' }]}>
           <Select
             placeholder="选择关联的 Agent"
-            showSearch
-            optionFilterProp="label"
+            showSearch={{ optionFilterProp: 'label' }}
             options={agentOptions}
           />
         </Form.Item>

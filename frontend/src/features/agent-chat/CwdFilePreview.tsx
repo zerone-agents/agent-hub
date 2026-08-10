@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { createStyles } from 'antd-style'
-import { Download, Warning } from '@phosphor-icons/react'
+import { DownloadIcon, WarningIcon } from '@phosphor-icons/react'
 import { agentFilesApi, type FileEntry } from '@/api/agent-files'
 import { parseApiError } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -267,7 +267,6 @@ export async function fetchText(
       }
       const { done, value } = await reader.read()
       if (done) break
-      if (!value) continue
       const remaining = PREVIEW_BYTE_CAP - total
       if (value.byteLength > remaining) {
         const slice = value.subarray(0, remaining)
@@ -321,6 +320,7 @@ export default function CwdFilePreview(props: Props) {
     }
 
     if (!selectedFile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset preview state when no file is selected; this is the sync-handoff counterpart of the in-flight fetch below
       setState(initialState)
       return
     }
@@ -331,7 +331,7 @@ export default function CwdFilePreview(props: Props) {
     const path = fullPath(selectedFile)
     setState({ ...initialState, loading: true, downloadName: selectedFile.name })
 
-    ;(async () => {
+    ;void (async () => {
       try {
         // HEAD precheck: we want Content-Length and Content-Type without
         // pulling the body. If the file is over the cap we render the
@@ -421,7 +421,7 @@ export default function CwdFilePreview(props: Props) {
       } catch (err) {
         if (controller.signal.aborted) return
         const msg = err instanceof Error ? err.message : String(err)
-        if (msg === 'Aborted' || (err as any)?.name === 'AbortError') return
+        if (msg === 'Aborted' || (err instanceof Error && err.name === 'AbortError')) return
         setState({
           ...initialState,
           loading: false,
@@ -464,7 +464,6 @@ export default function CwdFilePreview(props: Props) {
   // authorization". Going through fetch lets us attach the bearer token
   // (the axios interceptor doesn't run for <a> navigation).
   const handleDownload = async () => {
-    if (!selectedFile) return
     try {
       const res = await agentFilesApi.getContent(agentName, fullPath(selectedFile))
       if (!res.ok) {
@@ -497,7 +496,7 @@ export default function CwdFilePreview(props: Props) {
           onClick={handleDownload}
           aria-label="下载"
         >
-          <Download size={14} />
+          <DownloadIcon size={14} />
           下载
         </button>
       </div>
@@ -506,14 +505,14 @@ export default function CwdFilePreview(props: Props) {
 
       {!state.loading && state.error && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>加载失败：{state.error}</span>
         </div>
       )}
 
       {!state.loading && state.kind === 'too-large' && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
             文件较大（超过 {(PREVIEW_BYTE_CAP / 1024).toFixed(0)} KB），仅提供下载。
           </span>
@@ -538,7 +537,7 @@ export default function CwdFilePreview(props: Props) {
           aria-label={selectedFile.name}
         >
           <div className={styles.notice}>
-            <Warning size={24} className={styles.noticeIcon} />
+            <WarningIcon size={24} className={styles.noticeIcon} />
             <span className={styles.noticeText}>PDF 预览不可用，请使用下载按钮</span>
           </div>
         </object>
@@ -553,7 +552,7 @@ export default function CwdFilePreview(props: Props) {
 
       {!state.loading && state.kind === 'binary' && (
         <div className={styles.notice}>
-          <Warning size={24} className={styles.noticeIcon} />
+          <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
             不支持预览{state.mime ? `（${state.mime}）` : ''}
           </span>

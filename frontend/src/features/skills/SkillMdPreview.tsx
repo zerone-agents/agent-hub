@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Markdown } from '@lobehub/ui'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { Segmented, Spin, Tooltip } from 'antd'
-import { FileText } from '@phosphor-icons/react'
+// Lazy-load @lobehub/ui Markdown — pulls in 3.6 MB of dependencies
+const Markdown = lazy(() => import('@lobehub/ui').then((m) => ({ default: m.Markdown })))
+import { FileTextIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import { parseSkillFrontmatter } from './parseSkillFrontmatter'
@@ -74,6 +75,7 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
   const pathsKey = entries.map((e) => e.path).join('|')
   const [activeIdx, setActiveIdx] = useState(0)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset tab to first entry whenever the entry-set identity changes (new zip picked / modal reopened / remote data arrived)
     setActiveIdx(0)
   }, [pathsKey])
 
@@ -81,10 +83,12 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
   // new zip with fewer skills). Keeps the rendered entry in bounds.
   const idx = Math.min(activeIdx, Math.max(0, entries.length - 1))
   const active = entries[idx]
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- entries[idx] may be undefined at runtime when idx is out of bounds
   const { frontmatter, body } = active?.content
     ? parseSkillFrontmatter(active.content)
     : { frontmatter: null, body: '' }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same reason as above
   const hasContent = entries.length > 0 && !!active?.content
 
   return (
@@ -96,13 +100,13 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
       )}
       {!loading && error && (
         <div className={styles.idle}>
-          <FileText size={32} weight="thin" />
+          <FileTextIcon size={32} weight="thin" />
           <span className={styles.error}>{error}</span>
         </div>
       )}
       {!loading && !error && !hasContent && (
         <div className={styles.idle}>
-          <FileText size={32} weight="thin" />
+          <FileTextIcon size={32} weight="thin" />
           <span>{placeholder}</span>
         </div>
       )}
@@ -133,7 +137,7 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
                     <tr key={key}>
                       <td>{key}</td>
                       <td className="skill-md-preview__frontmatter-value">
-                        <span className="skill-md-preview__frontmatter-text" title={String(value)}>
+                        <span className="skill-md-preview__frontmatter-text" title={value}>
                           {value}
                         </span>
                       </td>
@@ -142,7 +146,9 @@ export default function SkillMdPreview({ loading, entries, error, placeholder }:
                 </tbody>
               </table>
             )}
-            <Markdown>{body}</Markdown>
+            <Suspense fallback={<Spin size="small" />}>
+              <Markdown>{body}</Markdown>
+            </Suspense>
           </div>
         </>
       )}

@@ -1,11 +1,11 @@
 import { memo, useState } from 'react'
 import { createStyles } from 'antd-style'
 import {
-  Folder,
-  FolderOpen,
-  FileText,
-  FileArrowDown,
-  Link as LinkIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FileTextIcon,
+  FileArrowDownIcon,
+  LinkIcon,
 } from '@phosphor-icons/react'
 import { useDirEntries } from '@/queries/useAgentFiles'
 import type { FileEntry } from '@/api/agent-files'
@@ -182,17 +182,17 @@ const CwdFileNode = memo(function CwdFileNode(props: NodeProps) {
 function renderIcon(entry: FileEntry, expanded: boolean) {
   switch (entry.type) {
     case 'directory':
-      return expanded ? <FolderOpen size={14} /> : <Folder size={14} />
+      return expanded ? <FolderOpenIcon size={14} /> : <FolderIcon size={14} />
     case 'symlink':
       return <LinkIcon size={14} />
     case 'file':
       // Heuristic: common download-likely extensions (zip, gz, pdf) get the
       // download icon, everything else gets the document icon.
       if (/\.(zip|gz|tar|pdf|7z|rar)$/i.test(entry.name)) {
-        return <FileArrowDown size={14} />
+        return <FileArrowDownIcon size={14} />
       }
-      return <FileText size={14} />
+      return <FileTextIcon size={14} />
     default:
-      return <FileText size={14} />
+      return <FileTextIcon size={14} />
   }
 }

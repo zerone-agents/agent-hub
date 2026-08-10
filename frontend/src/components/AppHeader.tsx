@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Avatar, Breadcrumb, Dropdown } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { SignOut, Key, List, ShieldCheck, SidebarSimple } from '@phosphor-icons/react'
+import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'
 import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
@@ -162,7 +162,7 @@ interface AppHeaderProps {
 }
 
 function getAvatarInitial(name?: string) {
-  const firstCharacter = Array.from(name?.trim() || '')[0]
+  const firstCharacter = Array.from(name?.trim() ?? '')[0]
   return firstCharacter ? firstCharacter.toLocaleUpperCase() : 'U'
 }
 
@@ -206,19 +206,19 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const dropdownItems = [
     {
       key: 'cli-tokens',
-      icon: <Key size={14} />,
+      icon: <KeyIcon size={14} />,
       label: 'CLI Tokens',
       onClick: () => { navigate('/settings/cli-tokens'); }
     },
     {
       key: 'aigc-config',
-      icon: <ShieldCheck size={14} />,
+      icon: <ShieldCheckIcon size={14} />,
       label: 'AIGC 标识配置',
       onClick: () => { navigate('/settings/aigc'); }
     },
     {
       key: 'logout',
-      icon: <SignOut size={14} />,
+      icon: <SignOutIcon size={14} />,
       label: '退出登录',
       onClick: handleLogout
     }
@@ -235,7 +235,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
             onClick={onToggleSidebar}
             aria-label="切换侧边栏"
           >
-            <SidebarSimple size={20} />
+            <SidebarSimpleIcon size={20} />
           </button>
 
           {/* 移动端汉堡按钮 */}
@@ -245,7 +245,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
             onClick={() => { setMobileMenuOpen(!mobileMenuOpen); }}
             aria-label="菜单"
           >
-            <List size={22} weight="bold" />
+            <ListIcon size={22} weight="bold" />
           </button>
 
           {/* 当前页面路径 */}
@@ -261,7 +261,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           <ThemeControls />
           <Dropdown menu={{ items: dropdownItems }} trigger={['click']}>
             <div className={styles.userArea}>
-              <span className={styles.userName}>{user?.name || 'Admin'}</span>
+              <span className={styles.userName}>{user?.name ?? 'Admin'}</span>
               <Avatar className={styles.avatar} size={28}>
                 {getAvatarInitial(user?.name)}
               </Avatar>

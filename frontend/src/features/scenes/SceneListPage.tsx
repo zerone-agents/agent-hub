@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { Spin, Popconfirm, Tooltip } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import type { ColumnsType } from 'antd/es/table'
-import { Plus, PencilSimple, Trash } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import StatusBadge from '@/components/StatusBadge'
@@ -55,7 +55,7 @@ const useStyles = createStyles(({ css }) => ({
 
 function getAgentTitle(agents: Agent[], agentName: string): string {
   const agent = agents.find((a) => a.name === agentName)
-  return agent ? (agent.config?.title?.zh || agent.config?.title?.en || agent.name) : agentName
+  return agent ? (agent.config.title?.zh ?? agent.config.title?.en ?? agent.name) : agentName
 }
 
 export default function SceneListPage() {
@@ -79,7 +79,7 @@ export default function SceneListPage() {
       const kw = keywords.toLowerCase()
       result = scenes.filter((scene) => {
         const fields = [scene.title, scene.titleEn, scene.name, scene.agent, scene.prompt, scene.promptEn]
-        return fields.some((f) => f?.toLowerCase().includes(kw))
+        return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }
     return result.sort((a, b) => a.name.localeCompare(b.name))
@@ -137,7 +137,7 @@ export default function SceneListPage() {
               setFormOpen(true)
             }}
           >
-            <PencilSimple size={14} />
+            <PencilSimpleIcon size={14} />
           </button>
           <Popconfirm
             title="确认删除？"
@@ -148,7 +148,7 @@ export default function SceneListPage() {
             onConfirm={() => { deleteScene.mutate(record.name); }}
           >
             <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <Trash size={14} />
+              <TrashIcon size={14} />
             </button>
           </Popconfirm>
         </div>
@@ -164,7 +164,7 @@ export default function SceneListPage() {
           <div className={styles.pageSub}>管理 Agent 场景配置，组合 Agent 与提示词预设</div>
         </div>
         <PrimaryButton
-          icon={<Plus size={16} weight="bold" />}
+          icon={<PlusIcon size={16} weight="bold" />}
           onClick={() => {
             setEditingScene(null)
             setFormOpen(true)

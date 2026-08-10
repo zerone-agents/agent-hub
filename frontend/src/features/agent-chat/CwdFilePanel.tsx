@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createStyles } from 'antd-style'
-import { FolderSimple, SidebarSimple } from '@phosphor-icons/react'
+import { FolderSimpleIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { useDirEntries } from '@/queries/useAgentFiles'
 import type { FileEntry } from '@/api/agent-files'
 import { tokens as t } from '@/styles/tokens'
@@ -99,6 +99,7 @@ export default function CwdFilePanel({ agentName }: Props) {
   // When agent changes, drop the stale selection. The expanded state is
   // per-agent (separate localStorage key) so we re-read on agentName change.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset on agent switch; both setStates are coupled to agentName change
     setSelected(null)
     setExpanded(readExpanded(agentName))
   }, [agentName])
@@ -126,7 +127,7 @@ export default function CwdFilePanel({ agentName }: Props) {
           setExpanded(next)
         }}
       >
-        <FolderSimple size={18} />
+        <FolderSimpleIcon size={18} />
       </div>
     )
   }
@@ -140,7 +141,7 @@ export default function CwdFilePanel({ agentName }: Props) {
   return (
     <div className={styles.expanded}>
       <div className={styles.header}>
-        <FolderSimple size={14} />
+        <FolderSimpleIcon size={14} />
         <span className={styles.headerTitle}>Agent 工作区</span>
         <button
           type="button"
@@ -149,7 +150,7 @@ export default function CwdFilePanel({ agentName }: Props) {
           title="折叠"
           onClick={handleToggle}
         >
-          <SidebarSimple size={14} />
+          <SidebarSimpleIcon size={14} />
         </button>
       </div>
       <div className={styles.treeWrap}>

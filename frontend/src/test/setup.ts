@@ -3,8 +3,17 @@ import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
 // Unmount React components after each test to avoid leaks.
-afterEach(() => {
+// Then wait for any pending React scheduler macrotasks (flushPassiveEffects
+// callbacks scheduled via MessageChannel) to complete before jsdom tears
+// down the environment. Without this wait, React 19's scheduler may
+// access `window.event` after jsdom is gone, producing:
+//   ReferenceError: window is not defined
+//   react-dom-client.development.js:17920 → schedulerEvent = window.event
+// The wait is ~0ms (just yields to the macrotask queue) but eliminates
+// the race that required CI reruns ~30% of the time.
+afterEach(async () => {
   cleanup()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 // Node >=22 ships an experimental `localStorage` global. Its state varies by
@@ -35,7 +44,7 @@ class InMemoryStorage implements Storage {
     this.store.delete(key)
   }
   setItem(key: string, value: string) {
-    this.store.set(key, String(value))
+    this.store.set(key, value)
   }
 }
 
@@ -65,6 +74,7 @@ if (!isUsableStorage(globalThis.localStorage)) {
 }
 
 // jsdom does not implement matchMedia; antd / lobe-ui expect it.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement matchMedia despite TS lib typing it as required
 if (!window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -82,11 +92,12 @@ if (!window.matchMedia) {
 }
 
 // jsdom lacks ResizeObserver; antd uses it for layout measurement.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement ResizeObserver despite TS lib typing it as required
 if (!window.ResizeObserver) {
   window.ResizeObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
+    observe(): void { /* no-op: jsdom stub */ }
+    unobserve(): void { /* no-op: jsdom stub */ }
+    disconnect(): void { /* no-op: jsdom stub */ }
   }
 }
 

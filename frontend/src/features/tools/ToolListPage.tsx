@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Spin, Popconfirm } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { Plus, PencilSimple, Trash, Wrench } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon, WrenchIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useTools, useDeleteTool } from '@/queries/useTools'
@@ -107,7 +107,7 @@ export default function ToolListPage() {
       const kw = keywords.toLowerCase()
       result = tools.filter((tool) => {
         const fields = [tool.title, tool.name, tool.description]
-        return fields.some((f) => f?.toLowerCase().includes(kw))
+        return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }
     return result.sort((a, b) => a.name.localeCompare(b.name))
@@ -134,7 +134,7 @@ export default function ToolListPage() {
           <div className={styles.pageTitle}>工具管理</div>
           <div className={styles.pageSub}>管理所有可用的 AI 工具定义</div>
         </div>
-        <PrimaryButton icon={<Plus size={16} weight="bold" />} onClick={showCreate}>
+        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
           新建工具
         </PrimaryButton>
       </div>
@@ -154,7 +154,7 @@ export default function ToolListPage() {
       ) : filteredTools.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <Wrench size={48} weight="thin" color={t.textMuted} />
+            <WrenchIcon size={48} weight="thin" color={t.textMuted} />
           </div>
           <div className={styles.emptyTitle}>{keywords ? '未找到匹配的工具' : '暂无工具'}</div>
           <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '创建您的第一个工具以开始使用'}</div>
@@ -164,7 +164,7 @@ export default function ToolListPage() {
           {filteredTools.map((tool) => (
             <EntityCard
               key={tool.name}
-              icon={tool.name[0]?.toUpperCase()}
+              icon={tool.name[0].toUpperCase()}
               title={tool.title || tool.name}
               subtitle={tool.name}
               headerExtra={
@@ -194,7 +194,7 @@ export default function ToolListPage() {
                     title="编辑"
                     onClick={() => { showEdit(tool); }}
                   >
-                    <PencilSimple size={14} />
+                    <PencilSimpleIcon size={14} />
                   </button>
                   <Popconfirm
                     title="确认删除？"
@@ -209,7 +209,7 @@ export default function ToolListPage() {
                       className={`${styles.actBtn} ${styles.actBtnDanger}`}
                       title="删除"
                     >
-                      <Trash size={14} />
+                      <TrashIcon size={14} />
                     </button>
                   </Popconfirm>
                 </div>

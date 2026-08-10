@@ -1,7 +1,7 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { Modal, Form, Input, Select, Upload, Spin, Button } from 'antd'
 import type { UploadProps } from 'antd'
-import { X, UploadSimple } from '@phosphor-icons/react'
+import { XIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
@@ -107,6 +107,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-related local state on modal open; coupled to the antd form.setFieldsValue below
       setSelectedFile(null)
       setUploadError('')
       setSkillMdEntries([])
@@ -132,6 +133,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
   // Bundle zip 会在预览区显示 tab 切换。
   useEffect(() => {
     if (editingSkill && !selectedFile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror remote SKILL.md query state into local state so the preview component can consume it
       setSkillMdLoading(remoteLoading)
       if (remoteError) {
         setSkillMdError(remoteError.message)
@@ -168,7 +170,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
         setSkillMdEntries(entries)
         setSkillMdLoading(false)
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         setSkillMdEntries([])
         setSkillMdError(err instanceof Error ? err.message : '解析 SKILL.md 失败')
         setSkillMdLoading(false)
@@ -187,7 +189,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
           titleEn: values.titleEn,
           description: values.description,
           descriptionEn: values.descriptionEn,
-          file: selectedFile || undefined
+          file: selectedFile ?? undefined
         }
       })
     } else {
@@ -222,7 +224,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
       <div className={styles.head}>
         <div className={styles.title}>{editingSkill ? '编辑技能' : '新建技能'}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -256,7 +258,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
           <div className={styles.section} style={{ marginTop: 20 }}>上传文件</div>
           <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".zip" maxCount={1}>
             <button type="button" className={styles.uploadBtn}>
-              <UploadSimple size={16} />
+              <UploadSimpleIcon size={16} />
               {selectedFile ? selectedFile.name : '选择 .zip 文件'}
             </button>
           </Upload>

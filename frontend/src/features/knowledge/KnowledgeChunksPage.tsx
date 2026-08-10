@@ -24,14 +24,14 @@ import {
   message,
 } from "antd";
 import {
-  ArrowLeft,
-  ArrowsClockwise,
-  ClipboardText,
-  FileText,
-  ImageSquare,
-  PencilSimple,
-  Plus,
-  Trash,
+  ArrowLeftIcon,
+  ArrowsClockwiseIcon,
+  ClipboardTextIcon,
+  FileTextIcon,
+  ImageSquareIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  TrashIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
 import { useNavigate, useParams } from "react-router-dom";
@@ -297,7 +297,7 @@ function sanitizeAllowedInlineHtml(value: string): string {
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     const element = node as HTMLElement;
     if (!ALLOWED_INLINE_TAGS.has(element.tagName))
-      return escapeHtml(element.textContent ?? "");
+      return escapeHtml(element.textContent);
     if (element.tagName === "BR") return "<br>";
     const children = Array.from(element.childNodes).map(serialize).join("");
     const tag = element.tagName.toLowerCase();
@@ -325,7 +325,7 @@ function SafeContent({
 }
 
 function formatPositions(chunk: KnowledgeChunk): string {
-  const positions = chunk.positions ?? [];
+  const positions = chunk.positions;
   if (positions.length === 0) return "-";
   const first = positions[0];
   if (Array.isArray(first)) return `位置 ${first.slice(0, 3).join(", ")}`;
@@ -333,7 +333,7 @@ function formatPositions(chunk: KnowledgeChunk): string {
 }
 
 function tagFeasText(chunk: KnowledgeChunk | null): string {
-  if (!chunk || Object.keys(chunk.tag_feas ?? {}).length === 0) return "";
+  if (!chunk || Object.keys(chunk.tag_feas).length === 0) return "";
   return JSON.stringify(chunk.tag_feas, null, 2);
 }
 
@@ -341,14 +341,15 @@ function fileToBase64(file: File): Promise<ImageFileReadResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = String(reader.result ?? "");
+      const raw = reader.result;
+      const dataUrl = typeof raw === "string" ? raw : "";
       const marker = "base64,";
       const markerIndex = dataUrl.indexOf(marker);
       const base64 =
         markerIndex >= 0 ? dataUrl.slice(markerIndex + marker.length) : dataUrl;
       resolve({ dataUrl, base64 });
     };
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => { reject(reader.error instanceof Error ? reader.error : new Error(String(reader.error))); };
     reader.readAsDataURL(file);
   });
 }
@@ -379,8 +380,11 @@ function ChunkImage({
     let active = true;
     let objectURL = "";
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset fetch-lifecycle status before kicking off a new image fetch; coupled to the request below
     setStatus("loading");
+     
     setErrorMessage("");
+     
     setImageSrc("");
 
     knowledgeApi.images
@@ -413,7 +417,7 @@ function ChunkImage({
 
   const copyImageId = async () => {
     try {
-      await navigator.clipboard?.writeText(imageId);
+      await navigator.clipboard.writeText(imageId);
       message.success("已复制 image id");
     } catch {
       message.error("复制失败");
@@ -424,7 +428,7 @@ function ChunkImage({
     <div className={cx(styles.imageFrame, className)} style={{ width, height }}>
       {status === "failed" ? (
         <div className={styles.imageFallback}>
-          <ImageSquare size={18} />
+          <ImageSquareIcon size={18} />
           <span>图片加载失败</span>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             ID {imageId.slice(0, 8)}
@@ -463,8 +467,8 @@ function ChunkImage({
                 objectFit: "cover",
                 opacity: status === "loaded" ? 1 : 0,
               }}
-              onLoad={() => setStatus("loaded")}
-              onError={() => setStatus("failed")}
+              onLoad={() => { setStatus("loaded"); }}
+              onError={() => { setStatus("failed"); }}
             />
           ) : null}
         </>
@@ -499,8 +503,11 @@ function ChunkEditor({
 
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form-local state on modal open; values are coupled to the antd form.setFieldsValue call below
     setImageBase64("");
+     
     setImagePreviewUrl("");
+     
     setPreviewMode("edit");
     form.setFieldsValue({
       content: editing?.content ?? "",
@@ -520,7 +527,7 @@ function ChunkEditor({
     }
 
     let tagFeas: Record<string, unknown> | undefined;
-    const tagFeasTextValue = values.tag_feas_text?.trim();
+    const tagFeasTextValue = values.tag_feas_text.trim();
     if (tagFeasTextValue) {
       try {
         const parsed = JSON.parse(tagFeasTextValue) as unknown;
@@ -537,9 +544,9 @@ function ChunkEditor({
 
     const input: ChunkFormInput = {
       content: values.content,
-      important_keywords: values.important_keywords ?? [],
-      questions: values.questions ?? [],
-      tag_kwd: values.tag_kwd ?? [],
+      important_keywords: values.important_keywords,
+      questions: values.questions,
+      tag_kwd: values.tag_kwd,
       tag_feas: tagFeas,
     };
     if (!editing && imageBase64) input.image_base64 = imageBase64;
@@ -552,14 +559,14 @@ function ChunkEditor({
     onClose();
   };
 
-  const contentValue = Form.useWatch("content", form) ?? "";
+  const contentValue = Form.useWatch("content", form);
 
   return (
     <Drawer
       title={editing ? "编辑切片" : "新增切片"}
       open={open}
       onClose={onClose}
-      width={720}
+      size={720}
       destroyOnHidden
       extra={
         <Space>
@@ -579,7 +586,7 @@ function ChunkEditor({
         <Space orientation="vertical" size={14} style={{ width: "100%" }}>
           <Segmented
             value={previewMode}
-            onChange={(value) => setPreviewMode(value as "edit" | "preview")}
+            onChange={(value) => { setPreviewMode(value as "edit" | "preview"); }}
             options={[
               { label: "编辑", value: "edit" },
               { label: "预览", value: "preview" },
@@ -651,13 +658,13 @@ function ChunkEditor({
                 maxCount={1}
                 showUploadList={false}
                 beforeUpload={async (file) => {
-                  const image = await fileToBase64(file as File);
+                  const image = await fileToBase64(file);
                   setImageBase64(image.base64);
                   setImagePreviewUrl(image.dataUrl);
                   return Upload.LIST_IGNORE;
                 }}
               >
-                <Button icon={<ImageSquare size={16} />}>选择图片</Button>
+                <Button icon={<ImageSquareIcon size={16} />}>选择图片</Button>
               </Upload>
               {imagePreviewUrl ? (
                 <Image width={180} src={imagePreviewUrl} alt="preview image" />
@@ -699,7 +706,7 @@ export default function KnowledgeChunksPage() {
   const deleteChunks = useDeleteChunks(id, documentId);
   const switchChunks = useSwitchChunks(id, documentId);
 
-  const chunks = query.data?.chunks ?? [];
+  const chunks = useMemo(() => query.data?.chunks ?? [], [query.data?.chunks]);
   const total = query.data?.total ?? 0;
   const document = query.data?.document;
   const currentIds = useMemo(() => chunks.map((chunk) => chunk.id), [chunks]);
@@ -708,6 +715,7 @@ export default function KnowledgeChunksPage() {
     currentIds.every((chunkId) => selectedIds.includes(chunkId));
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drop stale selections whenever the page result changes; this is the canonical "filter derived state against new source" sync pattern
     setSelectedIds((current) =>
       current.filter((chunkId) => currentIds.includes(chunkId)),
     );
@@ -748,7 +756,7 @@ export default function KnowledgeChunksPage() {
 
   const copyChunkId = async (chunkId: string) => {
     try {
-      await navigator.clipboard?.writeText(chunkId);
+      await navigator.clipboard.writeText(chunkId);
       message.success("已复制 chunk id");
     } catch {
       message.error("复制失败");
@@ -760,9 +768,9 @@ export default function KnowledgeChunksPage() {
       <button
         type="button"
         className={styles.back}
-        onClick={() => navigate(`/knowledge/${id}/documents`)}
+        onClick={() => { navigate(`/knowledge/${id}/documents`); }}
       >
-        <ArrowLeft size={14} />
+        <ArrowLeftIcon size={14} />
         返回文档列表
       </button>
 
@@ -782,7 +790,7 @@ export default function KnowledgeChunksPage() {
               <Segmented
                 value={displayMode}
                 onChange={(value) =>
-                  setDisplayMode(value as "ellipsis" | "full")
+                  { setDisplayMode(value as "ellipsis" | "full"); }
                 }
                 options={[
                   { label: "省略", value: "ellipsis" },
@@ -805,14 +813,14 @@ export default function KnowledgeChunksPage() {
               <Checkbox
                 checked={allCurrentSelected}
                 indeterminate={selectedIds.length > 0 && !allCurrentSelected}
-                onChange={(event) => toggleAll(event.target.checked)}
+                onChange={(event) => { toggleAll(event.target.checked); }}
               >
                 选择本页
               </Checkbox>
             </div>
             <div className={styles.actions}>
               <Button
-                icon={<ArrowsClockwise size={16} />}
+                icon={<ArrowsClockwiseIcon size={16} />}
                 loading={query.isFetching}
                 onClick={() => query.refetch()}
               >
@@ -820,7 +828,7 @@ export default function KnowledgeChunksPage() {
               </Button>
               <Button
                 type="primary"
-                icon={<Plus size={16} weight="bold" />}
+                icon={<PlusIcon size={16} weight="bold" />}
                 onClick={openCreate}
               >
                 新增切片
@@ -837,14 +845,14 @@ export default function KnowledgeChunksPage() {
                 <Button
                   size="small"
                   aria-label="批量启用切片"
-                  onClick={() => bulkSwitch(true)}
+                  onClick={() => { bulkSwitch(true); }}
                 >
                   启用
                 </Button>
                 <Button
                   size="small"
                   aria-label="批量停用切片"
-                  onClick={() => bulkSwitch(false)}
+                  onClick={() => { bulkSwitch(false); }}
                 >
                   停用
                 </Button>
@@ -856,14 +864,14 @@ export default function KnowledgeChunksPage() {
                   cancelText="取消"
                   onConfirm={bulkDelete}
                 >
-                  <Button size="small" danger icon={<Trash size={14} />}>
+                  <Button size="small" danger icon={<TrashIcon size={14} />}>
                     删除
                   </Button>
                 </Popconfirm>
                 <Button
                   size="small"
                   type="text"
-                  onClick={() => setSelectedIds([])}
+                  onClick={() => { setSelectedIds([]); }}
                 >
                   清除选择
                 </Button>
@@ -882,13 +890,13 @@ export default function KnowledgeChunksPage() {
                 <Checkbox
                   checked={selectedIds.includes(chunk.id)}
                   onChange={(event) =>
-                    toggleOne(chunk.id, event.target.checked)
+                    { toggleOne(chunk.id, event.target.checked); }
                   }
                 />
                 <div className={styles.cardBody}>
                   <div className={styles.cardMeta}>
                     <Tag color={chunk.image_id ? "purple" : "blue"}>
-                      {chunk.doc_type || (chunk.image_id ? "image" : "text")}
+                      {chunk.doc_type ?? (chunk.image_id ? "image" : "text")}
                     </Tag>
                     <Tag>{formatPositions(chunk)}</Tag>
                     <Badge
@@ -934,23 +942,23 @@ export default function KnowledgeChunksPage() {
                     size="small"
                     checked={chunk.available}
                     onChange={(checked) =>
-                      switchChunks.mutate({
+                      { switchChunks.mutate({
                         chunkIds: [chunk.id],
                         available: checked,
-                      })
+                      }); }
                     }
                   />
                   <Button
                     type="text"
                     size="small"
-                    icon={<ClipboardText size={16} />}
+                    icon={<ClipboardTextIcon size={16} />}
                     onClick={() => void copyChunkId(chunk.id)}
                   />
                   <Button
                     type="text"
                     size="small"
-                    icon={<PencilSimple size={16} />}
-                    onClick={() => openEdit(chunk)}
+                    icon={<PencilSimpleIcon size={16} />}
+                    onClick={() => { openEdit(chunk); }}
                   >
                     编辑
                   </Button>
@@ -959,13 +967,13 @@ export default function KnowledgeChunksPage() {
                     okText="删除"
                     okButtonProps={{ danger: true }}
                     cancelText="取消"
-                    onConfirm={() => deleteChunks.mutate([chunk.id])}
+                    onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
                   >
                     <Button
                       type="text"
                       size="small"
                       danger
-                      icon={<Trash size={16} />}
+                      icon={<TrashIcon size={16} />}
                     >
                       删除
                     </Button>
@@ -981,29 +989,29 @@ export default function KnowledgeChunksPage() {
               pageSize={PAGE_SIZE}
               total={total}
               showTotal={(count) => `共 ${count} 条`}
-              onChange={(next) => setPage(next)}
+              onChange={(next) => { setPage(next); }}
             />
           </div>
         </div>
 
         <aside className={styles.sidePanel}>
           <div className={styles.panelTitle}>
-            <FileText size={18} weight="duotone" />
+            <FileTextIcon size={18} weight="duotone" />
             文档信息
           </div>
           <Descriptions column={1} size="small">
             <Descriptions.Item label="名称">
-              {document?.name || "-"}
+              {document?.name ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="切片数">{total}</Descriptions.Item>
             <Descriptions.Item label="解析方法">
-              {document?.parser_id || "-"}
+              {document?.parser_id ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="来源">
-              {document?.source_type || "-"}
+              {document?.source_type ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="Metadata">
-              {document?.meta_fields?.length
+              {document?.meta_fields.length
                 ? `${document.meta_fields.length} 项`
                 : "-"}
             </Descriptions.Item>
@@ -1021,7 +1029,7 @@ export default function KnowledgeChunksPage() {
         editing={editing}
         datasetId={id}
         documentId={documentId}
-        onClose={() => setEditorOpen(false)}
+        onClose={() => { setEditorOpen(false); }}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { Input } from 'antd'
-import { PaperPlaneRight } from '@phosphor-icons/react'
+import { PaperPlaneRightIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -55,7 +55,7 @@ export default function ChatInput({ disabled, onSend }: ChatInputProps) {
         disabled={disabled}
       />
       <PrimaryButton
-        icon={<PaperPlaneRight size={14} weight="bold" />}
+        icon={<PaperPlaneRightIcon size={14} weight="bold" />}
         disabled={disabled || !value.trim()}
         onClick={submit}
       >

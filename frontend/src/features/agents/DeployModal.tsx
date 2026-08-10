@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography } from 'antd'
 import {
-  Rocket,
-  Stop,
-  Trash,
-  ArrowClockwise,
-  ChatsCircle,
-  Check,
-  Eye,
-  EyeSlash,
-  Copy,
-  Play,
+  RocketIcon,
+  StopIcon,
+  TrashIcon,
+  ArrowClockwiseIcon,
+  ChatsCircleIcon,
+  CheckIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  CopyIcon,
+  PlayIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -297,7 +297,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       }
       setError(null)
       return payload
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
       return null
     }
@@ -306,6 +306,13 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   // Single recursive chain: each tick captures the current generation at
   // schedule time and re-validates it both before fetching and before
   // rescheduling, so stale chains die instead of forking.
+  //
+  // The poll function is recursive (it reschedules itself on each tick). To
+  // avoid referencing `schedulePoll` before its declaration (which violates
+  // react-hooks/immutability) we hold the latest instance in a ref and have
+  // the callback go through the ref. The ref is populated by a separate
+  // effect below so the recursion always sees the current closure.
+  const schedulePollRef = useRef<(delay: number) => void>(() => undefined)
   const schedulePoll = useCallback(
     (delay: number) => {
       const gen = pollGenRef.current
@@ -316,18 +323,26 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         if (current && Date.now() < suppressHealthyRef.current) {
           current.health = undefined
         }
-        schedulePoll(isMidState(current) ? POLL_FAST_MS : POLL_SLOW_MS)
+        schedulePollRef.current(isMidState(current) ? POLL_FAST_MS : POLL_SLOW_MS)
       }, delay)
     },
     [fetchStatus]
   )
+  useEffect(() => {
+    schedulePollRef.current = schedulePoll
+  }, [schedulePoll])
 
   useEffect(() => {
     if (open) {
       const gen = pollGenRef.current
+      // Resetting error/loading state on open is intentional synchronization
+      // with the modal lifecycle — these resets are coupled to the polling
+      // kickoff below and must fire on the same effect tick.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal-open lifecycle reset
       setError(null)
+       
       setStatusLoaded(false)
-      fetchStatus().then(() => {
+      void fetchStatus().then(() => {
         // A close/re-mount (or StrictMode's extra effect cycle) bumps the
         // generation before this fetch resolves; only the live effect may
         // start a polling chain.
@@ -337,8 +352,11 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       })
     } else {
       clearTimer()
+       
       setStatus(null)
+       
       setStatusLoaded(false)
+       
       setError(null)
     }
     return () => { clearTimer(); }
@@ -358,7 +376,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       }
       // Kick off fast polling immediately after deploy response
       schedulePoll(POLL_FAST_MS)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -370,7 +388,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     try {
       await agentApi.stopDeployment(agent.name)
       await fetchStatus()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -389,7 +407,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         setStatus(payload)
       }
       schedulePoll(POLL_FAST_MS)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -405,7 +423,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         await agentApi.deleteDeployment(agent.name)
       }
       await fetchStatus()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
       setLoading(false)
@@ -413,7 +431,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   }
 
   const handleLaunch = () => {
-    if (agent?.name) {
+    if (agent.name) {
       window.open(`/static/agents/${encodeURIComponent(agent.name)}/chat`, '_blank', 'noopener,noreferrer')
     }
   }
@@ -423,9 +441,9 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     setConfirmOpen(true)
   }
 
-  const isMissingConfig = !agent.config?.providerId || !agent.config?.modelId
+  const isMissingConfig = !agent.config.providerId || !agent.config.modelId
 
-  const deploymentStatus = status?.status || 'not_found'
+  const deploymentStatus = status?.status ?? 'not_found'
   const isRunning = deploymentStatus === 'running'
   const isArchived = deploymentStatus === 'archived'
   const isStoppedOrError =
@@ -437,14 +455,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   const canLaunch = isRunning && status?.health === 'healthy'
 
   const provider = useMemo(
-    () => providers.find((p) => p.id === agent.config?.providerId),
-    [providers, agent.config?.providerId]
+    () => providers.find((p) => p.id === agent.config.providerId),
+    [providers, agent.config.providerId]
   )
 
   const description = useMemo(() => {
-    const d = agent.config?.description
-    return d?.zh || d?.en || ''
-  }, [agent.config?.description])
+    const d = agent.config.description
+    return d?.zh ?? d?.en ?? ''
+  }, [agent.config.description])
 
   const statusClass = useMemo(() => {
     if (isRunning) return `${styles.statusTag} ${styles.statusRunning}`
@@ -487,6 +505,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
   const handleCopy = async (which: 'url' | 'key', text: string) => {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: clipboard API may be undefined in non-HTTPS / older browsers despite TS lib typing it as required
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text)
       } else {
@@ -497,6 +516,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         ta.style.opacity = '0'
         document.body.appendChild(ta)
         ta.select()
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- only programmatic fallback available for non-secure (plain HTTP) contexts where navigator.clipboard is undefined
         document.execCommand('copy')
         document.body.removeChild(ta)
       }
@@ -516,7 +536,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       width={600}
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Rocket size={20} weight="duotone" />
+          <RocketIcon size={20} weight="duotone" />
           <span>部署 Agent</span>
         </div>
       }
@@ -524,7 +544,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       <div style={{ padding: '16px 0' }}>
         {isMissingConfig && (
           <Alert
-            message="未配置模型"
+            title="未配置模型"
             description="请先为 Agent 配置 Provider 和 Model，否则部署可能失败。"
             type="warning"
             showIcon
@@ -534,11 +554,10 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {error && (
           <Alert
-            message={error}
+            title={error}
             type="error"
             showIcon
-            closable
-            onClose={() => { setError(null); }}
+            closable={{ onClose: () => { setError(null); } }}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -547,7 +566,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         <div className={styles.infoCard}>
           <div className={styles.infoHead}>
             <div>
-              <h3 className={styles.infoTitle}>{agent.config?.title?.zh || agent.config?.title?.en || agent.name}</h3>
+              <h3 className={styles.infoTitle}>{agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}</h3>
               {description && <p className={styles.infoDesc}>{description}</p>}
             </div>
             <span className={statusClass}>{statusText}</span>
@@ -555,23 +574,23 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           <div className={styles.infoGrid}>
             <div>
               <div className={styles.infoLabel}>Provider</div>
-              <div className={styles.infoValue}>{provider?.name ?? (agent.config?.providerId != null ? `#${agent.config.providerId}` : '-')}</div>
+              <div className={styles.infoValue}>{provider?.name ?? (agent.config.providerId != null ? `#${agent.config.providerId}` : '-')}</div>
             </div>
             <div>
               <div className={styles.infoLabel}>Model</div>
-              <div className={styles.infoValue}>{agent.config?.modelId || '-'}</div>
+              <div className={styles.infoValue}>{agent.config.modelId ?? '-'}</div>
             </div>
             <div>
               <div className={styles.infoLabel}>端口</div>
-              <div className={styles.infoValue}>{status?.hostPort || '-'}</div>
+              <div className={styles.infoValue}>{status?.hostPort ?? '-'}</div>
             </div>
           </div>
         </div>
 
         {/* 工具 / 子代理 */}
         {(() => {
-          const tools = agent.tools || []
-          const subagents = agent.subagents || []
+          const tools = agent.tools ?? []
+          const subagents = agent.subagents ?? []
           if (tools.length === 0 && subagents.length === 0) return null
           return (
             <div className={styles.capabilityWrap}>
@@ -583,7 +602,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* 技能 */}
         {(() => {
-          const items = agent.skills || []
+          const items = agent.skills ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -599,7 +618,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* 知识库 */}
         {(() => {
-          const items = agent.datasets || []
+          const items = agent.datasets ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -615,7 +634,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* MCP */}
         {(() => {
-          const items = agent.mcps || []
+          const items = agent.mcps ?? []
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
@@ -640,9 +659,9 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 type="button"
                 className={styles.apiAction}
                 title="复制 URL"
-                onClick={() => handleCopy('url', status.runtimeUrl || '')}
+                onClick={() => handleCopy('url', status.runtimeUrl ?? '')}
               >
-                {copied === 'url' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
+                {copied === 'url' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
               </button>
             </div>
             <div className={styles.apiRow}>
@@ -656,16 +675,16 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 title={showApiKey ? '隐藏' : '显示'}
                 onClick={() => { setShowApiKey(!showApiKey); }}
               >
-                {showApiKey ? <EyeSlash size={13} /> : <Eye size={13} />}
+                {showApiKey ? <EyeSlashIcon size={13} /> : <EyeIcon size={13} />}
               </button>
               {status.apiKey && (
                 <button
                   type="button"
                   className={styles.apiAction}
                   title="复制 Key"
-                  onClick={() => handleCopy('key', status.apiKey || '')}
+                  onClick={() => handleCopy('key', status.apiKey ?? '')}
                 >
-                  {copied === 'key' ? <span className={styles.copied}>已复制</span> : <Copy size={13} />}
+                  {copied === 'key' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
                 </button>
               )}
             </div>
@@ -695,7 +714,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                       icon:
                         state === 'finish' ? (
                           <span className="deploy-step-icon deploy-step-icon-finish">
-                            <Check size={13} weight="bold" />
+                            <CheckIcon size={13} weight="bold" />
                           </span>
                         ) : state === 'process' ? (
                           <span className="deploy-step-icon deploy-step-icon-process" />
@@ -719,7 +738,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {deploymentStatus === 'error' && status && (
           <div style={{ marginBottom: 16 }}>
-            <Space direction="vertical" size="small">
+            <Space orientation="vertical" size="small">
               <Text type="danger">
                 状态: <Text strong>{status.status}</Text>
               </Text>
@@ -740,7 +759,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           {isRunning && (
             <>
               <Button
-                icon={<Stop size={16} />}
+                icon={<StopIcon size={16} />}
                 onClick={handleStop}
                 loading={loading}
               >
@@ -748,21 +767,21 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               </Button>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
               >
                 归档
               </Button>
               <Button
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
               >
                 重新部署
               </Button>
               <PrimaryButton
-                icon={<ChatsCircle size={16} weight="fill" />}
+                icon={<ChatsCircleIcon size={16} weight="fill" />}
                 onClick={handleLaunch}
                 disabled={!canLaunch || loading}
               >
@@ -773,7 +792,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
           {(isNotFound || !status) && (
             <PrimaryButton
-              icon={<Rocket size={16} />}
+              icon={<RocketIcon size={16} />}
               onClick={() => handleDeploy()}
               loading={loading}
               disabled={isMissingConfig}
@@ -786,14 +805,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             <>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete(true)}
                 loading={loading}
               >
                 彻底删除
               </Button>
               <PrimaryButton
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
                 disabled={isMissingConfig}
@@ -807,7 +826,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             <>
               <Button
                 danger
-                icon={<Trash size={16} />}
+                icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
               >
@@ -815,7 +834,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               </Button>
               {(deploymentStatus === 'stopped' || deploymentStatus === 'exited') ? (
                 <PrimaryButton
-                  icon={<Play size={16} weight="fill" />}
+                  icon={<PlayIcon size={16} weight="fill" />}
                   onClick={handleStart}
                   loading={loading}
                 >
@@ -823,7 +842,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 </PrimaryButton>
               ) : null}
               <Button
-                icon={<ArrowClockwise size={16} />}
+                icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
                 disabled={isMissingConfig}
@@ -839,7 +858,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
       <Modal
         open={confirmOpen}
-        title={`重新部署 ${agent.config?.title?.zh || agent.config?.title?.en || agent.name}`}
+        title={`重新部署 ${agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}`}
         onCancel={() => {
           setConfirmOpen(false)
           setRotateKey(false)
@@ -848,14 +867,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setConfirmOpen(false); setRotateKey(false) }}>取消</Button>
-            <PrimaryButton onClick={() => { handleDeploy(true, rotateKey); setConfirmOpen(false); setRotateKey(false) }}>
+            <PrimaryButton onClick={() => { void handleDeploy(true, rotateKey); setConfirmOpen(false); setRotateKey(false) }}>
               确认重新部署
             </PrimaryButton>
           </div>
         }
       >
         <Alert
-          message="重新部署将重新创建容器"
+          title="重新部署将重新创建容器"
           description="如果勾选下方选项，将生成新的 API Key，旧 API Key 会立即失效，使用旧 Key 的客户端需要重新配置。"
           type="warning"
           showIcon

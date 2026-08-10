@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal, Form, Input, Select, Spin, InputNumber, List, Button } from 'antd'
-import { X, Plus, Trash, PlugsConnected } from '@phosphor-icons/react'
+import { XIcon, PlusIcon, TrashIcon, PlugsConnectedIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Mcp, McpTransportType, McpProbeResult } from '@/api/mcps'
@@ -177,11 +177,12 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
           title: detail.title,
           description: detail.description,
           transportType: detail.transportType,
-          url: detail.url || '',
+          url: detail.url ?? '',
           retryMaxRetries: detail.retryMaxRetries ?? null,
           retryTimeoutMs: detail.retryTimeoutMs ?? null,
         })
-        setHeaderPairs(Object.entries(detail.headers ?? {}).map(([k, v]) => ({ key: k, value: v })))
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- sync dynamic-field state with loaded detail; coupled to the antd form.setFieldsValue above
+        setHeaderPairs(Object.entries(detail.headers).map(([k, v]) => ({ key: k, value: v })))
         // 编辑模式：用后端存储的 tools 初始化显示
         if (detail.tools && detail.tools.length > 0) {
           setProbedResult({
@@ -195,6 +196,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
     } else {
       form.resetFields()
       form.setFieldsValue({ transportType: 'sse', retryMaxRetries: null, retryTimeoutMs: null })
+       
       setHeaderPairs([])
       setProbedResult(null)
     }
@@ -249,7 +251,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
       payload.tools = probedResult.tools
     }
 
-    if (isEdit && editingMcp) {
+    if (editingMcp) {
       await updateMcp.mutateAsync({ name: editingMcp.name, data: payload })
     } else {
       await createMcp.mutateAsync({ ...payload, name: values.name })
@@ -271,7 +273,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
       <div className={styles.modalHead}>
         <div className={styles.modalTitle}>{isEdit ? '编辑 MCP' : '新建 MCP'}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
-          <X size={18} />
+          <XIcon size={18} />
         </button>
       </div>
 
@@ -341,12 +343,12 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
                     onChange={(e) => { handleHeaderChange(i, 'value', e.target.value); }}
                   />
                   <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveHeader(i); }}>
-                    <Trash size={13} />
+                    <TrashIcon size={13} />
                   </button>
                 </div>
               ))}
               <button type="button" className={styles.addBtn} onClick={handleAddHeader}>
-                <Plus size={14} /> 添加请求头
+                <PlusIcon size={14} /> 添加请求头
               </button>
             </>
 
@@ -365,18 +367,18 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
             {/* 探测连接 */}
             <div style={{ marginTop: 8, marginBottom: 16 }}>
               <Button
-                icon={probing ? <Spin size="small" /> : <PlugsConnected size={15} />}
+                icon={probing ? <Spin size="small" /> : <PlugsConnectedIcon size={15} />}
                 onClick={handleProbe}
                 loading={probing}
               >
                 探测连接
               </Button>
-              {probedResult && probedResult.status === 'success' && (
+              {probedResult?.status === 'success' && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: t.success }}>
                   ✓ 连接成功{probedResult.tools ? `，发现 ${probedResult.tools.length} 个工具` : ''}
                 </span>
               )}
-              {probedResult && probedResult.status === 'failed' && (
+              {probedResult?.status === 'failed' && (
                 <span style={{ marginLeft: 8, fontSize: 12, color: t.danger }}>
                   ✗ {probedResult.error ?? '连接失败'}
                 </span>

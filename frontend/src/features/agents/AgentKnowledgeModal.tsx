@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Spin, Transfer, Button } from 'antd'
 import type { TransferProps } from 'antd'
-import { Books } from '@phosphor-icons/react'
+import { BooksIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent } from '@/api/agents'
@@ -42,7 +42,7 @@ const useStyles = createStyles(({ css }) => ({
 
 export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowledgeModalProps) {
   const { styles } = useStyles()
-  const name = agent?.name || ''
+  const name = agent?.name ?? ''
 
   const { data: boundIds = [], isLoading: isLoadingBound } = useAgentKnowledgeDatasets(name)
   const { data: listData, isLoading: isLoadingList } = useKnowledgeList({ page_size: 1000 })
@@ -60,6 +60,7 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync targetKeys with the latest boundIds every time the modal opens or bound ids refetch
       setTargetKeys(boundIds)
     }
   }, [open, boundIds])
@@ -80,8 +81,8 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
 
   const titleNode = (
     <div className={styles.head}>
-      <Books size={20} weight="duotone" />
-      <span>{agent ? `配置知识库：${agent.config?.title?.zh || agent.name}` : '配置知识库'}</span>
+      <BooksIcon size={20} weight="duotone" />
+      <span>{agent ? `配置知识库：${agent.config.title?.zh ?? agent.name}` : '配置知识库'}</span>
     </div>
   )
 
@@ -113,7 +114,7 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
           onChange={handleChange}
           titles={['可选知识库', '已绑定']}
           render={(item) => item.title}
-          listStyle={{ width: 280, height: 360 }}
+          styles={{ section: { width: 280, height: 360 } }}
         />
       )}
     </Modal>

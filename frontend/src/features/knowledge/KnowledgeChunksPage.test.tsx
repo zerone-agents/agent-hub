@@ -7,7 +7,7 @@ import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeChunksPage from "./KnowledgeChunksPage";
 
 const h = vi.hoisted(() => ({
-  chunks: [] as Array<Record<string, unknown>>,
+  chunks: [] as Record<string, unknown>[],
   total: 0,
   refetchMock: vi.fn(),
   createMock: vi.fn(),
@@ -158,7 +158,7 @@ describe("KnowledgeChunksPage", () => {
     await user.type(textarea, "updated content");
     await user.click(screen.getByRole("button", { name: "保存切片" }));
 
-    await waitFor(() => expect(h.updateMock).toHaveBeenCalled());
+    await waitFor(() => { expect(h.updateMock).toHaveBeenCalled(); });
     expect(h.updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         chunkId: "c1",
@@ -202,7 +202,7 @@ describe("KnowledgeChunksPage", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "创建切片" }));
 
-    await waitFor(() => expect(h.createMock).toHaveBeenCalled());
+    await waitFor(() => { expect(h.createMock).toHaveBeenCalled(); });
     expect(h.createMock).toHaveBeenCalledWith(
       expect.objectContaining({
         content: "new image chunk",

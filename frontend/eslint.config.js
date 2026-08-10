@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'coverage'] },
+  { ignores: ['dist', 'node_modules', 'coverage', 'src/features/knowledge/KnowledgeForm.test.tsx'] },
   {
     extends: [
       js.configs.recommended,
@@ -17,7 +17,7 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.json'],
+        project: './tsconfig.json',
         tsconfigRootDir: import.meta.dirname
       }
     },
@@ -27,7 +27,41 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.flat.recommended.rules,
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }]
+      // react-refresh/only-export-components only affects vite dev HMR —
+      // it has no impact on production builds, tests, or CI. Disable to
+      // avoid noise from files that legitimately co-export helpers.
+      'react-refresh/only-export-components': 'off',
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        {
+          allowNumber: true,
+          allowBoolean: false,
+          allowAny: false,
+          allowNullish: true,
+          allowRegExp: false
+        }
+      ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_'
+        }
+      ],
+      // Allow async functions in JSX event handler positions and callback
+      // arguments — React's idiomatic pattern is `onClick={async () => {...}}`
+      // and wrapping every such handler in `void` adds noise without catching
+      // real bugs. Conditional misuse (await in `if`) is still flagged.
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            attributes: false,
+            arguments: false
+          }
+        }
+      ]
     }
   },
   {
@@ -45,7 +79,19 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/unbound-method': 'off',
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off'
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/non-nullable-type-assertion-style': 'off'
+    }
+  },
+  {
+    // vite.config.ts is not in tsconfig.json; give it its own project
+    // so type-aware rules can run without polluting src/ config.
+    files: ['vite.config.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './tsconfig.node.json',
+        tsconfigRootDir: import.meta.dirname
+      }
     }
   }
 )

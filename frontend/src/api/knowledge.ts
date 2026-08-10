@@ -210,14 +210,15 @@ function pick(raw: RawObject, ...keys: string[]): unknown {
 
 function str(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
   if (value === undefined || value === null) return fallback;
-  return String(value);
+  return fallback;
 }
 
 function optionalStr(value: unknown): string | undefined {
   if (typeof value === "string") return value === "" ? undefined : value;
-  if (value === undefined || value === null) return undefined;
-  return String(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  return undefined;
 }
 
 function num(value: unknown, fallback = 0): number {
@@ -432,25 +433,33 @@ async function unwrap<T>(
 ): Promise<T> {
   const res = await promise;
   const body = res.data;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- axios res.data typed as Envelope<T> but runtime may be undefined for empty/error responses
   if (body && !body.success) {
-    throw new Error(body.error || body.message || "请求失败");
+    throw new Error(body.error ?? body.message ?? "请求失败");
   }
   return body.data;
 }
 
 export function buildQuery(params: Record<string, unknown>): string {
   const query = new URLSearchParams();
+  const toPrimitive = (v: unknown): string | undefined => {
+    if (typeof v === "string") return v;
+    if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") return String(v);
+    return undefined;
+  };
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
     if (Array.isArray(value)) {
       for (const item of value) {
         if (item !== undefined && item !== null && item !== "") {
-          query.append(key, String(item));
+          const s = toPrimitive(item);
+          if (s !== undefined) query.append(key, s);
         }
       }
       continue;
     }
-    query.set(key, String(value));
+    const s = toPrimitive(value);
+    if (s !== undefined) query.set(key, s);
   }
   const qs = query.toString();
   return qs ? `?${qs}` : "";
@@ -469,24 +478,35 @@ export interface HealthStatus {
 
 export const knowledgeApi = {
   health: async (): Promise<HealthStatus> => {
+    interface HealthData {
+      configured?: boolean
+      connected?: boolean
+      status?: string
+      message?: string
+    }
+    interface AxiosErrShape {
+      response?: { data?: { data?: HealthData; error?: string }; status?: number }
+      message?: string
+    }
     try {
-      const res = await apiClient.get(`${BASE}/health`)
-      const data = res.data?.data
+      const res = await apiClient.get<{ data?: HealthStatus }>(`${BASE}/health`)
+      const data = res.data.data
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
-        status: data?.status || 'unknown',
+        status: data?.status ?? 'unknown',
         message: data?.message,
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // When MULTIRAG is unconfigured the backend returns 503 with success:false,
       // but the data envelope still contains configured/connected/status.
-      const data = err?.response?.data?.data
+      const axiosErr = err as AxiosErrShape
+      const data = axiosErr.response?.data?.data
       return {
         configured: !!data?.configured,
         connected: !!data?.connected,
-        status: data?.status || 'unavailable',
-        message: err?.response?.data?.error || data?.message || err?.message,
+        status: data?.status ?? 'unavailable',
+        message: axiosErr.response?.data?.error ?? data?.message ?? axiosErr.message,
       }
     }
   },
@@ -507,8 +527,8 @@ export const knowledgeApi = {
         apiClient.get(`${BASE}/datasets${qs}`),
       );
       return {
-        total: num(data?.total),
-        datasets: (data?.datasets ?? []).map(normalizeDataset),
+        total: num(data.total),
+        datasets: (data.datasets).map(normalizeDataset),
       };
     },
 
@@ -516,14 +536,14 @@ export const knowledgeApi = {
       const data = await unwrap<RawObject>(
         apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     create: async (input: DatasetFormInput): Promise<KnowledgeDataset> => {
       const data = await unwrap<RawObject>(
         apiClient.post(`${BASE}/datasets`, toDatasetBody(input)),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     update: async (
@@ -536,7 +556,7 @@ export const knowledgeApi = {
           toDatasetBody(input),
         ),
       );
-      return normalizeDataset(data ?? {});
+      return normalizeDataset(data);
     },
 
     remove: (datasetIds: string[]): Promise<unknown> =>
@@ -566,8 +586,8 @@ export const knowledgeApi = {
         ),
       );
       return {
-        total: num(data?.total),
-        documents: (data?.documents ?? []).map(normalizeDocument),
+        total: num(data.total),
+        documents: (data.documents).map(normalizeDocument),
       };
     },
 
@@ -587,7 +607,7 @@ export const knowledgeApi = {
           },
         ),
       );
-      return (data ?? []).map(normalizeDocument);
+      return (data).map(normalizeDocument);
     },
 
     update: async (
@@ -601,7 +621,7 @@ export const knowledgeApi = {
           patch,
         ),
       );
-      return normalizeDocument(data ?? {});
+      return normalizeDocument(data);
     },
 
     remove: (datasetId: string, documentIds: string[]): Promise<unknown> =>
@@ -685,9 +705,9 @@ export const knowledgeApi = {
         ),
       );
       return {
-        total: num(data?.total),
-        chunks: (data?.chunks ?? []).map(normalizeChunk),
-        document: data?.document ? normalizeDocument(data.document) : null,
+        total: num(data.total),
+        chunks: (data.chunks).map(normalizeChunk),
+        document: data.document ? normalizeDocument(data.document) : null,
       };
     },
 
@@ -702,7 +722,7 @@ export const knowledgeApi = {
           toChunkBody(input),
         ),
       );
-      return normalizeChunk(data ?? {});
+      return normalizeChunk(data);
     },
 
     update: async (
@@ -717,7 +737,7 @@ export const knowledgeApi = {
           toChunkBody(input),
         ),
       );
-      return normalizeChunk(data ?? {});
+      return normalizeChunk(data);
     },
 
     remove: (
@@ -747,7 +767,7 @@ export const knowledgeApi = {
       const data = await unwrap<RawObject>(
         apiClient.post(`${BASE}/retrieval`, input),
       );
-      return normalizeRetrievalResult(data ?? {});
+      return normalizeRetrievalResult(data);
     },
   },
 };

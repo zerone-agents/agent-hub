@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { CaretRight, CaretDown, CheckCircle, XCircle, Spinner } from '@phosphor-icons/react'
+import { CaretRightIcon, CaretDownIcon, CheckCircleIcon, XCircleIcon, SpinnerIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import {
@@ -91,7 +91,9 @@ function resultToString(result: unknown): string {
   try {
     return JSON.stringify(result, null, 2)
   } catch {
-    return String(result)
+    return typeof result === 'number' || typeof result === 'boolean' || typeof result === 'bigint'
+      ? String(result)
+      : '[unserializable]'
   }
 }
 
@@ -132,10 +134,10 @@ export default function ToolCallBlock({
         data-status={status}
         onClick={handleClick}
       >
-        {open ? <CaretDown size={10} /> : <CaretRight size={10} />}
-        {status === 'pending' && <Spinner size={12} color={t.textMuted} />}
-        {status === 'success' && <CheckCircle size={12} color={t.success} weight="fill" />}
-        {status === 'error' && <XCircle size={12} color={t.danger} weight="fill" />}
+        {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
+        {status === 'pending' && <SpinnerIcon size={12} color={t.textMuted} />}
+        {status === 'success' && <CheckCircleIcon size={12} color={t.success} weight="fill" />}
+        {status === 'error' && <XCircleIcon size={12} color={t.danger} weight="fill" />}
         <span className={styles.toolName}>{toolName}</span>
         {summary && <span className={styles.summary}>{summary}</span>}
       </div>

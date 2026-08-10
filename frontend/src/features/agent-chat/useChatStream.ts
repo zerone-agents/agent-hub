@@ -12,6 +12,31 @@ export interface StreamState {
 
 const INITIAL: StreamState = { phase: 'idle', parts: [], error: null }
 
+// ── SSE event payload shapes ────────────────────────────────────────
+// Runtime SSE data is JSON.parse'd and structurally unverified; these
+// types describe the expected shape so the rest of the parser can use
+// type-safe member access. Missing fields fall back via `?? defaults`.
+interface SSEPartial {
+  type?: 'text' | 'thinking' | 'tool_use'
+  text?: string
+  id?: string
+  tool_name?: string
+  input?: unknown
+}
+interface SSEContentBlock {
+  type?: 'text' | 'thinking' | 'tool_use'
+  text?: string
+  thinking?: string
+  id?: string
+  name?: string
+  input?: unknown
+}
+interface SSEPayload {
+  partial?: SSEPartial
+  message?: { content?: SSEContentBlock[] }
+  result?: { output?: unknown; tool_use_id?: string }
+}
+
 interface UseChatStreamReturn {
   state: StreamState
   send: (agentName: string, sessionId: string, content: string) => Promise<void>
@@ -75,7 +100,10 @@ export function useChatStream(): UseChatStreamReturn {
       armIdleTimer() // fetch handshake may take time; re-arm once streaming starts
       setState((s) => ({ ...s, phase: 'streaming' }))
 
-      const reader = resp.body!.getReader()
+      // Body is non-null for SSE responses from our backend; if it ever is null,
+      // .getReader() on a synthetic empty stream ends the loop cleanly via `done`.
+      const body = resp.body ?? new ReadableStream<Uint8Array>()
+      const reader = body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
 
@@ -90,6 +118,7 @@ export function useChatStream(): UseChatStreamReturn {
 
       let eventName = ''
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- SSE infinite loop, exits via `if (done) break`
       while (true) {
         const { value, done } = await reader.read()
         armIdleTimer() // any byte resets the watchdog — data OR backend heartbeat ping
@@ -114,9 +143,9 @@ export function useChatStream(): UseChatStreamReturn {
           const payload = line.slice(5).trim()
           if (!payload || payload === '{}') continue
 
-          let data: any
+          let data: SSEPayload
           try {
-            data = JSON.parse(payload)
+            data = JSON.parse(payload) as SSEPayload
           } catch {
             continue
           }
@@ -126,16 +155,16 @@ export function useChatStream(): UseChatStreamReturn {
             const partial = data.partial ?? {}
             if (partial.type === 'text') {
               const last = parts[parts.length - 1]
-              if (last?.type === 'text') {
-                last.text += partial.text ?? ''
+              if (last.type === 'text') {
+                last.text = (last.text ?? '') + (partial.text ?? '')
               } else {
                 parts.push({ type: 'text', text: partial.text ?? '' })
               }
               publish()
             } else if (partial.type === 'thinking') {
               const last = parts[parts.length - 1]
-              if (last?.type === 'reasoning') {
-                last.reasoning += partial.text ?? ''
+              if (last.type === 'reasoning') {
+                last.reasoning = (last.reasoning ?? '') + (partial.text ?? '')
               } else {
                 parts.push({ type: 'reasoning', reasoning: partial.text ?? '' })
               }
@@ -145,7 +174,7 @@ export function useChatStream(): UseChatStreamReturn {
                 type: 'tool_use',
                 id: partial.id,
                 name: partial.tool_name,
-                input: partial.input,
+                input: partial.input as Record<string, unknown> | undefined,
               })
               publish()
             }
@@ -163,7 +192,7 @@ export function useChatStream(): UseChatStreamReturn {
                   type: 'tool_use',
                   id: block.id,
                   name: block.name,
-                  input: block.input,
+                  input: block.input as Record<string, unknown> | undefined,
                 })
               }
             }
@@ -191,13 +220,15 @@ export function useChatStream(): UseChatStreamReturn {
       // Stream ended without explicit 'done' event
       publish()
       setState((s) => ({ ...s, phase: 'done' }))
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Distinguish three failure modes:
       //  1. Idle-timeout abort → show a friendly timeout message.
       //  2. User-initiated abort (stop button / new send / reset) → silent.
       //  3. Any other error → show the raw message.
-      if (err?.name === 'AbortError' || ctrl.signal.aborted) {
-        const reason = ctrl.signal.reason
+      const errName = err instanceof Error ? err.name : undefined
+      const errMsg = err instanceof Error ? err.message : 'stream failed'
+      if (errName === 'AbortError' || ctrl.signal.aborted) {
+        const reason: unknown = ctrl.signal.reason
         if (reason instanceof Error && reason.message === IDLE_REASON) {
           setState((s) => ({
             ...s,
@@ -208,8 +239,9 @@ export function useChatStream(): UseChatStreamReturn {
         // User abort: silent
         return
       }
-      setState((s) => ({ ...s, phase: 'error', error: err?.message || 'stream failed' }))
+      setState((s) => ({ ...s, phase: 'error', error: errMsg }))
     } finally {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- idleTimer may legitimately be null when stream errors before arming
       if (idleTimer) clearTimeout(idleTimer)
       if (abortRef.current === ctrl) {
         abortRef.current = null

@@ -40,7 +40,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
 
   const handleSubmit = async () => {
     try {
-      const { name, ttlDays } = await form.validateFields()
+      const { name, ttlDays } = await form.validateFields() as { name: string; ttlDays: number }
       const result = await issueToken.mutateAsync({ name, ttlDays })
       setIssuedToken(result.token)
       form.resetFields()
@@ -90,7 +90,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
           <Alert
             type="warning"
             showIcon
-            message="请立即保存此 Token"
+            title="请立即保存此 Token"
             description="关闭此窗口后将无法再次查看。请将 Token 安全存储。"
             style={{ marginBottom: 16 }}
           />
@@ -118,7 +118,7 @@ export default function CreateTokenModal({ open, onClose }: Props) {
                 type="link"
                 size="small"
                 onClick={() => {
-                  navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); })
+                  void navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); })
                 }}
               >
                 复制

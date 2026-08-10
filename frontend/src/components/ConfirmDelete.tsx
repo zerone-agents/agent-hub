@@ -1,5 +1,5 @@
 import { Popconfirm, Button } from 'antd'
-import { Trash } from '@phosphor-icons/react'
+import { TrashIcon } from '@phosphor-icons/react'
 
 interface ConfirmDeleteProps {
   onConfirm: () => void
@@ -23,7 +23,7 @@ export default function ConfirmDelete({
       cancelText="取消"
       onConfirm={onConfirm}
     >
-      <Button type="text" danger icon={<Trash size={16} />}>
+      <Button type="text" danger icon={<TrashIcon size={16} />}>
         {buttonText}
       </Button>
     </Popconfirm>

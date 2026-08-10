@@ -35,7 +35,7 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getAccessToken()
-    if (token && config.headers) {
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
     return config
@@ -68,15 +68,14 @@ apiClient.interceptors.response.use(
           refresh_token: refreshToken
         })
 
-        if (response.data.success) {
-          const { accessToken, refreshToken: newRefreshToken } = response.data.data
+        const body = response.data as { success: boolean; data?: { accessToken: string; refreshToken: string } }
+        if (body.success) {
+          const { accessToken, refreshToken: newRefreshToken } = body.data ?? { accessToken: '', refreshToken: '' }
           setTokens(accessToken, newRefreshToken)
 
-          if (originalRequest.headers) {
-            originalRequest.headers['X-Refresh-Attempt'] = 'true'
-            originalRequest.headers.Authorization = `Bearer ${accessToken}`
-          }
-          return apiClient(originalRequest)
+          originalRequest.headers['X-Refresh-Attempt'] = 'true'
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`
+          return await apiClient(originalRequest)
         }
       } catch {
         clearTokens()
@@ -90,6 +89,30 @@ apiClient.interceptors.response.use(
 )
 
 export default apiClient
+
+/**
+ * Backend response envelope. All admin API responses share this shape:
+ * `{ success: boolean, data?: T, message?: string, error?: string }`.
+ */
+export interface ApiEnvelope<T = unknown> {
+  success: boolean
+  data?: T
+  message?: string
+  error?: string
+}
+
+/**
+ * Unwrap an axios response into its data payload, throwing on backend errors.
+ * Eliminates `any` propagation from `res.data` across query/mutation hooks.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- T is the caller-specified return type; the rule doesn't recognize this ergonomic pattern
+export function unwrapResponse<T>(res: { data: unknown }): T {
+  const body = res.data as ApiEnvelope<T>
+  if (!body.success) {
+    throw new Error(body.error ?? body.message ?? '请求失败')
+  }
+  return body.data as T
+}
 
 /**
  * Convert any thrown value into a user-facing zh-CN message.

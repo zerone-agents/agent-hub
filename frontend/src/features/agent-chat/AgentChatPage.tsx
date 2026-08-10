@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Empty } from 'antd'
-import { Stop } from '@phosphor-icons/react'
+import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
 import type { AgentChatSession } from '@/api/agent-chat'
@@ -104,7 +104,7 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-import { ArrowLeft } from '@phosphor-icons/react'
+import { ArrowLeftIcon } from '@phosphor-icons/react'
 
 export default function AgentChatPage() {
   const { styles } = useStyles()
@@ -119,7 +119,7 @@ export default function AgentChatPage() {
 
   const STREAMING_MSG_ID = '__streaming__'
 
-  const history = (msgData?.items ?? []) as ChatMessage[]
+  const history = useMemo(() => msgData?.items ?? [], [msgData?.items])
 
   // Treat the in-flight stream as a transient assistant message rendered by the
   // same MessageBubble component as persisted messages. When the stream ends we
@@ -173,7 +173,6 @@ export default function AgentChatPage() {
     if (!isStreaming) return
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault()
-      e.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
     return () => { window.removeEventListener('beforeunload', handler); }
@@ -184,6 +183,7 @@ export default function AgentChatPage() {
     return () => {
       stream.reset()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only cleanup; stream.reset is stable (useCallback in useChatStream)
   }, [stream.reset])
 
   // When a stream finishes, promote the streamed content into the query cache
@@ -214,15 +214,15 @@ export default function AgentChatPage() {
         )
       }
       stream.reset()
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-messages', name, selected.id],
       })
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-sessions', name],
       })
     }
     if (stream.state.phase === 'error' && selected) {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ['agent-chat-messages', name, selected.id],
       })
     }
@@ -280,7 +280,7 @@ export default function AgentChatPage() {
                 className={styles.mobileBack}
                 onClick={() => { setSelected(null); }}
               >
-                <ArrowLeft size={16} />
+                <ArrowLeftIcon size={16} />
                 返回会话列表
               </button>
               <div className={styles.messages} ref={scrollRef} onScroll={handleScroll}>
@@ -303,7 +303,7 @@ export default function AgentChatPage() {
               {isStreaming && (
                 <div className={styles.stopBar}>
                   <button type="button" className={styles.stopBtn} onClick={() => { stream.reset(); }}>
-                    <Stop size={12} weight="fill" /> 停止回复
+                    <StopIcon size={12} weight="fill" /> 停止回复
                   </button>
                 </div>
               )}

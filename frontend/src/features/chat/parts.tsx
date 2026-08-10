@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CaretRight, CaretDown } from '@phosphor-icons/react'
+import { CaretRightIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 import ChatMarkdown from './ChatMarkdown'
@@ -94,7 +94,7 @@ export function PartReasoning({
   return (
     <div className={styles.reasoningWrap}>
       <div className={styles.reasoningToggle} onClick={() => { setOpen(!open); }}>
-        {open ? <CaretDown size={10} /> : <CaretRight size={10} />}
+        {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
         <span>思考过程{duration ? ` · ${duration}s` : ''}</span>
       </div>
       <div style={{ marginTop: 4 }}>
@@ -110,7 +110,7 @@ export function PartReasoning({
 
 export function PartError({ message }: { message?: string }) {
   const { styles } = useStyles()
-  return <div className={styles.errorWrap}>{message || '发生错误'}</div>
+  return <div className={styles.errorWrap}>{message ?? '发生错误'}</div>
 }
 
 type PairablePart =
@@ -193,8 +193,8 @@ export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; en
           return (
             <ToolCallBlock
               key={i}
-              toolName={p.use.name || 'tool'}
-              toolId={p.use.id || ''}
+              toolName={p.use.name ?? 'tool'}
+              toolId={p.use.id ?? ''}
               input={p.use.input as Record<string, unknown> | undefined}
               result={p.result.content}
               status={p.result.isError ? 'error' : 'success'}
@@ -212,8 +212,8 @@ export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; en
         return (
           <ToolCallBlock
             key={i}
-            toolName={p.part.name || 'tool'}
-            toolId={p.part.id || ''}
+            toolName={p.part.name ?? 'tool'}
+            toolId={p.part.id ?? ''}
             input={p.part.input as Record<string, unknown> | undefined}
             status="pending"
           />
@@ -229,7 +229,7 @@ export function parseContent(content: string): ContentPart[] | null {
   const trimmed = content.trim()
   if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return null
   try {
-    const parsed = JSON.parse(trimmed)
+    const parsed: unknown = JSON.parse(trimmed)
     if (Array.isArray(parsed)) return parsed as ContentPart[]
     if (typeof parsed === 'object') return [parsed as ContentPart]
     return null

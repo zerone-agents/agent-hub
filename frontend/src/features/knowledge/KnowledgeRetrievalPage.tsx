@@ -9,7 +9,7 @@ import {
   Spin,
   Tooltip
 } from 'antd'
-import { MagnifyingGlass } from '@phosphor-icons/react'
+import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useParams } from 'react-router-dom'
 import { useRetrievalTest } from '@/queries/useKnowledge'
@@ -120,7 +120,7 @@ export default function KnowledgeRetrievalPage() {
             <Button
               type="primary"
               htmlType="submit"
-              icon={<MagnifyingGlass size={16} />}
+              icon={<MagnifyingGlassIcon size={16} />}
               loading={retrieval.isPending}
             >
               检索测试

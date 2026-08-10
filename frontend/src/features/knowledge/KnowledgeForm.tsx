@@ -14,7 +14,7 @@ import {
   Typography,
 } from "antd";
 import type { Rule } from "antd/es/form";
-import { LockKey } from "@phosphor-icons/react";
+import { LockKeyIcon } from "@phosphor-icons/react";
 import { useCreateKnowledge, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
 import { useMultiragModels } from "@/queries/useMultirag";
@@ -156,8 +156,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown, fallback: string): string {
   if (typeof value === "string") return value;
-  if (value === undefined || value === null) return fallback;
-  return String(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  return fallback;
 }
 
 function numberValue(value: unknown, fallback: number): number {
@@ -216,7 +216,7 @@ function parseExtraParserConfig(
 /** Advanced parser_config must be a JSON object (or empty). */
 const parserConfigExtraRule: Rule = {
   validator: (_rule, value: string) => {
-    const text = (value ?? "").trim();
+    const text = (value).trim();
     if (text === "") return Promise.resolve();
     try {
       parseExtraParserConfig(text);
@@ -285,7 +285,7 @@ export function formValuesToInput(
     ...parseExtraParserConfig(values.parser_config_extra),
     layout_recognize: decodeRefValue(values.layout_recognize) || "DeepDOC",
     chunk_token_num: numberValue(values.chunk_token_num, 512),
-    delimiter: values.delimiter ?? "",
+    delimiter: values.delimiter,
     enable_children: booleanValue(values.enable_children, false),
     image_table_context_window: contextWindow,
     image_context_size: contextWindow,
@@ -294,20 +294,20 @@ export function formValuesToInput(
     auto_questions: numberValue(values.auto_questions, 0),
     toc_extraction: booleanValue(values.toc_extraction, false),
     html4excel: booleanValue(values.html4excel, false),
-    mineru_parse_method: values.mineru_parse_method ?? "auto",
-    mineru_lang: values.mineru_lang ?? "English",
+    mineru_parse_method: values.mineru_parse_method,
+    mineru_lang: values.mineru_lang,
     mineru_formula_enable: booleanValue(values.mineru_formula_enable, true),
     mineru_table_enable: booleanValue(values.mineru_table_enable, true),
   };
   if (
     booleanValue(values.enable_children, false) ||
-    (values.children_delimiter ?? "").trim()
+    (values.children_delimiter).trim()
   ) {
-    parserConfig.children_delimiter = values.children_delimiter ?? "";
+    parserConfig.children_delimiter = values.children_delimiter;
   }
   const input: DatasetFormInput = {
     name: values.name.trim(),
-    description: values.description ?? "",
+    description: values.description,
     permission: values.permission,
     parser_id: values.parser_id,
     parser_config: parserConfig,
@@ -341,8 +341,7 @@ function ParserConfigFields({
                 options={layoutOptions}
                 loading={layoutLoading}
                 placeholder="选择解析布局"
-                showSearch
-                optionFilterProp="label"
+                showSearch={{ optionFilterProp: 'label' }}
               />
             ) : (
               <Select options={LAYOUT_OPTIONS} />
@@ -362,7 +361,7 @@ function ParserConfigFields({
       <Form.Item
         noStyle
         shouldUpdate={(prev, current) =>
-          prev.enable_children !== current.enable_children
+          (prev as DatasetFormValues).enable_children !== (current as DatasetFormValues).enable_children
         }
       >
         {({ getFieldValue }) => (
@@ -429,11 +428,11 @@ function ParserConfigFields({
       <Form.Item
         noStyle
         shouldUpdate={(prev, current) =>
-          prev.layout_recognize !== current.layout_recognize
+          (prev as DatasetFormValues).layout_recognize !== (current as DatasetFormValues).layout_recognize
         }
       >
         {({ getFieldValue }) =>
-          layoutIsMinerU(getFieldValue("layout_recognize")) ? (
+          layoutIsMinerU(getFieldValue("layout_recognize") as string | undefined | null) ? (
             <>
               <Divider titlePlacement="left" plain>
                 MinerU
@@ -540,7 +539,7 @@ export function DatasetFields({
         <Select options={PERMISSION_OPTIONS} />
       </Form.Item>
       <Form.Item label="解析方法" name="parser_id">
-        <Select options={PARSER_OPTIONS} showSearch optionFilterProp="label" />
+        <Select options={PARSER_OPTIONS} showSearch={{ optionFilterProp: 'label' }} />
       </Form.Item>
       <Form.Item
         label="Embedding 模型"
@@ -557,7 +556,7 @@ export function DatasetFields({
           <Input
             readOnly
             suffix={
-              <Tag variant="filled" icon={<LockKey size={12} />}>
+              <Tag variant="filled" icon={<LockKeyIcon size={12} />}>
                 已锁定
               </Tag>
             }
@@ -567,8 +566,7 @@ export function DatasetFields({
             options={embeddingOptions}
             loading={embeddingLoading}
             placeholder="选择 Embedding 模型"
-            showSearch
-            optionFilterProp="label"
+            showSearch={{ optionFilterProp: 'label' }}
           />
         ) : (
           <Input placeholder="如 bge-m3、text-embedding-3-small" />
@@ -640,7 +638,7 @@ export default function KnowledgeForm({
   // latter surface via the synthetic "unavailable" option below.
   useEffect(() => {
     if (!open) return;
-    const embd = form.getFieldValue("embd_id");
+    const embd = form.getFieldValue("embd_id") as unknown;
     if (
       !embeddingLocked &&
       typeof embd === "string" &&
@@ -649,7 +647,7 @@ export default function KnowledgeForm({
     ) {
       form.setFieldValue("embd_id", embdRawToValue.get(embd));
     }
-    const layout = form.getFieldValue("layout_recognize");
+    const layout = form.getFieldValue("layout_recognize") as unknown;
     if (typeof layout === "string" && layout && layoutRawToValue.has(layout)) {
       form.setFieldValue("layout_recognize", layoutRawToValue.get(layout));
     }
@@ -678,7 +676,7 @@ export default function KnowledgeForm({
   }, [editing?.embd_id, embdRawToValue, embeddingGroups]);
 
   const layoutOptions = useMemo<SelectOptionGroup[]>(() => {
-    const saved = editing?.parser_config?.layout_recognize;
+    const saved = editing?.parser_config.layout_recognize;
     if (typeof saved === "string" && saved && !layoutRawToValue.has(saved)) {
       return [
         {
@@ -695,7 +693,7 @@ export default function KnowledgeForm({
     }
     return groupsToAntdOptions(layoutGroups);
   }, [
-    editing?.parser_config?.layout_recognize,
+    editing?.parser_config.layout_recognize,
     layoutRawToValue,
     layoutGroups,
   ]);
@@ -723,8 +721,7 @@ export default function KnowledgeForm({
     const modelMap = new Map<number, Set<string>>();
     const addTarget = (decoded: ReturnType<typeof decodeCandidateValue>) => {
       if (
-        !decoded ||
-        decoded.source !== "local" ||
+        decoded?.source !== "local" ||
         !decoded.providerId ||
         !decoded.rawValue
       )

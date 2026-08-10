@@ -1,4 +1,5 @@
-import { PencilSimple, Trash, DiamondsFour, Wrench, Star, Cpu, Plus, PlugsConnected, Rocket, Books } from '@phosphor-icons/react'
+import { createElement } from 'react'
+import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
 import { Popconfirm } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
@@ -70,14 +71,17 @@ export default function AgentCard({
 }: AgentCardProps) {
   const { styles } = useStyles()
 
-  const IconCmp = agent.config?.iconName ? getIconComponent(agent.config.iconName) : null
-  const iconColor = agent.config?.iconColor || '#6B7280'
+  const IconCmp = agent.config.iconName ? getIconComponent(agent.config.iconName) : null
+  const iconColor = agent.config.iconColor ?? '#6B7280'
+  // Render via createElement rather than JSX (<IconCmp />) so the linter
+  // doesn't mistake IconCmp for a component defined during render —
+  // getIconComponent returns a stable component reference (icon from catalog).
   const icon = IconCmp ? (
-    <IconCmp size={20} weight="duotone" color={iconColor} />
-  ) : agent.config?.icon ? (
+    createElement(IconCmp, { size: 20, weight: 'duotone', color: iconColor })
+  ) : agent.config.icon ? (
     <img src={agent.config.icon} alt={agent.name} className={styles.iconImg} />
   ) : (
-    agent.name[0]?.toUpperCase()
+    agent.name[0].toUpperCase()
   )
 
   const defaultBadgeStyle: React.CSSProperties = {
@@ -101,7 +105,7 @@ export default function AgentCard({
   return (
     <EntityCard
       icon={icon}
-      title={agent.config?.title?.zh || agent.config?.title?.en || agent.name}
+      title={agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}
       subtitle={agent.name}
       headerExtra={
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -110,32 +114,32 @@ export default function AgentCard({
           {agent.mobileEnabled && <span style={platformBadgeStyle}>手机端</span>}
         </div>
       }
-      description={agent.config?.description?.zh || agent.config?.description?.en || '暂无描述'}
+      description={agent.config.description?.zh ?? agent.config.description?.en ?? '暂无描述'}
       bodyExtra={
         <div className={styles.stats}>
           <span className={styles.statLink} onClick={() => { onEditSubagents(agent); }}>
-            <DiamondsFour size={12} />
-            {agent.subagents?.length || 0} 子代理
+            <DiamondsFourIcon size={12} />
+            {agent.subagents?.length ?? 0} 子代理
           </span>
           <span className={styles.statLink} onClick={() => { onEditTools(agent); }}>
-            <Wrench size={12} />
-            {agent.tools?.length || 0} 工具
+            <WrenchIcon size={12} />
+            {agent.tools?.length ?? 0} 工具
           </span>
           <span className={styles.statLink} onClick={() => { onEditSkills(agent); }}>
-            <Star size={12} />
-            {agent.skills?.length || 0} 技能
+            <StarIcon size={12} />
+            {agent.skills?.length ?? 0} 技能
           </span>
           <span className={styles.statLink} onClick={() => { onEditMcps(agent); }}>
-            <PlugsConnected size={12} />
-            {agent.mcps?.length || 0} MCP
+            <PlugsConnectedIcon size={12} />
+            {agent.mcps?.length ?? 0} MCP
           </span>
           <span className={styles.statLink} onClick={() => { onEditKnowledge(agent); }}>
-            <Books size={12} />
-            {agent.datasets?.length || 0} 知识库
+            <BooksIcon size={12} />
+            {agent.datasets?.length ?? 0} 知识库
           </span>
           <span className={styles.statLink} onClick={() => { onEditModel(agent); }}>
-            <Cpu size={12} />
-            {!modelDisplayName && <Plus size={10} />}
+            <CpuIcon size={12} />
+            {!modelDisplayName && <PlusIcon size={10} />}
             {modelDisplayName || '未选模型'}
           </span>
         </div>
@@ -144,10 +148,10 @@ export default function AgentCard({
       footerRight={
         <>
           <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
-            <Rocket size={14} />
+            <RocketIcon size={14} />
           </button>
           <button type="button" className={styles.actBtn} title="编辑" onClick={() => { onEdit(agent); }}>
-            <PencilSimple size={14} />
+            <PencilSimpleIcon size={14} />
           </button>
           <Popconfirm
             title="确认删除？"
@@ -158,7 +162,7 @@ export default function AgentCard({
             onConfirm={() => { onDelete(agent.name); }}
           >
             <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <Trash size={14} />
+              <TrashIcon size={14} />
             </button>
           </Popconfirm>
         </>
