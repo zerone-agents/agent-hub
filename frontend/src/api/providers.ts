@@ -106,8 +106,8 @@ export const providerApi = {
   update: (id: number, data: Partial<Provider>) =>
     apiClient.put(`/api/v1/admin/providers/${id}`, data),
   delete: (id: number) => apiClient.delete(`/api/v1/admin/providers/${id}`),
-  probe: (id: number, apiKey?: string) =>
-    apiClient.post(`/api/v1/admin/providers/${id}/probe`, { apiKey }),
+  probe: (id: number, payload?: { apiKey?: string; baseUrl?: string; models?: CatalogModel[] }) =>
+    apiClient.post(`/api/v1/admin/providers/${id}/probe`, payload ?? {}),
   probeConfig: (config: ProbeConfig) =>
     apiClient.post('/api/v1/admin/providers/probe', config),
   attrRules: (protocol?: string) =>

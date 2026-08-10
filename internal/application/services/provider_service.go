@@ -582,7 +582,10 @@ func (s *ProviderService) Delete(id uint64) error {
 
 // ProbeWithOverride probes a provider. If apiKeyOverride matches the masked form of the
 // stored key (or is empty), the real stored key is used; otherwise apiKeyOverride is used.
-func (s *ProviderService) ProbeWithOverride(id uint64, apiKeyOverride string) (*ProbeResult, error) {
+// baseURLOverride (when non-empty) replaces the stored BaseURL, so an edited-but-unsaved
+// URL can be tested from the form. modelsOverride (when non-empty) replaces the stored
+// model list for the same reason.
+func (s *ProviderService) ProbeWithOverride(id uint64, apiKeyOverride, baseURLOverride string, modelsOverride []provider.CatalogModel) (*ProbeResult, error) {
 	summary, err := s.repo.GetByID(id)
 	if err != nil {
 		return nil, provider.ErrProviderNotFound
@@ -602,7 +605,21 @@ func (s *ProviderService) ProbeWithOverride(id uint64, apiKeyOverride string) (*
 		apiKey = storedKey
 	}
 
-	return s.doProbe(p.BaseURL(), apiKey, p.Protocol(), p.AuthStyle(), p.DefaultModels()), nil
+	baseURL := p.BaseURL()
+	if baseURLOverride != "" {
+		baseURL = baseURLOverride
+	}
+
+	models := modelsOverride
+	if len(models) == 0 {
+		rows, err := s.repo.ListModels(id)
+		if err != nil {
+			return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		}
+		models = toCatalogModels(rows)
+	}
+
+	return s.doProbe(baseURL, apiKey, p.Protocol(), p.AuthStyle(), models), nil
 }
 
 func (s *ProviderService) ProbeConfig(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {
