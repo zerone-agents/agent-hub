@@ -120,9 +120,13 @@ func ValidateConfig(config map[string]interface{}) error {
 	if v, ok := config["modelId"].(string); ok {
 		modelID = v
 	}
+	var modelSelectionID string
+	if v, ok := config["modelSelectionId"].(string); ok {
+		modelSelectionID = v
+	}
 
 	if providerID != nil {
-		if err := validateProviderModel(*providerID, modelID); err != nil {
+		if err := validateProviderModel(*providerID, modelID, modelSelectionID); err != nil {
 			return err
 		}
 	}
@@ -147,13 +151,18 @@ func ValidateConfig(config map[string]interface{}) error {
 
 // validateProviderModel checks that the referenced provider exists and,
 // when a modelId is provided, that the bound model belongs to that
-// provider and is of type 'llm'. An agent can only bind to an LLM model;
-// rejecting at the model level (rather than the provider's top-level
-// type) prevents binding to e.g. an embedding model that happens to live
-// under an LLM-class provider.
+// provider and is of type 'llm' or 'vlm'. An agent can only bind to an
+// LLM/VLM model; rejecting at the model level (rather than the provider's
+// top-level type) prevents binding to e.g. an embedding model that happens
+// to live under an LLM-class provider.
+//
+// When modelSelectionID is provided it takes precedence over modelID for
+// the catalog lookup, since multiple catalog rows can share the same
+// modelID (e.g. "k3" with 256K vs 1M contextWindow) and only selectionID
+// disambiguates them.
 //
 // TODO: refactor to use a repository interface instead of database.DB global.
-func validateProviderModel(providerID uint64, modelID string) error {
+func validateProviderModel(providerID uint64, modelID, modelSelectionID string) error {
 	if database.DB == nil {
 		return nil
 	}
@@ -167,15 +176,24 @@ func validateProviderModel(providerID uint64, modelID string) error {
 		return fmt.Errorf("providerId %d 不存在", providerID)
 	}
 
-	if modelID == "" {
+	if modelID == "" && modelSelectionID == "" {
 		return nil // modelId optional; nothing more to check
 	}
 
+	query := database.DB.Table("provider_models").
+		Where("provider_id = ?", providerID)
+	if modelSelectionID != "" {
+		query = query.Where("selection_id = ?", modelSelectionID)
+	} else {
+		query = query.Where("model_id = ?", modelID)
+	}
+
 	var modelType string
-	err := database.DB.Table("provider_models").
-		Where("provider_id = ? AND model_id = ?", providerID, modelID).
-		Select("model_type").Row().Scan(&modelType)
+	err := query.Select("model_type").Row().Scan(&modelType)
 	if err == sql.ErrNoRows {
+		if modelSelectionID != "" {
+			return fmt.Errorf("providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
+		}
 		return fmt.Errorf("providerId %d 下不存在模型 %s", providerID, modelID)
 	}
 	if err != nil {

@@ -99,6 +99,7 @@ export default function AgentListPage() {
   const [selectedMcps, setSelectedMcps] = useState<string[]>([])
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
   const [selectedModelId, setSelectedModelId] = useState<string>('')
+  const [selectedSelectionId, setSelectedSelectionId] = useState<string>('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [initialApiKey, setInitialApiKey] = useState<string>('') // masked api_key from backend
   const [testPassed, setTestPassed] = useState(false)
@@ -221,8 +222,10 @@ export default function AgentListPage() {
     setCurrentAgent(agent)
     const pid = agent.config.providerId ?? null
     const mid = agent.config.modelId ?? ''
+    const sid = agent.config.modelSelectionId ?? ''
     setSelectedProviderId(pid)
     setSelectedModelId(mid)
+    setSelectedSelectionId(sid)
     setTestPassed(false)
     setTesting(false)
     setSaving(false)
@@ -284,12 +287,24 @@ export default function AgentListPage() {
     setInitialApiKey('')
     setSelectedProviderId(value)
     setSelectedModelId('')
+    setSelectedSelectionId('')
     setFieldValues(initial)
   }
 
+  // AutoComplete 选项的 value 用 selectionId（区分同 modelId 的多条 catalog 记录，
+  // 如 kimi-cn 的 k3 256K 与 k3 1M）。当用户从下拉选中一项时，同步设置 modelId
+  // 和 selectionId；用户自定义输入（无匹配建议）时，selectionId 置空，只存 modelId
+  // 兼容运行时直接传任意模型 ID 的场景。
   const handleModelChange = (value: string) => {
     setTestPassed(false)
-    setSelectedModelId(value)
+    const hit = modelSuggestions.find((m) => m.value === value)
+    if (hit) {
+      setSelectedModelId(hit.modelId)
+      setSelectedSelectionId(hit.selectionId ?? '')
+    } else {
+      setSelectedModelId(value)
+      setSelectedSelectionId('')
+    }
     if (!value) {
       setModelDropdownOpen(false)
     }
@@ -346,6 +361,7 @@ export default function AgentListPage() {
             ...currentAgent.config,
             providerId: selectedProviderId,
             modelId: selectedModelId,
+            modelSelectionId: selectedSelectionId,
             fieldOverrides: overrides,
           }
         }
@@ -407,39 +423,54 @@ export default function AgentListPage() {
   // Model suggestions from the selected Provider's defaultModels.
   // Only LLM and VLM models are eligible for agent binding (defense-in-depth
   // alongside the backend validator); embedding/OCR models are excluded.
-  const modelSuggestions = useMemo(() => {
+  // option.value 用 selectionId（区分同 modelId 的多条 catalog 记录）。
+  const modelSuggestions = (() => {
     const provider = providers.find(p => p.id === selectedProviderId)
     if (!provider) return []
     return provider.defaultModels
       .filter((m) => m.modelType === 'llm' || m.modelType === 'vlm')
       .map(m => ({
-        value: m.modelId,
+        value: m.selectionId ?? m.modelId,
+        selectionId: m.selectionId,
+        modelId: m.modelId,
         label: `${m.displayName || m.modelId} (${m.modelId})`,
         display: m.displayName || m.modelId,
       }))
-  }, [providers, selectedProviderId])
+  })()
 
-  // 选中建议项后输入框显示 displayName；聚焦编辑（下拉打开）时回显原始 modelId，
-  // 自定义输入（无匹配建议）时也显示原始输入。
-  const selectedModelSuggestion = modelSuggestions.find(m => m.value === selectedModelId)
+  // 当前选中的建议项：优先用 selectionId 命中（新绑定），否则用 modelId 命中
+  // （兼容只有 modelId 的存量 agent 与自定义输入）。
+  const selectedModelSuggestion = useMemo(
+    () => modelSuggestions.find(m => (selectedSelectionId ? m.selectionId === selectedSelectionId : m.value === selectedModelId)),
+    [modelSuggestions, selectedSelectionId, selectedModelId],
+  )
 
-  // Reverse-lookup map: `providerId::modelId` → displayName
+  // Reverse-lookup map: 主键 `providerId::selectionId`，次键 `providerId::modelId`
+  // （兼容存量 agent 没存 selectionId 的情况；同 modelId 多条记录时取最后一条）。
   const modelDisplayNameMap = useMemo(() => {
-    const m = new Map<string, string>()
+    const bySelection = new Map<string, string>()
+    const byModel = new Map<string, string>()
     for (const p of providers) {
       for (const mo of p.defaultModels) {
-        m.set(`${p.id}::${mo.modelId}`, mo.displayName)
+        if (mo.selectionId) {
+          bySelection.set(`${p.id}::${mo.selectionId}`, mo.displayName)
+        }
+        byModel.set(`${p.id}::${mo.modelId}`, mo.displayName)
       }
     }
-    return m
+    return { bySelection, byModel }
   }, [providers])
 
   const getModelDisplayName = (agent: Agent): string => {
     const pid = agent.config.providerId
-    const mid = agent.config.modelId
+    const mid = agent.config.modelId ?? ''
+    const sid = agent.config.modelSelectionId ?? ''
     if (!pid || !mid) return ''
-    const name = modelDisplayNameMap.get(`${pid}::${mid}`)
-    return name ?? mid
+    if (sid) {
+      const name = modelDisplayNameMap.bySelection.get(`${pid}::${sid}`)
+      if (name) return name
+    }
+    return modelDisplayNameMap.byModel.get(`${pid}::${mid}`) ?? mid
   }
 
   return (
@@ -696,7 +727,13 @@ export default function AgentListPage() {
             {(() => {
               const pid = currentAgent?.config.providerId
               const mid = currentAgent?.config.modelId
-              if (pid && mid && !modelDisplayNameMap.has(`${pid}::${mid}`)) {
+              const sid = currentAgent?.config.modelSelectionId
+              if (!pid || !mid) return null
+              // 优先用 selectionId 命中（精确），否则用 modelId 兜底（兼容存量）
+              const hit = sid
+                ? modelDisplayNameMap.bySelection.has(`${pid}::${sid}`)
+                : modelDisplayNameMap.byModel.has(`${pid}::${mid}`)
+              if (!hit) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>
                     ⚠️ 原 Provider 或模型已下线，请重新选择
