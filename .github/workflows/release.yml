@@ -45,7 +45,7 @@ jobs:
       - run: go build ./...
       - run: go test -v ./...
 
-  frontend-test:
+  frontend-test-full:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,7 +87,7 @@ jobs:
 
   push:
     runs-on: ubuntu-latest
-    needs: [lint, test, frontend-test, frontend-lint]
+    needs: [lint, test, frontend-test-full, frontend-lint]
     steps:
       - uses: actions/checkout@v4
 
