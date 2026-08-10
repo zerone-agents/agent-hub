@@ -415,8 +415,13 @@ export default function AgentListPage() {
       .map(m => ({
         value: m.modelId,
         label: `${m.displayName || m.modelId} (${m.modelId})`,
+        display: m.displayName || m.modelId,
       }))
   }, [providers, selectedProviderId])
+
+  // 选中建议项后输入框显示 displayName；聚焦编辑（下拉打开）时回显原始 modelId，
+  // 自定义输入（无匹配建议）时也显示原始输入。
+  const selectedModelSuggestion = modelSuggestions.find(m => m.value === selectedModelId)
 
   // Reverse-lookup map: `providerId::modelId` → displayName
   const modelDisplayNameMap = useMemo(() => {
@@ -736,7 +741,7 @@ export default function AgentListPage() {
                   style={{ width: '100%' }}
                   size="large"
                   placeholder="选择模型或输入自定义模型 ID"
-                  value={selectedModelId}
+                  value={modelDropdownOpen || !selectedModelSuggestion ? selectedModelId : selectedModelSuggestion.display}
                   onChange={(value) => {
                     handleModelChange(value)
                     setModelDropdownOpen(false)

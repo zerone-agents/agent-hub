@@ -68,8 +68,8 @@ const useStyles = createStyles(({ css }) => ({
     margin-bottom: 8px;
     align-items: center;
   `,
-  modelRow: css`grid-template-columns: 1fr 1fr 110px 90px minmax(150px, 1fr) 56px 28px;`,
-  modelRowOcr: css`grid-template-columns: 1fr 1fr 110px 56px 28px;`,
+  modelRow: css`grid-template-columns: 1fr 1fr 110px 90px minmax(150px, 1fr) 28px;`,
+  modelRowOcr: css`grid-template-columns: 1fr 1fr 110px 28px;`,
   fieldRow: css`grid-template-columns: 120px 1fr 1fr 80px 80px 28px;`,
   editorHeader: css`
     display: grid;
@@ -109,19 +109,6 @@ const useStyles = createStyles(({ css }) => ({
     cursor: pointer;
     transition: all 0.15s;
     &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
-  `,
-  aigcChip: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--primary) 10%, transparent);
-    color: var(--primary);
-    font-size: 11px;
-    font-weight: 600;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    cursor: default;
   `,
   builtinRow: css`
     display: flex;
@@ -462,7 +449,6 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             <span>类型</span>
             {!isOcr && <span>上下文</span>}
             {!isOcr && <span>Effort</span>}
-            <span>AIGC</span>
             <span />
           </div>
         )}
@@ -500,12 +486,6 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
                 onChange={(efforts) => { handleModelChange(i, 'efforts', efforts); }}
               />
             )}
-            <span
-              className={styles.aigcChip}
-              title="由系统自动分配，用于 AIGC 内容标识"
-            >
-              {model.aigcCode ?? '—'}
-            </span>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveModel(i); }}>
               <TrashIcon size={13} />
             </button>
