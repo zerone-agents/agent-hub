@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { ConfigProvider } from 'antd'
 import { RouterProvider } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { ThemeProvider as LobeThemeProvider } from '@lobehub/ui'
 import { ThemeProvider as StyleThemeProvider } from 'antd-style'
 import { App as AntdApp } from 'antd'
 import { router } from '@/routes'
@@ -9,6 +10,7 @@ import { queryClient } from '@/lib/query-client'
 import { createAntdTheme, formValidateMessages } from '@/lib/antd-theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { setTokens } from '@/api/client'
+import { tokens as t } from '@/styles/tokens'
 import { getTheme, type ThemeColors } from '@/styles/themes'
 import { useThemeStore } from '@/stores/theme'
 
@@ -98,21 +100,27 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <StyleThemeProvider theme={antdTheme}>
-        <ConfigProvider
-          theme={antdTheme}
-          form={{ validateMessages: formValidateMessages }}
-        >
-          <AntdApp>
-            <QueryClientProvider client={queryClient}>
-              <RouterProvider
-                router={router}
-                future={{ v7_startTransition: true }}
-              />
-            </QueryClientProvider>
-          </AntdApp>
-        </ConfigProvider>
-      </StyleThemeProvider>
+      <LobeThemeProvider
+        appearance={appearance}
+        theme={antdTheme}
+        customFonts={[t.fontSans, t.fontMono]}
+      >
+        <StyleThemeProvider theme={antdTheme}>
+          <ConfigProvider
+            theme={antdTheme}
+            form={{ validateMessages: formValidateMessages }}
+          >
+            <AntdApp>
+              <QueryClientProvider client={queryClient}>
+                <RouterProvider
+                  router={router}
+                  future={{ v7_startTransition: true }}
+                />
+              </QueryClientProvider>
+            </AntdApp>
+          </ConfigProvider>
+        </StyleThemeProvider>
+      </LobeThemeProvider>
     </ErrorBoundary>
   )
 }

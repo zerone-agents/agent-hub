@@ -155,7 +155,8 @@ export function useChatStream(): UseChatStreamReturn {
             const partial = data.partial ?? {}
             if (partial.type === 'text') {
               const last = parts[parts.length - 1]
-              if (last.type === 'text') {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- parts[-1] is undefined at runtime when array is empty
+              if (last?.type === 'text') {
                 last.text = (last.text ?? '') + (partial.text ?? '')
               } else {
                 parts.push({ type: 'text', text: partial.text ?? '' })
@@ -163,7 +164,8 @@ export function useChatStream(): UseChatStreamReturn {
               publish()
             } else if (partial.type === 'thinking') {
               const last = parts[parts.length - 1]
-              if (last.type === 'reasoning') {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same: array may be empty
+              if (last?.type === 'reasoning') {
                 last.reasoning = (last.reasoning ?? '') + (partial.text ?? '')
               } else {
                 parts.push({ type: 'reasoning', reasoning: partial.text ?? '' })
