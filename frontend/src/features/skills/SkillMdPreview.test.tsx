@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import SkillMdPreview from './SkillMdPreview'
 import type { SkillMdEntry } from './parseSkillMd'
+
+// Mock @lobehub/ui Markdown to avoid loading 3.6MB of dependencies in tests.
+// SkillMdPreview tests verify frontmatter parsing and tab logic, not markdown rendering.
+// Strip simple markdown syntax (headings, bold) so text assertions still work.
+vi.mock('@lobehub/ui', () => ({
+  Markdown: ({ children }: { children: React.ReactNode }) => {
+    const text = String(children)
+      .replace(/^#{1,6}\s+/gm, '')  // strip heading markers
+      .replace(/\*\*(.+?)\*\*/g, '$1')  // strip bold
+    return <div data-testid="mock-markdown">{text}</div>
+  },
+}))
 
 const SINGLE_ENTRY: SkillMdEntry = {
   path: 'SKILL.md',
@@ -33,7 +45,7 @@ describe('SkillMdPreview', () => {
     expect(screen.getByText('无法读取 SKILL.md')).toBeInTheDocument()
   })
 
-  it('renders frontmatter as a table above markdown body for single entry', () => {
+  it('renders frontmatter as a table above markdown body for single entry', async () => {
     render(
       <ConfigProvider theme={antdTheme}>
         <SkillMdPreview loading={false} entries={[SINGLE_ENTRY]} error="" placeholder="" />
@@ -47,7 +59,8 @@ describe('SkillMdPreview', () => {
     expect(screen.getByText('A test skill')).toBeInTheDocument()
 
     // Markdown body is rendered without the raw frontmatter delimiters
-    expect(screen.getByText('Hello World')).toBeInTheDocument()
+    // Use findByText (async) because Markdown is lazy-loaded via Suspense
+    expect(await screen.findByText('Hello World')).toBeInTheDocument()
   })
 
   it('does not render tab bar when there is only one entry', () => {

@@ -1,4 +1,9 @@
-import { Markdown } from '@lobehub/ui'
+import { lazy, Suspense } from 'react'
+import { Spin } from 'antd'
+
+// Lazy-load @lobehub/ui Markdown — pulls in 3.6 MB of dependencies
+// (shiki, mermaid, cytoscape). Only needed on the chat page.
+const Markdown = lazy(() => import('@lobehub/ui').then((m) => ({ default: m.Markdown })))
 
 interface ChatMarkdownProps {
   content: string
@@ -12,14 +17,16 @@ interface ChatMarkdownProps {
 export default function ChatMarkdown({ content, enableStream }: ChatMarkdownProps) {
   return (
     <div className="msg-text">
-      <Markdown
-        enableStream={enableStream}
-        animated={enableStream}
-        streamSmoothingPreset="silky"
-        variant="chat"
-      >
-        {content}
-      </Markdown>
+      <Suspense fallback={<Spin size="small" />}>
+        <Markdown
+          enableStream={enableStream}
+          animated={enableStream}
+          streamSmoothingPreset="silky"
+          variant="chat"
+        >
+          {content}
+        </Markdown>
+      </Suspense>
     </div>
   )
 }
