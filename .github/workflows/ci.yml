@@ -118,36 +118,8 @@ jobs:
       - name: Run ESLint
         run: npx eslint .
 
-  push:
-    runs-on: ubuntu-latest
-    needs: [lint, test, frontend-test, frontend-lint, frontend-test-full]
-    # 只在 main 分支 push 时运行，PR 时不推送
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Login to Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ vars.REGISTRY_HOST }}
-          username: ${{ secrets.DOCKER_REGISTRY_USER }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
-
-      - name: Build and push
-        run: |
-          docker build --provenance=false -f Dockerfile -t ${{ vars.REGISTRY_IMAGE }}:${{ github.sha }} .
-          docker push ${{ vars.REGISTRY_IMAGE }}:${{ github.sha }}
-          docker tag ${{ vars.REGISTRY_IMAGE }}:${{ github.sha }} ${{ vars.REGISTRY_IMAGE }}:latest
-          docker push ${{ vars.REGISTRY_IMAGE }}:latest
-
-      - name: Logout from Registry
-        if: always()
-        run: docker logout ${{ vars.REGISTRY_HOST }}
-
   # Full test suite (including slow component tests excluded from PR runs).
-  # Replaces frontend-test on main push. Runs BEFORE docker push so a full
-  # regression must pass before deployment. PR 触发时此 job skip。
+  # Replaces frontend-test on main push. PR 触发时此 job skip。
   frontend-test-full:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -179,3 +151,4 @@ jobs:
           if [ $TEST_EXIT -ne 0 ] || [ $TSC_EXIT -ne 0 ]; then
             exit 1
           fi
+
