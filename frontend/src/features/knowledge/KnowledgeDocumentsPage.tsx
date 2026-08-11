@@ -636,8 +636,8 @@ export default function KnowledgeDocumentsPage() {
             type="link"
             size="small"
             icon={<ListBulletsIcon size={14} />}
-            onClick={() =>
-              { navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
+            onClick={async () =>
+              { await navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
             }
           >
             切片

@@ -128,7 +128,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (token && !isLoading && user) {
-      navigate('/', { replace: true })
+      void Promise.resolve(navigate('/', { replace: true }))
     }
   }, [token, isLoading, user, navigate])
 

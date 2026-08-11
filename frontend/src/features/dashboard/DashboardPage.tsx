@@ -730,7 +730,7 @@ export default function DashboardPage() {
         {resources.map((item) => {
           const Icon = item.icon
           return (
-            <button key={item.label} type="button" className={styles.statItem} onClick={() => { navigate(item.path); }}>
+            <button key={item.label} type="button" className={styles.statItem} onClick={async () => { await navigate(item.path); }}>
               <span className={styles.statIcon}><Icon size={17} weight="fill" /></span>
               <span>
                 <span className={styles.statValue}>{item.value}</span>

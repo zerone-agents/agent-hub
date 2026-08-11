@@ -195,11 +195,11 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
 
   const handleLogout = async () => {
     await logout()
-    navigate('/login')
+    await navigate('/login')
   }
 
-  const handleNavClick = (path: string) => {
-    navigate(path)
+  const handleNavClick = async (path: string) => {
+    await navigate(path)
     setMobileMenuOpen(false)
   }
 
@@ -208,13 +208,13 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       key: 'cli-tokens',
       icon: <KeyIcon size={14} />,
       label: 'CLI Tokens',
-      onClick: () => { navigate('/settings/cli-tokens'); }
+      onClick: async () => { await navigate('/settings/cli-tokens'); }
     },
     {
       key: 'aigc-config',
       icon: <ShieldCheckIcon size={14} />,
       label: 'AIGC 标识配置',
-      onClick: () => { navigate('/settings/aigc'); }
+      onClick: async () => { await navigate('/settings/aigc'); }
     },
     {
       key: 'logout',

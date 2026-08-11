@@ -87,7 +87,7 @@ export default function KnowledgeListPage() {
       key: 'name',
       width: 200,
       render: (_, record) => (
-        <span className={styles.nameLink} onClick={() => { navigate(`/knowledge/${record.id}`); }}>
+        <span className={styles.nameLink} onClick={async () => { await navigate(`/knowledge/${record.id}`); }}>
           {record.name || '未命名'}
         </span>
       )

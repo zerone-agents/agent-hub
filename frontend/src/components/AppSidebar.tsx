@@ -120,7 +120,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
                 collapsed && styles.navLinkCollapsed,
                 active && styles.navLinkActive
               )}
-              onClick={() => { navigate(item.path); }}
+              onClick={async () => { await navigate(item.path); }}
             >
               <IconComp size={18} weight={active ? 'fill' : 'regular'} />
               {!collapsed && item.label}
