@@ -281,7 +281,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
                 key={item.id}
                 type="button"
                 className={cx(styles.mobileMenuItem, active && styles.mobileMenuItemActive)}
-                onClick={() => { handleNavClick(item.path); }}
+                onClick={async () => { await handleNavClick(item.path); }}
               >
                 <IconComp size={18} />
                 {item.label}
