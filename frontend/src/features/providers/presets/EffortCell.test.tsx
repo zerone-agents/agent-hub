@@ -1,10 +1,19 @@
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import EffortCell from "./EffortCell";
+
+// EffortCell schedules a 120ms setTimeout in onBlur to defer the active→idle
+// transition. After tests that click a button (which blurs the input), the
+// timer is still pending when jsdom tears down the environment, and React's
+// state update throws `window is not defined`. Drain pending timers here
+// while the environment is still alive.
+afterEach(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+});
 
 function Harness({ initial }: { initial?: string[] }) {
   const [value, setValue] = useState<string[] | undefined>(initial);
