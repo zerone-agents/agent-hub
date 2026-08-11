@@ -12,7 +12,7 @@ import {
 } from '@phosphor-icons/react'
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useDashboardStats } from '@/queries/useDashboardStats'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'

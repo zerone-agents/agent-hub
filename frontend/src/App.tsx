@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { ConfigProvider } from 'antd'
-import { RouterProvider } from 'react-router-dom'
+import { RouterProvider } from 'react-router/dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider as LobeThemeProvider } from '@lobehub/ui'
 import { ThemeProvider as StyleThemeProvider } from 'antd-style'
@@ -112,10 +112,7 @@ export default function App() {
           >
             <AntdApp>
               <QueryClientProvider client={queryClient}>
-                <RouterProvider
-                  router={router}
-                  future={{ v7_startTransition: true }}
-                />
+                <RouterProvider router={router} />
               </QueryClientProvider>
             </AntdApp>
           </ConfigProvider>

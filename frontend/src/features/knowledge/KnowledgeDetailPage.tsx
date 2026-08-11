@@ -1,7 +1,7 @@
 import { Spin, Tabs, Tag } from 'antd'
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { useNavigate, useParams, useLocation, Outlet } from 'react-router-dom'
+import { useNavigate, useParams, useLocation, Outlet } from 'react-router'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 

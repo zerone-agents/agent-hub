@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Avatar, Breadcrumb, Dropdown } from 'antd'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router'
 import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'

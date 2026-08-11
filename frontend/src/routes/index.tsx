@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate } from 'react-router'
 import RequireAuth from './RequireAuth'
 import MainLayout from '@/layouts/MainLayout'
 import NotFound from '@/components/NotFound'

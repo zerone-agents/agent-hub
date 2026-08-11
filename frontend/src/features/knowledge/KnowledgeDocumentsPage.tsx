@@ -33,7 +33,7 @@ import {
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import { parseApiError } from "@/api/client";
 import { knowledgeApi, type KnowledgeDocument } from "@/api/knowledge";
 import {

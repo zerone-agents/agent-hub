@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Form, Button, Spin } from "antd";
 import { createStyles } from "antd-style";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 import { useKnowledgeDetail, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useMultiragModels } from "@/queries/useMultirag";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";

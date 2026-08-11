@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet } from 'react-router'
 import { createStyles } from 'antd-style'
 import AppHeader from '@/components/AppHeader'
 import AppSidebar from '@/components/AppSidebar'

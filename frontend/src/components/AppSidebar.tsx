@@ -1,5 +1,5 @@
 import { Tooltip } from 'antd'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router'
 import { createStyles } from 'antd-style'
 import { NAV_ITEMS } from '@/lib/nav'
 import { tokens as t } from '@/styles/tokens'

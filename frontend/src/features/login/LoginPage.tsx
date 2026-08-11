@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { authApi } from '@/api/auth'
 import { getAccessToken } from '@/api/client'
 import { useUserInfo } from '@/queries/useUserInfo'

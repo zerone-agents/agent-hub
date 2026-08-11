@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { Button, Form, Input, Popconfirm, Spin, Tag, Typography } from 'antd'
 import { createStyles } from 'antd-style'
 import { PlusIcon } from '@phosphor-icons/react'
