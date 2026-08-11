@@ -49,14 +49,6 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_'
         }
       ],
-      // strictTypeChecked 配置默认仅声明规则为 'error' 而不传 options 对象，
-      // ESLint 9 的 meta.defaultOptions 合并在某些场景下似乎不会生效，
-      // 导致 ignoreVoid 实际为 undefined（falsy）→ void X 被当成 floating
-      // promise 报错。显式传一遍确保 fire-and-forget 的 void 操作符正常工作。
-      '@typescript-eslint/no-floating-promises': [
-        'error',
-        { ignoreVoid: true, ignoreIIFE: false, checkThenables: false }
-      ],
       // Allow async functions in JSX event handler positions and callback
       // arguments — React's idiomatic pattern is `onClick={async () => {...}}`
       // and wrapping every such handler in `void` adds noise without catching
