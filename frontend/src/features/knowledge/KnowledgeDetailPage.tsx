@@ -1,7 +1,7 @@
 import { Spin, Tabs, Tag } from 'antd'
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { useNavigate, useParams, useLocation, Outlet } from 'react-router-dom'
+import { useNavigate, useParams, useLocation, Outlet } from 'react-router'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 
@@ -56,7 +56,7 @@ export default function KnowledgeDetailPage() {
 
   return (
     <div className={styles.page}>
-      <button type="button" className={styles.back} onClick={() => { navigate('/knowledge'); }}>
+      <button type="button" className={styles.back} onClick={async () => { await navigate('/knowledge'); }}>
         <ArrowLeftIcon size={14} />
         返回知识库列表
       </button>
@@ -78,7 +78,7 @@ export default function KnowledgeDetailPage() {
           <Tabs
             activeKey={activeKey}
             items={tabs}
-            onChange={(key) => { navigate(`/knowledge/${id}/${key}`); }}
+            onChange={async (key) => { await navigate(`/knowledge/${id}/${key}`); }}
           />
 
           <Outlet />

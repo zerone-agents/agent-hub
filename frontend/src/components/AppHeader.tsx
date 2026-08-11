@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Avatar, Breadcrumb, Dropdown } from 'antd'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router'
 import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'
@@ -195,11 +195,11 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
 
   const handleLogout = async () => {
     await logout()
-    navigate('/login')
+    await navigate('/login')
   }
 
-  const handleNavClick = (path: string) => {
-    navigate(path)
+  const handleNavClick = async (path: string) => {
+    await navigate(path)
     setMobileMenuOpen(false)
   }
 
@@ -208,13 +208,13 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       key: 'cli-tokens',
       icon: <KeyIcon size={14} />,
       label: 'CLI Tokens',
-      onClick: () => { navigate('/settings/cli-tokens'); }
+      onClick: async () => { await navigate('/settings/cli-tokens'); }
     },
     {
       key: 'aigc-config',
       icon: <ShieldCheckIcon size={14} />,
       label: 'AIGC 标识配置',
-      onClick: () => { navigate('/settings/aigc'); }
+      onClick: async () => { await navigate('/settings/aigc'); }
     },
     {
       key: 'logout',
@@ -281,7 +281,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
                 key={item.id}
                 type="button"
                 className={cx(styles.mobileMenuItem, active && styles.mobileMenuItemActive)}
-                onClick={() => { handleNavClick(item.path); }}
+                onClick={async () => { await handleNavClick(item.path); }}
               >
                 <IconComp size={18} />
                 {item.label}

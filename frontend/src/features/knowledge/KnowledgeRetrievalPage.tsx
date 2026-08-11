@@ -11,7 +11,7 @@ import {
 } from 'antd'
 import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import { useRetrievalTest } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 

@@ -12,7 +12,7 @@ import {
 } from '@phosphor-icons/react'
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useDashboardStats } from '@/queries/useDashboardStats'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -730,7 +730,7 @@ export default function DashboardPage() {
         {resources.map((item) => {
           const Icon = item.icon
           return (
-            <button key={item.label} type="button" className={styles.statItem} onClick={() => { navigate(item.path); }}>
+            <button key={item.label} type="button" className={styles.statItem} onClick={async () => { await navigate(item.path); }}>
               <span className={styles.statIcon}><Icon size={17} weight="fill" /></span>
               <span>
                 <span className={styles.statValue}>{item.value}</span>

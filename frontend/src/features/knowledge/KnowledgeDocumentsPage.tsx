@@ -33,7 +33,7 @@ import {
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import { parseApiError } from "@/api/client";
 import { knowledgeApi, type KnowledgeDocument } from "@/api/knowledge";
 import {
@@ -636,8 +636,8 @@ export default function KnowledgeDocumentsPage() {
             type="link"
             size="small"
             icon={<ListBulletsIcon size={14} />}
-            onClick={() =>
-              { navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
+            onClick={async () =>
+              { await navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
             }
           >
             切片

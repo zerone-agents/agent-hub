@@ -1,5 +1,5 @@
 import { Result, Button } from 'antd'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 
 export default function NotFound() {
   const navigate = useNavigate()
@@ -9,7 +9,7 @@ export default function NotFound() {
       title="404"
       subTitle="抱歉，您访问的页面不存在。"
       extra={
-        <Button type="primary" onClick={() => { navigate('/dashboard'); }}>
+        <Button type="primary" onClick={async () => { await navigate('/dashboard'); }}>
           回到首页
         </Button>
       }

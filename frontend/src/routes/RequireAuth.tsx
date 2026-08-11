@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate } from 'react-router'
 import { getAccessToken } from '@/api/client'
 import { useUserInfo } from '@/queries/useUserInfo'
 import LoadingState from '@/components/LoadingState'

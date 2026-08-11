@@ -34,7 +34,7 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import { parseApiError } from "@/api/client";
 import {
   knowledgeApi,
@@ -768,7 +768,7 @@ export default function KnowledgeChunksPage() {
       <button
         type="button"
         className={styles.back}
-        onClick={() => { navigate(`/knowledge/${id}/documents`); }}
+        onClick={async () => { await navigate(`/knowledge/${id}/documents`); }}
       >
         <ArrowLeftIcon size={14} />
         返回文档列表

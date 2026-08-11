@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeDocumentsPage from "./KnowledgeDocumentsPage";

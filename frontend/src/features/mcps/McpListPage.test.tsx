@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import { tokens as t } from '@/styles/tokens'

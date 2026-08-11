@@ -1,5 +1,5 @@
 import { Tooltip } from 'antd'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router'
 import { createStyles } from 'antd-style'
 import { NAV_ITEMS } from '@/lib/nav'
 import { tokens as t } from '@/styles/tokens'
@@ -120,7 +120,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
                 collapsed && styles.navLinkCollapsed,
                 active && styles.navLinkActive
               )}
-              onClick={() => { navigate(item.path); }}
+              onClick={async () => { await navigate(item.path); }}
             >
               <IconComp size={18} weight={active ? 'fill' : 'regular'} />
               {!collapsed && item.label}

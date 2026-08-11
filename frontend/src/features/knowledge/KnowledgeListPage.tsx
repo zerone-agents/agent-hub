@@ -5,7 +5,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusIcon, PencilSimpleIcon, TrashIcon, DatabaseIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useKnowledgeList, useDeleteKnowledge } from '@/queries/useKnowledge'
 import type { KnowledgeDataset } from '@/api/knowledge'
 import { formatTime } from '@/utils/time'
@@ -87,7 +87,7 @@ export default function KnowledgeListPage() {
       key: 'name',
       width: 200,
       render: (_, record) => (
-        <span className={styles.nameLink} onClick={() => { navigate(`/knowledge/${record.id}`); }}>
+        <span className={styles.nameLink} onClick={async () => { await navigate(`/knowledge/${record.id}`); }}>
           {record.name || '未命名'}
         </span>
       )
