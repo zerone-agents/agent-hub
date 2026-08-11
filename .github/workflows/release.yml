@@ -111,6 +111,17 @@ jobs:
           # 剥掉 git tag 的 "hub-" 前缀：hub-v1.2.3 → v1.2.3
           TAG="${GITHUB_REF_NAME#hub-}"
 
+          # SemVer 2.0 pre-release 检测：含 "-" 后缀（如 -test/-beta/-rc.1）
+          # 视为预发布，只推 :TAG，不更新 :latest。
+          # 稳定版本（v1.2.3）和 build metadata（v1.2.3+build）都会更新 latest。
+          IS_PRERELEASE=false
+          if [[ "$TAG" == *-* ]]; then
+            IS_PRERELEASE=true
+            echo "🚧 Pre-release detected: $TAG — skipping :latest update"
+          else
+            echo "✅ Stable release: $TAG — will update :latest"
+          fi
+
           # 所有要推送的目标镜像全路径（含 registry host）。
           # 约定：
           #   REGISTRY_IMAGE  = SWR 完整路径（如 swr.cn-east-3.myhuaweicloud.com/zerone/agent-hub）
@@ -133,13 +144,16 @@ jobs:
           echo "Building ${TARGETS[0]}:$TAG (from git tag $GITHUB_REF_NAME)"
           docker build --provenance=false -f Dockerfile -t "${TARGETS[0]}:$TAG" .
 
-          # 给每个 target 推 :TAG 和 :latest
+          # 给每个 target 推 :TAG；稳定版本同时更新 :latest
           for IMAGE in "${TARGETS[@]}"; do
-            echo "→ Pushing $IMAGE:$TAG and $IMAGE:latest"
+            echo "→ Pushing $IMAGE:$TAG"
             docker tag "${TARGETS[0]}:$TAG" "$IMAGE:$TAG"
             docker push "$IMAGE:$TAG"
-            docker tag "${TARGETS[0]}:$TAG" "$IMAGE:latest"
-            docker push "$IMAGE:latest"
+            if [ "$IS_PRERELEASE" = false ]; then
+              echo "→ Updating $IMAGE:latest"
+              docker tag "${TARGETS[0]}:$TAG" "$IMAGE:latest"
+              docker push "$IMAGE:latest"
+            fi
           done
 
       - name: Logout from registries
