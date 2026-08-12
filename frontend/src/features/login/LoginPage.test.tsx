@@ -37,14 +37,14 @@ describe('LoginPage', () => {
 
   it('renders brand and login button', () => {
     renderLogin()
-    expect(screen.getByText('Zerone Hub')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Casdoor/ })).toBeInTheDocument()
+    expect(screen.getByText('Zerone Agent Hub')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '登录 Agent Hub' })).toBeInTheDocument()
   })
 
   it('calls authApi.login on button click', async () => {
     const user = userEvent.setup()
     renderLogin()
-    const btn = screen.getByRole('button', { name: /Casdoor/ })
+    const btn = screen.getByRole('button', { name: '登录 Agent Hub' })
     await user.click(btn)
     expect(authApi.login).toHaveBeenCalledTimes(1)
   })
