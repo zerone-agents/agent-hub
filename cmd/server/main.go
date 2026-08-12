@@ -10,6 +10,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
+	"control-panel/internal/auth/builtin"
 	"control-panel/internal/config"
 	knowledgedomain "control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
@@ -59,13 +60,30 @@ func main() {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
-	if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
-		log.Fatalf("Failed to initialize Casdoor: %v", err)
+	if err := cfg.ValidateAuth(); err != nil {
+		log.Fatalf("Invalid auth config: %v", err)
 	}
-	// Auth provider assembled per auth.mode. Task 13 makes this mode-conditional;
-	// for now the Casdoor provider preserves existing behavior so the build
-	// stays green during the middleware refactor.
-	authProvider := auth.NewCasdoorProvider()
+
+	// ==================== 认证装配（按 auth.mode 二选一） ====================
+	var authProvider auth.Provider
+	var builtinAuthHandler *handler.BuiltinAuthHandler
+	var adminUserHandler *handler.AdminUserHandler
+
+	if cfg.Auth.IsBuiltin() {
+		userSvc := services.NewUserService(database.GetDB())
+		inviteSvc := services.NewInviteService(database.GetDB())
+		builtinProvider := builtin.New(database.GetDB(), cfg.Auth.JWTSecret)
+		authProvider = builtinProvider
+		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc)
+		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider)
+		log.Println("Auth mode: builtin")
+	} else {
+		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
+			log.Fatalf("Failed to initialize Casdoor: %v", err)
+		}
+		authProvider = auth.NewCasdoorProvider()
+		log.Println("Auth mode: casdoor")
+	}
 
 	uploader, err := ossinfra.InitOSS(&cfg.OSS)
 	if err != nil {
@@ -204,18 +222,37 @@ func main() {
 	r.GET("/health", handler.HealthCheck)
 	r.GET("/health/:service", handler.ServiceHealthCheck)
 
-	// /auth
+	// /auth — endpoints are mode-conditional. builtin mode serves setup/login/
+	// register/refresh/change-password locally; casdoor mode keeps the OAuth
+	// redirect flow. /auth/mode and /auth/userinfo are common to both.
 	authGroup := r.Group("/auth")
 	{
-		authGroup.GET("/login", handler.Login)
-		authGroup.GET("/callback", handler.Callback)
-		authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
-		authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
-		authGroup.POST("/refresh", handler.RefreshToken)
+		if cfg.Auth.IsBuiltin() {
+			rl := middleware.IPRateLimit(10, time.Minute)
+			authGroup.GET("/mode", builtinAuthHandler.GetMode)
+			authGroup.POST("/setup", rl, builtinAuthHandler.Setup)
+			authGroup.POST("/login", rl, builtinAuthHandler.Login)
+			authGroup.POST("/refresh", rl, builtinAuthHandler.Refresh)
+			authGroup.POST("/logout", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), builtinAuthHandler.Logout)
+			authGroup.POST("/register", rl, builtinAuthHandler.Register)
+			authGroup.GET("/invite/:token", rl, builtinAuthHandler.InvitePrecheck)
+			authGroup.POST("/change-password", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), builtinAuthHandler.ChangePassword)
+			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
+		} else {
+			authGroup.GET("/mode", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
+			})
+			authGroup.GET("/login", handler.Login)
+			authGroup.GET("/callback", handler.Callback)
+			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
+			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
+			authGroup.POST("/refresh", handler.RefreshToken)
+		}
 	}
 
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider))
-	v1adminGroup := v1group.Group("/admin", middleware.RequireAdmin())
+	// Business-resource admin routes: admin OR maintainer.
+	v1adminGroup := v1group.Group("/admin", middleware.RequireManager())
 
 	// ---------- Tenant 领域 ----------
 	tenantsGroup := v1group.Group("/tenants")
@@ -398,6 +435,18 @@ func main() {
 
 		// MultiRAG sync (Task 6): push provider config to the configured MultiRAG.
 		adminProvidersGroup.POST("/:id/sync-multirag", providerHandler.SyncToMultiRAG)
+	}
+
+	// ---------- Builtin 用户管理（仅 builtin 模式注册） ----------
+	// 用户管理与邀请由 admin 独享。casdoor 模式下用户管理仍在 Casdoor 后台。
+	if cfg.Auth.IsBuiltin() {
+		usersAdmin := v1group.Group("/admin", middleware.RequireAdmin())
+		usersAdmin.GET("/users", adminUserHandler.ListUsers)
+		usersAdmin.PATCH("/users/:id", adminUserHandler.UpdateUser)
+		usersAdmin.POST("/users/:id/reset-password", adminUserHandler.ResetUserPassword)
+		usersAdmin.POST("/invites", adminUserHandler.CreateInvite)
+		usersAdmin.GET("/invites", adminUserHandler.ListInvites)
+		usersAdmin.DELETE("/invites/:id", adminUserHandler.RevokeInvite)
 	}
 
 	// ---------- CLI Token 领域 ----------
