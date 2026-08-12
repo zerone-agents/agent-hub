@@ -183,6 +183,13 @@ func (s *UserService) GetByID(id uint64) (*authdom.User, error) {
 	return &u, nil
 }
 
+// Delete removes a user by id. Intended for rollback of a just-created user
+// when a follow-up step (e.g. invite consume) fails — not exposed as a general
+// admin endpoint (admins disable instead, preserving audit history).
+func (s *UserService) Delete(id uint64) error {
+	return s.db.Delete(&authdom.User{}, id).Error
+}
+
 // UpdateRole changes a user's role. Guards: no self-change, keep last admin.
 func (s *UserService) UpdateRole(id, actorID uint64, role string) error {
 	if !authdom.IsValidRole(role) {

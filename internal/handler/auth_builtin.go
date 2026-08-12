@@ -164,7 +164,9 @@ func (h *BuiltinAuthHandler) Register(c *gin.Context) {
 	}
 	if _, err := h.invites.Consume(req.InviteToken); err != nil {
 		// Race: the invite was consumed by a concurrent registration between
-		// Validate and Consume. Roll back the just-created user and report 410.
+		// Validate and Consume. Roll back the just-created user so the username
+		// is freed, then report 410.
+		_ = h.users.Delete(user.ID)
 		respondError(c, http.StatusGone, services.ErrInviteInvalid.Error())
 		return
 	}
