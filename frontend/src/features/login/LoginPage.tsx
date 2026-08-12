@@ -155,22 +155,22 @@ export default function LoginPage() {
           <div className={styles.logoMark}>
             <BrandMark size={56} />
           </div>
-          <div className={styles.brandTitle}>Zerone Hub</div>
+          <div className={styles.brandTitle}>Zerone Agent Hub</div>
           <div className={styles.brandSubtitle}>AI Agent 管理平台</div>
         </div>
         <div className={styles.body}>
           <div className={styles.bodyTitle}>欢迎回来</div>
-          <div className={styles.bodySubtitle}>通过 Casdoor 统一认证登录</div>
+          <div className={styles.bodySubtitle}>使用 Zerone 统一账号认证登录</div>
           <button
             type="button"
             className={styles.loginBtn}
             onClick={handleLogin}
             disabled={loading}
           >
-            {loading ? <Spin size="small" /> : '通过 Casdoor 登录'}
+            {loading ? <Spin size="small" /> : '登录 Agent Hub'}
           </button>
         </div>
-        <div className={styles.foot}>由 Casdoor 认证服务保障安全</div>
+        <div className={styles.foot}>由 Zerone 认证服务保障安全</div>
       </div>
     </div>
   )
