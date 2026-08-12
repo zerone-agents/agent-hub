@@ -123,6 +123,10 @@ export const router = createBrowserRouter(
           path: 'settings/aigc',
           lazy: () =>
             import('@/features/aigc-config/AigcConfigPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'settings/users',
+          lazy: () => import('@/features/users/UsersPage').then((m) => ({ Component: m.default }))
         }
       ]
     },
