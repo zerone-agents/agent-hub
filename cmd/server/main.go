@@ -62,6 +62,10 @@ func main() {
 	if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 		log.Fatalf("Failed to initialize Casdoor: %v", err)
 	}
+	// Auth provider assembled per auth.mode. Task 13 makes this mode-conditional;
+	// for now the Casdoor provider preserves existing behavior so the build
+	// stays green during the middleware refactor.
+	authProvider := auth.NewCasdoorProvider()
 
 	uploader, err := ossinfra.InitOSS(&cfg.OSS)
 	if err != nil {
@@ -205,12 +209,12 @@ func main() {
 	{
 		authGroup.GET("/login", handler.Login)
 		authGroup.GET("/callback", handler.Callback)
-		authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc), handler.UserInfo)
-		authGroup.POST("/logout", middleware.JWTAuth(), handler.Logout)
+		authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
+		authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
 		authGroup.POST("/refresh", handler.RefreshToken)
 	}
 
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc))
+	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider))
 	v1adminGroup := v1group.Group("/admin", middleware.RequireAdmin())
 
 	// ---------- Tenant 领域 ----------

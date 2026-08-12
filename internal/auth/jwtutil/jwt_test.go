@@ -1,6 +1,7 @@
 package jwtutil
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -8,9 +9,9 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
-	"control-panel/internal/domain/auth"
+	"control-panel/internal/auth"
+	authdom "control-panel/internal/domain/auth"
 
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -18,89 +19,97 @@ import (
 	"gorm.io/gorm"
 )
 
+// fakeProvider is a controllable auth.Provider for middleware tests.
+type fakeProvider struct {
+	user  *auth.AuthUser
+	err   error
+	roles []string
+	ok    bool
+}
+
+func (f *fakeProvider) ValidateAccessToken(string) (*auth.AuthUser, error) { return f.user, f.err }
+func (f *fakeProvider) RefreshToken(string) (*auth.TokenPair, error)       { return nil, errors.New("x") }
+func (f *fakeProvider) RevokeToken(string) error                           { return nil }
+func (f *fakeProvider) GetUserRoles(string) ([]string, bool)               { return f.roles, f.ok }
+func (f *fakeProvider) Mode() string                                       { return "builtin" }
+
 // --- Test helpers ---
 
 func setupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&auth.CLIToken{}))
+	require.NoError(t, db.AutoMigrate(&authdom.CLIToken{}))
 	return db
 }
 
 // swapRolesFetcher replaces the package-level fetcher for the duration of the
 // test and restores the previous value on cleanup.
-func swapRolesFetcher(t *testing.T, fn func(userID string) ([]*casdoorsdk.Role, bool)) {
+func swapRolesFetcher(t *testing.T, fn func(p auth.Provider, userID string) ([]string, bool)) {
+	t.Helper()
 	prev := rolesFetcher
 	rolesFetcher = fn
 	t.Cleanup(func() { rolesFetcher = prev })
 }
 
-func newRequestWithCLI(token string) *http.Request {
+func newRequestWithBearer(token string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	return req
 }
 
-// --- Tests ---
+// --- Access token (JWT) path ---
 
-// TestFetchUserRoles_CachesWithinTTL verifies that fetchUserRoles only invokes
-// the underlying fetcher once during a burst of identical lookups (cache hit).
-func TestFetchUserRoles_CachesWithinTTL(t *testing.T) {
-	resetRolesCache()
-	var calls int32
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
-		atomic.AddInt32(&calls, 1)
-		return []*casdoorsdk.Role{{Name: "agents-admin"}}, true
+func TestJWTPathSetsNormalizedRoles(t *testing.T) {
+	p := &fakeProvider{user: &auth.AuthUser{
+		ID: "1", Username: "alice", Roles: []string{"maintainer"},
+	}}
+	r := gin.New()
+	var capturedRoles, capturedMethod any
+	r.GET("/", AuthMiddlewareWithCLI(nil, p), func(c *gin.Context) {
+		capturedRoles, _ = c.Get("roles")
+		capturedMethod, _ = c.Get("auth_method")
+		c.Status(http.StatusOK)
 	})
-
-	for i := 0; i < 5; i++ {
-		roles, ok := fetchUserRoles("user-xyz")
-		require.True(t, ok)
-		require.Len(t, roles, 1)
-		assert.Equal(t, "agents-admin", roles[0].Name)
-	}
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fetcher should only be called once (cache hits)")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, newRequestWithBearer("any-jwt"))
+	require.Equal(t, http.StatusOK, w.Code)
+	roles, ok := capturedRoles.([]string)
+	require.True(t, ok, "roles must be []string")
+	require.Equal(t, []string{"maintainer"}, roles)
+	assert.Equal(t, "builtin", capturedMethod)
 }
 
-// TestFetchUserRoles_FetcherFailureIsNotCachedAsOK ensures that when the
-// fetcher reports the user is unknown, fetchUserRoles returns !ok so the
-// middleware rejects the token.
-func TestFetchUserRoles_FetcherFailureIsNotCachedAsOK(t *testing.T) {
-	resetRolesCache()
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
-		return nil, false
-	})
-	roles, ok := fetchUserRoles("ghost")
-	assert.False(t, ok, "missing user should return ok=false")
-	assert.Nil(t, roles)
+func TestJWTPathRejectsBadToken(t *testing.T) {
+	p := &fakeProvider{err: errors.New("bad")}
+	r := gin.New()
+	r.GET("/", AuthMiddlewareWithCLI(nil, p), func(c *gin.Context) { c.Status(http.StatusOK) })
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, newRequestWithBearer("bad"))
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-// TestAuthMiddlewareWithCLI_SetsRolesForAdminUser is the spec §8.1 integration
-// test: a valid CLI token for an admin user must populate the gin context with
-// the user's roles so downstream RequireAdmin middleware authorizes the call.
-func TestAuthMiddlewareWithCLI_SetsRolesForAdminUser(t *testing.T) {
-	resetRolesCache()
+func TestNilProviderRejects(t *testing.T) {
+	r := gin.New()
+	r.GET("/", AuthMiddlewareWithCLI(nil, nil), func(c *gin.Context) { c.Status(http.StatusOK) })
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, newRequestWithBearer("x"))
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
 
+// --- CLI token path ---
+
+func TestCLITokenPathSetsRoles(t *testing.T) {
+	resetRolesCache()
 	db := setupTestDB(t)
 	svc := services.NewCLITokenService(db)
-
-	// Issue a real CLI token to get a valid plaintext.
-	result, err := svc.Issue("admin/alice", "laptop", 30)
+	issued, err := svc.Issue("42", "laptop", 30)
 	require.NoError(t, err)
 
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
-		if userID != "admin/alice" {
-			return nil, false
-		}
-		return []*casdoorsdk.Role{{Name: "agents-admin"}}, true
-	})
-
+	p := &fakeProvider{roles: []string{"admin"}, ok: true}
 	r := gin.New()
-	r.Use(AuthMiddlewareWithCLI(svc))
-	var capturedRoles interface{}
-	var capturedUserID interface{}
-	var capturedMethod interface{}
-	r.GET("/", func(c *gin.Context) {
+	var capturedRoles, capturedUserID, capturedMethod any
+	r.GET("/", AuthMiddlewareWithCLI(svc, p), func(c *gin.Context) {
 		capturedRoles, _ = c.Get("roles")
 		capturedUserID, _ = c.Get("user_id")
 		capturedMethod, _ = c.Get("auth_method")
@@ -108,93 +117,73 @@ func TestAuthMiddlewareWithCLI_SetsRolesForAdminUser(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequestWithCLI(result.Token))
-
+	r.ServeHTTP(w, newRequestWithBearer(issued.Token))
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "admin/alice", capturedUserID)
+	assert.Equal(t, "42", capturedUserID)
 	assert.Equal(t, "cli", capturedMethod)
-
-	roles, ok := capturedRoles.([]*casdoorsdk.Role)
-	require.True(t, ok, "roles must be []*casdoorsdk.Role")
-	require.Len(t, roles, 1)
-	assert.Equal(t, "agents-admin", roles[0].Name,
-		"admin user's roles must be populated per spec §8.1")
-}
-
-// TestAuthMiddlewareWithCLI_RejectsUnknownUser ensures that if the CLI token
-// validates but the user no longer exists in Casdoor, the middleware returns
-// 401 (token effectively revoked).
-func TestAuthMiddlewareWithCLI_RejectsUnknownUser(t *testing.T) {
-	resetRolesCache()
-
-	db := setupTestDB(t)
-	svc := services.NewCLITokenService(db)
-	result, err := svc.Issue("ghost-user", "x", 30)
-	require.NoError(t, err)
-
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
-		return nil, false
-	})
-
-	r := gin.New()
-	r.Use(AuthMiddlewareWithCLI(svc))
-	r.GET("/", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequestWithCLI(result.Token))
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code,
-		"a CLI token whose user is missing from Casdoor must be rejected")
-}
-
-// TestAuthMiddlewareWithCLI_NoRolesForRegularUser confirms that a CLI token
-// for a non-admin user carries empty roles, so admin routes still 403.
-func TestAuthMiddlewareWithCLI_NoRolesForRegularUser(t *testing.T) {
-	resetRolesCache()
-
-	db := setupTestDB(t)
-	svc := services.NewCLITokenService(db)
-	result, err := svc.Issue("user/bob", "x", 30)
-	require.NoError(t, err)
-
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
-		// Bob has no roles.
-		return []*casdoorsdk.Role{}, true
-	})
-
-	r := gin.New()
-	r.Use(AuthMiddlewareWithCLI(svc))
-	var capturedRoles interface{}
-	r.GET("/", func(c *gin.Context) {
-		capturedRoles, _ = c.Get("roles")
-		c.Status(http.StatusOK)
-	})
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequestWithCLI(result.Token))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	roles, ok := capturedRoles.([]*casdoorsdk.Role)
+	roles, ok := capturedRoles.([]string)
 	require.True(t, ok)
-	assert.Empty(t, roles)
+	require.Equal(t, []string{"admin"}, roles)
 }
 
-// TestFetchUserRoles_ParallelSafety is a smoke test that concurrent fetches
-// for the same userID do not race (the mutex must serialize cache writes).
-func TestFetchUserRoles_ParallelSafety(t *testing.T) {
+func TestCLITokenRejectsUnknownUser(t *testing.T) {
+	resetRolesCache()
+	db := setupTestDB(t)
+	svc := services.NewCLITokenService(db)
+	issued, err := svc.Issue("ghost", "x", 30)
+	require.NoError(t, err)
+
+	p := &fakeProvider{ok: false} // user not found / disabled
+	r := gin.New()
+	r.GET("/", AuthMiddlewareWithCLI(svc, p), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, newRequestWithBearer(issued.Token))
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// --- Cache ---
+
+func TestFetchUserRolesCachesWithinTTL(t *testing.T) {
 	resetRolesCache()
 	var calls int32
-	swapRolesFetcher(t, func(userID string) ([]*casdoorsdk.Role, bool) {
+	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
 		atomic.AddInt32(&calls, 1)
-		// Tiny sleep to widen the race window.
-		time.Sleep(5 * time.Millisecond)
-		return []*casdoorsdk.Role{{Name: "agents-admin"}}, true
+		return []string{"admin"}, true
 	})
+	p := &fakeProvider{}
+	for i := 0; i < 5; i++ {
+		roles, ok := fetchUserRoles(p, "user-xyz")
+		require.True(t, ok)
+		require.Equal(t, []string{"admin"}, roles)
+	}
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fetcher should only be called once (cache hits)")
+}
 
+func TestFetchUserRolesFailureNotCached(t *testing.T) {
+	resetRolesCache()
+	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
+		return nil, false
+	})
+	p := &fakeProvider{}
+	roles, ok := fetchUserRoles(p, "ghost")
+	assert.False(t, ok)
+	assert.Nil(t, roles)
+}
+
+func TestFetchUserRolesParallelSafety(t *testing.T) {
+	resetRolesCache()
+	var calls int32
+	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(5 * time.Millisecond)
+		return []string{"admin"}, true
+	})
+	p := &fakeProvider{}
 	done := make(chan struct{}, 20)
 	for i := 0; i < 20; i++ {
 		go func() {
-			_, ok := fetchUserRoles("concurrent-user")
+			_, ok := fetchUserRoles(p, "concurrent-user")
 			assert.True(t, ok)
 			done <- struct{}{}
 		}()
@@ -202,7 +191,5 @@ func TestFetchUserRoles_ParallelSafety(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		<-done
 	}
-	// We tolerate a small number of duplicated fetches (cache stampede on first
-	// load) but the majority should hit the cache after the first writer.
 	assert.LessOrEqual(t, atomic.LoadInt32(&calls), int32(20))
 }
