@@ -31,11 +31,13 @@ export function useUserInfo({ enabled = true }: UseUserInfoOptions = {}) {
       const res = await authApi.getUserInfo()
       if (!res.data.success) return null
       const d = res.data.data
+      const roles = d.roles ?? []
       return {
         id: d.user_id ?? d.id ?? '',
         email: d.email ?? '',
         name: d.display_name ?? d.username ?? d.email?.split('@')[0] ?? '',
-        avatar: d.avatar
+        avatar: d.avatar,
+        role: roles[0]
       }
     },
     enabled: BYPASS_AUTH || (enabled && !!getAccessToken()),
