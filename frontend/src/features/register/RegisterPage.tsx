@@ -86,6 +86,10 @@ const useStyles = createStyles(({ css }) => ({
   field: css`
     margin-bottom: 12px;
     text-align: left;
+    .ant-input,
+    .ant-input-affix-wrapper {
+      font-size: 14px;
+    }
   `,
   error: css`
     color: #d4380d;
