@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router'
 import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
+import { queryClient } from '@/lib/query-client'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
 import BrandMark from '@/components/BrandMark'
@@ -148,6 +149,7 @@ export default function SetupPage() {
     try {
       const pair = await authApi.setup(password, confirm)
       setTokens(pair.accessToken, pair.refreshToken)
+      queryClient.clear()
       void Promise.resolve(navigate('/', { replace: true }))
     } catch (err) {
       setError(parseApiError(err))

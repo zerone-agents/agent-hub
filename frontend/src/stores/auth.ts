@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { User } from '@/api/auth'
 import { authApi } from '@/api/auth'
 import { clearTokens, setTokens } from '@/api/client'
+import { queryClient } from '@/lib/query-client'
 
 interface AuthState {
   user: User | null
@@ -19,12 +20,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   loginWithPassword: async (username, password) => {
     const pair = await authApi.loginWithPassword(username, password)
     setTokens(pair.accessToken, pair.refreshToken)
+    // 切换账号：清掉上一个用户的全部 React Query 缓存，避免遗留 UI。
+    queryClient.clear()
   },
   login: () => { authApi.login() },
   logout: async () => {
     try {
       await authApi.logout()
     } finally {
+      queryClient.clear()
       clearTokens()
       set({ user: null })
     }

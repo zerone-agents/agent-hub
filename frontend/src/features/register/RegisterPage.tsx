@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router'
 import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
+import { queryClient } from '@/lib/query-client'
 import { tokens as t } from '@/styles/tokens'
 import BrandMark from '@/components/BrandMark'
 import ThemeControls from '@/components/ThemeControls'
@@ -170,6 +171,7 @@ export default function RegisterPage() {
     try {
       const pair = await authApi.register(inviteToken, username, password, displayName || undefined)
       setTokens(pair.accessToken, pair.refreshToken)
+      queryClient.clear()
       void Promise.resolve(navigate('/', { replace: true }))
     } catch (err) {
       setError(parseApiError(err))
