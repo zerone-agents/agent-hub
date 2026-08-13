@@ -224,6 +224,7 @@ export default function LoginPage() {
                   value={username}
                   onChange={(e) => { setUsername(e.target.value); }}
                   onPressEnter={handleBuiltinLogin}
+                  autoComplete="username"
                   size="large"
                 />
               </div>
@@ -233,6 +234,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); }}
                   onPressEnter={handleBuiltinLogin}
+                  autoComplete="current-password"
                   size="large"
                 />
               </div>

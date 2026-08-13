@@ -81,6 +81,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
           placeholder="当前密码"
           value={oldPassword}
           onChange={(e) => { setOldPassword(e.target.value); }}
+          autoComplete="current-password"
         />
       </div>
       <div style={{ marginBottom: 12 }}>
@@ -88,6 +89,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
           placeholder="新密码（至少 8 位，含字母和数字）"
           value={newPassword}
           onChange={(e) => { setNewPassword(e.target.value); }}
+          autoComplete="new-password"
         />
       </div>
       <div>
@@ -96,6 +98,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
           value={confirm}
           onChange={(e) => { setConfirm(e.target.value); }}
           onPressEnter={handleSubmit}
+          autoComplete="new-password"
         />
       </div>
     </Modal>

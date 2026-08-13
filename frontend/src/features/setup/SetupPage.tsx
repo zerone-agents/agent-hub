@@ -187,6 +187,7 @@ export default function SetupPage() {
               value={password}
               onChange={(e) => { setPassword(e.target.value); }}
               onPressEnter={handleSubmit}
+              autoComplete="new-password"
               size="large"
             />
           </div>
@@ -196,6 +197,7 @@ export default function SetupPage() {
               value={confirm}
               onChange={(e) => { setConfirm(e.target.value); }}
               onPressEnter={handleSubmit}
+              autoComplete="new-password"
               size="large"
             />
           </div>

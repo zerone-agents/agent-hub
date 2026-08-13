@@ -197,6 +197,7 @@ export default function RegisterPage() {
             placeholder="用户名（3-32 位字母数字下划线连字符）"
             value={username}
             onChange={(e) => { setUsername(e.target.value); }}
+            autoComplete="username"
             size="large"
           />
         </div>
@@ -205,6 +206,7 @@ export default function RegisterPage() {
             placeholder="昵称（可选）"
             value={displayName}
             onChange={(e) => { setDisplayName(e.target.value); }}
+            autoComplete="off"
             size="large"
           />
         </div>
@@ -214,6 +216,7 @@ export default function RegisterPage() {
             value={password}
             onChange={(e) => { setPassword(e.target.value); }}
             onPressEnter={handleSubmit}
+            autoComplete="new-password"
             size="large"
           />
         </div>
