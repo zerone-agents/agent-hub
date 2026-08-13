@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Modal, Select, Input, InputNumber, Typography, message } from 'antd'
+import { Modal, Select, Input, InputNumber, Typography, message, Space, Button } from 'antd'
+import { CopyIcon } from '@phosphor-icons/react'
 import { usersApi, type UserRole, type CreatedInvite } from '@/api/users'
 import { parseApiError } from '@/api/client'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
@@ -85,24 +86,12 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
           <Typography.Paragraph type="warning" style={{ marginBottom: 12 }}>
             链接仅显示这一次，请立即复制保存。关闭后无法再获取该链接（如丢失只能撤销重建）。
           </Typography.Paragraph>
-          <Input.Group compact>
-            <Input
-              style={{ width: 'calc(100% - 88px)' }}
-              value={inviteURL}
-              readOnly
-            />
-            <button
-              type="button"
-              onClick={() => void copyURL()}
-              style={{
-                width: 88, height: 32, cursor: 'pointer',
-                border: '1px solid var(--border)', background: 'var(--card)',
-                borderRadius: 6
-              }}
-            >
+          <Space.Compact style={{ width: '100%' }}>
+            <Input value={inviteURL} readOnly />
+            <Button icon={<CopyIcon size={16} />} onClick={() => void copyURL()}>
               复制
-            </button>
-          </Input.Group>
+            </Button>
+          </Space.Compact>
         </>
       ) : (
         <>
