@@ -217,13 +217,13 @@ export default function LoginPage() {
               {loading ? <Spin size="small" /> : '登录 Agent Hub'}
             </button>
           ) : (
-            <>
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void handleBuiltinLogin(); }}>
               <div className={styles.field}>
                 <Input
                   placeholder="用户名"
+                  name="username"
                   value={username}
                   onChange={(e) => { setUsername(e.target.value); }}
-                  onPressEnter={handleBuiltinLogin}
                   autoComplete="username"
                   size="large"
                 />
@@ -231,22 +231,21 @@ export default function LoginPage() {
               <div className={styles.field}>
                 <PasswordInput
                   placeholder="密码"
+                  name="password"
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); }}
-                  onPressEnter={handleBuiltinLogin}
                   autoComplete="current-password"
                   size="large"
                 />
               </div>
               <button
-                type="button"
+                type="submit"
                 className={styles.loginBtn}
-                onClick={handleBuiltinLogin}
                 disabled={loading || !username || !password}
               >
                 {loading ? <Spin size="small" /> : '登录'}
               </button>
-            </>
+            </form>
           )}
         </div>
         <div className={styles.foot}>由 Zerone 认证服务保障安全</div>

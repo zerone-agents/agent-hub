@@ -181,34 +181,47 @@ export default function SetupPage() {
           <div className={styles.bodyTitle}>初始化系统</div>
           <div className={styles.bodySubtitle}>创建管理员账号（用户名固定为 admin）</div>
           {error && <div className={styles.error}>{error}</div>}
-          <div className={styles.field}>
-            <PasswordInput
-              placeholder="设置管理员密码"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); }}
-              onPressEnter={handleSubmit}
-              autoComplete="new-password"
-              size="large"
+          <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
+            {/* 用户名固定为 admin。渲染一个离屏 username 输入框，
+                让密码管理器能把凭证关联到正确的用户名上。 */}
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value="admin"
+              readOnly
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', height: 0, width: 0 }}
             />
-          </div>
-          <div className={styles.field}>
-            <PasswordInput
-              placeholder="确认密码"
-              value={confirm}
-              onChange={(e) => { setConfirm(e.target.value); }}
-              onPressEnter={handleSubmit}
-              autoComplete="new-password"
-              size="large"
-            />
-          </div>
-          <button
-            type="button"
-            className={styles.submitBtn}
-            onClick={handleSubmit}
-            disabled={loading || !password || !confirm}
-          >
-            {loading ? <Spin size="small" /> : '创建并登录'}
-          </button>
+            <div className={styles.field}>
+              <PasswordInput
+                placeholder="设置管理员密码"
+                name="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); }}
+                autoComplete="new-password"
+                size="large"
+              />
+            </div>
+            <div className={styles.field}>
+              <PasswordInput
+                placeholder="确认密码"
+                name="confirmPassword"
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); }}
+                autoComplete="new-password"
+                size="large"
+              />
+            </div>
+            <button
+              type="submit"
+              className={styles.submitBtn}
+              disabled={loading || !password || !confirm}
+            >
+              {loading ? <Spin size="small" /> : '创建并登录'}
+            </button>
+          </form>
         </div>
       </div>
     </div>

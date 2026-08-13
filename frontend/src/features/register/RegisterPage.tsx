@@ -192,42 +192,47 @@ export default function RegisterPage() {
         <div className={styles.bodySubtitle}>填写信息完成注册</div>
         {note && <div className={styles.note}>邀请备注：{note}</div>}
         {error && <div className={styles.error}>{error}</div>}
-        <div className={styles.field}>
-          <Input
-            placeholder="用户名（3-32 位字母数字下划线连字符）"
-            value={username}
-            onChange={(e) => { setUsername(e.target.value); }}
-            autoComplete="username"
-            size="large"
-          />
-        </div>
-        <div className={styles.field}>
-          <Input
-            placeholder="昵称（可选）"
-            value={displayName}
-            onChange={(e) => { setDisplayName(e.target.value); }}
-            autoComplete="off"
-            size="large"
-          />
-        </div>
-        <div className={styles.field}>
-          <PasswordInput
-            placeholder="密码（至少 8 位，含字母和数字）"
-            value={password}
-            onChange={(e) => { setPassword(e.target.value); }}
-            onPressEnter={handleSubmit}
-            autoComplete="new-password"
-            size="large"
-          />
-        </div>
-        <button
-          type="button"
-          className={styles.submitBtn}
-          onClick={handleSubmit}
-          disabled={loading || !username || !password}
-        >
-          {loading ? <Spin size="small" /> : '注册并登录'}
-        </button>
+        {/* Chrome 凭证填充依赖 <form> 结构分组 username/password，
+            缺了 form 会退化为逐字段启发式（填错框）。 */}
+        <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
+          <div className={styles.field}>
+            <Input
+              placeholder="用户名（3-32 位字母数字下划线连字符）"
+              name="username"
+              value={username}
+              onChange={(e) => { setUsername(e.target.value); }}
+              autoComplete="username"
+              size="large"
+            />
+          </div>
+          <div className={styles.field}>
+            <Input
+              placeholder="昵称（可选）"
+              name="displayName"
+              value={displayName}
+              onChange={(e) => { setDisplayName(e.target.value); }}
+              autoComplete="off"
+              size="large"
+            />
+          </div>
+          <div className={styles.field}>
+            <PasswordInput
+              placeholder="密码（至少 8 位，含字母和数字）"
+              name="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); }}
+              autoComplete="new-password"
+              size="large"
+            />
+          </div>
+          <button
+            type="submit"
+            className={styles.submitBtn}
+            disabled={loading || !username || !password}
+          >
+            {loading ? <Spin size="small" /> : '注册并登录'}
+          </button>
+        </form>
       </div>
     </div>
   )

@@ -23,9 +23,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  // keep store reference stable so the linter doesn't flag unused setUser
-  const _setUser = useAuthStore((s) => s.setUser)
-  void _setUser
+  const username = useAuthStore((s) => s.user?.name ?? '')
 
   const reset = () => {
     setOldPassword('')
@@ -76,31 +74,46 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
       destroyOnHidden
     >
       {error && <div style={{ color: '#d4380d', marginBottom: 12 }}>{error}</div>}
-      <div style={{ marginBottom: 12 }}>
-        <PasswordInput
-          placeholder="当前密码"
-          value={oldPassword}
-          onChange={(e) => { setOldPassword(e.target.value); }}
-          autoComplete="current-password"
+      <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
+        {/* 离屏 username 输入框：让密码管理器把新密码关联到当前账号 */}
+        <input
+          type="text"
+          name="username"
+          autoComplete="username"
+          value={username}
+          readOnly
+          tabIndex={-1}
+          aria-hidden="true"
+          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', height: 0, width: 0 }}
         />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <PasswordInput
-          placeholder="新密码（至少 8 位，含字母和数字）"
-          value={newPassword}
-          onChange={(e) => { setNewPassword(e.target.value); }}
-          autoComplete="new-password"
-        />
-      </div>
-      <div>
-        <PasswordInput
-          placeholder="确认新密码"
-          value={confirm}
-          onChange={(e) => { setConfirm(e.target.value); }}
-          onPressEnter={handleSubmit}
-          autoComplete="new-password"
-        />
-      </div>
+        <div style={{ marginBottom: 12 }}>
+          <PasswordInput
+            placeholder="当前密码"
+            name="currentPassword"
+            value={oldPassword}
+            onChange={(e) => { setOldPassword(e.target.value); }}
+            autoComplete="current-password"
+          />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <PasswordInput
+            placeholder="新密码（至少 8 位，含字母和数字）"
+            name="newPassword"
+            value={newPassword}
+            onChange={(e) => { setNewPassword(e.target.value); }}
+            autoComplete="new-password"
+          />
+        </div>
+        <div>
+          <PasswordInput
+            placeholder="确认新密码"
+            name="confirmPassword"
+            value={confirm}
+            onChange={(e) => { setConfirm(e.target.value); }}
+            autoComplete="new-password"
+          />
+        </div>
+      </form>
     </Modal>
   )
 }
