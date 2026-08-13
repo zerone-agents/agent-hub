@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
+import { Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
 import { PlusIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
@@ -8,6 +8,7 @@ import { parseApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/PageHeader'
 import PrimaryButton from '@/components/PrimaryButton'
+import BorderedTable from '@/components/BorderedTable'
 import CreateInviteModal from './CreateInviteModal'
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
@@ -127,6 +128,9 @@ export default function UsersPage() {
               <Popconfirm
                 title="确认禁用该用户？"
                 description="用户将立即下线。"
+                okText="禁用"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
                 onConfirm={() =>
                   updateMutation.mutate({ id: record.id, patch: { status: 'disabled' } })
                 }
@@ -144,13 +148,18 @@ export default function UsersPage() {
                 启用
               </Button>
             )}
-            <Button
-              size="small"
-              style={{ marginLeft: 8 }}
-              onClick={() => resetMutation.mutate(record.id)}
+            <Popconfirm
+              title="确认重置密码？"
+              description={`将为 "${record.username}" 生成随机新密码，原密码立即失效，所有会话下线。`}
+              okText="重置"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => resetMutation.mutate(record.id)}
             >
-              重置密码
-            </Button>
+              <Button size="small" style={{ marginLeft: 8 }}>
+                重置密码
+              </Button>
+            </Popconfirm>
           </>
         )
       }
@@ -187,7 +196,11 @@ export default function UsersPage() {
       render: (_, record) =>
         record.status === 'pending' ? (
           <Popconfirm
-            title="撤销该邀请？"
+            title="确认撤销该邀请？"
+            description="撤销后该邀请链接立即失效，无法用于注册。"
+            okText="撤销"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
             onConfirm={() => revokeMutation.mutate(record.id)}
           >
             <Button size="small" danger>撤销</Button>
@@ -209,7 +222,7 @@ export default function UsersPage() {
       />
 
       <Typography.Title level={5} style={{ marginTop: 24 }}>用户</Typography.Title>
-      <Table<AdminUser>
+      <BorderedTable<AdminUser>
         rowKey="id"
         loading={usersLoading}
         dataSource={users}
@@ -219,7 +232,7 @@ export default function UsersPage() {
       />
 
       <Typography.Title level={5} style={{ marginTop: 32 }}>邀请记录</Typography.Title>
-      <Table<Invite>
+      <BorderedTable<Invite>
         rowKey="id"
         loading={invitesLoading}
         dataSource={invites}
@@ -233,10 +246,10 @@ export default function UsersPage() {
       <Modal
         title="重置密码成功"
         open={!!resetTarget}
-        onOk={() => setResetTarget(null)}
         onCancel={() => setResetTarget(null)}
-        okText="已复制/关闭"
-        cancelText="关闭"
+        footer={
+          <PrimaryButton onClick={() => setResetTarget(null)}>关闭</PrimaryButton>
+        }
       >
         <Typography.Paragraph type="warning">
           新密码仅显示这一次，请立即复制并安全送达被重置的用户：
