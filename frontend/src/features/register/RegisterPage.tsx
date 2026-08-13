@@ -192,16 +192,15 @@ export default function RegisterPage() {
         <div className={styles.bodySubtitle}>填写信息完成注册</div>
         {note && <div className={styles.note}>邀请备注：{note}</div>}
         {error && <div className={styles.error}>{error}</div>}
-        {/* Chrome 凭证填充依赖 <form> 结构分组 username/password，
-            缺了 form 会退化为逐字段启发式（填错框）。 */}
-        <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
+        {/* 注册页关闭自动填充：form 级 off + 全部字段 off。 */}
+        <form noValidate autoComplete="off" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
           <div className={styles.field}>
             <Input
               placeholder="用户名（3-32 位字母数字下划线连字符）"
               name="username"
               value={username}
               onChange={(e) => { setUsername(e.target.value); }}
-              autoComplete="username"
+              autoComplete="off"
               size="large"
             />
           </div>
@@ -221,7 +220,7 @@ export default function RegisterPage() {
               name="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); }}
-              autoComplete="new-password"
+              autoComplete="off"
               size="large"
             />
           </div>

@@ -4,7 +4,6 @@ import PasswordInput from '@/components/PasswordInput'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
-import { useAuthStore } from '@/stores/auth'
 
 interface ChangePasswordModalProps {
   open: boolean
@@ -23,7 +22,6 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const username = useAuthStore((s) => s.user?.name ?? '')
 
   const reset = () => {
     setOldPassword('')
@@ -74,25 +72,14 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
       destroyOnHidden
     >
       {error && <div style={{ color: '#d4380d', marginBottom: 12 }}>{error}</div>}
-      <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
-        {/* 离屏 username 输入框：让密码管理器把新密码关联到当前账号 */}
-        <input
-          type="text"
-          name="username"
-          autoComplete="username"
-          value={username}
-          readOnly
-          tabIndex={-1}
-          aria-hidden="true"
-          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', height: 0, width: 0 }}
-        />
+      <form noValidate autoComplete="off" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
         <div style={{ marginBottom: 12 }}>
           <PasswordInput
             placeholder="当前密码"
             name="currentPassword"
             value={oldPassword}
             onChange={(e) => { setOldPassword(e.target.value); }}
-            autoComplete="current-password"
+            autoComplete="off"
           />
         </div>
         <div style={{ marginBottom: 12 }}>
@@ -101,7 +88,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
             name="newPassword"
             value={newPassword}
             onChange={(e) => { setNewPassword(e.target.value); }}
-            autoComplete="new-password"
+            autoComplete="off"
           />
         </div>
         <div>
@@ -110,7 +97,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
             name="confirmPassword"
             value={confirm}
             onChange={(e) => { setConfirm(e.target.value); }}
-            autoComplete="new-password"
+            autoComplete="off"
           />
         </div>
       </form>
