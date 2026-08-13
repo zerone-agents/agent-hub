@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Spin } from 'antd'
+import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate } from 'react-router'
+import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
-import { getAccessToken } from '@/api/client'
+import { getAccessToken, parseApiError } from '@/api/client'
 import { useUserInfo } from '@/queries/useUserInfo'
+import { useAuthStore } from '@/stores/auth'
 import LoadingState from '@/components/LoadingState'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
 import BrandMark from '@/components/BrandMark'
+import { useAuthMode } from './useAuthMode'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -86,6 +89,19 @@ const useStyles = createStyles(({ css }) => ({
     color: ${t.textTertiary};
     margin-bottom: 24px;
   `,
+  field: css`
+    margin-bottom: 12px;
+    text-align: left;
+    .ant-input,
+    .ant-input-affix-wrapper {
+      font-size: 14px;
+    }
+  `,
+  error: css`
+    color: #d4380d;
+    font-size: ${t.textSm};
+    margin-bottom: 12px;
+  `,
   loginBtn: css`
     width: 100%;
     height: 46px;
@@ -121,10 +137,15 @@ const useStyles = createStyles(({ css }) => ({
 
 export default function LoginPage() {
   const { styles } = useStyles()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const token = getAccessToken()
   const { data: user, isLoading } = useUserInfo({ enabled: !!token })
+  const { data: mode, isLoading: modeLoading } = useAuthMode()
+  const loginWithPassword = useAuthStore((s) => s.loginWithPassword)
 
   useEffect(() => {
     if (token && !isLoading && user) {
@@ -132,18 +153,40 @@ export default function LoginPage() {
     }
   }, [token, isLoading, user, navigate])
 
-  const handleLogin = () => {
+  // builtin mode + uninitialized → force the setup flow
+  useEffect(() => {
+    if (mode && mode.mode === 'builtin' && !mode.initialized) {
+      void Promise.resolve(navigate('/setup', { replace: true }))
+    }
+  }, [mode, navigate])
+
+  const handleBuiltinLogin = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      await loginWithPassword(username, password)
+      void Promise.resolve(navigate('/', { replace: true }))
+    } catch (err) {
+      setError(parseApiError(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCasdoorLogin = () => {
     setLoading(true)
     authApi.login()
   }
 
-  if (token && isLoading) {
+  if ((token && isLoading) || modeLoading) {
     return (
       <div className={styles.page}>
         <LoadingState />
       </div>
     )
   }
+
+  const isCasdoor = mode?.mode === 'casdoor'
 
   return (
     <div className={styles.page}>
@@ -160,15 +203,50 @@ export default function LoginPage() {
         </div>
         <div className={styles.body}>
           <div className={styles.bodyTitle}>欢迎回来</div>
-          <div className={styles.bodySubtitle}>使用 Zerone 统一账号认证登录</div>
-          <button
-            type="button"
-            className={styles.loginBtn}
-            onClick={handleLogin}
-            disabled={loading}
-          >
-            {loading ? <Spin size="small" /> : '登录 Agent Hub'}
-          </button>
+          <div className={styles.bodySubtitle}>
+            {isCasdoor ? '使用 Zerone 统一账号认证登录' : '使用账号登录'}
+          </div>
+          {error && <div className={styles.error}>{error}</div>}
+          {isCasdoor ? (
+            <button
+              type="button"
+              className={styles.loginBtn}
+              onClick={handleCasdoorLogin}
+              disabled={loading}
+            >
+              {loading ? <Spin size="small" /> : '登录 Agent Hub'}
+            </button>
+          ) : (
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void handleBuiltinLogin(); }}>
+              <div className={styles.field}>
+                <Input
+                  placeholder="用户名"
+                  name="username"
+                  value={username}
+                  onChange={(e) => { setUsername(e.target.value); }}
+                  autoComplete="username"
+                  size="large"
+                />
+              </div>
+              <div className={styles.field}>
+                <PasswordInput
+                  placeholder="密码"
+                  name="password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); }}
+                  autoComplete="current-password"
+                  size="large"
+                />
+              </div>
+              <button
+                type="submit"
+                className={styles.loginBtn}
+                disabled={loading || !username || !password}
+              >
+                {loading ? <Spin size="small" /> : '登录'}
+              </button>
+            </form>
+          )}
         </div>
         <div className={styles.foot}>由 Zerone 认证服务保障安全</div>
       </div>

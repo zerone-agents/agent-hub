@@ -1,4 +1,4 @@
-import apiClient from './client'
+import apiClient, { getRefreshToken, unwrapResponse } from './client'
 import type { ApiResponse } from '@/types/api'
 
 export interface User {
@@ -6,6 +6,7 @@ export interface User {
   name: string
   email: string
   avatar?: string
+  role?: string
 }
 
 export interface UserInfoResponse {
@@ -15,6 +16,7 @@ export interface UserInfoResponse {
   display_name?: string
   username?: string
   avatar?: string
+  roles?: string[]
 }
 
 export interface RefreshResponse {
@@ -22,16 +24,54 @@ export interface RefreshResponse {
   refreshToken: string
 }
 
+export interface TokenPair {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}
+
+export interface AuthMode {
+  mode: 'builtin' | 'casdoor'
+  initialized: boolean
+}
+
 export const authApi = {
+  /** Casdoor SSO redirect entry. Only used when auth.mode = casdoor. */
   login: () => {
     window.location.href = '/auth/login'
   },
+  /** Reports the active auth backend so the login page can render the right UI. */
+  getAuthMode: () =>
+    apiClient.get<ApiResponse<AuthMode>>('/auth/mode').then((res) => unwrapResponse<AuthMode>(res)),
+  /** builtin login with username + password. */
+  loginWithPassword: (username: string, password: string) =>
+    apiClient
+      .post<ApiResponse<TokenPair>>('/auth/login', { username, password })
+      .then((res) => unwrapResponse<TokenPair>(res)),
+  /** First-run setup: create the fixed-username `admin` account. */
+  setup: (password: string, confirmPassword: string) =>
+    apiClient
+      .post<ApiResponse<TokenPair>>('/auth/setup', { password, confirmPassword })
+      .then((res) => unwrapResponse<TokenPair>(res)),
+  /** Consume a one-time invite and create the account (auto-login). */
+  register: (inviteToken: string, username: string, password: string, displayName?: string) =>
+    apiClient
+      .post<ApiResponse<TokenPair>>('/auth/register', { inviteToken, username, password, displayName })
+      .then((res) => unwrapResponse<TokenPair>(res)),
+  /** Validate an invite token before rendering the register form. */
+  precheckInvite: (token: string) =>
+    apiClient
+      .get<ApiResponse<{ valid: boolean; note: string }>>(`/auth/invite/${encodeURIComponent(token)}`)
+      .then((res) => unwrapResponse<{ valid: boolean; note: string }>(res)),
+  /** Self-service password change; revokes all other sessions. */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiClient
+      .post<ApiResponse<TokenPair>>('/auth/change-password', { oldPassword, newPassword })
+      .then((res) => unwrapResponse<TokenPair>(res)),
   getUserInfo: () => apiClient.get<ApiResponse<UserInfoResponse>>('/auth/userinfo'),
   logout: async () => {
     try {
-      await apiClient.post('/auth/logout', '', {
-        headers: { 'Content-Type': 'text/plain' }
-      })
+      await apiClient.post('/auth/logout', { refreshToken: getRefreshToken() })
     } finally {
       // tokens are cleared by the caller (auth store)
     }

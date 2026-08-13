@@ -11,6 +11,14 @@ export const router = createBrowserRouter(
       lazy: () => import('@/features/login/LoginPage').then((m) => ({ Component: m.default }))
     },
     {
+      path: '/setup',
+      lazy: () => import('@/features/setup/SetupPage').then((m) => ({ Component: m.default }))
+    },
+    {
+      path: '/register',
+      lazy: () => import('@/features/register/RegisterPage').then((m) => ({ Component: m.default }))
+    },
+    {
       path: '/agents/:name/chat',
       element: (
         <RequireAuth>
@@ -115,6 +123,10 @@ export const router = createBrowserRouter(
           path: 'settings/aigc',
           lazy: () =>
             import('@/features/aigc-config/AigcConfigPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'settings/users',
+          lazy: () => import('@/features/users/UsersPage').then((m) => ({ Component: m.default }))
         }
       ]
     },

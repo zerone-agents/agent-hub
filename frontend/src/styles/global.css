@@ -59,7 +59,7 @@ button {
 .ant-card,
 .ant-modal-content,
 .ant-drawer-content,
-.ant-popover-inner,
+.ant-popover-container,
 .ant-dropdown-menu {
   border: 1px solid var(--border);
   box-shadow: var(--elevation-2);
@@ -115,11 +115,10 @@ button {
   overflow: hidden;
 }
 
-/* Popconfirm (删除确认等) — 统一按钮样式 */
-.ant-popconfirm {
-  border: 1px solid var(--border);
-  box-shadow: var(--elevation-2);
-}
+/* Popconfirm (删除确认等) — 统一按钮样式。
+   注意：border/shadow 只能加在内层 .ant-popover-container（antd v6 圆角所在层），
+   加在外层 .ant-popconfirm 会在圆角外露出直角边。边框阴影由上方
+   .ant-popover-container 通用规则统一提供。 */
 
 .ant-popconfirm .ant-btn-primary,
 .ant-popconfirm .ant-btn-primary.ant-btn-dangerous,

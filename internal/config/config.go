@@ -24,12 +24,44 @@ func Get() *Config {
 type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	Database  DatabaseConfig  `mapstructure:"database"`
+	Auth      AuthConfig      `mapstructure:"auth"`
 	Casdoor   CasdoorConfig   `mapstructure:"casdoor"`
 	OSS       OSSConfig       `mapstructure:"oss"`
 	Provider  ProviderConfig  `mapstructure:"provider"`
 	Deployer  DeployerConfig  `mapstructure:"deployer"`
 	Knowledge KnowledgeConfig `mapstructure:"knowledge"`
 	Kong      KongConfig      `mapstructure:"kong"`
+}
+
+// AuthConfig selects the authentication backend. Mode "builtin" (default) uses
+// the built-in username/password user system; "casdoor" delegates to the
+// existing Casdoor OAuth integration. JWTSecret is required for builtin mode
+// and must be at least 32 bytes.
+type AuthConfig struct {
+	Mode      string `mapstructure:"mode"`
+	JWTSecret string `mapstructure:"jwt_secret"`
+}
+
+// IsBuiltin reports whether the builtin auth backend is active.
+func (a *AuthConfig) IsBuiltin() bool { return a.Mode == "builtin" }
+
+// IsCasdoor reports whether the Casdoor auth backend is active.
+func (a *AuthConfig) IsCasdoor() bool { return a.Mode == "casdoor" }
+
+// ValidateAuth enforces auth config invariants: Mode must be one of the
+// supported values, and builtin mode requires a JWTSecret of at least 32 bytes.
+func (c *Config) ValidateAuth() error {
+	switch c.Auth.Mode {
+	case "builtin":
+		if len(c.Auth.JWTSecret) < 32 {
+			return fmt.Errorf("auth.jwt_secret 必填且至少 32 字节（builtin 模式）")
+		}
+	case "casdoor":
+		// Casdoor uses its own token signing; no local JWT secret required.
+	default:
+		return fmt.Errorf("auth.mode 必须是 builtin 或 casdoor，当前: %q", c.Auth.Mode)
+	}
+	return nil
 }
 
 type DeployerConfig struct {
@@ -98,6 +130,7 @@ func LoadConfig() (*Config, error) {
 		"database.url", "database.max_idle", "database.max_open", "database.max_lifetime",
 		"casdoor.endpoint", "casdoor.client_id", "casdoor.client_secret", "casdoor.certificate",
 		"casdoor.organization", "casdoor.callback_url",
+		"auth.mode", "auth.jwt_secret",
 		"oss.endpoint", "oss.region", "oss.bucket", "oss.access_key", "oss.secret_key", "oss.force_path_style", "oss.cdn_host",
 		"provider.encryption_key",
 	}
@@ -117,6 +150,7 @@ func LoadConfig() (*Config, error) {
 
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)
+	viper.SetDefault("auth.mode", "builtin")
 	viper.SetDefault("database.max_idle", 10)
 	viper.SetDefault("database.max_open", 100)
 	viper.SetDefault("database.max_lifetime", 3600)

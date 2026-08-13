@@ -49,7 +49,12 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as (InternalAxiosRequestConfig & { headers: Record<string, string> }) | undefined
 
-    if (error.response?.status === 401 && originalRequest) {
+    // 凭证校验类端点的 401 语义是"密码错误"，不是"会话过期"——
+    // 不能走 refresh / 强制跳登录页，否则错误提示会被整页刷新吞掉。
+    const CREDENTIAL_CHECK_PATHS = ['/auth/login', '/auth/setup', '/auth/register', '/auth/change-password']
+    const isCredentialCheck = CREDENTIAL_CHECK_PATHS.some((p) => originalRequest?.url?.includes(p))
+
+    if (error.response?.status === 401 && originalRequest && !isCredentialCheck) {
       if (originalRequest.headers['X-Refresh-Attempt']) {
         clearTokens()
         window.location.href = '/static/login'

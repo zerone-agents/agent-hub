@@ -12,7 +12,6 @@ import (
 	"control-panel/internal/middleware"
 	"control-panel/pkg/database"
 
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -61,7 +60,7 @@ func setupProviderRevealRouter(t *testing.T, apiKey string) (*gin.Engine, *bytes
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if c.GetHeader("X-Test-Admin") == "true" {
-			c.Set("roles", []*casdoorsdk.Role{{Name: "agents-admin"}})
+			c.Set("roles", []string{"admin"})
 			c.Set("user_id", "user-1")
 			c.Set("user_name", "Ada")
 		}

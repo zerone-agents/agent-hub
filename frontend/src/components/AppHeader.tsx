@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { Avatar, Breadcrumb, Dropdown } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router'
-import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
+import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, LockIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'
 import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
+import ChangePasswordModal from '@/features/users/ChangePasswordModal'
 
 const useStyles = createStyles(({ css }) => ({
   header: css`
@@ -174,6 +175,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const logout = useAuthStore((s) => s.logout)
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [pwdModalOpen, setPwdModalOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // 知识库详情页面包屑显示具体库名
@@ -204,6 +206,20 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   }
 
   const dropdownItems = [
+    ...(user?.role === 'admin'
+      ? [{
+          key: 'users',
+          icon: <UsersIcon size={14} />,
+          label: '用户管理',
+          onClick: async () => { await navigate('/settings/users'); }
+        }]
+      : []),
+    {
+      key: 'change-password',
+      icon: <LockIcon size={14} />,
+      label: '修改密码',
+      onClick: () => { setPwdModalOpen(true) }
+    },
     {
       key: 'cli-tokens',
       icon: <KeyIcon size={14} />,
@@ -290,6 +306,8 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           })}
         </div>
       )}
+
+      <ChangePasswordModal open={pwdModalOpen} onClose={() => { setPwdModalOpen(false); }} />
     </header>
   )
 }

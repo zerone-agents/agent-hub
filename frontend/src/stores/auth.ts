@@ -1,23 +1,34 @@
 import { create } from 'zustand'
 import type { User } from '@/api/auth'
 import { authApi } from '@/api/auth'
-import { clearTokens } from '@/api/client'
+import { clearTokens, setTokens } from '@/api/client'
+import { queryClient } from '@/lib/query-client'
 
 interface AuthState {
   user: User | null
   setUser: (user: User) => void
+  /** builtin username+password login. */
+  loginWithPassword: (username: string, password: string) => Promise<void>
+  /** casdoor SSO redirect (no-op for builtin mode). */
   login: () => void
   logout: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  setUser: (user) => { set({ user }); },
-  login: () => { authApi.login(); },
+  setUser: (user) => { set({ user }) },
+  loginWithPassword: async (username, password) => {
+    const pair = await authApi.loginWithPassword(username, password)
+    setTokens(pair.accessToken, pair.refreshToken)
+    // 切换账号：清掉上一个用户的全部 React Query 缓存，避免遗留 UI。
+    queryClient.clear()
+  },
+  login: () => { authApi.login() },
   logout: async () => {
     try {
       await authApi.logout()
     } finally {
+      queryClient.clear()
       clearTokens()
       set({ user: null })
     }

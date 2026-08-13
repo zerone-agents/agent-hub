@@ -19,7 +19,19 @@ Environment variable reference. All configuration is loaded via Viper (environme
 | `DATABASE_MAX_OPEN` | No | `100` | Connection pool upper limit |
 | `DATABASE_MAX_LIFETIME` | No | `3600` | Maximum connection lifetime (seconds) |
 
-## Casdoor (SSO Auth)
+## Authentication
+
+agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
+
+- **`builtin`** (default): a self-contained username/password user system. Open-source deployments work out of the box with no external identity provider. First visit shows a setup screen to create the fixed-username `admin` account; further users are added via one-time admin-issued invite links. Roles are `admin` / `maintainer` / `member`.
+- **`casdoor`**: delegate authentication to an existing Casdoor SSO. Required for the hosted SaaS and enterprise private deployments that already run Casdoor.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `AUTH_MODE` | No | `builtin` | Auth backend: `builtin` or `casdoor` |
+| `AUTH_JWT_SECRET` | ✅ (builtin) | — | JWT signing secret for builtin mode; ≥32 bytes. Generate with `openssl rand -hex 32`. Ignored in casdoor mode. |
+
+### Casdoor (only when `AUTH_MODE=casdoor`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -29,6 +41,9 @@ Environment variable reference. All configuration is loaded via Viper (environme
 | `CASDOOR_CERTIFICATE` | ✅ | — | JWT verification certificate |
 | `CASDOOR_ORGANIZATION` | ✅ | — | Casdoor organization name |
 | `CASDOOR_CALLBACK_URL` | No | — | OAuth callback URL |
+
+> Casdoor role names containing `admin` map to the `admin` role; those containing `maintainer` map to `maintainer`; everything else maps to `member`. User management (invite/roles/disable) is only available in builtin mode — in casdoor mode it stays in the Casdoor console.
+
 
 ## OSS (S3 / MinIO)
 
