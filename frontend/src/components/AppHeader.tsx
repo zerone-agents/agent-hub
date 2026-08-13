@@ -307,7 +307,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
         </div>
       )}
 
-      <ChangePasswordModal open={pwdModalOpen} onClose={() => setPwdModalOpen(false)} />
+      <ChangePasswordModal open={pwdModalOpen} onClose={() => { setPwdModalOpen(false); }} />
     </header>
   )
 }
