@@ -449,7 +449,6 @@ func main() {
 		usersAdmin := v1group.Group("/admin", middleware.RequireAdmin())
 		usersAdmin.GET("/users", adminUserHandler.ListUsers)
 		usersAdmin.PATCH("/users/:id", adminUserHandler.UpdateUser)
-		usersAdmin.POST("/users/:id/reset-password", adminUserHandler.ResetUserPassword)
 		usersAdmin.POST("/invites", adminUserHandler.CreateInvite)
 		usersAdmin.GET("/invites", adminUserHandler.ListInvites)
 		usersAdmin.DELETE("/invites/:id", adminUserHandler.RevokeInvite)

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
+import { Tag, Select, Button, Popconfirm, message, Typography } from 'antd'
 import { PlusIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
@@ -37,7 +37,6 @@ export default function UsersPage() {
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
-  const [resetTarget, setResetTarget] = useState<{ password: string } | null>(null)
 
   const { data: users = [], isLoading: usersLoading } = useQuery({
     queryKey: ['admin', 'users'],
@@ -59,15 +58,6 @@ export default function UsersPage() {
     mutationFn: (vars: { id: number; patch: { role?: UserRole; status?: 'active' | 'disabled' } }) =>
       usersApi.updateUser(vars.id, vars.patch),
     onSuccess: () => { void invalidateAll(); message.success('已更新') },
-    onError: (err) => message.error(parseApiError(err))
-  })
-
-  const resetMutation = useMutation({
-    mutationFn: (id: number) => usersApi.resetPassword(id),
-    onSuccess: async (data) => {
-      await invalidateAll()
-      setResetTarget({ password: data.password })
-    },
     onError: (err) => message.error(parseApiError(err))
   })
 
@@ -148,18 +138,6 @@ export default function UsersPage() {
                 启用
               </Button>
             )}
-            <Popconfirm
-              title="确认重置密码？"
-              description={`将为 "${record.username}" 生成随机新密码，原密码立即失效，所有会话下线。`}
-              okText="重置"
-              okButtonProps={{ danger: true }}
-              cancelText="取消"
-              onConfirm={() => resetMutation.mutate(record.id)}
-            >
-              <Button size="small" style={{ marginLeft: 8 }}>
-                重置密码
-              </Button>
-            </Popconfirm>
           </>
         )
       }
@@ -242,22 +220,6 @@ export default function UsersPage() {
       />
 
       <CreateInviteModal open={inviteModalOpen} onClose={() => setInviteModalOpen(false)} />
-
-      <Modal
-        title="重置密码成功"
-        open={!!resetTarget}
-        onCancel={() => setResetTarget(null)}
-        footer={
-          <PrimaryButton onClick={() => setResetTarget(null)}>关闭</PrimaryButton>
-        }
-      >
-        <Typography.Paragraph type="warning">
-          新密码仅显示这一次，请立即复制并安全送达被重置的用户：
-        </Typography.Paragraph>
-        <Typography.Paragraph copyable code>
-          {resetTarget?.password ?? ''}
-        </Typography.Paragraph>
-      </Modal>
     </div>
   )
 }

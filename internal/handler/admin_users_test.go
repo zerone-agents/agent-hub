@@ -45,7 +45,6 @@ func newAdminTestEnv(t *testing.T) (*gin.Engine, *services.UserService) {
 	g := r.Group("/api/v1/admin", withActor)
 	g.GET("/users", h.ListUsers)
 	g.PATCH("/users/:id", h.UpdateUser)
-	g.POST("/users/:id/reset-password", h.ResetUserPassword)
 	g.POST("/invites", h.CreateInvite)
 	g.GET("/invites", h.ListInvites)
 	g.DELETE("/invites/:id", h.RevokeInvite)
@@ -107,16 +106,6 @@ func TestAdminUserOps(t *testing.T) {
 	// self-disable → 400
 	if w := patch(admin.ID, map[string]string{"status": "disabled"}); w.Code != http.StatusBadRequest {
 		t.Fatalf("self-disable code=%d, want 400", w.Code)
-	}
-
-	// reset password returns plaintext once
-	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/admin/users/%d/reset-password", member.ID), nil)
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	data := parseData(t, w)
-	pw, ok := data["password"].(string)
-	if !ok || len(pw) < 12 {
-		t.Fatalf("reset resp: %v", data)
 	}
 }
 

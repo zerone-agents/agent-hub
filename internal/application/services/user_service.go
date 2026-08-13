@@ -1,8 +1,6 @@
 package services
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"regexp"
 	"sync"
@@ -228,26 +226,6 @@ func (s *UserService) SetStatus(id, actorID uint64, status string) error {
 		}
 	}
 	return s.db.Model(&authdom.User{}).Where("id = ?", id).Update("status", status).Error
-}
-
-// ResetPassword sets a random password and returns the plaintext once.
-func (s *UserService) ResetPassword(id uint64) (string, error) {
-	if _, err := s.GetByID(id); err != nil {
-		return "", err
-	}
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	plain := hex.EncodeToString(b)[:16]
-	hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcryptCost)
-	if err != nil {
-		return "", err
-	}
-	if err := s.db.Model(&authdom.User{}).Where("id = ?", id).Update("password_hash", string(hash)).Error; err != nil {
-		return "", err
-	}
-	return plain, nil
 }
 
 // ensureNotLastAdmin errors when no other active admin exists besides excludeID.

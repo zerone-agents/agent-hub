@@ -100,7 +100,7 @@ func TestLastAdminProtection(t *testing.T) {
 	}
 }
 
-func TestChangeAndResetPassword(t *testing.T) {
+func TestChangePassword(t *testing.T) {
 	svc, _ := newUserSvc(t)
 	u, _ := svc.Create("carol", "abcd1234", "", authdom.RoleMember)
 	if err := svc.ChangePassword(u.ID, "wrong", "newpass123"); err != ErrInvalidCredentials {
@@ -111,12 +111,5 @@ func TestChangeAndResetPassword(t *testing.T) {
 	}
 	if _, err := svc.Authenticate("carol", "newpass123"); err != nil {
 		t.Fatalf("auth with new pwd: %v", err)
-	}
-	plain, err := svc.ResetPassword(u.ID)
-	if err != nil || len(plain) < 12 {
-		t.Fatalf("reset: %v %q", err, plain)
-	}
-	if _, err := svc.Authenticate("carol", plain); err != nil {
-		t.Fatalf("auth with reset pwd: %v", err)
 	}
 }

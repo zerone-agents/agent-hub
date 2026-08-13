@@ -36,10 +36,6 @@ export const usersApi = {
     apiClient.get<ApiResponse<AdminUser[]>>('/api/v1/admin/users').then((res) => unwrapResponse<AdminUser[]>(res)),
   updateUser: (id: number, patch: { role?: UserRole; status?: UserStatus }) =>
     apiClient.patch(`/api/v1/admin/users/${id}`, patch).then((res) => unwrapResponse<unknown>(res)),
-  resetPassword: (id: number) =>
-    apiClient
-      .post<ApiResponse<{ password: string }>>(`/api/v1/admin/users/${id}/reset-password`)
-      .then((res) => unwrapResponse<{ password: string }>(res)),
   listInvites: () =>
     apiClient.get<ApiResponse<Invite[]>>('/api/v1/admin/invites').then((res) => unwrapResponse<Invite[]>(res)),
   createInvite: (input: { role: UserRole; note?: string; expiresInDays?: number }) =>
