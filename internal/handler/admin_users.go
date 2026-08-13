@@ -102,6 +102,24 @@ func (h *AdminUserHandler) UpdateUser(c *gin.Context) {
 	respondSuccess(c, nil)
 }
 
+// ResetUserPassword sets a random password, returns the plaintext once, and
+// logs the user out everywhere. 不能对自己重置（走自助改密）。
+func (h *AdminUserHandler) ResetUserPassword(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "无效的用户 ID")
+		return
+	}
+	actorID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 64)
+	plain, err := h.users.ResetPassword(id, actorID)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = h.provider.RevokeAllForUser(id)
+	respondSuccess(c, gin.H{"password": plain})
+}
+
 // CreateInvite makes a one-time invite. The plaintext token is returned
 // exactly once (only its hash is stored); the caller must copy the invite URL
 // immediately.
