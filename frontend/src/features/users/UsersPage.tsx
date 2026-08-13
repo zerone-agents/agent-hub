@@ -64,7 +64,7 @@ export default function UsersPage() {
 
   const resetMutation = useMutation({
     mutationFn: (id: number) => usersApi.resetPassword(id),
-    onSuccess: (data) => setResetTarget({ password: data.password }),
+    onSuccess: (data) => { setResetTarget({ password: data.password }); },
     onError: (err) => message.error(parseApiError(err))
   })
 
@@ -90,7 +90,7 @@ export default function UsersPage() {
           options={ROLE_OPTIONS}
           disabled={String(record.id) === currentUserId}
           onChange={(role: UserRole) =>
-            updateMutation.mutate({ id: record.id, patch: { role } })
+            { updateMutation.mutate({ id: record.id, patch: { role } }); }
           }
         />
       )
@@ -129,7 +129,7 @@ export default function UsersPage() {
                 okButtonProps={{ danger: true }}
                 cancelText="取消"
                 onConfirm={() =>
-                  updateMutation.mutate({ id: record.id, patch: { status: 'disabled' } })
+                  { updateMutation.mutate({ id: record.id, patch: { status: 'disabled' } }); }
                 }
                 disabled={isSelf}
               >
@@ -139,7 +139,7 @@ export default function UsersPage() {
               <Button
                 size="small"
                 onClick={() =>
-                  updateMutation.mutate({ id: record.id, patch: { status: 'active' } })
+                  { updateMutation.mutate({ id: record.id, patch: { status: 'active' } }); }
                 }
               >
                 启用
@@ -151,7 +151,7 @@ export default function UsersPage() {
               okText="重置"
               okButtonProps={{ danger: true }}
               cancelText="取消"
-              onConfirm={() => resetMutation.mutate(record.id)}
+              onConfirm={() => { resetMutation.mutate(record.id); }}
               disabled={isSelf}
             >
               <Button size="small" style={{ marginLeft: 8 }} disabled={isSelf}>
@@ -199,7 +199,7 @@ export default function UsersPage() {
             okText="撤销"
             okButtonProps={{ danger: true }}
             cancelText="取消"
-            onConfirm={() => revokeMutation.mutate(record.id)}
+            onConfirm={() => { revokeMutation.mutate(record.id); }}
           >
             <Button size="small" danger>撤销</Button>
           </Popconfirm>
@@ -213,7 +213,7 @@ export default function UsersPage() {
         title="用户管理"
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
-          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => setInviteModalOpen(true)}>
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
             创建邀请
           </PrimaryButton>
         }
@@ -239,14 +239,14 @@ export default function UsersPage() {
         size="middle"
       />
 
-      <CreateInviteModal open={inviteModalOpen} onClose={() => setInviteModalOpen(false)} />
+      <CreateInviteModal open={inviteModalOpen} onClose={() => { setInviteModalOpen(false); }} />
 
       <Modal
         title="重置密码成功"
         open={!!resetTarget}
-        onCancel={() => setResetTarget(null)}
+        onCancel={() => { setResetTarget(null); }}
         footer={
-          <PrimaryButton onClick={() => setResetTarget(null)}>关闭</PrimaryButton>
+          <PrimaryButton onClick={() => { setResetTarget(null); }}>关闭</PrimaryButton>
         }
       >
         <Typography.Paragraph type="warning">

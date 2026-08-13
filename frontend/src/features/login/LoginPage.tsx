@@ -222,7 +222,7 @@ export default function LoginPage() {
                 <Input
                   placeholder="用户名"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => { setUsername(e.target.value); }}
                   onPressEnter={handleBuiltinLogin}
                   size="large"
                 />
@@ -231,7 +231,7 @@ export default function LoginPage() {
                 <PasswordInput
                   placeholder="密码"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); }}
                   onPressEnter={handleBuiltinLogin}
                   size="large"
                 />

@@ -10,8 +10,8 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/builtin"
-	"control-panel/internal/middleware"
 	authdom "control-panel/internal/domain/auth"
+	"control-panel/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -20,8 +20,9 @@ import (
 
 // TestFullAuthFlow wires the real middleware stack (JWT + RequireAdmin) and
 // exercises the end-to-end builtin lifecycle:
-//   setup → admin login → create invite → register → member blocked from
-//   admin route → admin disables user → user's refresh + access both fail.
+//
+//	setup → admin login → create invite → register → member blocked from
+//	admin route → admin disables user → user's refresh + access both fail.
 func TestFullAuthFlow(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

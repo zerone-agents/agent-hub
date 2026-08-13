@@ -73,28 +73,28 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
       cancelText="取消"
       okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <div style={{ color: '#d4380d', marginBottom: 12 }}>{error}</div>}
       <div style={{ marginBottom: 12 }}>
         <PasswordInput
           placeholder="当前密码"
           value={oldPassword}
-          onChange={(e) => setOldPassword(e.target.value)}
+          onChange={(e) => { setOldPassword(e.target.value); }}
         />
       </div>
       <div style={{ marginBottom: 12 }}>
         <PasswordInput
           placeholder="新密码（至少 8 位，含字母和数字）"
           value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
+          onChange={(e) => { setNewPassword(e.target.value); }}
         />
       </div>
       <div>
         <PasswordInput
           placeholder="确认新密码"
           value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
+          onChange={(e) => { setConfirm(e.target.value); }}
           onPressEnter={handleSubmit}
         />
       </div>

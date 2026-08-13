@@ -143,7 +143,7 @@ export default function RegisterPage() {
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('token') ?? ''
   const navigate = useNavigate()
-  const [state, setState] = useState<State>('loading')
+  const [state, setState] = useState<State>(inviteToken ? 'loading' : 'invalid')
   const [note, setNote] = useState('')
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -153,7 +153,6 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (!inviteToken) {
-      setState('invalid')
       return
     }
     authApi
@@ -162,7 +161,7 @@ export default function RegisterPage() {
         setNote(res.note)
         setState('ok')
       })
-      .catch(() => setState('invalid'))
+      .catch(() => { setState('invalid'); })
   }, [inviteToken])
 
   const handleSubmit = async () => {
@@ -197,7 +196,7 @@ export default function RegisterPage() {
           <Input
             placeholder="用户名（3-32 位字母数字下划线连字符）"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => { setUsername(e.target.value); }}
             size="large"
           />
         </div>
@@ -205,7 +204,7 @@ export default function RegisterPage() {
           <Input
             placeholder="昵称（可选）"
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => { setDisplayName(e.target.value); }}
             size="large"
           />
         </div>
@@ -213,7 +212,7 @@ export default function RegisterPage() {
           <PasswordInput
             placeholder="密码（至少 8 位，含字母和数字）"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => { setPassword(e.target.value); }}
             onPressEnter={handleSubmit}
             size="large"
           />

@@ -26,8 +26,8 @@ const PasswordInput = forwardRef<InputRef, Omit<InputProps, 'type' | 'suffix'>>(
             tabIndex={-1}
             aria-label={visible ? '隐藏密码' : '显示密码'}
             aria-pressed={visible}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setVisible((v) => !v)}
+            onMouseDown={(e) => { e.preventDefault(); }}
+            onClick={() => { setVisible((v) => !v); }}
             style={{ cursor: 'pointer', color: 'var(--ant-color-text-tertiary)' }}
           >
             {visible ? <EyeOutlined /> : <EyeInvisibleOutlined />}

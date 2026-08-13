@@ -79,7 +79,7 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
       cancelText="关闭"
       okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
       {created ? (
         <>
@@ -100,7 +100,7 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
             <Select
               style={{ width: '100%' }}
               value={role}
-              onChange={(v) => setRole(v)}
+              onChange={(v) => { setRole(v); }}
               options={ROLE_OPTIONS}
             />
           </div>
@@ -109,7 +109,7 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
             <Input
               placeholder="例如：给张三"
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => { setNote(e.target.value); }}
               maxLength={128}
             />
           </div>
@@ -119,7 +119,7 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
               min={1}
               max={30}
               value={days}
-              onChange={(v) => setDays(Number(v) || 7)}
+              onChange={(v) => { setDays(Number(v) || 7); }}
               style={{ width: '100%' }}
             />
           </div>

@@ -19,9 +19,10 @@ import (
 // provider is assembled).
 //
 // Context keys set (unchanged names from the legacy Casdoor middleware):
-//   user_id, user_name, email, display_name, org_id, avatar,
-//   roles ([]string, normalized to admin|maintainer|member),
-//   permissions, auth_method ("builtin" | "casdoor" | "cli").
+//
+//	user_id, user_name, email, display_name, org_id, avatar,
+//	roles ([]string, normalized to admin|maintainer|member),
+//	permissions, auth_method ("builtin" | "casdoor" | "cli").
 func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")

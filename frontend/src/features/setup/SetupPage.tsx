@@ -185,7 +185,7 @@ export default function SetupPage() {
             <PasswordInput
               placeholder="设置管理员密码"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => { setPassword(e.target.value); }}
               onPressEnter={handleSubmit}
               size="large"
             />
@@ -194,7 +194,7 @@ export default function SetupPage() {
             <PasswordInput
               placeholder="确认密码"
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => { setConfirm(e.target.value); }}
               onPressEnter={handleSubmit}
               size="large"
             />
