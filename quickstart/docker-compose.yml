@@ -34,10 +34,9 @@ services:
     # ports: ["3306:3306"]
 
   hub:
-    # Build from the repository root (where the Dockerfile lives).
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    # Pulls the prebuilt image from Docker Hub by default. To build from source
+    # instead, use docker-compose.build.yml (see README "Build from source").
+    image: ${HUB_IMAGE:-zeroneai/agent-hub}:latest
     restart: unless-stopped
     depends_on:
       mysql:

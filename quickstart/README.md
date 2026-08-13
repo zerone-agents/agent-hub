@@ -11,6 +11,8 @@ The stack: **MySQL 8** + **agent-hub server** (one image that compiles the front
 
 ## Run
 
+The default stack pulls the prebuilt image from Docker Hub — no source build needed.
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/zerone-agents/agent-hub.git
@@ -25,12 +27,22 @@ cp .env.example .env
 #    or edit .env manually.
 #    The value must be at least 32 bytes.
 
-# 4. Build and start
-docker compose up -d --build
+# 4. Start (pulls zeroneai/agent-hub:latest)
+docker compose up -d
 
 # 5. Open the app
 open http://localhost:8081/static/
 ```
+
+### Build from source
+
+To run from a local source build instead of the published image (e.g. for testing unreleased changes), add the build override file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+This compiles the frontend and backend from the repo root `Dockerfile` and tags it as the `hub` image.
 
 ## First-run setup
 
