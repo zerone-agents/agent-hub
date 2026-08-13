@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate } from 'react-router'
+import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { getAccessToken, parseApiError } from '@/api/client'
 import { useUserInfo } from '@/queries/useUserInfo'
@@ -223,7 +224,7 @@ export default function LoginPage() {
                 />
               </div>
               <div className={styles.field}>
-                <Input.Password
+                <PasswordInput
                   placeholder="密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

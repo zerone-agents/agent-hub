@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Modal, Input, message } from 'antd'
+import { Modal, message } from 'antd'
+import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -73,21 +74,21 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
     >
       {error && <div style={{ color: '#d4380d', marginBottom: 12 }}>{error}</div>}
       <div style={{ marginBottom: 12 }}>
-        <Input.Password
+        <PasswordInput
           placeholder="当前密码"
           value={oldPassword}
           onChange={(e) => setOldPassword(e.target.value)}
         />
       </div>
       <div style={{ marginBottom: 12 }}>
-        <Input.Password
+        <PasswordInput
           placeholder="新密码（至少 8 位，含字母和数字）"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
         />
       </div>
       <div>
-        <Input.Password
+        <PasswordInput
           placeholder="确认新密码"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

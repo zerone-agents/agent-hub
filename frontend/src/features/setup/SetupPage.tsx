@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Input, Spin } from 'antd'
+import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate } from 'react-router'
+import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -177,7 +178,7 @@ export default function SetupPage() {
           <div className={styles.bodySubtitle}>创建管理员账号（用户名固定为 admin）</div>
           {error && <div className={styles.error}>{error}</div>}
           <div className={styles.field}>
-            <Input.Password
+            <PasswordInput
               placeholder="设置管理员密码"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -186,7 +187,7 @@ export default function SetupPage() {
             />
           </div>
           <div className={styles.field}>
-            <Input.Password
+            <PasswordInput
               placeholder="确认密码"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}

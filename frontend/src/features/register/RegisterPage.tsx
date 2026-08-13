@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Input, Spin } from 'antd'
+import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate, useSearchParams } from 'react-router'
+import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -205,7 +206,7 @@ export default function RegisterPage() {
           />
         </div>
         <div className={styles.field}>
-          <Input.Password
+          <PasswordInput
             placeholder="密码（至少 8 位，含字母和数字）"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
