@@ -85,9 +85,15 @@ func main() {
 		log.Println("Auth mode: casdoor")
 	}
 
+	// OSS is optional: when unconfigured (empty endpoint) the server runs
+	// without file-upload support (InitOSS returns nil) rather than refusing
+	// to boot. Configured-but-invalid OSS still fails fast.
 	uploader, err := ossinfra.InitOSS(&cfg.OSS)
 	if err != nil {
 		log.Fatalf("Failed to initialize OSS: %v", err)
+	}
+	if uploader == nil {
+		log.Println("OSS not configured — file uploads disabled (set OSS_ENDPOINT/BUCKET/REGION to enable)")
 	}
 
 	r := gin.Default()

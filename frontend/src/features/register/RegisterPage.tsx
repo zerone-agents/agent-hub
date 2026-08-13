@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'

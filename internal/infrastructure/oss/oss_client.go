@@ -16,7 +16,9 @@ import (
 
 func InitOSS(cfg *config.OSSConfig) (oss.OSSUploader, error) {
 	if cfg.Endpoint == "" {
-		return nil, fmt.Errorf("OSS 未配置: endpoint 不能为空，请设置 OSS_ENDPOINT 环境变量")
+		// OSS disabled: return nil so callers can run without file uploads
+		// (the server boots without object storage; uploads will no-op/error).
+		return nil, nil
 	}
 	if cfg.Bucket == "" {
 		return nil, fmt.Errorf("OSS 未配置: bucket 不能为空，请设置 OSS_BUCKET 环境变量")
