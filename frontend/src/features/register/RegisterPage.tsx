@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Spin } from 'antd'
+import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate, useSearchParams } from 'react-router'
 import PasswordInput from '@/components/PasswordInput'
