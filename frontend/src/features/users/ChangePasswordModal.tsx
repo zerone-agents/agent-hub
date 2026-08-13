@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, message } from 'antd'
 import PasswordInput from '@/components/PasswordInput'
+import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { authApi } from '@/api/auth'
 import { parseApiError, setTokens } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +17,7 @@ interface ChangePasswordModalProps {
  * session stays logged in.
  */
 export default function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
+  const primaryBtnCls = usePrimaryButtonStyle()
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -69,6 +71,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
       onCancel={handleClose}
       okText="更新密码"
       cancelText="取消"
+      okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
       destroyOnClose
     >

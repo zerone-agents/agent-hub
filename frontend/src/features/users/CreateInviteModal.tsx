@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Modal, Select, Input, InputNumber, Typography, message } from 'antd'
 import { usersApi, type UserRole, type CreatedInvite } from '@/api/users'
 import { parseApiError } from '@/api/client'
+import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { useQueryClient } from '@tanstack/react-query'
 
 interface CreateInviteModalProps {
@@ -20,6 +21,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
  * rendered as a copyable registration URL; closing the modal discards it.
  */
 export default function CreateInviteModal({ open, onClose }: CreateInviteModalProps) {
+  const primaryBtnCls = usePrimaryButtonStyle()
   const [role, setRole] = useState<UserRole>('member')
   const [note, setNote] = useState('')
   const [days, setDays] = useState<number>(7)
@@ -74,6 +76,7 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
       onCancel={handleClose}
       okText={created ? '完成' : '创建'}
       cancelText="关闭"
+      okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
       destroyOnClose
     >

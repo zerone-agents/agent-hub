@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Table, Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
+import { PlusIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
 import { parseApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/PageHeader'
+import PrimaryButton from '@/components/PrimaryButton'
 import CreateInviteModal from './CreateInviteModal'
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
@@ -200,9 +202,9 @@ export default function UsersPage() {
         title="用户管理"
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
-          <Button type="primary" onClick={() => setInviteModalOpen(true)}>
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => setInviteModalOpen(true)}>
             创建邀请
-          </Button>
+          </PrimaryButton>
         }
       />
 
