@@ -211,11 +211,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// runtime keeps executing regardless of the downstream connection.
 	aggregateStr := aggregate.String()
 
-	// scanner.Err() != nil means the runtime stream was truncated (network
-	// error, runtime crash, ctx cancellation, etc.). Surface it to the user so
-	// a refresh shows that the turn was interrupted, then persist whatever we
-	// already captured below.
-	if scanErr := scanner.Err(); scanErr != nil {
+	// result/subtype=error（如 429 配额耗尽）是正常结束的流里携带的运行时
+	// 失败，scanner.Err 为 nil 覆盖不到；落库为系统错误消息，刷新后历史可见。
+	// 与流中断分支互斥，避免同一次失败双重落库。
+	if runErr := extractRuntimeError(aggregateStr); runErr != "" {
+		h.saveErrorMessage(userID, sessionID, runErr)
+	} else if scanErr := scanner.Err(); scanErr != nil {
+		// scanner.Err() != nil means the runtime stream was truncated (network
+		// error, runtime crash, ctx cancellation, etc.). Surface it to the user so
+		// a refresh shows that the turn was interrupted.
 		h.saveErrorMessage(userID, sessionID, "Runtime 流中断："+scanErr.Error())
 	}
 
@@ -240,6 +244,52 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 func (h *AgentChatHandler) saveErrorMessage(userID, sessionID, message string) {
 	payload, _ := json.Marshal([]map[string]string{{"type": "error", "message": message}})
 	_, _ = h.svc.SaveSystemMessage(userID, sessionID, string(payload))
+}
+
+// extractRuntimeError scans the buffered SSE stream for a result event with
+// subtype=error (e.g. 429 quota exhausted, surfaced after runtime-internal
+// retries give up) and returns the joined error messages, falling back to
+// error_type when the errors array is empty. Returns "" when the run did not
+// fail. Malformed lines are skipped.
+func extractRuntimeError(sse string) string {
+	lines := strings.Split(sse, "\n")
+	var eventName string
+	var messages []string
+	var errorType string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			eventName = ""
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if eventName != "result" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var data struct {
+			Type      string   `json:"type"`
+			Subtype   string   `json:"subtype"`
+			ErrorType string   `json:"error_type"`
+			Errors    []string `json:"errors"`
+		}
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			continue
+		}
+		if data.Type == "result" && data.Subtype == "error" {
+			messages = append(messages, data.Errors...)
+			if errorType == "" {
+				errorType = data.ErrorType
+			}
+		}
+	}
+	if len(messages) > 0 {
+		return strings.Join(messages, "\n")
+	}
+	return errorType
 }
 
 // extractRuntimeSessionID scans the raw SSE stream for the first system.init

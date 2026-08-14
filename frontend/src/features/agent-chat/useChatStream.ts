@@ -4,13 +4,29 @@ import type { ContentPart } from './types'
 
 export type StreamPhase = 'idle' | 'sending' | 'streaming' | 'done' | 'error'
 
+/** runtime 内部自动重试（如限流退避）的状态，来自 system/retry 事件 */
+export interface StreamRetry {
+  attempt: number
+  errorType: string
+  delayMs: number
+}
+
 export interface StreamState {
   phase: StreamPhase
   parts: ContentPart[]
   error: string | null
+  retry: StreamRetry | null
+  /** 本次流所属的会话 id。页面用它把错误/重试等状态的渲染限定在
+      产生它们的会话内，避免切换会话后旧状态泄漏到其他会话。 */
+  sessionId: string | null
+  /** error 是否已被后端落库（result/subtype=error 路径，后端 saveErrorMessage
+      会写入系统消息）。为 true 时页面在 refetch 后 reset 流状态，让历史记录
+      成为错误的唯一展示来源，避免 transient 气泡与持久化消息双份显示。
+      传输层错误（HTTP 非 200、网络失败）后端没见过这条流，为 false。 */
+  errorPersisted: boolean
 }
 
-const INITIAL: StreamState = { phase: 'idle', parts: [], error: null }
+const INITIAL: StreamState = { phase: 'idle', parts: [], error: null, retry: null, sessionId: null, errorPersisted: false }
 
 // ── SSE event payload shapes ────────────────────────────────────────
 // Runtime SSE data is JSON.parse'd and structurally unverified; these
@@ -35,6 +51,15 @@ interface SSEPayload {
   partial?: SSEPartial
   message?: { content?: SSEContentBlock[] }
   result?: { output?: unknown; tool_use_id?: string }
+  // `result` 事件（run 级）的顶层字段：成功时只带统计信息，
+  // subtype=error 时携带 errors 数组（如 429 配额耗尽）
+  type?: string
+  subtype?: string
+  error_type?: string
+  errors?: unknown
+  // `system/retry` 事件（runtime 内部自动重试）的顶层字段
+  attempt?: number
+  delay_ms?: number
 }
 
 interface UseChatStreamReturn {
@@ -58,7 +83,12 @@ interface UseChatStreamReturn {
  *    Arrives AFTER all partial_message events for the same turn. Replaces the
  *    partial-accumulated content with the authoritative full message.
  *  - `tool_result` × 1 per tool call: tool execution result.
- *  - `result`: run-level stats (cost, duration). Ignored.
+ *  - `system`: `subtype=init` 由后端用于 session 绑定，前端忽略；
+ *    `subtype=retry` 是 runtime 内部自动重试（如限流退避），暴露为
+ *    `retry` 状态，内容到达后自动清除。
+ *  - `result`: run-level outcome. `subtype=success` carries stats (cost,
+ *    duration) and is ignored; `subtype=error` carries an `errors` array
+ *    (e.g. 429 quota exhausted) and transitions the state to `error`.
  *  - `done`: stream end marker.
  *
  * Implementation: single `parts` array with `currentTurnStart` index tracking.
@@ -93,7 +123,7 @@ export function useChatStream(): UseChatStreamReturn {
     }
     armIdleTimer()
 
-    setState({ phase: 'sending', parts: [], error: null })
+    setState({ phase: 'sending', parts: [], error: null, retry: null, sessionId, errorPersisted: false })
 
     try {
       const resp = await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal)
@@ -113,7 +143,8 @@ export function useChatStream(): UseChatStreamReturn {
       let currentTurnStart = 0
 
       const publish = () => {
-        setState((s) => ({ ...s, parts: [...parts] }))
+        // 任何真实内容（或 done）到达都意味着重试已结束，清掉重试提示
+        setState((s) => ({ ...s, parts: [...parts], retry: null }))
       }
 
       let eventName = ''
@@ -211,6 +242,38 @@ export function useChatStream(): UseChatStreamReturn {
             })
             currentTurnStart = parts.length
             publish()
+          } else if (eventName === 'system') {
+            // runtime 内部自动重试（如限流退避等待）：暴露为 retry 状态展示给
+            // 用户；内容到达（publish）或流结束时自动清除。system/init 等其他
+            // 子类型前端无需处理（后端用 init 做 runtime session 绑定）。
+            if (data.type === 'system' && data.subtype === 'retry') {
+              setState((s) => ({
+                ...s,
+                retry: {
+                  attempt: data.attempt ?? 0,
+                  errorType: data.error_type ?? '',
+                  delayMs: data.delay_ms ?? 0,
+                },
+              }))
+            }
+          } else if (eventName === 'result') {
+            // run 级结果：成功时只带统计信息（忽略）；subtype=error 是 runtime
+            // 失败（如 429 配额耗尽），必须显示给用户，否则页面静默无提示。
+            if (data.type === 'result' && data.subtype === 'error') {
+              const errorList = Array.isArray(data.errors)
+                ? data.errors.filter((e): e is string => typeof e === 'string')
+                : []
+              const message =
+                errorList.join('\n') ||
+                (data.error_type ?? '') ||
+                'Runtime 请求失败，请稍后重试'
+              publish()
+              // errorPersisted=true：后端会把该错误落库为系统消息，
+              // 页面 refetch 后可 reset 流状态做去重
+              setState((s) => ({ ...s, phase: 'error', error: message, errorPersisted: true }))
+              void reader.cancel()
+              return
+            }
           } else if (eventName === 'done') {
             publish()
             setState((s) => ({ ...s, phase: 'done' }))
@@ -236,12 +299,13 @@ export function useChatStream(): UseChatStreamReturn {
             ...s,
             phase: 'error',
             error: '连接超时（60 秒无数据），可能是网络中断或工具执行时间过长；刷新后可查看已保存的消息',
+            errorPersisted: false,
           }))
         }
         // User abort: silent
         return
       }
-      setState((s) => ({ ...s, phase: 'error', error: errMsg }))
+      setState((s) => ({ ...s, phase: 'error', error: errMsg, errorPersisted: false }))
     } finally {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- idleTimer may legitimately be null when stream errors before arming
       if (idleTimer) clearTimeout(idleTimer)
