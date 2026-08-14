@@ -12,6 +12,7 @@ import MessageBubble from '@/features/chat/MessageBubble'
 import ChatSessionList from './ChatSessionList'
 import ChatInput from './ChatInput'
 import SceneWelcome from './SceneWelcome'
+import StreamingMessage from './StreamingMessage'
 import AgentDetailBar from './AgentDetailBar'
 import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
@@ -130,9 +131,13 @@ export default function AgentChatPage() {
   // and position.
   const transientMessage: ChatMessage | null = useMemo(() => {
     if (stream.state.phase === 'idle' || stream.state.parts.length === 0) return null
+    // 会话门控：流式内容只渲染在产生它的会话里；用户在流式中途切换到
+    // 其他会话时，不把另一个会话的内容带过去。
+    if (stream.state.sessionId !== selected?.id) return null
     return {
       id: STREAMING_MSG_ID,
-      session_id: selected?.id ?? '',
+      // 上面的 sessionId 门控已保证 selected 非空且与流所属会话一致
+      session_id: selected.id,
       role: 'assistant',
       content: JSON.stringify(stream.state.parts),
       created_at: new Date().toISOString(),
@@ -141,7 +146,7 @@ export default function AgentChatPage() {
       feedback: '',
       user_id: ''
     }
-  }, [stream.state, selected?.id])
+  }, [stream.state, selected])
 
   const displayMessages: ChatMessage[] = useMemo(() => {
     if (!transientMessage) return history
@@ -190,13 +195,18 @@ export default function AgentChatPage() {
   // as a placeholder persisted message and reset the stream. Then invalidate
   // so the real server-generated message (with correct id/timestamps) replaces
   // the placeholder seamlessly.
+  //
+  // 缓存操作一律以 stream.state.sessionId（产生内容的会话）为准，而不是当前
+  // 选中的会话：用户可能在流式中途切换会话，用 selected.id 会把 A 会话的
+  // 内容提升进 B 会话的缓存。
   useEffect(() => {
-    if (stream.state.phase === 'done' && selected) {
+    const streamSessionId = stream.state.sessionId
+    if (stream.state.phase === 'done' && streamSessionId) {
       const parts = stream.state.parts
       if (parts.length > 0) {
         const placeholder: ChatMessage = {
           id: STREAMING_MSG_ID,
-          session_id: selected.id,
+          session_id: streamSessionId,
           role: 'assistant',
           content: JSON.stringify(parts),
           created_at: new Date().toISOString(),
@@ -206,7 +216,7 @@ export default function AgentChatPage() {
           user_id: ''
         }
         queryClient.setQueryData(
-          ['agent-chat-messages', name, selected.id],
+          ['agent-chat-messages', name, streamSessionId],
           (old: { items: ChatMessage[]; total: number } | undefined) => {
             const base = (old?.items ?? []).filter((m) => m.id !== STREAMING_MSG_ID)
             return { items: [...base, placeholder], total: base.length + 1 }
@@ -215,18 +225,26 @@ export default function AgentChatPage() {
       }
       stream.reset()
       void queryClient.invalidateQueries({
-        queryKey: ['agent-chat-messages', name, selected.id],
+        queryKey: ['agent-chat-messages', name, streamSessionId],
       })
       void queryClient.invalidateQueries({
         queryKey: ['agent-chat-sessions', name],
       })
     }
-    if (stream.state.phase === 'error' && selected) {
-      void queryClient.invalidateQueries({
-        queryKey: ['agent-chat-messages', name, selected.id],
-      })
+    if (stream.state.phase === 'error' && streamSessionId) {
+      void queryClient
+        .invalidateQueries({
+          queryKey: ['agent-chat-messages', name, streamSessionId],
+        })
+        .then(() => {
+          // errorPersisted=true（result/subtype=error）：后端已把错误落库为
+          // 系统消息，refetch 完成后 reset 流状态，让历史记录成为唯一展示
+          // 来源，避免 transient 气泡与持久化消息双份显示。
+          // 传输层错误（false）后端没见过这条流，历史里不会有，保留气泡。
+          if (stream.state.errorPersisted) stream.reset()
+        })
     }
-  }, [stream.state.phase, selected, name, queryClient, stream])
+  }, [stream.state.phase, stream.state.sessionId, name, queryClient, stream])
 
   const handleSend = async (content: string) => {
     if (!selected) return
@@ -298,6 +316,26 @@ export default function AgentChatPage() {
                       enableStream={msg.id === STREAMING_MSG_ID}
                     />
                   ))
+                )}
+                {/* 流以 error 结束时（如 runtime 返回 429 配额的 result 事件），
+                    transientMessage 可能为空（本轮没有任何内容），必须单独渲染
+                    错误提示，否则用户完全看不到失败原因。sessionId 门控：错误
+                    只显示在产生它的会话里，切换会话后不泄漏。 */}
+                {stream.state.phase === 'error' && stream.state.sessionId === selected.id && (
+                  <StreamingMessage
+                    parts={stream.state.parts}
+                    phase="error"
+                    error={stream.state.error}
+                  />
+                )}
+                {/* runtime 内部自动重试（system/retry，如限流退避等待）期间，
+                    还没有任何内容产出，单独渲染重试状态提示。sessionId 门控同上。 */}
+                {isStreaming && stream.state.retry && stream.state.sessionId === selected.id && (
+                  <StreamingMessage
+                    parts={stream.state.parts}
+                    phase={stream.state.phase}
+                    retry={stream.state.retry}
+                  />
                 )}
               </div>
               {isStreaming && (

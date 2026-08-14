@@ -1,9 +1,9 @@
-import { RobotIcon, WarningIcon } from '@phosphor-icons/react'
+import { RobotIcon, WarningIcon, ArrowsClockwiseIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ContentPart } from '@/features/chat/parts'
 import { ContentParts } from '@/features/chat/parts'
 import { tokens as t } from '@/styles/tokens'
-import type { StreamPhase } from './useChatStream'
+import type { StreamPhase, StreamRetry } from './useChatStream'
 
 const useStyles = createStyles(({ css }) => ({
   row: css`
@@ -42,15 +42,23 @@ const useStyles = createStyles(({ css }) => ({
     border-left: 2px solid ${t.danger};
     padding: 8px 12px; border-radius: 4px;
   `,
+  retry: css`
+    display: flex; align-items: center; gap: 8px;
+    color: ${t.warning}; font-size: 13px;
+    background: rgba(217, 119, 6, 0.08);
+    border-left: 2px solid ${t.warning};
+    padding: 8px 12px; border-radius: 4px;
+  `,
 }))
 
 interface StreamingMessageProps {
   parts: ContentPart[]
   phase: StreamPhase
   error?: string | null
+  retry?: StreamRetry | null
 }
 
-export default function StreamingMessage({ parts, phase, error }: StreamingMessageProps) {
+export default function StreamingMessage({ parts, phase, error, retry }: StreamingMessageProps) {
   const { styles } = useStyles()
 
   return (
@@ -65,6 +73,13 @@ export default function StreamingMessage({ parts, phase, error }: StreamingMessa
             <div className={styles.error}>
               <WarningIcon size={14} weight="bold" />
               <span>回复失败：{error ?? '未知错误'}</span>
+            </div>
+          ) : retry ? (
+            <div className={styles.retry}>
+              <ArrowsClockwiseIcon size={14} weight="bold" />
+              <span>
+                服务繁忙（{retry.errorType}），约 {(retry.delayMs / 1000).toFixed(1)} 秒后自动重试（第 {retry.attempt} 次）…
+              </span>
             </div>
           ) : parts.length > 0 ? (
             <ContentParts parts={parts} />
