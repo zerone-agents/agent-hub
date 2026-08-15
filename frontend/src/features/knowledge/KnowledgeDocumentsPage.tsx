@@ -45,6 +45,7 @@ import {
   useDeleteDocuments,
 } from "@/queries/useKnowledge";
 import BorderedTable from "@/components/BorderedTable";
+import PrimaryButton from "@/components/PrimaryButton";
 import { tokens as t } from "@/styles/tokens";
 import { formatTime } from "@/utils/time";
 
@@ -742,13 +743,12 @@ export default function KnowledgeDocumentsPage() {
           >
             刷新
           </Button>
-          <Button
-            type="primary"
+          <PrimaryButton
             icon={<UploadSimpleIcon size={16} />}
             onClick={() => { setUploadOpen(true); }}
           >
             上传文档
-          </Button>
+          </PrimaryButton>
         </div>
       </div>
 
