@@ -8,6 +8,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +23,7 @@ import (
 //
 //	user_id, user_name, email, display_name, org_id, avatar,
 //	roles ([]string, normalized to admin|maintainer|member),
+//	tenant_id (via tenant.SetTenantID; "default" for builtin mode),
 //	permissions, auth_method ("builtin" | "casdoor" | "cli").
 func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -49,9 +51,9 @@ func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gi
 				return
 			}
 			// CLI tokens identify the user but carry no profile/role data, so
-			// roles are looked up fresh via the provider (cached briefly). If
-			// the user no longer exists or is disabled, reject the token.
-			roles, ok := fetchUserRoles(p, record.UserID)
+			// the identity is looked up fresh via the provider (cached briefly).
+			// If the user no longer exists or is disabled, reject the token.
+			identity, ok := fetchUserIdentity(p, record.UserID)
 			if !ok {
 				unauthorized(c, "cli token user not found")
 				return
@@ -62,7 +64,8 @@ func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gi
 			c.Set("display_name", "")
 			c.Set("org_id", "")
 			c.Set("avatar", "")
-			c.Set("roles", roles)
+			c.Set("roles", identity.Roles)
+			tenant.SetTenantID(c, tenantOrDefault(identity.TenantID))
 			c.Set("permissions", []string{})
 			c.Set("auth_method", "cli")
 			c.Next()
@@ -87,6 +90,7 @@ func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gi
 		c.Set("org_id", "")
 		c.Set("avatar", user.Avatar)
 		c.Set("roles", user.Roles)
+		tenant.SetTenantID(c, tenantOrDefault(user.TenantID))
 		c.Set("permissions", []string{})
 		c.Set("auth_method", p.Mode())
 		c.Next()
@@ -107,56 +111,66 @@ func unauthorized(c *gin.Context, msg string) {
 	c.Abort()
 }
 
-// --- User-roles cache (CLI token path) ---
+// --- User-identity cache (CLI token path) ---
 //
-// Roles are fetched via the provider on the first CLI-token request for a user
-// and cached briefly for performance. Only positive results are cached, so a
-// transient provider failure retries immediately instead of locking a valid
-// user out for the TTL.
+// The identity (roles + tenant) is fetched via the provider on the first
+// CLI-token request for a user and cached briefly for performance. Only
+// positive results are cached, so a transient provider failure retries
+// immediately instead of locking a valid user out for the TTL.
 
-const rolesCacheTTL = 5 * time.Minute
+const identityCacheTTL = 5 * time.Minute
 
-type rolesCacheEntry struct {
-	roles     []string
+type identityCacheEntry struct {
+	user      *auth.AuthUser
 	fetchedAt time.Time
 }
 
 var (
-	rolesCache   = make(map[string]*rolesCacheEntry)
-	rolesCacheMu sync.RWMutex
+	identityCache   = make(map[string]*identityCacheEntry)
+	identityCacheMu sync.RWMutex
 
-	// rolesFetcher is the function used to look up a user's roles via the
-	// provider. Swappable in tests; defaults to calling p.GetUserRoles.
-	rolesFetcher func(p auth.Provider, userID string) ([]string, bool) = func(p auth.Provider, userID string) ([]string, bool) {
-		return p.GetUserRoles(userID)
+	// identityFetcher is the function used to look up a user's identity via
+	// the provider. Swappable in tests; defaults to calling p.GetUserIdentity.
+	identityFetcher func(p auth.Provider, userID string) (*auth.AuthUser, bool) = func(p auth.Provider, userID string) (*auth.AuthUser, bool) {
+		return p.GetUserIdentity(userID)
 	}
 )
 
-// fetchUserRoles returns the cached roles for userID, or fetches them via the
-// provider when the cache entry is missing or stale. The bool is false if the
-// user could not be found / is disabled / lookup failed.
-func fetchUserRoles(p auth.Provider, userID string) ([]string, bool) {
-	rolesCacheMu.RLock()
-	if entry, ok := rolesCache[userID]; ok && time.Since(entry.fetchedAt) < rolesCacheTTL {
-		rolesCacheMu.RUnlock()
-		return entry.roles, true
+// fetchUserIdentity returns the cached identity for userID, or fetches it via
+// the provider when the cache entry is missing or stale. The bool is false if
+// the user could not be found / is disabled / lookup failed.
+func fetchUserIdentity(p auth.Provider, userID string) (*auth.AuthUser, bool) {
+	identityCacheMu.RLock()
+	if entry, ok := identityCache[userID]; ok && time.Since(entry.fetchedAt) < identityCacheTTL {
+		identityCacheMu.RUnlock()
+		return entry.user, true
 	}
-	rolesCacheMu.RUnlock()
+	identityCacheMu.RUnlock()
 
-	roles, ok := rolesFetcher(p, userID)
+	user, ok := identityFetcher(p, userID)
 	// Only cache positive results. On failure, skip the cache write so the next
 	// request retries immediately instead of locking valid users out.
 	if ok {
-		rolesCacheMu.Lock()
-		rolesCache[userID] = &rolesCacheEntry{roles: roles, fetchedAt: time.Now()}
-		rolesCacheMu.Unlock()
+		identityCacheMu.Lock()
+		identityCache[userID] = &identityCacheEntry{user: user, fetchedAt: time.Now()}
+		identityCacheMu.Unlock()
 	}
-	return roles, ok
+	return user, ok
 }
 
-// resetRolesCache is intended for test isolation; not used in production code.
-func resetRolesCache() {
-	rolesCacheMu.Lock()
-	rolesCache = make(map[string]*rolesCacheEntry)
-	rolesCacheMu.Unlock()
+// resetIdentityCache is intended for test isolation; not used in production code.
+func resetIdentityCache() {
+	identityCacheMu.Lock()
+	identityCache = make(map[string]*identityCacheEntry)
+	identityCacheMu.Unlock()
+}
+
+// tenantOrDefault guards against providers returning an empty TenantID: the
+// middleware is the last line of defense, so an empty tenant falls back to
+// tenant.DefaultID.
+func tenantOrDefault(id string) string {
+	if id == "" {
+		return tenant.DefaultID
+	}
+	return id
 }

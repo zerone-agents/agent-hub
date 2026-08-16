@@ -9,6 +9,7 @@ import (
 	"control-panel/internal/auth"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // Login initiates the OAuth flow by redirecting to the Casdoor login page.
@@ -37,45 +38,57 @@ func Login(c *gin.Context) {
 }
 
 // Callback handles the OAuth callback, exchanging the code for tokens.
-func Callback(c *gin.Context) {
-	code := c.Query("code")
-	state := c.Query("state")
+// It also upserts the user_identities shadow row on successful login;
+// upsert failures are logged but never block the login.
+func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		code := c.Query("code")
+		state := c.Query("state")
 
-	if code == "" || state == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "code 和 state 参数必填",
-		})
-		return
+		if code == "" || state == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "code 和 state 参数必填",
+			})
+			return
+		}
+
+		session := auth.GetSession(state)
+		if session == nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "无效的 state 参数或会话已过期",
+			})
+			return
+		}
+
+		codeVerifier := session.CodeVerifier
+
+		tokenResp, err := auth.ExchangeCodeForToken(code, codeVerifier)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "Token 交换失败: " + err.Error(),
+			})
+			return
+		}
+
+		if user, err := auth.GetUserInfo(tokenResp.AccessToken); err == nil {
+			if au, err := provider.NormalizeUser(user); err == nil {
+				if err := auth.UpsertIdentity(db, "casdoor", au); err != nil {
+					log.Printf("[Callback] shadow identity upsert failed: %v", err)
+				}
+			}
+		}
+
+		redirectURL := "/static/?token=" + url.QueryEscape(tokenResp.AccessToken)
+		if tokenResp.RefreshToken != "" {
+			redirectURL += "&refreshToken=" + url.QueryEscape(tokenResp.RefreshToken)
+		}
+
+		log.Printf("[Callback] Redirecting with tokens to /static/")
+		c.Redirect(http.StatusFound, redirectURL)
 	}
-
-	session := auth.GetSession(state)
-	if session == nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "无效的 state 参数或会话已过期",
-		})
-		return
-	}
-
-	codeVerifier := session.CodeVerifier
-
-	tokenResp, err := auth.ExchangeCodeForToken(code, codeVerifier)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Token 交换失败: " + err.Error(),
-		})
-		return
-	}
-
-	redirectURL := "/static/?token=" + url.QueryEscape(tokenResp.AccessToken)
-	if tokenResp.RefreshToken != "" {
-		redirectURL += "&refreshToken=" + url.QueryEscape(tokenResp.RefreshToken)
-	}
-
-	log.Printf("[Callback] Redirecting with tokens to /static/")
-	c.Redirect(http.StatusFound, redirectURL)
 }
 
 // UserInfo returns the authenticated user's profile information.

@@ -9,25 +9,46 @@ import (
 // CasdoorProvider adapts the existing Casdoor OAuth flow (package-level
 // functions in casdoor.go) to the Provider interface. Construction requires
 // InitCasdoor to have run first so the package-level client is initialized.
-type CasdoorProvider struct{}
+type CasdoorProvider struct {
+	roleMapping map[string]string
+	defaultRole string
+}
 
-// NewCasdoorProvider constructs a CasdoorProvider.
-func NewCasdoorProvider() *CasdoorProvider { return &CasdoorProvider{} }
+// NewCasdoorProvider constructs a CasdoorProvider. An empty roleMapping falls
+// back to DefaultCasdoorRoleMapping (strict matching against the conventional
+// agent-hub-* casdoor role names).
+func NewCasdoorProvider(roleMapping map[string]string, defaultRole string) *CasdoorProvider {
+	return &CasdoorProvider{roleMapping: roleMapping, defaultRole: defaultRole}
+}
 
 // Mode identifies this provider.
 func (p *CasdoorProvider) Mode() string { return "casdoor" }
 
-// NormalizeCasdoorUser converts a Casdoor user into the normalized AuthUser,
-// mapping roles via NormalizeCasdoorRoles.
-func NormalizeCasdoorUser(u *casdoorsdk.User) *AuthUser {
+// NormalizeUser converts a casdoor user to AuthUser: TenantID from Owner
+// (empty -> "default"); roles via strict role mapping (configured mapping or
+// DefaultCasdoorRoleMapping).
+func (p *CasdoorProvider) NormalizeUser(u *casdoorsdk.User) (*AuthUser, error) {
+	mapping := p.roleMapping
+	if len(mapping) == 0 {
+		mapping = DefaultCasdoorRoleMapping
+	}
+	roles, err := NormalizeCasdoorRolesMapped(u.Roles, mapping, p.defaultRole)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := u.Owner
+	if tenantID == "" {
+		tenantID = "default"
+	}
 	return &AuthUser{
 		ID:          u.Id,
 		Username:    u.Name,
 		Email:       u.Email,
 		DisplayName: u.DisplayName,
 		Avatar:      u.Avatar,
-		Roles:       NormalizeCasdoorRoles(u.Roles),
-	}
+		Roles:       roles,
+		TenantID:    tenantID,
+	}, nil
 }
 
 // ValidateAccessToken parses a Casdoor JWT and returns the normalized user.
@@ -36,7 +57,7 @@ func (p *CasdoorProvider) ValidateAccessToken(token string) (*AuthUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NormalizeCasdoorUser(u), nil
+	return p.NormalizeUser(u)
 }
 
 // RefreshToken exchanges a Casdoor refresh token for a fresh token pair.
@@ -62,10 +83,10 @@ func (p *CasdoorProvider) RevokeToken(token string) error {
 	return RevokeToken(token)
 }
 
-// GetUserRoles looks up a user's current roles from Casdoor (used by the
-// CLI-token middleware path). The bool is false when the user is unknown or
-// the lookup fails.
-func (p *CasdoorProvider) GetUserRoles(userID string) ([]string, bool) {
+// GetUserIdentity looks up a user's current normalized identity from Casdoor
+// (used by the CLI-token middleware path). The bool is false when the user is
+// unknown or the lookup fails.
+func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
 	c := GetClient()
 	if c == nil {
 		return nil, false
@@ -74,5 +95,9 @@ func (p *CasdoorProvider) GetUserRoles(userID string) ([]string, bool) {
 	if err != nil || u == nil {
 		return nil, false
 	}
-	return NormalizeCasdoorRoles(u.Roles), true
+	au, err := p.NormalizeUser(u)
+	if err != nil {
+		return nil, false
+	}
+	return au, true
 }

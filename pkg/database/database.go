@@ -107,6 +107,7 @@ func AutoMigrate() error {
 		&authdomain.User{},
 		&authdomain.Invite{},
 		&authdomain.RefreshToken{},
+		&authdomain.UserIdentity{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

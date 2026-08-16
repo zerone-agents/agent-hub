@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	authdom "control-panel/internal/domain/auth"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -21,16 +23,15 @@ import (
 
 // fakeProvider is a controllable auth.Provider for middleware tests.
 type fakeProvider struct {
-	user  *auth.AuthUser
-	err   error
-	roles []string
-	ok    bool
+	user *auth.AuthUser
+	err  error
+	ok   bool
 }
 
 func (f *fakeProvider) ValidateAccessToken(string) (*auth.AuthUser, error) { return f.user, f.err }
 func (f *fakeProvider) RefreshToken(string) (*auth.TokenPair, error)       { return nil, errors.New("x") }
 func (f *fakeProvider) RevokeToken(string) error                           { return nil }
-func (f *fakeProvider) GetUserRoles(string) ([]string, bool)               { return f.roles, f.ok }
+func (f *fakeProvider) GetUserIdentity(string) (*auth.AuthUser, bool)      { return f.user, f.ok }
 func (f *fakeProvider) Mode() string                                       { return "builtin" }
 
 // --- Test helpers ---
@@ -43,13 +44,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// swapRolesFetcher replaces the package-level fetcher for the duration of the
-// test and restores the previous value on cleanup.
-func swapRolesFetcher(t *testing.T, fn func(p auth.Provider, userID string) ([]string, bool)) {
+// swapIdentityFetcher replaces the package-level fetcher for the duration of
+// the test and restores the previous value on cleanup.
+func swapIdentityFetcher(t *testing.T, fn func(p auth.Provider, userID string) (*auth.AuthUser, bool)) {
 	t.Helper()
-	prev := rolesFetcher
-	rolesFetcher = fn
-	t.Cleanup(func() { rolesFetcher = prev })
+	prev := identityFetcher
+	identityFetcher = fn
+	t.Cleanup(func() { identityFetcher = prev })
 }
 
 func newRequestWithBearer(token string) *http.Request {
@@ -100,13 +101,13 @@ func TestNilProviderRejects(t *testing.T) {
 // --- CLI token path ---
 
 func TestCLITokenPathSetsRoles(t *testing.T) {
-	resetRolesCache()
+	resetIdentityCache()
 	db := setupTestDB(t)
 	svc := services.NewCLITokenService(db)
 	issued, err := svc.Issue("42", "laptop", 30)
 	require.NoError(t, err)
 
-	p := &fakeProvider{roles: []string{"admin"}, ok: true}
+	p := &fakeProvider{user: &auth.AuthUser{ID: "42", Roles: []string{"admin"}}, ok: true}
 	r := gin.New()
 	var capturedRoles, capturedUserID, capturedMethod any
 	r.GET("/", AuthMiddlewareWithCLI(svc, p), func(c *gin.Context) {
@@ -127,7 +128,7 @@ func TestCLITokenPathSetsRoles(t *testing.T) {
 }
 
 func TestCLITokenRejectsUnknownUser(t *testing.T) {
-	resetRolesCache()
+	resetIdentityCache()
 	db := setupTestDB(t)
 	svc := services.NewCLITokenService(db)
 	issued, err := svc.Issue("ghost", "x", 30)
@@ -144,46 +145,46 @@ func TestCLITokenRejectsUnknownUser(t *testing.T) {
 
 // --- Cache ---
 
-func TestFetchUserRolesCachesWithinTTL(t *testing.T) {
-	resetRolesCache()
+func TestFetchUserIdentityCachesWithinTTL(t *testing.T) {
+	resetIdentityCache()
 	var calls int32
-	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
+	swapIdentityFetcher(t, func(p auth.Provider, userID string) (*auth.AuthUser, bool) {
 		atomic.AddInt32(&calls, 1)
-		return []string{"admin"}, true
+		return &auth.AuthUser{ID: userID, Roles: []string{"admin"}}, true
 	})
 	p := &fakeProvider{}
 	for i := 0; i < 5; i++ {
-		roles, ok := fetchUserRoles(p, "user-xyz")
+		identity, ok := fetchUserIdentity(p, "user-xyz")
 		require.True(t, ok)
-		require.Equal(t, []string{"admin"}, roles)
+		require.Equal(t, []string{"admin"}, identity.Roles)
 	}
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fetcher should only be called once (cache hits)")
 }
 
-func TestFetchUserRolesFailureNotCached(t *testing.T) {
-	resetRolesCache()
-	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
+func TestFetchUserIdentityFailureNotCached(t *testing.T) {
+	resetIdentityCache()
+	swapIdentityFetcher(t, func(p auth.Provider, userID string) (*auth.AuthUser, bool) {
 		return nil, false
 	})
 	p := &fakeProvider{}
-	roles, ok := fetchUserRoles(p, "ghost")
+	identity, ok := fetchUserIdentity(p, "ghost")
 	assert.False(t, ok)
-	assert.Nil(t, roles)
+	assert.Nil(t, identity)
 }
 
-func TestFetchUserRolesParallelSafety(t *testing.T) {
-	resetRolesCache()
+func TestFetchUserIdentityParallelSafety(t *testing.T) {
+	resetIdentityCache()
 	var calls int32
-	swapRolesFetcher(t, func(p auth.Provider, userID string) ([]string, bool) {
+	swapIdentityFetcher(t, func(p auth.Provider, userID string) (*auth.AuthUser, bool) {
 		atomic.AddInt32(&calls, 1)
 		time.Sleep(5 * time.Millisecond)
-		return []string{"admin"}, true
+		return &auth.AuthUser{ID: userID, Roles: []string{"admin"}}, true
 	})
 	p := &fakeProvider{}
 	done := make(chan struct{}, 20)
 	for i := 0; i < 20; i++ {
 		go func() {
-			_, ok := fetchUserRoles(p, "concurrent-user")
+			_, ok := fetchUserIdentity(p, "concurrent-user")
 			assert.True(t, ok)
 			done <- struct{}{}
 		}()
@@ -192,4 +193,70 @@ func TestFetchUserRolesParallelSafety(t *testing.T) {
 		<-done
 	}
 	assert.LessOrEqual(t, atomic.LoadInt32(&calls), int32(20))
+}
+
+// --- tenant_id propagation ---
+
+func TestMiddlewareSetsTenantID(t *testing.T) {
+	// builtin path: fake provider returning TenantID "default"
+	p := &fakeProvider{
+		user: &auth.AuthUser{ID: "1", Username: "u", Roles: []string{"member"}, TenantID: "default"},
+	}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(nil, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"tenant": tenant.GetTenantID(c)})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"tenant":"default"`) {
+		t.Fatalf("tenant_id not propagated: %s", w.Body.String())
+	}
+}
+
+func TestMiddlewareSetsTenantIDCasdoorOrg(t *testing.T) {
+	p := &fakeProvider{
+		user: &auth.AuthUser{ID: "abc", Username: "u", Roles: []string{"admin"}, TenantID: "tenant-acme"},
+	}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(nil, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"tenant": tenant.GetTenantID(c)})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"tenant":"tenant-acme"`) {
+		t.Fatalf("tenant_id not propagated: %s", w.Body.String())
+	}
+}
+
+func TestMiddlewareEmptyTenantFallsBackToDefault(t *testing.T) {
+	p := &fakeProvider{
+		user: &auth.AuthUser{ID: "1", Roles: []string{"member"}, TenantID: ""},
+	}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(nil, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"tenant": tenant.GetTenantID(c)})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"tenant":"default"`) {
+		t.Fatalf("empty tenant must fall back to default: %s", w.Body.String())
+	}
 }
