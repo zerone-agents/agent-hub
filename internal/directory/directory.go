@@ -31,6 +31,8 @@ type UserClient interface {
 	GetUsers() ([]*casdoorsdk.User, error)
 	GetUserByUserId(userId string) (*casdoorsdk.User, error)
 	UpdateUserForColumns(user *casdoorsdk.User, columns []string) (bool, error)
+	GetRoles() ([]*casdoorsdk.Role, error)
+	UpdateRoleForColumns(role *casdoorsdk.Role, columns []string) (bool, error)
 }
 
 // CasdoorDirectory manages users through the Casdoor admin API.

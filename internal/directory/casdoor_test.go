@@ -2,7 +2,6 @@ package directory
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
@@ -13,14 +12,22 @@ type updateCall struct {
 	columns []string
 }
 
+type roleUpdateCall struct {
+	role    *casdoorsdk.Role
+	columns []string
+}
+
 type fakeClient struct {
-	users      []*casdoorsdk.User
-	getErr     error
-	getByIDErr error // injected error for GetUserByUserId (takes precedence)
-	// updateRejected makes UpdateUserForColumns return (false, nil), simulating
-	// casdoor rejecting the update without an error.
+	users       []*casdoorsdk.User
+	roles       []*casdoorsdk.Role
+	getErr      error
+	getRolesErr error
+	getByIDErr  error // injected error for GetUserByUserId (takes precedence)
+	// updateRejected makes UpdateUserForColumns/UpdateRoleForColumns return
+	// (false, nil), simulating casdoor rejecting the update without an error.
 	updateRejected bool
 	updates        []updateCall
+	roleUpdates    []roleUpdateCall
 }
 
 func (f *fakeClient) GetUsers() ([]*casdoorsdk.User, error) { return f.users, f.getErr }
@@ -42,6 +49,14 @@ func (f *fakeClient) UpdateUserForColumns(u *casdoorsdk.User, cols []string) (bo
 	}
 	return true, nil
 }
+func (f *fakeClient) GetRoles() ([]*casdoorsdk.Role, error) { return f.roles, f.getRolesErr }
+func (f *fakeClient) UpdateRoleForColumns(r *casdoorsdk.Role, cols []string) (bool, error) {
+	f.roleUpdates = append(f.roleUpdates, roleUpdateCall{role: r, columns: cols})
+	if f.updateRejected {
+		return false, nil
+	}
+	return true, nil
+}
 
 var testMapping = map[string]string{
 	"admin":      "agent-hub-admin",
@@ -50,17 +65,23 @@ var testMapping = map[string]string{
 }
 
 func TestListUsersFiltersByTenantAndNormalizesRoles(t *testing.T) {
-	fc := &fakeClient{users: []*casdoorsdk.User{
-		{Id: "1", Name: "alice", DisplayName: "Alice", Email: "a@x.com", Owner: "tenant-a",
-			CreatedTime: "2026-01-01T00:00:00+08:00",
-			Roles:       []*casdoorsdk.Role{{Name: "agent-hub-admin"}}},
-		{Id: "2", Name: "bob", Owner: "tenant-a",
-			Roles: []*casdoorsdk.Role{{Name: "agent-hub-member"}, {Name: "other-org-role"}}},
-		{Id: "3", Name: "carol", Owner: "tenant-a", IsForbidden: true,
-			Roles: []*casdoorsdk.Role{{Name: "unmapped-role"}}}, // no mapped role -> Role ""
-		{Id: "4", Name: "dave", Owner: "tenant-b", // other tenant -> filtered out
-			Roles: []*casdoorsdk.Role{{Name: "agent-hub-admin"}}},
-	}}
+	// get-users returns users WITHOUT roles (casdoor/casdoor#3688); role
+	// membership comes from the Role objects' Users lists ("owner/name").
+	fc := &fakeClient{
+		users: []*casdoorsdk.User{
+			{Id: "1", Name: "alice", DisplayName: "Alice", Email: "a@x.com", Owner: "tenant-a",
+				CreatedTime: "2026-01-01T00:00:00+08:00"},
+			{Id: "2", Name: "bob", Owner: "tenant-a"},
+			{Id: "3", Name: "carol", Owner: "tenant-a", IsForbidden: true},
+			{Id: "4", Name: "dave", Owner: "tenant-b"}, // other tenant -> filtered out
+		},
+		roles: []*casdoorsdk.Role{
+			{Owner: "tenant-a", Name: "agent-hub-admin", Users: []string{"tenant-a/alice", "tenant-b/dave"}},
+			{Owner: "tenant-a", Name: "agent-hub-member", Users: []string{"tenant-a/bob"}},
+			{Owner: "tenant-a", Name: "other-org-role", Users: []string{"tenant-a/bob"}},
+			{Owner: "tenant-a", Name: "unmapped-role", Users: []string{"tenant-a/carol"}},
+		},
+	}
 	d := NewCasdoorDirectory(fc, testMapping, "")
 	got, err := d.ListUsers("tenant-a")
 	if err != nil {
@@ -85,37 +106,64 @@ func TestListUsersSDKError(t *testing.T) {
 	if _, err := d.ListUsers("tenant-a"); err == nil {
 		t.Fatal("want error")
 	}
+	d = NewCasdoorDirectory(&fakeClient{
+		users:       []*casdoorsdk.User{{Id: "1", Owner: "tenant-a"}},
+		getRolesErr: errors.New("roles boom"),
+	}, testMapping, "")
+	if _, err := d.ListUsers("tenant-a"); err == nil {
+		t.Fatal("want error from GetRoles")
+	}
 }
 
 func TestUpdateRoleSwapsOnlyMappedRoles(t *testing.T) {
-	fc := &fakeClient{users: []*casdoorsdk.User{
-		{Id: "1", Name: "alice", Owner: "tenant-a",
-			Roles: []*casdoorsdk.Role{
-				{Name: "agent-hub-member"},       // mapped -> replaced
-				{Name: "external-billing-admin"}, // not in mapping values -> kept
-			}},
-	}}
+	fc := &fakeClient{
+		users: []*casdoorsdk.User{
+			{Id: "1", Name: "alice", Owner: "tenant-a"},
+		},
+		roles: []*casdoorsdk.Role{
+			{Owner: "tenant-a", Name: "agent-hub-member", Users: []string{"tenant-a/alice", "tenant-a/other"}}, // mapped -> alice removed
+			{Owner: "tenant-a", Name: "agent-hub-admin", Users: []string{"tenant-a/other"}},                    // mapped -> alice added
+			{Owner: "tenant-a", Name: "external-billing-admin", Users: []string{"tenant-a/alice"}},             // not mapped -> untouched
+		},
+	}
 	d := NewCasdoorDirectory(fc, testMapping, "")
 	if err := d.UpdateRole("tenant-a", "1", "admin", "actor-9"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fc.updates) != 1 {
-		t.Fatalf("updates = %d", len(fc.updates))
+	if len(fc.roleUpdates) != 2 {
+		t.Fatalf("role updates = %d, want 2 (member+admin)", len(fc.roleUpdates))
 	}
-	u := fc.updates[0].user
-	names := []string{}
-	for _, r := range u.Roles {
-		names = append(names, r.Name)
+	if len(fc.updates) != 0 {
+		t.Fatalf("update-user must not be used for roles, got %d calls", len(fc.updates))
 	}
-	// expect: external-billing-admin kept, agent-hub-member removed, agent-hub-admin added
-	joined := strings.Join(names, ",")
-	if !strings.Contains(joined, "external-billing-admin") ||
-		!strings.Contains(joined, "agent-hub-admin") ||
-		strings.Contains(joined, "agent-hub-member") {
-		t.Fatalf("roles after update: %v", names)
+	for _, call := range fc.roleUpdates {
+		if len(call.columns) != 1 || call.columns[0] != "users" {
+			t.Fatalf("columns: %v", call.columns)
+		}
+		switch call.role.Name {
+		case "agent-hub-member":
+			for _, uid := range call.role.Users {
+				if uid == "tenant-a/alice" {
+					t.Fatalf("alice must be removed from agent-hub-member: %v", call.role.Users)
+				}
+			}
+		case "agent-hub-admin":
+			found := false
+			for _, uid := range call.role.Users {
+				if uid == "tenant-a/alice" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("alice must be added to agent-hub-admin: %v", call.role.Users)
+			}
+		default:
+			t.Fatalf("unexpected role touched: %s", call.role.Name)
+		}
 	}
-	if len(fc.updates[0].columns) != 1 || fc.updates[0].columns[0] != "roles" {
-		t.Fatalf("columns: %v", fc.updates[0].columns)
+	// external role untouched
+	if fc.roles[2].Users[0] != "tenant-a/alice" {
+		t.Fatalf("external role must stay untouched: %v", fc.roles[2].Users)
 	}
 }
 
@@ -163,7 +211,10 @@ func TestWriteOpsUpdateRejected(t *testing.T) {
 	// casdoor answering ok=false without an error must surface ErrUpdateRejected
 	// (handler maps it to 502 via the default branch).
 	fc := &fakeClient{
-		users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
+		users: []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
+		roles: []*casdoorsdk.Role{
+			{Owner: "tenant-a", Name: "agent-hub-admin", Users: []string{}},
+		},
 		updateRejected: true,
 	}
 	d := NewCasdoorDirectory(fc, testMapping, "")
