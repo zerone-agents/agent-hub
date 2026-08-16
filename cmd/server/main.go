@@ -86,9 +86,12 @@ func main() {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 			log.Fatalf("Failed to initialize Casdoor: %v", err)
 		}
-		casdoorProvider = auth.NewCasdoorProvider(auth.NewMembershipStore(database.GetDB()))
+		// membershipStore 是 user_identities 的唯一句柄：provider（登录时合成
+		// 角色）与 directory（用户管理 CRUD）共享同一实例。
+		membershipStore := auth.NewMembershipStore(database.GetDB())
+		casdoorProvider = auth.NewCasdoorProvider(membershipStore)
 		authProvider = casdoorProvider
-		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), membershipStore)
 		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GetClient().GetSignupUrl(true, ""))
 		log.Println("Auth mode: casdoor")
 	}

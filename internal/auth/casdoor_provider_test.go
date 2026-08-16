@@ -75,6 +75,25 @@ func (f *fakeMembershipStore) ApplyDecision(provider string, au *AuthUser, d Mem
 	return nil
 }
 
+// ListByTenant/SetRole 是 MembershipStore 的用户管理扩展（Task 6）；
+// provider 路径不触达，这里给出语义对齐的最小实现以维持接口实现。
+func (f *fakeMembershipStore) ListByTenant(tenantID string) ([]authdom.UserIdentity, error) {
+	var out []authdom.UserIdentity
+	for _, rec := range f.recs {
+		if rec.TenantID == tenantID {
+			out = append(out, *rec)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMembershipStore) SetRole(provider, externalID, role, status string) error {
+	if rec := f.recs[storeKey(provider, externalID)]; rec != nil {
+		rec.Role, rec.Status = role, status
+	}
+	return nil
+}
+
 // newTestProvider 构造注入 fake store 的 provider，外部依赖由用例自行替换。
 func newTestProvider(store MembershipStore) *CasdoorProvider {
 	p := NewCasdoorProvider(store)
