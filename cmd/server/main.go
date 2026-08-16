@@ -66,6 +66,7 @@ func main() {
 
 	// ==================== 认证装配（按 auth.mode 二选一） ====================
 	var authProvider auth.Provider
+	var casdoorProvider *auth.CasdoorProvider
 	var builtinAuthHandler *handler.BuiltinAuthHandler
 	var adminUserHandler *handler.AdminUserHandler
 
@@ -81,7 +82,8 @@ func main() {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 			log.Fatalf("Failed to initialize Casdoor: %v", err)
 		}
-		authProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		casdoorProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		authProvider = casdoorProvider
 		log.Println("Auth mode: casdoor")
 	}
 
@@ -249,7 +251,7 @@ func main() {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
 			})
 			authGroup.GET("/login", handler.Login)
-			authGroup.GET("/callback", handler.Callback)
+			authGroup.GET("/callback", handler.Callback(casdoorProvider, database.GetDB()))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
 			authGroup.POST("/refresh", handler.RefreshToken)
