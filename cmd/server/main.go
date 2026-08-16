@@ -81,7 +81,7 @@ func main() {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 			log.Fatalf("Failed to initialize Casdoor: %v", err)
 		}
-		authProvider = auth.NewCasdoorProvider()
+		authProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
 		log.Println("Auth mode: casdoor")
 	}
 
