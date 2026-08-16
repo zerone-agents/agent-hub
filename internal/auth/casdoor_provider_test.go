@@ -61,3 +61,35 @@ func TestCasdoorProviderNormalizeUser_DefaultMapping(t *testing.T) {
 		t.Fatal("expected ErrNoMatchedRole for unmapped role")
 	}
 }
+
+func TestCasdoorProviderNormalizeIdentity_ActiveUser(t *testing.T) {
+	p := NewCasdoorProvider(nil, "")
+	u := &casdoorsdk.User{Id: "id1", Name: "alice", Owner: "org1",
+		Roles: []*casdoorsdk.Role{{Name: "agent-hub-admin"}}}
+	au, ok := p.normalizeIdentity(u)
+	if !ok {
+		t.Fatal("expected ok for active user")
+	}
+	if au == nil || au.ID != "id1" || au.TenantID != "org1" {
+		t.Fatalf("unexpected identity %+v", au)
+	}
+}
+
+func TestCasdoorProviderNormalizeIdentity_ForbiddenUser(t *testing.T) {
+	p := NewCasdoorProvider(nil, "")
+	u := &casdoorsdk.User{Id: "id2", Name: "bob", Owner: "org1", IsForbidden: true,
+		Roles: []*casdoorsdk.Role{{Name: "agent-hub-admin"}}}
+	if _, ok := p.normalizeIdentity(u); ok {
+		t.Fatal("disabled (IsForbidden) casdoor user must be rejected")
+	}
+}
+
+func TestCasdoorProviderNormalizeIdentity_NormalizeFailure(t *testing.T) {
+	p := NewCasdoorProvider(nil, "")
+	// unmapped role, no defaultRole -> NormalizeUser error -> not ok
+	u := &casdoorsdk.User{Id: "id3", Name: "carol", Owner: "org1",
+		Roles: []*casdoorsdk.Role{{Name: "site-admin"}}}
+	if _, ok := p.normalizeIdentity(u); ok {
+		t.Fatal("user whose roles fail normalization must be rejected")
+	}
+}

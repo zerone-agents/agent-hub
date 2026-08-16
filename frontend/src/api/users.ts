@@ -5,11 +5,13 @@ export type UserRole = 'admin' | 'maintainer' | 'member'
 export type UserStatus = 'active' | 'disabled'
 
 export interface AdminUser {
-  id: number
+  // builtin 模式为 number；casdoor 模式为 casdoor 用户 Id 字符串。
+  id: string | number
   username: string
   displayName: string
   email: string
-  role: UserRole
+  // casdoor 模式下无映射角色的用户为 ''（前端显示 "-"）。
+  role: UserRole | ''
   status: UserStatus
   createdAt: string
 }
@@ -34,9 +36,9 @@ export interface CreatedInvite {
 export const usersApi = {
   listUsers: () =>
     apiClient.get<ApiResponse<AdminUser[]>>('/api/v1/admin/users').then((res) => unwrapResponse<AdminUser[]>(res)),
-  updateUser: (id: number, patch: { role?: UserRole; status?: UserStatus }) =>
+  updateUser: (id: string | number, patch: { role?: UserRole; status?: UserStatus }) =>
     apiClient.patch(`/api/v1/admin/users/${id}`, patch).then((res) => unwrapResponse<unknown>(res)),
-  resetPassword: (id: number) =>
+  resetPassword: (id: string | number) =>
     apiClient
       .post<ApiResponse<{ password: string }>>(`/api/v1/admin/users/${id}/reset-password`)
       .then((res) => unwrapResponse<{ password: string }>(res)),
@@ -47,5 +49,8 @@ export const usersApi = {
       .post<ApiResponse<CreatedInvite>>('/api/v1/admin/invites', input)
       .then((res) => unwrapResponse<CreatedInvite>(res)),
   revokeInvite: (id: number) =>
-    apiClient.delete(`/api/v1/admin/invites/${id}`).then((res) => unwrapResponse<unknown>(res))
+    apiClient.delete(`/api/v1/admin/invites/${id}`).then((res) => unwrapResponse<unknown>(res)),
+  /** Casdoor 模式：获取组织注册页链接（admin 引导新用户自助注册）。 */
+  getSignupUrl: () =>
+    apiClient.get<ApiResponse<{ signupUrl: string }>>('/api/v1/admin/users/signup-url').then((res) => unwrapResponse<{ signupUrl: string }>(res))
 }
