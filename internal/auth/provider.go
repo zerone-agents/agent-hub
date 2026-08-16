@@ -17,6 +17,9 @@ type AuthUser struct {
 	DisplayName string
 	Avatar      string
 	Roles       []string
+	// TenantID is "default" for builtin mode; the casdoor organization name
+	// otherwise.
+	TenantID string
 }
 
 // Provider abstracts the authentication backend. Exactly one Provider is
@@ -31,10 +34,10 @@ type Provider interface {
 	// RevokeToken revokes a refresh token (logout). Missing tokens are not
 	// errors (idempotent).
 	RevokeToken(token string) error
-	// GetUserRoles looks up a user's current normalized roles. Used by the
-	// CLI-token middleware path. The bool is false when the user is unknown
-	// or disabled.
-	GetUserRoles(userID string) ([]string, bool)
+	// GetUserIdentity looks up a user's current normalized identity. Used by
+	// the CLI-token middleware path. The bool is false when the user is
+	// unknown or disabled.
+	GetUserIdentity(userID string) (*AuthUser, bool)
 	// Mode reports the provider identifier ("builtin" | "casdoor").
 	Mode() string
 }

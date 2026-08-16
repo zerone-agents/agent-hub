@@ -13,6 +13,7 @@ func TestNormalizeCasdoorUser(t *testing.T) {
 		Email:       "a@b.c",
 		DisplayName: "Alice",
 		Avatar:      "https://x/y.png",
+		Owner:       "acme",
 		Roles:       []*casdoorsdk.Role{{Name: "agents-admin"}},
 	}
 	au := NormalizeCasdoorUser(u)
@@ -21,6 +22,9 @@ func TestNormalizeCasdoorUser(t *testing.T) {
 	}
 	if len(au.Roles) != 1 || au.Roles[0] != "admin" {
 		t.Fatalf("roles = %v", au.Roles)
+	}
+	if au.TenantID != "acme" {
+		t.Fatalf("TenantID = %q, want casdoor owner %q", au.TenantID, "acme")
 	}
 }
 

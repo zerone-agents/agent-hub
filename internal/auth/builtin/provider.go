@@ -12,6 +12,7 @@ import (
 
 	"control-panel/internal/auth"
 	authdom "control-panel/internal/domain/auth"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/gorm"
@@ -113,6 +114,7 @@ func (p *Provider) ValidateAccessToken(tokenString string) (*auth.AuthUser, erro
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Roles:       []string{user.Role},
+		TenantID:    tenant.DefaultID,
 	}, nil
 }
 
@@ -150,9 +152,10 @@ func (p *Provider) RevokeAllForUser(userID uint64) error {
 	return p.db.Where("user_id = ?", userID).Delete(&authdom.RefreshToken{}).Error
 }
 
-// GetUserRoles returns the user's current role; false when unknown or disabled.
-// Used by the CLI-token middleware path.
-func (p *Provider) GetUserRoles(userID string) ([]string, bool) {
+// GetUserIdentity returns the user's current identity; false when unknown or
+// disabled. Used by the CLI-token middleware path. Builtin mode is
+// single-tenant, so TenantID is always tenant.DefaultID.
+func (p *Provider) GetUserIdentity(userID string) (*auth.AuthUser, bool) {
 	id, err := strconv.ParseUint(userID, 10, 64)
 	if err != nil {
 		return nil, false
@@ -164,7 +167,14 @@ func (p *Provider) GetUserRoles(userID string) ([]string, bool) {
 	if user.Status != authdom.StatusActive {
 		return nil, false
 	}
-	return []string{user.Role}, true
+	return &auth.AuthUser{
+		ID:          userID,
+		Username:    user.Username,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		Roles:       []string{user.Role},
+		TenantID:    tenant.DefaultID,
+	}, true
 }
 
 func (p *Provider) lookupRefresh(plaintext string) (*authdom.RefreshToken, error) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authdom "control-panel/internal/domain/auth"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -54,6 +55,9 @@ func TestIssueAndValidateAccessToken(t *testing.T) {
 	}
 	if len(au.Roles) != 1 || au.Roles[0] != authdom.RoleMaintainer {
 		t.Fatalf("roles = %v", au.Roles)
+	}
+	if au.TenantID != tenant.DefaultID {
+		t.Fatalf("builtin TenantID = %q, want %q", au.TenantID, tenant.DefaultID)
 	}
 }
 
@@ -104,10 +108,10 @@ func TestRevokeAllForUser(t *testing.T) {
 	}
 }
 
-func TestGetUserRolesDisabledUser(t *testing.T) {
+func TestGetUserIdentityDisabledUser(t *testing.T) {
 	p, db := newTestProvider(t)
 	u := seedUser(t, db, "dave", authdom.RoleAdmin, authdom.StatusDisabled)
-	if _, ok := p.GetUserRoles(strconv.FormatUint(u.ID, 10)); ok {
+	if _, ok := p.GetUserIdentity(strconv.FormatUint(u.ID, 10)); ok {
 		t.Fatal("disabled user must report not-found")
 	}
 }
