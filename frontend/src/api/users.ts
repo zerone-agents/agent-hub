@@ -10,7 +10,8 @@ export interface AdminUser {
   username: string
   displayName: string
   email: string
-  role: UserRole
+  // casdoor 模式下无映射角色的用户为 ''（前端显示 "-"）。
+  role: UserRole | ''
   status: UserStatus
   createdAt: string
 }
