@@ -12,6 +12,7 @@ import (
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
 	"control-panel/internal/config"
+	"control-panel/internal/directory"
 	knowledgedomain "control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/handler"
@@ -67,6 +68,8 @@ func main() {
 	// ==================== 认证装配（按 auth.mode 二选一） ====================
 	var authProvider auth.Provider
 	var casdoorProvider *auth.CasdoorProvider
+	var casdoorDir *directory.CasdoorDirectory
+	var casdoorUserHandler *handler.CasdoorUserHandler
 	var builtinAuthHandler *handler.BuiltinAuthHandler
 	var adminUserHandler *handler.AdminUserHandler
 
@@ -84,6 +87,8 @@ func main() {
 		}
 		casdoorProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
 		authProvider = casdoorProvider
+		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GetClient().GetSignupUrl(true, ""))
 		log.Println("Auth mode: casdoor")
 	}
 
@@ -446,7 +451,9 @@ func main() {
 	}
 
 	// ---------- Builtin 用户管理（仅 builtin 模式注册） ----------
-	// 用户管理与邀请由 admin 独享。casdoor 模式下用户管理仍在 Casdoor 后台。
+	// User management and invites are admin-only. Builtin mode also manages
+	// invites; casdoor mode delegates user management to the Casdoor admin API
+	// via the directory.
 	if cfg.Auth.IsBuiltin() {
 		usersAdmin := v1group.Group("/admin", middleware.RequireAdmin())
 		usersAdmin.GET("/users", adminUserHandler.ListUsers)
@@ -455,6 +462,12 @@ func main() {
 		usersAdmin.POST("/invites", adminUserHandler.CreateInvite)
 		usersAdmin.GET("/invites", adminUserHandler.ListInvites)
 		usersAdmin.DELETE("/invites/:id", adminUserHandler.RevokeInvite)
+	} else {
+		usersAdmin := v1group.Group("/admin", middleware.RequireAdmin())
+		usersAdmin.GET("/users/signup-url", casdoorUserHandler.SignupURL)
+		usersAdmin.GET("/users", casdoorUserHandler.ListUsers)
+		usersAdmin.PATCH("/users/:id", casdoorUserHandler.UpdateUser)
+		usersAdmin.POST("/users/:id/reset-password", casdoorUserHandler.ResetUserPassword)
 	}
 
 	// ---------- CLI Token 领域 ----------
