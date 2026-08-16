@@ -52,13 +52,15 @@ func (d *CasdoorDirectory) toManagedUser(u *casdoorsdk.User) ManagedUser {
 	}
 }
 
-// getTenantUser fetches a user and verifies tenant ownership.
+// getTenantUser fetches a user and verifies tenant ownership. SDK errors are
+// propagated as-is (mapped to 502 by the handler); only a missing user or a
+// cross-tenant user yields ErrUserNotFound (404).
 func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.User, error) {
 	u, err := d.client.GetUserByUserId(userID)
-	if err != nil || u == nil {
-		return nil, ErrUserNotFound
+	if err != nil {
+		return nil, err
 	}
-	if u.Owner != tenantID {
+	if u == nil || u.Owner != tenantID {
 		return nil, ErrUserNotFound
 	}
 	return u, nil
@@ -94,8 +96,14 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 	}
 	kept = append(kept, &casdoorsdk.Role{Owner: u.Owner, Name: casdoorName})
 	u.Roles = kept
-	_, err = d.client.UpdateUserForColumns(u, []string{"roles"})
-	return err
+	ok, err = d.client.UpdateUserForColumns(u, []string{"roles"})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrUpdateRejected
+	}
+	return nil
 }
 
 // SetDisabled sets the casdoor is_forbidden flag.
@@ -108,8 +116,14 @@ func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, a
 		return err
 	}
 	u.IsForbidden = disabled
-	_, err = d.client.UpdateUserForColumns(u, []string{"is_forbidden"})
-	return err
+	ok, err := d.client.UpdateUserForColumns(u, []string{"is_forbidden"})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrUpdateRejected
+	}
+	return nil
 }
 
 // ResetPassword sets a random password (casdoor hashes it server-side) and
@@ -128,8 +142,12 @@ func (d *CasdoorDirectory) ResetPassword(tenantID, userID, actorID string) (stri
 	}
 	plain := "Reset!" + hex.EncodeToString(b)
 	u.Password = plain
-	if _, err := d.client.UpdateUserForColumns(u, []string{"password"}); err != nil {
+	ok, err := d.client.UpdateUserForColumns(u, []string{"password"})
+	if err != nil {
 		return "", err
+	}
+	if !ok {
+		return "", ErrUpdateRejected
 	}
 	return plain, nil
 }

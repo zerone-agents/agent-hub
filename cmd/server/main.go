@@ -450,7 +450,7 @@ func main() {
 		adminProvidersGroup.POST("/:id/sync-multirag", providerHandler.SyncToMultiRAG)
 	}
 
-	// ---------- Builtin 用户管理（仅 builtin 模式注册） ----------
+	// ---------- Admin user management (builtin: invites + local users; casdoor: casdoor API passthrough) ----------
 	// User management and invites are admin-only. Builtin mode also manages
 	// invites; casdoor mode delegates user management to the Casdoor admin API
 	// via the directory.

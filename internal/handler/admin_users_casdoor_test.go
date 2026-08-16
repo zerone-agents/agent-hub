@@ -27,6 +27,8 @@ type fakeUserDirectory struct {
 	gotTenant, gotUser, gotActor string
 	gotRole                      string
 	gotDisabled                  bool
+
+	updateRoleCalls int
 }
 
 func (f *fakeUserDirectory) ListUsers(tenantID string) ([]directory.ManagedUser, error) {
@@ -35,6 +37,7 @@ func (f *fakeUserDirectory) ListUsers(tenantID string) ([]directory.ManagedUser,
 }
 
 func (f *fakeUserDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
+	f.updateRoleCalls++
 	f.gotTenant, f.gotUser, f.gotRole, f.gotActor = tenantID, userID, role, actorID
 	return f.updateRoleErr
 }
@@ -159,6 +162,27 @@ func TestCasdoorUpdateUserRoleAndStatus(t *testing.T) {
 		t.Fatalf("ErrUserNotFound: %d", w.Code)
 	}
 	dir.updateRoleErr = nil
+}
+
+func TestCasdoorUpdateUserInvalidStatus(t *testing.T) {
+	dir := &fakeUserDirectory{}
+	r := setupCasdoorUserRouter(dir)
+
+	// Invalid status alone -> 400.
+	w := casdoorDo(r, "PATCH", "/admin/users/u1", map[string]string{"status": "banned"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status: %d %s", w.Code, w.Body.String())
+	}
+
+	// Valid role + invalid status -> 400, and UpdateRole must NOT be called
+	// (status is validated before any change is applied).
+	w = casdoorDo(r, "PATCH", "/admin/users/u1", map[string]string{"role": "maintainer", "status": "banned"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("valid role + invalid status: %d %s", w.Code, w.Body.String())
+	}
+	if dir.updateRoleCalls != 0 {
+		t.Fatalf("UpdateRole called %d times, want 0 on invalid status", dir.updateRoleCalls)
+	}
 }
 
 func TestCasdoorResetPassword(t *testing.T) {

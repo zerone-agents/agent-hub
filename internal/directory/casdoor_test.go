@@ -14,22 +14,32 @@ type updateCall struct {
 }
 
 type fakeClient struct {
-	users   []*casdoorsdk.User
-	getErr  error
-	updates []updateCall
+	users      []*casdoorsdk.User
+	getErr     error
+	getByIDErr error // injected error for GetUserByUserId (takes precedence)
+	// updateRejected makes UpdateUserForColumns return (false, nil), simulating
+	// casdoor rejecting the update without an error.
+	updateRejected bool
+	updates        []updateCall
 }
 
 func (f *fakeClient) GetUsers() ([]*casdoorsdk.User, error) { return f.users, f.getErr }
 func (f *fakeClient) GetUserByUserId(id string) (*casdoorsdk.User, error) {
+	if f.getByIDErr != nil {
+		return nil, f.getByIDErr
+	}
 	for _, u := range f.users {
 		if u.Id == id {
 			return u, nil
 		}
 	}
-	return nil, errors.New("not found")
+	return nil, nil // casdoor SDK returns (nil, nil) for an unknown user
 }
 func (f *fakeClient) UpdateUserForColumns(u *casdoorsdk.User, cols []string) (bool, error) {
 	f.updates = append(f.updates, updateCall{user: u, columns: cols})
+	if f.updateRejected {
+		return false, nil
+	}
 	return true, nil
 }
 
@@ -125,6 +135,47 @@ func TestUpdateRoleRejectsSelfAndInvalid(t *testing.T) {
 	}
 	if err := d.UpdateRole("tenant-b", "1", "admin", "actor"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("cross-tenant: %v", err)
+	}
+}
+
+func TestGetTenantUserSDKErrorPropagates(t *testing.T) {
+	sentinel := errors.New("casdoor unreachable")
+	fc := &fakeClient{
+		users:      []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
+		getByIDErr: sentinel,
+	}
+	d := NewCasdoorDirectory(fc, testMapping, "")
+
+	// Transient SDK errors must surface as-is (handler maps them to 502),
+	// not be collapsed into ErrUserNotFound (404).
+	if err := d.UpdateRole("tenant-a", "1", "admin", "actor"); !errors.Is(err, sentinel) {
+		t.Fatalf("UpdateRole: got %v, want sentinel", err)
+	}
+	if err := d.SetDisabled("tenant-a", "1", true, "actor"); !errors.Is(err, sentinel) {
+		t.Fatalf("SetDisabled: got %v, want sentinel", err)
+	}
+	if _, err := d.ResetPassword("tenant-a", "1", "actor"); !errors.Is(err, sentinel) {
+		t.Fatalf("ResetPassword: got %v, want sentinel", err)
+	}
+}
+
+func TestWriteOpsUpdateRejected(t *testing.T) {
+	// casdoor answering ok=false without an error must surface ErrUpdateRejected
+	// (handler maps it to 502 via the default branch).
+	fc := &fakeClient{
+		users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
+		updateRejected: true,
+	}
+	d := NewCasdoorDirectory(fc, testMapping, "")
+
+	if err := d.UpdateRole("tenant-a", "1", "admin", "actor"); !errors.Is(err, ErrUpdateRejected) {
+		t.Fatalf("UpdateRole: got %v, want ErrUpdateRejected", err)
+	}
+	if err := d.SetDisabled("tenant-a", "1", true, "actor"); !errors.Is(err, ErrUpdateRejected) {
+		t.Fatalf("SetDisabled: got %v, want ErrUpdateRejected", err)
+	}
+	if _, err := d.ResetPassword("tenant-a", "1", "actor"); !errors.Is(err, ErrUpdateRejected) {
+		t.Fatalf("ResetPassword: got %v, want ErrUpdateRejected", err)
 	}
 }
 

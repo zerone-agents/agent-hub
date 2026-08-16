@@ -57,6 +57,12 @@ func (h *CasdoorUserHandler) UpdateUser(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "至少需要提供一个字段")
 		return
 	}
+	// Validate status before applying any change, so a PATCH with a valid role
+	// plus an invalid status is rejected without side effects.
+	if req.Status != "" && req.Status != "active" && req.Status != "disabled" {
+		respondError(c, http.StatusBadRequest, "无效的 status")
+		return
+	}
 	if req.Role != "" {
 		if err := h.dir.UpdateRole(tenant.GetTenantID(c), id, req.Role, actorID); err != nil {
 			respondDirectoryError(c, err)
@@ -64,10 +70,6 @@ func (h *CasdoorUserHandler) UpdateUser(c *gin.Context) {
 		}
 	}
 	if req.Status != "" {
-		if req.Status != "active" && req.Status != "disabled" {
-			respondError(c, http.StatusBadRequest, "无效的 status")
-			return
-		}
 		if err := h.dir.SetDisabled(tenant.GetTenantID(c), id, req.Status == "disabled", actorID); err != nil {
 			respondDirectoryError(c, err)
 			return

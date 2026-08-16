@@ -10,6 +10,10 @@ var ErrSelfOperation = errors.New("cannot perform this operation on yourself")
 var ErrUserNotFound = errors.New("user not found")
 var ErrInvalidRole = errors.New("invalid role") // not admin/maintainer/member, or not in mapping
 
+// ErrUpdateRejected is returned when casdoor answers an update request with
+// ok=false and no error (e.g. permission denied server-side).
+var ErrUpdateRejected = errors.New("casdoor rejected the update")
+
 // ManagedUser is the admin-UI projection of a user, backend-agnostic.
 type ManagedUser struct {
 	ID          string `json:"id"` // casdoor user Id
