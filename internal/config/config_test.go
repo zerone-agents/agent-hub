@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"log"
+	"os"
 	"strings"
 	"testing"
 )
@@ -46,73 +49,25 @@ func TestValidateAuthRejectsUnknownMode(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CasdoorRoleMappingEnv(t *testing.T) {
+func TestDeprecatedRoleMappingEnvWarns(t *testing.T) {
 	t.Setenv("AUTH_MODE", "casdoor")
-	t.Setenv("CASDOOR_ROLE_MAPPING", "admin=agent-hub-admin, maintainer=agent-hub-maintainer ,member=agent-hub-member")
-	cfg, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("load: %v", err)
+	t.Setenv("CASDOOR_ROLE_MAPPING", "admin=agent-hub-admin")
+	t.Setenv("CASDOOR_DEFAULT_ROLE", "member")
+
+	// 捕获标准日志，断言废弃警告被记录
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	// 废弃 env 不应导致加载失败（给线上留清理窗口）
+	if _, err := LoadConfig(); err != nil {
+		t.Fatalf("废弃 env 不应导致 LoadConfig 失败: %v", err)
 	}
-	want := map[string]string{
-		"admin":      "agent-hub-admin",
-		"maintainer": "agent-hub-maintainer",
-		"member":     "agent-hub-member",
-	}
-	if len(cfg.Casdoor.RoleMapping) != len(want) {
-		t.Fatalf("mapping = %v, want %v", cfg.Casdoor.RoleMapping, want)
-	}
-	for k, v := range want {
-		if cfg.Casdoor.RoleMapping[k] != v {
-			t.Fatalf("mapping[%q] = %q, want %q", k, cfg.Casdoor.RoleMapping[k], v)
+
+	out := buf.String()
+	for _, name := range []string{"CASDOOR_ROLE_MAPPING", "CASDOOR_DEFAULT_ROLE"} {
+		if !strings.Contains(out, name) || !strings.Contains(out, "已废弃") {
+			t.Fatalf("未记录 %s 的废弃警告，日志输出: %q", name, out)
 		}
-	}
-}
-
-func TestLoadConfig_CasdoorRoleMappingEnvInvalid(t *testing.T) {
-	for _, raw := range []string{"admin", "admin=", "=x", "admin=a,,member=b"} {
-		t.Run(raw, func(t *testing.T) {
-			t.Setenv("AUTH_MODE", "casdoor")
-			t.Setenv("CASDOOR_ROLE_MAPPING", raw)
-			if _, err := LoadConfig(); err == nil {
-				t.Fatalf("want error for %q", raw)
-			}
-		})
-	}
-}
-
-func TestValidateAuth_CasdoorRoleMapping(t *testing.T) {
-	c := &Config{}
-	c.Auth.Mode = "casdoor"
-	// valid keys pass
-	c.Casdoor.RoleMapping = map[string]string{"admin": "a", "member": "m"}
-	if err := c.ValidateAuth(); err != nil {
-		t.Fatalf("valid mapping rejected: %v", err)
-	}
-	// unknown hub role key rejected
-	c.Casdoor.RoleMapping = map[string]string{"superuser": "a"}
-	if err := c.ValidateAuth(); err == nil {
-		t.Fatal("unknown mapping key accepted")
-	}
-	// duplicate casdoor role values rejected
-	c.Casdoor.RoleMapping = map[string]string{"admin": "same", "member": "same"}
-	if err := c.ValidateAuth(); err == nil {
-		t.Fatal("duplicate mapping values accepted")
-	}
-}
-
-func TestValidateAuth_CasdoorDefaultRole(t *testing.T) {
-	c := &Config{}
-	c.Auth.Mode = "casdoor"
-	c.Casdoor.DefaultRole = "member"
-	if err := c.ValidateAuth(); err != nil {
-		t.Fatalf("valid default_role rejected: %v", err)
-	}
-	c.Casdoor.DefaultRole = "superuser"
-	if err := c.ValidateAuth(); err == nil {
-		t.Fatal("invalid default_role accepted")
-	}
-	c.Casdoor.DefaultRole = ""
-	if err := c.ValidateAuth(); err != nil {
-		t.Fatalf("empty default_role must be allowed: %v", err)
 	}
 }

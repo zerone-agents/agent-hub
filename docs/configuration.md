@@ -44,19 +44,10 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 
 > Casdoor role names containing `admin` map to the `admin` role; those containing `maintainer` map to `maintainer`; everything else maps to `member`. User management (invite/roles/disable) is only available in builtin mode — in casdoor mode it stays in the Casdoor console.
 
-#### 多租户与角色映射（仅 casdoor 模式）
+#### 多租户与角色管理（仅 casdoor 模式）
 
 - **租户 = Casdoor 组织**：token 中的组织（owner）即租户 ID，业务数据按租户隔离（Phase 3 落地）。组织的创建与配置在 Casdoor 侧完成，agent-hub 不接管。
-- **角色映射**：一律严格匹配。不配 `CASDOOR_ROLE_MAPPING` 时使用内置默认映射（`admin=agent-hub-admin,maintainer=agent-hub-maintainer,member=agent-hub-member`）；需要自定义 Casdoor 角色名时显式配置：
-
-  ```bash
-  # 逗号分隔的 k=v 对：agent-hub 角色 = Casdoor 角色名
-  CASDOOR_ROLE_MAPPING="admin=agent-hub-admin,maintainer=agent-hub-maintainer,member=agent-hub-member"
-  CASDOOR_DEFAULT_ROLE=""   # 无匹配角色时：留空=拒绝登录；member=兜底为 member
-  ```
-
-  用户持有多个映射角色时取最高：admin > maintainer > member。启动期校验：mapping 的 key 必须是 admin/maintainer/member、值不允许重复、格式必须是 `k=v,k=v`，违反任一即拒绝启动（fail-fast）。
-- **升级注意**：从 v1.1.x 升级前，必须在 Casdoor 组织内创建映射对应的角色（默认 `agent-hub-admin`/`agent-hub-maintainer`/`agent-hub-member`）并分配给用户，否则用户登录时无匹配角色会被拒绝（或落入 `CASDOOR_DEFAULT_ROLE`）。历史版本的角色名子串匹配行为已移除。
+- **角色管理**：角色现由 agent-hub 本地管理，`CASDOOR_ROLE_MAPPING` / `CASDOOR_DEFAULT_ROLE` 环境变量已废弃（检测到仅打 warning，不影响启动）。
 - **影子记录**：casdoor 登录成功会在 `user_identities` 表写入/刷新一条影子记录（内部 ID 映射 + 租户 + 角色快照 + last_login），不影响登录链路（失败仅记日志）。
 - **用户管理（admin）**：casdoor 模式下「用户管理」页直连 Casdoor API——列表/修改角色/禁用/重置密码均在 Casdoor 侧生效；创建用户引导至 Casdoor 组织注册页（页面右上角「去 Casdoor 注册」）。邀请制接口仅 builtin 模式可用。角色修改只替换映射角色，用户在 Casdoor 侧的其他角色保持不变。当前用户管理与注册引导仅覆盖 `CASDOOR_ORGANIZATION` 配置的组织（SDK client 绑定单组织）；多组织动态管理留待后续版本。
 - **已知限制**：casdoor 用户被禁用后，其未过期的 access token 在过期前仍可使用（Casdoor JWT 本地校验，无吊销通道）；CLI token 路径实时查询用户状态，禁用最迟 5 分钟内生效（身份缓存 TTL）。
