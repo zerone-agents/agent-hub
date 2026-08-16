@@ -2,44 +2,19 @@ package auth
 
 import (
 	"errors"
-	"strings"
 
 	authdom "control-panel/internal/domain/auth"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
-// NormalizeCasdoorRoles maps Casdoor roles to builtin role strings.
-// A role name containing "admin" maps to admin; one containing "maintainer"
-// maps to maintainer; anything else maps to member. Empty/nil input defaults
-// to ["member"]. Results are deduplicated, preserving first-seen order; nil
-// role entries are skipped.
-func NormalizeCasdoorRoles(roles []*casdoorsdk.Role) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, len(roles))
-	add := func(r string) {
-		if !seen[r] {
-			seen[r] = true
-			out = append(out, r)
-		}
-	}
-	for _, r := range roles {
-		if r == nil {
-			continue
-		}
-		switch name := strings.ToLower(r.Name); {
-		case strings.Contains(name, "admin"):
-			add(authdom.RoleAdmin)
-		case strings.Contains(name, "maintainer"):
-			add(authdom.RoleMaintainer)
-		default:
-			add(authdom.RoleMember)
-		}
-	}
-	if len(out) == 0 {
-		out = append(out, authdom.RoleMember)
-	}
-	return out
+// DefaultCasdoorRoleMapping is the fallback role mapping used when
+// CASDOOR_ROLE_MAPPING is not configured: strict matching against the
+// conventional casdoor role names.
+var DefaultCasdoorRoleMapping = map[string]string{
+	authdom.RoleAdmin:      "agent-hub-admin",
+	authdom.RoleMaintainer: "agent-hub-maintainer",
+	authdom.RoleMember:     "agent-hub-member",
 }
 
 // ErrNoMatchedRole is returned when no casdoor role matches the mapping and

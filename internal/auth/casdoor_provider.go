@@ -14,9 +14,9 @@ type CasdoorProvider struct {
 	defaultRole string
 }
 
-// NewCasdoorProvider constructs a CasdoorProvider. roleMapping empty means
-// legacy substring role matching (backwards compatible with deployments that
-// predate configurable mapping).
+// NewCasdoorProvider constructs a CasdoorProvider. An empty roleMapping falls
+// back to DefaultCasdoorRoleMapping (strict matching against the conventional
+// agent-hub-* casdoor role names).
 func NewCasdoorProvider(roleMapping map[string]string, defaultRole string) *CasdoorProvider {
 	return &CasdoorProvider{roleMapping: roleMapping, defaultRole: defaultRole}
 }
@@ -24,34 +24,17 @@ func NewCasdoorProvider(roleMapping map[string]string, defaultRole string) *Casd
 // Mode identifies this provider.
 func (p *CasdoorProvider) Mode() string { return "casdoor" }
 
-// NormalizeCasdoorUser converts a Casdoor user into the normalized AuthUser,
-// mapping roles via NormalizeCasdoorRoles. TenantID takes the Casdoor
-// organization (owner) name for now; explicit tenant mapping is wired up
-// separately.
-func NormalizeCasdoorUser(u *casdoorsdk.User) *AuthUser {
-	return &AuthUser{
-		ID:          u.Id,
-		Username:    u.Name,
-		Email:       u.Email,
-		DisplayName: u.DisplayName,
-		Avatar:      u.Avatar,
-		Roles:       NormalizeCasdoorRoles(u.Roles),
-		TenantID:    u.Owner,
-	}
-}
-
 // NormalizeUser converts a casdoor user to AuthUser: TenantID from Owner
-// (empty -> "default"); roles via strict mapping when configured, else legacy.
+// (empty -> "default"); roles via strict role mapping (configured mapping or
+// DefaultCasdoorRoleMapping).
 func (p *CasdoorProvider) NormalizeUser(u *casdoorsdk.User) (*AuthUser, error) {
-	var roles []string
-	if len(p.roleMapping) > 0 {
-		mapped, err := NormalizeCasdoorRolesMapped(u.Roles, p.roleMapping, p.defaultRole)
-		if err != nil {
-			return nil, err
-		}
-		roles = mapped
-	} else {
-		roles = NormalizeCasdoorRoles(u.Roles)
+	mapping := p.roleMapping
+	if len(mapping) == 0 {
+		mapping = DefaultCasdoorRoleMapping
+	}
+	roles, err := NormalizeCasdoorRolesMapped(u.Roles, mapping, p.defaultRole)
+	if err != nil {
+		return nil, err
 	}
 	tenantID := u.Owner
 	if tenantID == "" {

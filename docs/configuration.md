@@ -47,7 +47,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 #### 多租户与角色映射（仅 casdoor 模式）
 
 - **租户 = Casdoor 组织**：token 中的组织（owner）即租户 ID，业务数据按租户隔离（Phase 3 落地）。组织的创建与配置在 Casdoor 侧完成，agent-hub 不接管。
-- **角色映射**（可选）：默认按历史行为做子串匹配（角色名含 admin/maintainer → 对应角色，其余 → member）。配置 `CASDOOR_ROLE_MAPPING` 后切换为严格匹配：
+- **角色映射**：一律严格匹配。不配 `CASDOOR_ROLE_MAPPING` 时使用内置默认映射（`admin=agent-hub-admin,maintainer=agent-hub-maintainer,member=agent-hub-member`）；需要自定义 Casdoor 角色名时显式配置：
 
   ```bash
   # 逗号分隔的 k=v 对：agent-hub 角色 = Casdoor 角色名
@@ -56,7 +56,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
   ```
 
   用户持有多个映射角色时取最高：admin > maintainer > member。启动期校验：mapping 的 key 必须是 admin/maintainer/member、值不允许重复、格式必须是 `k=v,k=v`，违反任一即拒绝启动（fail-fast）。
-- **升级注意**：现有 casdoor 部署不配 `role_mapping` 则行为完全不变。
+- **升级注意**：从 v1.1.x 升级前，必须在 Casdoor 组织内创建映射对应的角色（默认 `agent-hub-admin`/`agent-hub-maintainer`/`agent-hub-member`）并分配给用户，否则用户登录时无匹配角色会被拒绝（或落入 `CASDOOR_DEFAULT_ROLE`）。历史版本的角色名子串匹配行为已移除。
 - **影子记录**：casdoor 登录成功会在 `user_identities` 表写入/刷新一条影子记录（内部 ID 映射 + 租户 + 角色快照 + last_login），不影响登录链路（失败仅记日志）。
 
 ## OSS (S3 / MinIO)
