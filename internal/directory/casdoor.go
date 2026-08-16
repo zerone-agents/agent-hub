@@ -21,16 +21,35 @@ func NewCasdoorDirectory(client UserClient, roleMapping map[string]string, defau
 // ListUsers returns users of tenantID (casdoor organization) with normalized
 // roles. Users with no mapped role get Role "" (display-only; the list must
 // not fail because one user is unmapped).
+//
+// Note: casdoor's get-users API returns users WITHOUT their roles (upstream
+// issue casdoor/casdoor#3688), so roles are resolved from the role objects'
+// Users lists instead (get-roles).
 func (d *CasdoorDirectory) ListUsers(tenantID string) ([]ManagedUser, error) {
 	users, err := d.client.GetUsers()
 	if err != nil {
 		return nil, err
+	}
+	roles, err := d.client.GetRoles()
+	if err != nil {
+		return nil, err
+	}
+	// reverse index: user id (owner/name) -> casdoor roles holding that user
+	userRoles := make(map[string][]*casdoorsdk.Role, len(users))
+	for _, r := range roles {
+		if r == nil {
+			continue
+		}
+		for _, uid := range r.Users {
+			userRoles[uid] = append(userRoles[uid], r)
+		}
 	}
 	out := make([]ManagedUser, 0, len(users))
 	for _, u := range users {
 		if u == nil || u.Owner != tenantID {
 			continue
 		}
+		u.Roles = userRoles[u.GetId()]
 		out = append(out, d.toManagedUser(u))
 	}
 	return out, nil
@@ -68,6 +87,10 @@ func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.U
 
 // UpdateRole swaps the user's mapped casdoor roles for the one corresponding
 // to role, preserving any roles outside the mapping value set.
+//
+// Casdoor does not support changing a user's roles via update-user (roles are
+// an extended, read-only field on the User API); role membership lives on the
+// Role object's Users list, so we update those instead.
 func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
 	if userID == actorID {
 		return ErrSelfOperation
@@ -84,24 +107,40 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 	for _, v := range d.roleMapping {
 		mappedValues[v] = true
 	}
-	kept := make([]*casdoorsdk.Role, 0, len(u.Roles)+1)
-	for _, r := range u.Roles {
-		if r == nil {
-			continue
-		}
-		if mappedValues[r.Name] {
-			continue // drop old mapped roles
-		}
-		kept = append(kept, r)
-	}
-	kept = append(kept, &casdoorsdk.Role{Owner: u.Owner, Name: casdoorName})
-	u.Roles = kept
-	ok, err = d.client.UpdateUserForColumns(u, []string{"roles"})
+	roles, err := d.client.GetRoles()
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return ErrUpdateRejected
+	uid := u.GetId() // "owner/name", the form stored in Role.Users
+	for _, r := range roles {
+		if r == nil || !mappedValues[r.Name] {
+			continue // only touch mapped roles; external roles stay untouched
+		}
+		has := false
+		kept := r.Users[:0]
+		for _, member := range r.Users {
+			if member == uid {
+				has = true
+				continue
+			}
+			kept = append(kept, member)
+		}
+		want := r.Name == casdoorName
+		if has == want {
+			continue // already in the desired state
+		}
+		if want {
+			r.Users = append(r.Users, uid)
+		} else {
+			r.Users = kept
+		}
+		ok, err := d.client.UpdateRoleForColumns(r, []string{"users"})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrUpdateRejected
+		}
 	}
 	return nil
 }
