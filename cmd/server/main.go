@@ -11,6 +11,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/config"
 	"control-panel/internal/directory"
 	knowledgedomain "control-panel/internal/domain/knowledge"
@@ -263,7 +264,11 @@ func main() {
 		}
 	}
 
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider))
+	// PendingApprovalGuard 紧跟鉴权中间件挂载（同一链）：casdoor 待审批用户
+	// （角色为空）除白名单（/auth/userinfo、/auth/logout、/health*）外一律 403，
+	// 前端据此渲染等待审批页。builtin 用户必有角色，guard 直接放行，行为零变化。
+	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
+	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
 	// Business-resource admin routes: admin OR maintainer.
 	v1adminGroup := v1group.Group("/admin", middleware.RequireManager())
 
