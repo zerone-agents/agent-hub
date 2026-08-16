@@ -9,11 +9,17 @@ const (
 
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
+	StatusPending  = "pending"
 )
 
 // IsValidRole reports whether r is one of the three built-in roles.
 func IsValidRole(r string) bool {
 	return r == RoleAdmin || r == RoleMaintainer || r == RoleMember
+}
+
+// IsValidStatus reports whether s is one of the three account statuses.
+func IsValidStatus(s string) bool {
+	return s == StatusActive || s == StatusDisabled || s == StatusPending
 }
 
 // User is a builtin local account. PasswordHash is bcrypt; never serialized

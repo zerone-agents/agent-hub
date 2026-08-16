@@ -43,3 +43,14 @@ func TestIsValidRole(t *testing.T) {
 		t.Fatal("owner should be invalid")
 	}
 }
+
+func TestIsValidStatus(t *testing.T) {
+	for _, s := range []string{auth.StatusActive, auth.StatusDisabled, auth.StatusPending} {
+		if !auth.IsValidStatus(s) {
+			t.Fatalf("%s should be valid", s)
+		}
+	}
+	if auth.IsValidStatus("banned") {
+		t.Fatal("banned should be invalid")
+	}
+}
