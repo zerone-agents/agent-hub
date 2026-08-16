@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -62,6 +63,18 @@ func (c *Config) ValidateAuth() error {
 		case "", "admin", "maintainer", "member":
 		default:
 			return fmt.Errorf("casdoor.default_role 必须是 admin/maintainer/member 或留空，当前: %q", c.Casdoor.DefaultRole)
+		}
+		seenValues := make(map[string]string, len(c.Casdoor.RoleMapping))
+		for hubRole, casdoorName := range c.Casdoor.RoleMapping {
+			switch hubRole {
+			case "admin", "maintainer", "member":
+			default:
+				return fmt.Errorf("casdoor.role_mapping 的 key 必须是 admin/maintainer/member，当前: %q", hubRole)
+			}
+			if prev, dup := seenValues[casdoorName]; dup {
+				return fmt.Errorf("casdoor.role_mapping 的值重复：%q 同时映射到 %q 和 %q", casdoorName, prev, hubRole)
+			}
+			seenValues[casdoorName] = hubRole
 		}
 	default:
 		return fmt.Errorf("auth.mode 必须是 builtin 或 casdoor，当前: %q", c.Auth.Mode)
@@ -137,8 +150,9 @@ func LoadConfig() (*Config, error) {
 		"database.url", "database.max_idle", "database.max_open", "database.max_lifetime",
 		"casdoor.endpoint", "casdoor.client_id", "casdoor.client_secret", "casdoor.certificate",
 		"casdoor.organization", "casdoor.callback_url", "casdoor.default_role",
-		// Note: casdoor.role_mapping is a map and cannot be bound to a single env
-		// var; it is only configurable via the config file.
+		// Note: casdoor.role_mapping is a map and cannot be decoded from a
+		// single env var by viper; it is parsed explicitly from
+		// CASDOOR_ROLE_MAPPING ("k=v,k=v") after Unmarshal below.
 		"auth.mode", "auth.jwt_secret",
 		"oss.endpoint", "oss.region", "oss.bucket", "oss.access_key", "oss.secret_key", "oss.force_path_style", "oss.cdn_host",
 		"provider.encryption_key",
@@ -172,6 +186,16 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// CASDOOR_ROLE_MAPPING carries the role mapping as "k=v,k=v" pairs since a
+	// map cannot be bound through viper env decoding.
+	if raw := os.Getenv("CASDOOR_ROLE_MAPPING"); raw != "" {
+		m, err := parseRoleMapping(raw)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Casdoor.RoleMapping = m
+	}
+
 	// If no public host is configured for runtime URLs, fall back to the
 	// hostname parsed from the agent-deployer URL.
 	if cfg.Deployer.PublicHost == "" && cfg.Deployer.URL != "" {
@@ -194,6 +218,20 @@ func LoadConfig() (*Config, error) {
 
 	SetGlobalConfig(&cfg)
 	return &cfg, nil
+}
+
+// parseRoleMapping parses "k=v,k=v" pairs into a map. Whitespace around keys
+// and values is trimmed; malformed, empty-key, or empty-value pairs error.
+func parseRoleMapping(raw string) (map[string]string, error) {
+	m := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) != 2 || kv[0] == "" || kv[1] == "" {
+			return nil, fmt.Errorf(`casdoor.role_mapping 格式错误（应为 "k=v,k=v"）: %q`, pair)
+		}
+		m[kv[0]] = kv[1]
+	}
+	return m, nil
 }
 
 func (c *Config) GetServerAddr() string {
