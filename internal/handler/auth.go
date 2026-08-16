@@ -38,8 +38,8 @@ func Login(c *gin.Context) {
 }
 
 // Callback handles the OAuth callback, exchanging the code for tokens.
-// It also upserts the user_identities shadow row on successful login;
-// upsert failures are logged but never block the login.
+// TODO(Task 4): 成员记录落库（MembershipStore.ApplyDecision）将在此接线；
+// db 参数暂时保留给 Task 4 使用。
 func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Query("code")
@@ -74,10 +74,11 @@ func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if user, err := auth.GetUserInfo(tokenResp.AccessToken); err == nil {
-			if au, err := provider.NormalizeUser(user); err == nil {
-				if err := auth.UpsertIdentity(db, "casdoor", au); err != nil {
-					log.Printf("[Callback] shadow identity upsert failed: %v", err)
-				}
+			// TODO(Task 4): 此处改用 MembershipStore.ApplyDecision 落库成员记录
+			// （SynthesizeMembership 合成 + store 持久化）。当前仅保留用户归一化，
+			// 暂时不做影子表写入。
+			if _, err := provider.NormalizeUser(user); err != nil {
+				log.Printf("[Callback] normalize user failed: %v", err)
 			}
 		}
 
