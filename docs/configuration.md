@@ -59,7 +59,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 - **升级注意**：从 v1.1.x 升级前，必须在 Casdoor 组织内创建映射对应的角色（默认 `agent-hub-admin`/`agent-hub-maintainer`/`agent-hub-member`）并分配给用户，否则用户登录时无匹配角色会被拒绝（或落入 `CASDOOR_DEFAULT_ROLE`）。历史版本的角色名子串匹配行为已移除。
 - **影子记录**：casdoor 登录成功会在 `user_identities` 表写入/刷新一条影子记录（内部 ID 映射 + 租户 + 角色快照 + last_login），不影响登录链路（失败仅记日志）。
 - **用户管理（admin）**：casdoor 模式下「用户管理」页直连 Casdoor API——列表/修改角色/禁用/重置密码均在 Casdoor 侧生效；创建用户引导至 Casdoor 组织注册页（页面右上角「去 Casdoor 注册」）。邀请制接口仅 builtin 模式可用。角色修改只替换映射角色，用户在 Casdoor 侧的其他角色保持不变。
-- **已知限制**：casdoor 用户被禁用后，其未过期的 access token 在过期前仍可使用（Casdoor JWT 本地校验，无吊销通道）；CLI token 路径实时查询，立即生效。
+- **已知限制**：casdoor 用户被禁用后，其未过期的 access token 在过期前仍可使用（Casdoor JWT 本地校验，无吊销通道）；CLI token 路径实时查询用户状态，禁用最迟 5 分钟内生效（身份缓存 TTL）。
 - **部署要求**：agent-hub 使用的 Casdoor Application 需要有所在组织的用户管理权限（读写用户、角色）。CasdoorDirectory 与 CasdoorProvider 复用同一份 `CASDOOR_*` 配置。
 
 ## OSS (S3 / MinIO)

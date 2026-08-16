@@ -85,7 +85,7 @@ func (p *CasdoorProvider) RevokeToken(token string) error {
 
 // GetUserIdentity looks up a user's current normalized identity from Casdoor
 // (used by the CLI-token middleware path). The bool is false when the user is
-// unknown or the lookup fails.
+// unknown, disabled, or the lookup fails.
 func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
 	c := GetClient()
 	if c == nil {
@@ -93,6 +93,17 @@ func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
 	}
 	u, err := c.GetUserByUserId(userID)
 	if err != nil || u == nil {
+		return nil, false
+	}
+	return p.normalizeIdentity(u)
+}
+
+// normalizeIdentity converts a casdoor user to an AuthUser for the identity
+// path, rejecting disabled users. The bool is false when the user is
+// forbidden (mirrors the builtin provider's disabled-user check in
+// GetUserIdentity) or normalization fails.
+func (p *CasdoorProvider) normalizeIdentity(u *casdoorsdk.User) (*AuthUser, bool) {
+	if u.IsForbidden {
 		return nil, false
 	}
 	au, err := p.NormalizeUser(u)
