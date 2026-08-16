@@ -45,3 +45,20 @@ func TestValidateAuthRejectsUnknownMode(t *testing.T) {
 		t.Fatal("want error for unknown mode")
 	}
 }
+
+func TestValidateAuth_CasdoorDefaultRole(t *testing.T) {
+	c := &Config{}
+	c.Auth.Mode = "casdoor"
+	c.Casdoor.DefaultRole = "member"
+	if err := c.ValidateAuth(); err != nil {
+		t.Fatalf("valid default_role rejected: %v", err)
+	}
+	c.Casdoor.DefaultRole = "superuser"
+	if err := c.ValidateAuth(); err == nil {
+		t.Fatal("invalid default_role accepted")
+	}
+	c.Casdoor.DefaultRole = ""
+	if err := c.ValidateAuth(); err != nil {
+		t.Fatalf("empty default_role must be allowed: %v", err)
+	}
+}

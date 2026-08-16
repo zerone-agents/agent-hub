@@ -58,6 +58,11 @@ func (c *Config) ValidateAuth() error {
 		}
 	case "casdoor":
 		// Casdoor uses its own token signing; no local JWT secret required.
+		switch c.Casdoor.DefaultRole {
+		case "", "admin", "maintainer", "member":
+		default:
+			return fmt.Errorf("casdoor.default_role 必须是 admin/maintainer/member 或留空，当前: %q", c.Casdoor.DefaultRole)
+		}
 	default:
 		return fmt.Errorf("auth.mode 必须是 builtin 或 casdoor，当前: %q", c.Auth.Mode)
 	}
@@ -112,12 +117,14 @@ type DatabaseConfig struct {
 }
 
 type CasdoorConfig struct {
-	Endpoint     string `mapstructure:"endpoint"`
-	ClientID     string `mapstructure:"client_id"`
-	ClientSecret string `mapstructure:"client_secret"`
-	Certificate  string `mapstructure:"certificate"`
-	Organization string `mapstructure:"organization"`
-	CallbackURL  string `mapstructure:"callback_url"`
+	Endpoint     string            `mapstructure:"endpoint"`
+	ClientID     string            `mapstructure:"client_id"`
+	ClientSecret string            `mapstructure:"client_secret"`
+	Certificate  string            `mapstructure:"certificate"`
+	Organization string            `mapstructure:"organization"`
+	CallbackURL  string            `mapstructure:"callback_url"`
+	RoleMapping  map[string]string `mapstructure:"role_mapping"` // agent-hub role -> casdoor role name
+	DefaultRole  string            `mapstructure:"default_role"` // "" = reject unmatched; else member|maintainer|admin
 }
 
 func LoadConfig() (*Config, error) {
@@ -129,7 +136,9 @@ func LoadConfig() (*Config, error) {
 		"server.host", "server.port", "server.cors_origins",
 		"database.url", "database.max_idle", "database.max_open", "database.max_lifetime",
 		"casdoor.endpoint", "casdoor.client_id", "casdoor.client_secret", "casdoor.certificate",
-		"casdoor.organization", "casdoor.callback_url",
+		"casdoor.organization", "casdoor.callback_url", "casdoor.default_role",
+		// Note: casdoor.role_mapping is a map and cannot be bound to a single env
+		// var; it is only configurable via the config file.
 		"auth.mode", "auth.jwt_secret",
 		"oss.endpoint", "oss.region", "oss.bucket", "oss.access_key", "oss.secret_key", "oss.force_path_style", "oss.cdn_host",
 		"provider.encryption_key",
