@@ -44,6 +44,23 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 
 > Casdoor role names containing `admin` map to the `admin` role; those containing `maintainer` map to `maintainer`; everything else maps to `member`. User management (invite/roles/disable) is only available in builtin mode — in casdoor mode it stays in the Casdoor console.
 
+#### 多租户与角色映射（仅 casdoor 模式）
+
+- **租户 = Casdoor 组织**：token 中的组织（owner）即租户 ID，业务数据按租户隔离（Phase 3 落地）。组织的创建与配置在 Casdoor 侧完成，agent-hub 不接管。
+- **角色映射**（可选）：默认按历史行为做子串匹配（角色名含 admin/maintainer → 对应角色，其余 → member）。配置 `role_mapping` 后切换为严格匹配：
+
+  ```yaml
+  casdoor:
+    role_mapping:
+      admin: agent-hub-admin
+      maintainer: agent-hub-maintainer
+      member: agent-hub-member
+    default_role: ""   # 无匹配角色时：留空=拒绝登录；member=兜底为 member
+  ```
+
+  用户持有多个映射角色时取最高：admin > maintainer > member。
+- **升级注意**：现有 casdoor 部署不配 `role_mapping` 则行为完全不变。
+- **影子记录**：casdoor 登录成功会在 `user_identities` 表写入/刷新一条影子记录（内部 ID 映射 + 租户 + 角色快照 + last_login），不影响登录链路（失败仅记日志）。
 
 ## OSS (S3 / MinIO)
 
