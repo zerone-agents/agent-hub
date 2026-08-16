@@ -1,4 +1,4 @@
-package auth
+package directory
 
 import (
 	"errors"
@@ -7,6 +7,10 @@ import (
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
+
+// 本文件的严格角色映射助手原位于 internal/auth/roles.go；CasdoorProvider
+// 改为本地成员表合成后（Task 4），唯一剩余消费方是 CasdoorDirectory，
+// 故随删迁入本包以保持编译。Task 6 重写 directory 时将整体删除。
 
 // DefaultCasdoorRoleMapping is the fallback role mapping used when
 // CASDOOR_ROLE_MAPPING is not configured: strict matching against the

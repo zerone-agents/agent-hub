@@ -1,4 +1,4 @@
-package auth
+package directory
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
+// 本测试原位于 internal/auth/roles_test.go，随映射助手一并迁入本包（见 roles.go 顶部注释）。
 func TestNormalizeCasdoorRolesMapped(t *testing.T) {
 	mapping := map[string]string{
 		"admin":      "agent-hub-admin",

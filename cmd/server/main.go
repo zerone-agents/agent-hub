@@ -85,7 +85,7 @@ func main() {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 			log.Fatalf("Failed to initialize Casdoor: %v", err)
 		}
-		casdoorProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		casdoorProvider = auth.NewCasdoorProvider(auth.NewMembershipStore(database.GetDB()))
 		authProvider = casdoorProvider
 		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
 		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GetClient().GetSignupUrl(true, ""))
@@ -256,7 +256,7 @@ func main() {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
 			})
 			authGroup.GET("/login", handler.Login)
-			authGroup.GET("/callback", handler.Callback(casdoorProvider, database.GetDB()))
+			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
 			authGroup.POST("/refresh", handler.RefreshToken)

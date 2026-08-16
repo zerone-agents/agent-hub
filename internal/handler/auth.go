@@ -9,7 +9,6 @@ import (
 	"control-panel/internal/auth"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // Login initiates the OAuth flow by redirecting to the Casdoor login page.
@@ -38,9 +37,9 @@ func Login(c *gin.Context) {
 }
 
 // Callback handles the OAuth callback, exchanging the code for tokens.
-// TODO(Task 4): 成员记录落库（MembershipStore.ApplyDecision）将在此接线；
-// db 参数暂时保留给 Task 4 使用。
-func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
+// 登录成功时经 provider.SyncMembership 合成成员角色并落库（本地成员表）；
+// 同步失败仅记日志，不阻断登录（保持宽松语义，待审批由下游中间件拦截）。
+func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Query("code")
 		state := c.Query("state")
@@ -74,11 +73,10 @@ func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if user, err := auth.GetUserInfo(tokenResp.AccessToken); err == nil {
-			// TODO(Task 4): 此处改用 MembershipStore.ApplyDecision 落库成员记录
-			// （SynthesizeMembership 合成 + store 持久化）。当前仅保留用户归一化，
-			// 暂时不做影子表写入。
-			if _, err := provider.NormalizeUser(user); err != nil {
-				log.Printf("[Callback] normalize user failed: %v", err)
+			// 同步成员记录（Admin API 拉权威 IsAdmin 合成 + 落库）；
+			// 失败仅记日志，不阻断登录。
+			if _, err := provider.SyncMembership(user); err != nil {
+				log.Printf("[Callback] sync membership failed: %v", err)
 			}
 		}
 

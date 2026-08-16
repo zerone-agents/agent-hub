@@ -2,40 +2,54 @@ package auth
 
 import (
 	"errors"
+	"fmt"
+
+	authdom "control-panel/internal/domain/auth"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
-// CasdoorProvider adapts the existing Casdoor OAuth flow (package-level
-// functions in casdoor.go) to the Provider interface. Construction requires
-// InitCasdoor to have run first so the package-level client is initialized.
+// CasdoorProvider 适配 Casdoor OAuth 流程（casdoor.go 中的包级函数）到
+// Provider 接口。构造前必须先运行 InitCasdoor 以初始化包级 client。
+//
+// 角色来源：Casdoor JWT 的 roles claim 完全忽略，角色以本地成员表
+// （MembershipStore，user_identities）为准——登录/身份查询时经
+// SynthesizeMembership 合成并落库，token 校验路径只读不建记录。
 type CasdoorProvider struct {
-	roleMapping map[string]string
-	defaultRole string
+	store MembershipStore
+	// parseToken 解析 access token 为 casdoor 用户（默认 GetUserInfo，
+	// 走 JWT 解析）。测试可注入假实现，避免构造真 JWT。
+	parseToken func(string) (*casdoorsdk.User, error)
+	// fetchUser 按 user Id 经 Admin API 拉取权威用户数据（默认
+	// GetClient().GetUserByUserId）。测试可注入假实现。
+	fetchUser func(string) (*casdoorsdk.User, error)
 }
 
-// NewCasdoorProvider constructs a CasdoorProvider. An empty roleMapping falls
-// back to DefaultCasdoorRoleMapping (strict matching against the conventional
-// agent-hub-* casdoor role names).
-func NewCasdoorProvider(roleMapping map[string]string, defaultRole string) *CasdoorProvider {
-	return &CasdoorProvider{roleMapping: roleMapping, defaultRole: defaultRole}
+// NewCasdoorProvider 构造 CasdoorProvider。store 为本地成员表句柄，
+// 角色/审批状态的真实源。
+func NewCasdoorProvider(store MembershipStore) *CasdoorProvider {
+	return &CasdoorProvider{
+		store:      store,
+		parseToken: GetUserInfo,
+		fetchUser:  defaultFetchUser,
+	}
+}
+
+// defaultFetchUser 走 Casdoor Admin API 按 user Id 拉取用户。
+func defaultFetchUser(userID string) (*casdoorsdk.User, error) {
+	c := GetClient()
+	if c == nil {
+		return nil, errors.New("casdoor client 未初始化")
+	}
+	return c.GetUserByUserId(userID)
 }
 
 // Mode identifies this provider.
 func (p *CasdoorProvider) Mode() string { return "casdoor" }
 
-// NormalizeUser converts a casdoor user to AuthUser: TenantID from Owner
-// (empty -> "default"); roles via strict role mapping (configured mapping or
-// DefaultCasdoorRoleMapping).
-func (p *CasdoorProvider) NormalizeUser(u *casdoorsdk.User) (*AuthUser, error) {
-	mapping := p.roleMapping
-	if len(mapping) == 0 {
-		mapping = DefaultCasdoorRoleMapping
-	}
-	roles, err := NormalizeCasdoorRolesMapped(u.Roles, mapping, p.defaultRole)
-	if err != nil {
-		return nil, err
-	}
+// toAuthUser 纯字段映射：casdoor User → AuthUser。TenantID 取 Owner
+// （空 → "default"）；roles 由调用方按本地成员表/合成结果填入。
+func toAuthUser(u *casdoorsdk.User, roles []string) *AuthUser {
 	tenantID := u.Owner
 	if tenantID == "" {
 		tenantID = "default"
@@ -48,16 +62,39 @@ func (p *CasdoorProvider) NormalizeUser(u *casdoorsdk.User) (*AuthUser, error) {
 		Avatar:      u.Avatar,
 		Roles:       roles,
 		TenantID:    tenantID,
-	}, nil
+	}
 }
 
-// ValidateAccessToken parses a Casdoor JWT and returns the normalized user.
+// rolesFromRecord 从本地成员记录取角色（只读路径用）。无记录或 Role 为
+// 非法值（admin/maintainer/member 之外的非空串）一律视为未分配，返回空切片。
+func rolesFromRecord(rec *authdom.UserIdentity) []string {
+	if rec == nil || !authdom.IsValidRole(rec.Role) {
+		return []string{}
+	}
+	return []string{rec.Role}
+}
+
+// rolesFromDecision 从合成结果取角色；空或非法值一律视为未分配。
+func rolesFromDecision(d MembershipDecision) []string {
+	if !authdom.IsValidRole(d.Role) {
+		return []string{}
+	}
+	return []string{d.Role}
+}
+
+// ValidateAccessToken 解析 Casdoor JWT 并返回归一化用户。roles claim 完全
+// 忽略，角色从本地成员表只读查询：无记录/非法值 → 空 roles（待审批由下游
+// 拦截），本路径绝不建记录。
 func (p *CasdoorProvider) ValidateAccessToken(token string) (*AuthUser, error) {
-	u, err := GetUserInfo(token)
+	u, err := p.parseToken(token)
 	if err != nil {
 		return nil, err
 	}
-	return p.NormalizeUser(u)
+	rec, err := p.store.FindByExternalID("casdoor", u.Id)
+	if err != nil {
+		return nil, err
+	}
+	return toAuthUser(u, rolesFromRecord(rec)), nil
 }
 
 // RefreshToken exchanges a Casdoor refresh token for a fresh token pair.
@@ -83,32 +120,58 @@ func (p *CasdoorProvider) RevokeToken(token string) error {
 	return RevokeToken(token)
 }
 
-// GetUserIdentity looks up a user's current normalized identity from Casdoor
-// (used by the CLI-token middleware path). The bool is false when the user is
-// unknown, disabled, or the lookup fails.
-func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
-	c := GetClient()
-	if c == nil {
-		return nil, false
+// SyncMembership 登录回调专用：经 Admin API 拉取权威 IsAdmin/IsForbidden，
+// 与本地成员记录合成角色后落库，返回带合成角色的 AuthUser。
+// IsForbidden 用户返回 error；合成/落库失败同样返回 error（调用方记日志，
+// 不阻断登录）。
+func (p *CasdoorProvider) SyncMembership(u *casdoorsdk.User) (*AuthUser, error) {
+	if u == nil {
+		return nil, errors.New("casdoor user 为空")
 	}
-	u, err := c.GetUserByUserId(userID)
+	fresh, err := p.fetchUser(u.Id)
+	if err != nil {
+		return nil, fmt.Errorf("拉取 casdoor 用户失败: %w", err)
+	}
+	if fresh == nil {
+		return nil, fmt.Errorf("casdoor 用户不存在: %s", u.Id)
+	}
+	if fresh.IsForbidden {
+		return nil, fmt.Errorf("casdoor 用户已被禁用: %s", u.Id)
+	}
+	rec, err := p.store.FindByExternalID("casdoor", fresh.Id)
+	if err != nil {
+		return nil, err
+	}
+	d := SynthesizeMembership(fresh.IsAdmin, rec)
+	au := toAuthUser(fresh, rolesFromDecision(d))
+	if err := p.store.ApplyDecision("casdoor", au, d); err != nil {
+		return nil, err
+	}
+	return au, nil
+}
+
+// GetUserIdentity 从 Casdoor 查询用户当前归一化身份（CLI-token 中间件路径；
+// 缓存机制在 jwtutil，不在此层）。规则与登录路径一致：IsForbidden 拒绝；
+// 合成结果有变更（Op≠OpNone）时落库——双向同步（casdoor 组织管理员任免
+// 反映到本地角色）在此生效。bool 为 false 表示用户未知、被禁用或查询失败。
+func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
+	u, err := p.fetchUser(userID)
 	if err != nil || u == nil {
 		return nil, false
 	}
-	return p.normalizeIdentity(u)
-}
-
-// normalizeIdentity converts a casdoor user to an AuthUser for the identity
-// path, rejecting disabled users. The bool is false when the user is
-// forbidden (mirrors the builtin provider's disabled-user check in
-// GetUserIdentity) or normalization fails.
-func (p *CasdoorProvider) normalizeIdentity(u *casdoorsdk.User) (*AuthUser, bool) {
 	if u.IsForbidden {
 		return nil, false
 	}
-	au, err := p.NormalizeUser(u)
+	rec, err := p.store.FindByExternalID("casdoor", u.Id)
 	if err != nil {
 		return nil, false
+	}
+	d := SynthesizeMembership(u.IsAdmin, rec)
+	au := toAuthUser(u, rolesFromDecision(d))
+	if d.Op != OpNone {
+		if err := p.store.ApplyDecision("casdoor", au, d); err != nil {
+			return nil, false
+		}
 	}
 	return au, true
 }

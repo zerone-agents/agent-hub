@@ -4,16 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
-	"control-panel/internal/auth"
-
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
 // NewCasdoorDirectory constructs a CasdoorDirectory. roleMapping empty falls
-// back to auth.DefaultCasdoorRoleMapping (same rule as CasdoorProvider).
+// back to DefaultCasdoorRoleMapping.
 func NewCasdoorDirectory(client UserClient, roleMapping map[string]string, defaultRole string) *CasdoorDirectory {
 	if len(roleMapping) == 0 {
-		roleMapping = auth.DefaultCasdoorRoleMapping
+		roleMapping = DefaultCasdoorRoleMapping
 	}
 	return &CasdoorDirectory{client: client, roleMapping: roleMapping, defaultRole: defaultRole}
 }
@@ -58,7 +56,7 @@ func (d *CasdoorDirectory) ListUsers(tenantID string) ([]ManagedUser, error) {
 // toManagedUser maps a casdoor user to the admin-UI projection.
 func (d *CasdoorDirectory) toManagedUser(u *casdoorsdk.User) ManagedUser {
 	role := ""
-	if roles, err := auth.NormalizeCasdoorRolesMapped(u.Roles, d.roleMapping, d.defaultRole); err == nil && len(roles) > 0 {
+	if roles, err := NormalizeCasdoorRolesMapped(u.Roles, d.roleMapping, d.defaultRole); err == nil && len(roles) > 0 {
 		role = roles[0]
 	}
 	status := "active"
