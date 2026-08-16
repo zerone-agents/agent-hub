@@ -4,6 +4,7 @@ import { Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'ant
 import { PlusIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
+import { authApi } from '@/api/auth'
 import { parseApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import PageHeader from '@/components/PageHeader'
@@ -39,13 +40,25 @@ export default function UsersPage() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<{ password: string } | null>(null)
 
+  const { data: authMode } = useQuery({
+    queryKey: ['auth', 'mode'],
+    queryFn: authApi.getAuthMode
+  })
+  const isCasdoor = authMode?.mode === 'casdoor'
+
   const { data: users = [], isLoading: usersLoading } = useQuery({
     queryKey: ['admin', 'users'],
     queryFn: usersApi.listUsers
   })
   const { data: invites = [], isLoading: invitesLoading } = useQuery({
     queryKey: ['admin', 'invites'],
-    queryFn: usersApi.listInvites
+    queryFn: usersApi.listInvites,
+    enabled: !isCasdoor
+  })
+  const { data: signupUrlData } = useQuery({
+    queryKey: ['admin', 'signup-url'],
+    queryFn: usersApi.getSignupUrl,
+    enabled: isCasdoor
   })
 
   const invalidateAll = async () => {
@@ -56,14 +69,14 @@ export default function UsersPage() {
   }
 
   const updateMutation = useMutation({
-    mutationFn: (vars: { id: number; patch: { role?: UserRole; status?: 'active' | 'disabled' } }) =>
+    mutationFn: (vars: { id: string | number; patch: { role?: UserRole; status?: 'active' | 'disabled' } }) =>
       usersApi.updateUser(vars.id, vars.patch),
     onSuccess: () => { void invalidateAll(); message.success('已更新') },
     onError: (err) => message.error(parseApiError(err))
   })
 
   const resetMutation = useMutation({
-    mutationFn: (id: number) => usersApi.resetPassword(id),
+    mutationFn: (id: string | number) => usersApi.resetPassword(id),
     onSuccess: (data) => { setResetTarget({ password: data.password }); },
     onError: (err) => message.error(parseApiError(err))
   })
@@ -85,7 +98,9 @@ export default function UsersPage() {
       render: (_, record) => (
         <Select
           size="small"
-          value={record.role}
+          // casdoor 模式下未映射角色的用户 role 为 ""，归一为 undefined 以显示 placeholder。
+          value={record.role || undefined}
+          placeholder="-"
           style={{ width: 130 }}
           options={ROLE_OPTIONS}
           disabled={String(record.id) === currentUserId}
@@ -213,9 +228,21 @@ export default function UsersPage() {
         title="用户管理"
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
-          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
-            创建邀请
-          </PrimaryButton>
+          isCasdoor ? (
+            <PrimaryButton
+              onClick={() => {
+                if (signupUrlData?.signupUrl) {
+                  window.open(signupUrlData.signupUrl, '_blank', 'noopener')
+                }
+              }}
+            >
+              去 Casdoor 注册
+            </PrimaryButton>
+          ) : (
+            <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
+              创建邀请
+            </PrimaryButton>
+          )
         }
       />
 
@@ -229,17 +256,21 @@ export default function UsersPage() {
         size="middle"
       />
 
-      <Typography.Title level={5} style={{ marginTop: 32 }}>邀请记录</Typography.Title>
-      <BorderedTable<Invite>
-        rowKey="id"
-        loading={invitesLoading}
-        dataSource={invites}
-        columns={inviteColumns}
-        pagination={false}
-        size="middle"
-      />
+      {!isCasdoor && (
+        <>
+          <Typography.Title level={5} style={{ marginTop: 32 }}>邀请记录</Typography.Title>
+          <BorderedTable<Invite>
+            rowKey="id"
+            loading={invitesLoading}
+            dataSource={invites}
+            columns={inviteColumns}
+            pagination={false}
+            size="middle"
+          />
 
-      <CreateInviteModal open={inviteModalOpen} onClose={() => { setInviteModalOpen(false); }} />
+          <CreateInviteModal open={inviteModalOpen} onClose={() => { setInviteModalOpen(false); }} />
+        </>
+      )}
 
       <Modal
         title="重置密码成功"
