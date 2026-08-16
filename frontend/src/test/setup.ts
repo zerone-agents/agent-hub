@@ -2,18 +2,39 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
-// Unmount React components after each test to avoid leaks.
-// Then wait for any pending React scheduler macrotasks (flushPassiveEffects
-// callbacks scheduled via MessageChannel) to complete before jsdom tears
-// down the environment. Without this wait, React 19's scheduler may
-// access `window.event` after jsdom is gone, producing:
-//   ReferenceError: window is not defined
-//   react-dom-client.development.js:17920 → schedulerEvent = window.event
-// The wait is ~0ms (just yields to the macrotask queue) but eliminates
-// the race that required CI reruns ~30% of the time.
+// Unmount React components after each test to avoid leaks, then drain React's
+// scheduled work before vitest tears down the per-file jsdom environment.
+//
+// Root cause of the flaky "ReferenceError: window is not defined" CI failure:
+// React 19's commit phase schedules passive-effect flushing through the
+// Scheduler, which in Node uses `setImmediate`. The scheduled callback reads
+// the bare global `window` (react-dom-client.development.js:
+// `schedulerEvent = window.event`). If that immediate fires AFTER vitest has
+// torn down jsdom, `window` no longer exists and the read throws; vitest
+// collects it as an unhandled error and fails the run even though all tests
+// passed. (Still unguarded upstream as of react-dom 19.2.8.)
+//
+// Why the previous single `setTimeout(0)` yield was not enough: it only
+// drains work posted BEFORE the yield. Commits triggered during the yield
+// itself (passive effects flushed in the drain, or promises resolving in the
+// same window scheduling new renders) post a NEW setImmediate that can fire
+// after teardown — typically after the LAST test of a file.
+//
+// Fix: setImmediate callbacks run FIFO, so awaiting our own immediate
+// guarantees every immediate posted so far has executed. Repeating the cycle
+// several times drains cascades (work posted during the drain itself).
+// Convergence is guaranteed because React's scheduling chains are shallow;
+// 5 cycles is far beyond the worst case and costs ~0ms when idle.
+function flushSchedulerWork(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 afterEach(async () => {
   cleanup()
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  for (let i = 0; i < 5; i++) {
+    await flushSchedulerWork()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
 })
 
 // Node >=22 ships an experimental `localStorage` global. Its state varies by
