@@ -1,6 +1,9 @@
 package directory
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+
 	"control-panel/internal/auth"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
@@ -47,4 +50,86 @@ func (d *CasdoorDirectory) toManagedUser(u *casdoorsdk.User) ManagedUser {
 		ID: u.Id, Username: u.Name, DisplayName: u.DisplayName,
 		Email: u.Email, Role: role, Status: status, CreatedAt: u.CreatedTime,
 	}
+}
+
+// getTenantUser fetches a user and verifies tenant ownership.
+func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.User, error) {
+	u, err := d.client.GetUserByUserId(userID)
+	if err != nil || u == nil {
+		return nil, ErrUserNotFound
+	}
+	if u.Owner != tenantID {
+		return nil, ErrUserNotFound
+	}
+	return u, nil
+}
+
+// UpdateRole swaps the user's mapped casdoor roles for the one corresponding
+// to role, preserving any roles outside the mapping value set.
+func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
+	if userID == actorID {
+		return ErrSelfOperation
+	}
+	casdoorName, ok := d.roleMapping[role]
+	if !ok {
+		return ErrInvalidRole
+	}
+	u, err := d.getTenantUser(tenantID, userID)
+	if err != nil {
+		return err
+	}
+	mappedValues := make(map[string]bool, len(d.roleMapping))
+	for _, v := range d.roleMapping {
+		mappedValues[v] = true
+	}
+	kept := make([]*casdoorsdk.Role, 0, len(u.Roles)+1)
+	for _, r := range u.Roles {
+		if r == nil {
+			continue
+		}
+		if mappedValues[r.Name] {
+			continue // drop old mapped roles
+		}
+		kept = append(kept, r)
+	}
+	kept = append(kept, &casdoorsdk.Role{Owner: u.Owner, Name: casdoorName})
+	u.Roles = kept
+	_, err = d.client.UpdateUserForColumns(u, []string{"roles"})
+	return err
+}
+
+// SetDisabled sets the casdoor is_forbidden flag.
+func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) error {
+	if userID == actorID {
+		return ErrSelfOperation
+	}
+	u, err := d.getTenantUser(tenantID, userID)
+	if err != nil {
+		return err
+	}
+	u.IsForbidden = disabled
+	_, err = d.client.UpdateUserForColumns(u, []string{"is_forbidden"})
+	return err
+}
+
+// ResetPassword sets a random password (casdoor hashes it server-side) and
+// returns the plaintext exactly once.
+func (d *CasdoorDirectory) ResetPassword(tenantID, userID, actorID string) (string, error) {
+	if userID == actorID {
+		return "", ErrSelfOperation
+	}
+	u, err := d.getTenantUser(tenantID, userID)
+	if err != nil {
+		return "", err
+	}
+	b := make([]byte, 12) // 24 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	plain := "Reset!" + hex.EncodeToString(b)
+	u.Password = plain
+	if _, err := d.client.UpdateUserForColumns(u, []string{"password"}); err != nil {
+		return "", err
+	}
+	return plain, nil
 }

@@ -1,6 +1,14 @@
 package directory
 
-import "github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+import (
+	"errors"
+
+	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+)
+
+var ErrSelfOperation = errors.New("cannot perform this operation on yourself")
+var ErrUserNotFound = errors.New("user not found")
+var ErrInvalidRole = errors.New("invalid role") // not admin/maintainer/member, or not in mapping
 
 // ManagedUser is the admin-UI projection of a user, backend-agnostic.
 type ManagedUser struct {
