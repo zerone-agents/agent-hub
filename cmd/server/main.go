@@ -62,6 +62,14 @@ func main() {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
+	// 一次性数据归一：旧模型升级后，存量行 {role:旧快照, status:pending} 与
+	// 新模型语义矛盾（pending 用户仍持有旧角色权限）。此处清空 pending 行的
+	// role，使升级后全员待审批、由 admin 重新分配。幂等（新模型 pending 行
+	// role 恒为 ""），builtin 模式下 user_identities 表无数据、执行无副作用。
+	if err := auth.NormalizePendingRoles(database.GetDB()); err != nil {
+		log.Fatalf("Failed to normalize pending roles: %v", err)
+	}
+
 	if err := cfg.ValidateAuth(); err != nil {
 		log.Fatalf("Invalid auth config: %v", err)
 	}
