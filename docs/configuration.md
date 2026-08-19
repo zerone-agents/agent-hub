@@ -46,7 +46,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 
 #### 多租户与角色管理（仅 casdoor 模式）
 
-- **租户 = Casdoor 组织**：token 中的组织（owner）即租户 ID，业务数据按租户隔离。组织的创建与配置在 Casdoor 侧完成，agent-hub 不接管。
+- **租户 = Casdoor 组织**：token 中的组织（owner）即租户 ID，业务数据按租户隔离（Phase 3 落地）。组织的创建与配置在 Casdoor 侧完成，agent-hub 不接管。
 - **角色由 agent-hub 本地管理**：角色真实源是本地 `user_identities` 租户成员表（Role + Status pending/active），Casdoor 仅提供用户身份。JWT 中的 Casdoor roles claim 完全忽略。`CASDOOR_ROLE_MAPPING` / `CASDOOR_DEFAULT_ROLE` 环境变量已废弃（检测到仅打 warning，不影响启动）；升级后 Casdoor 侧的 `agent-hub-*` 角色可手动删除。
 - **新用户待审批流程**：新用户首次登录成功后自动创建 pending 记录，前端渲染「等待审批」页（可访问 /auth/userinfo 与 logout，其余 API 返回 403 PENDING_APPROVAL）。admin 在用户管理页为其分配角色后自动转为 active。
 - **admin 锚定 Casdoor 组织管理员**：本地 admin 资格与 Casdoor 组织管理员（IsAdmin）双向同步——组织管理员登录/CLI 身份核对时自动成为本地 admin；被取消组织管理员则本地 admin 撤销为待审批。admin 任命/降级采用「Casdoor 先行」双写：先成功修改 Casdoor is_admin，再写本地。
