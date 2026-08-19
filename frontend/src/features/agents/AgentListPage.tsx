@@ -14,6 +14,7 @@ import { useTools } from '@/queries/useTools'
 import { useSkills } from '@/queries/useSkills'
 import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
 import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -70,6 +71,7 @@ export default function AgentListPage() {
   const { styles } = useStyles()
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
+  const canWrite = useCanWrite()
   const { data: skills = [] } = useSkills()
   const { data: providers = [] } = useProviders('chat')
   const { data: mcps = [] } = useMcps()
@@ -480,9 +482,11 @@ export default function AgentListPage() {
           <div className={styles.pageTitle}>Agent 管理</div>
           <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-          新建代理
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
+            新建代理
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>
@@ -516,6 +520,7 @@ export default function AgentListPage() {
                   key={agent.name}
                   agent={agent}
                   modelDisplayName={getModelDisplayName(agent)}
+                  canWrite={canWrite}
                   onEdit={showEdit}
                   onDelete={(name) => { deleteAgent.mutate(name); }}
                   onEditSubagents={handleEditSubagents}

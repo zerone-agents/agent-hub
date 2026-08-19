@@ -15,6 +15,24 @@ const h = vi.hoisted(() => ({
   deleteMock: vi.fn(),
   switchMock: vi.fn(),
   fetchImageMock: vi.fn(),
+  // 角色默认 admin：既有断言依赖新增/编辑/删除/批量按钮可见；member 分支用例内切换。
+  user: { id: "1", name: "admin", email: "admin@zerone.run", role: "admin" },
+}));
+
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: (selector: (s: {
+    user: { id: string; name: string; email: string; role: string } | null
+    setUser: () => void
+    loginWithPassword: () => Promise<void>
+    login: () => void
+    logout: () => Promise<void>
+  }) => unknown) => selector({
+    user: h.user,
+    setUser: vi.fn(),
+    loginWithPassword: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
@@ -99,6 +117,7 @@ function renderPage() {
 
 describe("KnowledgeChunksPage", () => {
   beforeEach(() => {
+    h.user = { ...h.user, role: "admin" };
     h.chunks = sampleChunks;
     h.total = sampleChunks.length;
     h.refetchMock.mockReset();
@@ -210,4 +229,21 @@ describe("KnowledgeChunksPage", () => {
       }),
     );
   }, 15000);
+
+  it("member: hides editor/switch/delete/bulk but keeps data and copy ID", () => {
+    h.user = { ...h.user, role: "member" };
+    renderPage();
+
+    // 数据仍可见（只读）
+    expect(screen.getByText("original chunk content")).toBeInTheDocument();
+    expect(screen.getByText("文档信息")).toBeInTheDocument();
+    // 写操作按钮隐藏：新增切片/编辑/删除/启用 Switch
+    expect(screen.queryByRole("button", { name: "新增切片" })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: /编辑/ })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /删除/ })).toHaveLength(0);
+    expect(document.querySelector(".ant-switch")).toBeNull();
+    // 批量勾选与批量栏不存在
+    expect(screen.queryByRole("checkbox", { name: "选择本页" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/已选择/)).not.toBeInTheDocument();
+  });
 });

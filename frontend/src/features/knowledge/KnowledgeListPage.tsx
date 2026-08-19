@@ -7,6 +7,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useNavigate } from 'react-router'
 import { useKnowledgeList, useDeleteKnowledge } from '@/queries/useKnowledge'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import type { KnowledgeDataset } from '@/api/knowledge'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -74,6 +75,7 @@ export default function KnowledgeListPage() {
     desc: true
   })
   const deleteKnowledge = useDeleteKnowledge()
+  const canWrite = useCanWrite()
 
   const datasets = useMemo(() => {
     return (data?.datasets ?? []).sort((a, b) => a.name.localeCompare(b.name))
@@ -119,29 +121,33 @@ export default function KnowledgeListPage() {
       fixed: 'right',
       render: (_, record) => (
         <div style={{ display: 'flex', gap: 2 }}>
-          <button
-            type="button"
-            className={styles.actBtn}
-            title="编辑"
-            onClick={() => {
-              setEditing(record)
-              setFormOpen(true)
-            }}
-          >
-            <PencilSimpleIcon size={14} />
-          </button>
-          <Popconfirm
-            title="确认删除？"
-            description={`删除知识库 "${record.name}"？此操作不可撤销。`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => { deleteKnowledge.mutate(record.id); }}
-          >
-            <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <TrashIcon size={14} />
-            </button>
-          </Popconfirm>
+          {canWrite && (
+            <>
+              <button
+                type="button"
+                className={styles.actBtn}
+                title="编辑"
+                onClick={() => {
+                  setEditing(record)
+                  setFormOpen(true)
+                }}
+              >
+                <PencilSimpleIcon size={14} />
+              </button>
+              <Popconfirm
+                title="确认删除？"
+                description={`删除知识库 "${record.name}"？此操作不可撤销。`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => { deleteKnowledge.mutate(record.id); }}
+              >
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                  <TrashIcon size={14} />
+                </button>
+              </Popconfirm>
+            </>
+          )}
         </div>
       )
     }
@@ -154,15 +160,17 @@ export default function KnowledgeListPage() {
           <div className={styles.pageTitle}>知识库管理</div>
           <div className={styles.pageSub}>管理知识库、文档、分块与检索测试</div>
         </div>
-        <PrimaryButton
-          icon={<PlusIcon size={16} weight="bold" />}
-          onClick={() => {
-            setEditing(null)
-            setFormOpen(true)
-          }}
-        >
-          新建知识库
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton
+            icon={<PlusIcon size={16} weight="bold" />}
+            onClick={() => {
+              setEditing(null)
+              setFormOpen(true)
+            }}
+          >
+            新建知识库
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>

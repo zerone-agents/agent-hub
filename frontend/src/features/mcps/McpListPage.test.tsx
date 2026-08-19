@@ -78,6 +78,27 @@ const mcpsList: Mcp[] = []
 const probeMutateAsync = vi.fn().mockResolvedValue({ status: 'success' })
 const deleteMutateAsync = vi.fn().mockResolvedValue({ data: { success: true } })
 
+// 角色默认 admin：既有断言依赖新建/探测/删除按钮可见；member 分支用例内切换。
+const authUser = vi.hoisted(() => ({
+  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: (selector: (s: {
+    user: { id: string; name: string; email: string; role: string } | null
+    setUser: () => void
+    loginWithPassword: () => Promise<void>
+    login: () => void
+    logout: () => Promise<void>
+  }) => unknown) => selector({
+    user: authUser.user,
+    setUser: vi.fn(),
+    loginWithPassword: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn()
+  })
+}))
+
 vi.mock('@/queries/useMcps', () => ({
   useMcps: () => ({ data: mcpsList, isLoading: false }),
   useDeleteMcp: () => ({ mutateAsync: deleteMutateAsync }),
@@ -106,6 +127,7 @@ describe('McpListPage', () => {
     seedMcps(mockMcpPending, mockMcpSuccess, mockMcpFailed, mockMcpBuiltin)
     probeMutateAsync.mockClear()
     deleteMutateAsync.mockClear()
+    authUser.user = { ...authUser.user, role: 'admin' }
   })
 
   it('renders page title and create button', () => {
@@ -193,5 +215,19 @@ describe('McpListPage', () => {
     const probeButtons = screen.getAllByTitle('探测')
     const nonBuiltinCount = mcpsList.filter(m => !m.isBuiltin).length
     expect(probeButtons.length).toBe(nonBuiltinCount)
+  })
+
+  it('member: hides create/probe/edit/delete but still sees mcps', () => {
+    authUser.user = { ...authUser.user, role: 'member' }
+    renderPage()
+
+    // 数据仍可见（只读）
+    expect(screen.getByText('filesystem')).toBeInTheDocument()
+    expect(screen.getByText('内置')).toBeInTheDocument()
+    // 写操作按钮隐藏
+    expect(screen.queryByRole('button', { name: /新建 MCP/ })).not.toBeInTheDocument()
+    expect(screen.queryAllByTitle('探测')).toHaveLength(0)
+    expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
+    expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })
 })

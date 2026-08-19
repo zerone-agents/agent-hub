@@ -6,6 +6,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Skill } from '@/api/skills'
 import { useSkills, useDeleteSkill } from '@/queries/useSkills'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { skillApi } from '@/api/skills'
 import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
@@ -68,6 +69,7 @@ export default function SkillListPage() {
   const { styles } = useStyles()
   const { data: skills = [], isLoading } = useSkills()
   const deleteSkill = useDeleteSkill()
+  const canWrite = useCanWrite()
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null)
@@ -146,21 +148,25 @@ export default function SkillListPage() {
           >
             <ArrowDownIcon size={14} />
           </button>
-          <button type="button" className={styles.actBtn} title="编辑" onClick={() => { showEdit(skill); }}>
-            <PencilSimpleIcon size={14} />
-          </button>
-          <Popconfirm
-            title="确认删除？"
-            description={`删除 "${skill.name}"？此操作不可撤销。`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => { deleteSkill.mutate(skill.name); }}
-          >
-            <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <TrashIcon size={14} />
-            </button>
-          </Popconfirm>
+          {canWrite && (
+            <>
+              <button type="button" className={styles.actBtn} title="编辑" onClick={() => { showEdit(skill); }}>
+                <PencilSimpleIcon size={14} />
+              </button>
+              <Popconfirm
+                title="确认删除？"
+                description={`删除 "${skill.name}"？此操作不可撤销。`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => { deleteSkill.mutate(skill.name); }}
+              >
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                  <TrashIcon size={14} />
+                </button>
+              </Popconfirm>
+            </>
+          )}
         </div>
       }
     />
@@ -173,12 +179,14 @@ export default function SkillListPage() {
           <div className={styles.pageTitle}>技能管理</div>
           <div className={styles.pageSub}>管理 AI 技能包，上传 zip 文件并关联到 Agent</div>
         </div>
-        <PrimaryButton
-          icon={<PlusIcon size={16} weight="bold" />}
-          onClick={() => { setEditingSkill(null); setFormOpen(true) }}
-        >
-          新建技能
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton
+            icon={<PlusIcon size={16} weight="bold" />}
+            onClick={() => { setEditingSkill(null); setFormOpen(true) }}
+          >
+            新建技能
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>

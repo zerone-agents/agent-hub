@@ -13,6 +13,24 @@ const h = vi.hoisted(() => ({
   syncMock: vi.fn(),
   providers: [] as Record<string, unknown>[],
   multiragEmbedding: [] as Record<string, unknown>[],
+  // 角色默认 admin：既有断言依赖保存按钮可见；member 分支用例内切换。
+  user: { id: "1", name: "admin", email: "admin@zerone.run", role: "admin" },
+}));
+
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: (selector: (s: {
+    user: { id: string; name: string; email: string; role: string } | null
+    setUser: () => void
+    loginWithPassword: () => Promise<void>
+    login: () => void
+    logout: () => Promise<void>
+  }) => unknown) => selector({
+    user: h.user,
+    setUser: vi.fn(),
+    loginWithPassword: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
@@ -73,6 +91,7 @@ function renderPage() {
 
 describe("KnowledgeSettingsPage embedding model guard", () => {
   beforeEach(() => {
+    h.user = { ...h.user, role: "admin" };
     h.dataset = { ...baseDataset };
     h.updateMock.mockReset();
     h.updateMock.mockResolvedValue({ id: "kb-1" });
@@ -147,5 +166,19 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
       ),
     ).toBeInTheDocument();
     expect(h.refetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("member: hides save button and renders the form read-only", () => {
+    h.user = { ...h.user, role: "member" };
+    renderPage();
+
+    // 表单数据仍可见（只读）
+    const item = screen
+      .getByText("Embedding 模型")
+      .closest<HTMLElement>(".ant-form-item");
+    expect(item).not.toBeNull();
+    // 保存设置按钮隐藏，表单控件整体置为只读（antd Form disabled 经 context 下发）
+    expect(screen.queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
+    expect(within(item!).getByRole("combobox")).toBeDisabled();
   });
 });

@@ -5,6 +5,7 @@ import { PlusIcon, PencilSimpleIcon, TrashIcon, WrenchIcon } from '@phosphor-ico
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useTools, useDeleteTool } from '@/queries/useTools'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Tool } from '@/api/tools'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -91,6 +92,7 @@ export default function ToolListPage() {
   const { styles } = useStyles()
   const { data: tools = [], isLoading } = useTools()
   const deleteTool = useDeleteTool()
+  const canWrite = useCanWrite()
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<Tool | null>(null)
@@ -134,9 +136,11 @@ export default function ToolListPage() {
           <div className={styles.pageTitle}>工具管理</div>
           <div className={styles.pageSub}>管理所有可用的 AI 工具定义</div>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-          新建工具
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
+            新建工具
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>
@@ -187,32 +191,34 @@ export default function ToolListPage() {
               description={tool.description || '暂无描述'}
               footerLeft={formatTime(tool.createdAt)}
               footerRight={
-                <div style={{ display: 'flex', gap: 2 }}>
-                  <button
-                    type="button"
-                    className={styles.actBtn}
-                    title="编辑"
-                    onClick={() => { showEdit(tool); }}
-                  >
-                    <PencilSimpleIcon size={14} />
-                  </button>
-                  <Popconfirm
-                    title="确认删除？"
-                    description={`删除 "${tool.name}"？此操作不可撤销。`}
-                    okText="删除"
-                    okButtonProps={{ danger: true }}
-                    cancelText="取消"
-                    onConfirm={() => handleDelete(tool.name)}
-                  >
+                canWrite ? (
+                  <div style={{ display: 'flex', gap: 2 }}>
                     <button
                       type="button"
-                      className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                      title="删除"
+                      className={styles.actBtn}
+                      title="编辑"
+                      onClick={() => { showEdit(tool); }}
                     >
-                      <TrashIcon size={14} />
+                      <PencilSimpleIcon size={14} />
                     </button>
-                  </Popconfirm>
-                </div>
+                    <Popconfirm
+                      title="确认删除？"
+                      description={`删除 "${tool.name}"？此操作不可撤销。`}
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      cancelText="取消"
+                      onConfirm={() => handleDelete(tool.name)}
+                    >
+                      <button
+                        type="button"
+                        className={`${styles.actBtn} ${styles.actBtnDanger}`}
+                        title="删除"
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </Popconfirm>
+                  </div>
+                ) : null
               }
             />
           ))}

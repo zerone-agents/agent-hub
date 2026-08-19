@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
@@ -6,6 +6,27 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import AgentListPage from './AgentListPage'
 import type { Agent } from '@/api/agents'
+
+// 角色默认 admin：既有断言依赖写操作按钮可见；member 分支用例在测试内切换 h.user.role。
+const h = vi.hoisted(() => ({
+  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: (selector: (s: {
+    user: { id: string; name: string; email: string; role: string } | null
+    setUser: () => void
+    loginWithPassword: () => Promise<void>
+    login: () => void
+    logout: () => Promise<void>
+  }) => unknown) => selector({
+    user: h.user,
+    setUser: vi.fn(),
+    loginWithPassword: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn()
+  })
+}))
 
 const mockAgents: Agent[] = [
   {
@@ -86,6 +107,10 @@ vi.mock('@/api/agents', () => ({
 }))
 
 describe('AgentListPage', () => {
+  beforeEach(() => {
+    h.user = { ...h.user, role: 'admin' }
+  })
+
   it('renders agent cards with names and stats', () => {
     render(
       <ConfigProvider theme={antdTheme}>
@@ -144,6 +169,27 @@ describe('AgentListPage', () => {
     )
     const deployButtons = await screen.findAllByTitle('部署')
     expect(deployButtons.length).toBe(mockAgents.length)
+  })
+
+  it('member: hides write actions but still sees agent data', () => {
+    h.user = { ...h.user, role: 'member' }
+    render(
+      <ConfigProvider theme={antdTheme}>
+        <MemoryRouter>
+          <AgentListPage />
+        </MemoryRouter>
+      </ConfigProvider>
+    )
+
+    // 数据仍可见（只读）
+    expect(screen.getByText('Agent 管理')).toBeInTheDocument()
+    expect(screen.getByText('通用助手')).toBeInTheDocument()
+    expect(screen.getByText('编程助手')).toBeInTheDocument()
+    // 写操作按钮隐藏：新建代理、部署/编辑/删除
+    expect(screen.queryByText('新建代理')).not.toBeInTheDocument()
+    expect(screen.queryAllByTitle('部署')).toHaveLength(0)
+    expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
+    expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })
 
   it('modelId dropdown excludes non-LLM models', async () => {

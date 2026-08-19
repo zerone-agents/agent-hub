@@ -10,7 +10,25 @@ const h = vi.hoisted(() => ({
   datasets: [] as Record<string, unknown>[],
   total: 0,
   createMock: vi.fn(),
-  deleteMock: vi.fn()
+  deleteMock: vi.fn(),
+  // 角色默认 admin：既有断言依赖新建/编辑/删除按钮可见；member 分支用例内切换。
+  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: (selector: (s: {
+    user: { id: string; name: string; email: string; role: string } | null
+    setUser: () => void
+    loginWithPassword: () => Promise<void>
+    login: () => void
+    logout: () => Promise<void>
+  }) => unknown) => selector({
+    user: h.user,
+    setUser: vi.fn(),
+    loginWithPassword: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn()
+  })
 }))
 
 vi.mock('@/queries/useKnowledge', () => ({
@@ -74,6 +92,7 @@ describe('KnowledgeListPage', () => {
     h.total = 0
     h.createMock.mockReset()
     h.deleteMock.mockReset()
+    h.user = { ...h.user, role: 'admin' }
   })
 
   it('renders the dataset rows', () => {
@@ -108,5 +127,20 @@ describe('KnowledgeListPage', () => {
 
     await waitFor(() => { expect(h.createMock).toHaveBeenCalled(); })
     expect(h.createMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'kb-new' }))
+  })
+
+  it('member: hides create/edit/delete actions but still sees datasets', () => {
+    h.datasets = sampleDatasets
+    h.total = sampleDatasets.length
+    h.user = { ...h.user, role: 'member' }
+    renderPage()
+
+    // 数据仍可见（只读）
+    expect(screen.getByText('产品知识库')).toBeInTheDocument()
+    expect(screen.getByText('客服知识库')).toBeInTheDocument()
+    // 写操作按钮隐藏
+    expect(screen.queryByRole('button', { name: /新建知识库/ })).not.toBeInTheDocument()
+    expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
+    expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })
 })
