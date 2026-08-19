@@ -280,8 +280,10 @@ func main() {
 	// 前端据此渲染等待审批页。builtin 用户必有角色，guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
-	// Business-resource admin routes: admin OR maintainer.
-	v1adminGroup := v1group.Group("/admin", middleware.RequireManager())
+	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
+	adminWrite := v1group.Group("/admin", middleware.RequireManager())
+	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
+	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
 
 	// ---------- Tenant 领域 ----------
 	tenantsGroup := v1group.Group("/tenants")
@@ -309,40 +311,46 @@ func main() {
 		agentsGroup.POST("/:name/chat/sessions/:id/messages", agentChatHandler.SendMessage)
 	}
 
-	// 管理接口
-	adminAgentsGroup := v1adminGroup.Group("/agents")
+	// 管理接口：写方法/敏感 GET（deploy 状态、files/content）→ write 组；
+	// 非敏感 GET（列表、detail、tools、skills、mcps、knowledge、files 列表）→ read 组（member 只读）
+	adminAgentsGroup := adminWrite.Group("/agents")
+	adminAgentsReadGroup := adminRead.Group("/agents")
 	{
-		adminAgentsGroup.GET("", agentHandler.ListAdmin)
+		adminAgentsReadGroup.GET("", agentHandler.ListAdmin)
 		adminAgentsGroup.POST("", agentHandler.Create)
 		adminAgentsGroup.PUT("/:name", agentHandler.Update)
 		adminAgentsGroup.DELETE("/:name", agentHandler.Delete)
 		adminAgentsGroup.PUT("/:name/subagents", agentHandler.UpdateSubagents)
-		adminAgentsGroup.GET("/:name/tools", toolHandler.GetAgentTools)
+		adminAgentsReadGroup.GET("/:name/tools", toolHandler.GetAgentTools)
 		adminAgentsGroup.PUT("/:name/tools", toolHandler.UpdateAgentTools)
-		adminAgentsGroup.GET("/:name/skills", skillHandler.GetAgentSkills)
+		adminAgentsReadGroup.GET("/:name/skills", skillHandler.GetAgentSkills)
 		adminAgentsGroup.PUT("/:name/skills", skillHandler.UpdateAgentSkills)
-		adminAgentsGroup.GET("/:name/mcps", mcpHandler.GetAgentMcps)
+		adminAgentsReadGroup.GET("/:name/mcps", mcpHandler.GetAgentMcps)
 		adminAgentsGroup.PUT("/:name/mcps", mcpHandler.UpdateAgentMcps)
-		adminAgentsGroup.GET("/:name/knowledge", agentHandler.GetAgentKnowledge)
+		adminAgentsReadGroup.GET("/:name/knowledge", agentHandler.GetAgentKnowledge)
 		adminAgentsGroup.PUT("/:name/knowledge", agentHandler.UpdateAgentKnowledge)
 		adminAgentsGroup.POST("/:name/probe", agentHandler.ProbeAgent)
 		adminAgentsGroup.POST("/:name/deploy", agentHandler.DeployAgent)
+		// 部署状态属敏感信息，留 write 组
 		adminAgentsGroup.GET("/:name/deploy", agentHandler.GetDeployment)
 		adminAgentsGroup.POST("/:name/deploy/stop", agentHandler.StopDeployment)
 		adminAgentsGroup.POST("/:name/deploy/start", agentHandler.StartDeployment)
 		adminAgentsGroup.DELETE("/:name/deploy", agentHandler.DeleteDeployment)
-		adminAgentsGroup.GET("/:name/detail", agentDetailHandler.GetAgentDetail)
-		adminAgentsGroup.GET("/:name/files", agentFilesHandler.ListFiles)
+		adminAgentsReadGroup.GET("/:name/detail", agentDetailHandler.GetAgentDetail)
+		adminAgentsReadGroup.GET("/:name/files", agentFilesHandler.ListFiles)
+		// 文件内容属敏感信息，留 write 组
 		adminAgentsGroup.GET("/:name/files/content", agentFilesHandler.GetContent)
 		adminAgentsGroup.HEAD("/:name/files/content", agentFilesHandler.HeadContent)
 	}
 
 	// ---------- Tool 领域 ----------
-	toolsGroup := v1adminGroup.Group("/tools")
+	// 写方法 → write 组；GET 列表/详情 → read 组（member 只读）
+	toolsGroup := adminWrite.Group("/tools")
+	toolsReadGroup := adminRead.Group("/tools")
 	{
-		toolsGroup.GET("", toolHandler.List)
+		toolsReadGroup.GET("", toolHandler.List)
 		toolsGroup.POST("", toolHandler.Create)
-		toolsGroup.GET("/:name", toolHandler.Get)
+		toolsReadGroup.GET("/:name", toolHandler.Get)
 		toolsGroup.PUT("/:name", toolHandler.Update)
 		toolsGroup.DELETE("/:name", toolHandler.Delete)
 	}
@@ -354,13 +362,14 @@ func main() {
 		mcpsGroup.GET("", mcpHandler.GetClientMcpsByAgent)
 	}
 
-	// 管理接口（CRUD）
-	adminMcpsGroup := v1adminGroup.Group("/mcps")
+	// 管理接口（CRUD）：写方法/probe → write 组；GET 列表/详情 → read 组（member 只读）
+	adminMcpsGroup := adminWrite.Group("/mcps")
+	adminMcpsReadGroup := adminRead.Group("/mcps")
 	{
-		adminMcpsGroup.GET("", mcpHandler.List)
+		adminMcpsReadGroup.GET("", mcpHandler.List)
 		adminMcpsGroup.POST("", mcpHandler.Create)
 		adminMcpsGroup.POST("/probe", mcpHandler.ProbeByConfig)
-		adminMcpsGroup.GET("/:name", mcpHandler.Get)
+		adminMcpsReadGroup.GET("/:name", mcpHandler.Get)
 		adminMcpsGroup.PUT("/:name", mcpHandler.Update)
 		adminMcpsGroup.POST("/:name/probe", mcpHandler.ProbeByName)
 		adminMcpsGroup.DELETE("/:name", mcpHandler.Delete)
@@ -375,14 +384,15 @@ func main() {
 		skillsGroup.GET("/:name/download", skillHandler.Download)
 	}
 
-	// 管理接口
-	adminSkillsGroup := v1adminGroup.Group("/skills")
+	// 管理接口：GET 列表（ListAdmin）/skill-md → read 组（member 只读）；写方法 → write 组
+	adminSkillsGroup := adminWrite.Group("/skills")
+	adminSkillsReadGroup := adminRead.Group("/skills")
 	{
-		adminSkillsGroup.GET("", skillHandler.ListAdmin)
+		adminSkillsReadGroup.GET("", skillHandler.ListAdmin)
 		adminSkillsGroup.POST("", skillHandler.Create)
 		adminSkillsGroup.PUT("/:name", skillHandler.Update)
 		adminSkillsGroup.DELETE("/:name", skillHandler.Delete)
-		adminSkillsGroup.GET("/:name/skill-md", skillHandler.GetSkillMd)
+		adminSkillsReadGroup.GET("/:name/skill-md", skillHandler.GetSkillMd)
 	}
 
 	// ---------- Scene 领域 ----------
@@ -393,10 +403,11 @@ func main() {
 		scenesGroup.GET("/:name", sceneHandler.Get)
 	}
 
-	// 管理接口
-	adminScenesGroup := v1adminGroup.Group("/scenes")
+	// 管理接口：GET 列表（ListAdmin）→ read 组（member 只读）；写方法 → write 组
+	adminScenesGroup := adminWrite.Group("/scenes")
+	adminScenesReadGroup := adminRead.Group("/scenes")
 	{
-		adminScenesGroup.GET("", sceneHandler.ListAdmin)
+		adminScenesReadGroup.GET("", sceneHandler.ListAdmin)
 		adminScenesGroup.POST("", sceneHandler.Create)
 		adminScenesGroup.PUT("/:name", sceneHandler.Update)
 		adminScenesGroup.DELETE("/:name", sceneHandler.Delete)
@@ -408,7 +419,8 @@ func main() {
 	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
 
 	// ---------- Knowledge 领域 ----------
-	handler.RegisterKnowledgeRoutes(v1adminGroup, knowledgeHandler)
+	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组
+	handler.RegisterKnowledgeRoutes(adminWrite, adminRead, knowledgeHandler)
 
 	// /api/v1/services
 	v1group.GET("/services/:service", serviceRouter.Route)
@@ -419,16 +431,19 @@ func main() {
 		chatGroup.POST("/push", chatHandler.Push)
 	}
 
-	adminChatGroup := v1adminGroup.Group("/chat")
+	// 聊天历史：GET 会话/消息 → read 组（member 只读）；DELETE → write 组
+	adminChatGroup := adminWrite.Group("/chat")
+	adminChatReadGroup := adminRead.Group("/chat")
 	{
-		adminChatGroup.GET("/sessions", chatHandler.ListSessions)
-		adminChatGroup.GET("/sessions/:id", chatHandler.GetSession)
-		adminChatGroup.GET("/sessions/:id/messages", chatHandler.ListMessages)
+		adminChatReadGroup.GET("/sessions", chatHandler.ListSessions)
+		adminChatReadGroup.GET("/sessions/:id", chatHandler.GetSession)
+		adminChatReadGroup.GET("/sessions/:id/messages", chatHandler.ListMessages)
 		adminChatGroup.DELETE("/sessions/:id", chatHandler.DeleteSession)
 	}
 
 	// ---------- AIGC 标识配置 ----------
-	adminAigcGroup := v1adminGroup.Group("/aigc")
+	// 全部端点含敏感配置（密钥），整体留 write 组，member 不开放
+	adminAigcGroup := adminWrite.Group("/aigc")
 	{
 		adminAigcGroup.GET("/config", aigcConfigHandler.Get)
 		adminAigcGroup.PUT("/config", aigcConfigHandler.Save)
@@ -445,17 +460,19 @@ func main() {
 		providersGroup.GET("/:id", providerHandler.Get)
 	}
 
-	// 管理接口
-	adminProvidersGroup := v1adminGroup.Group("/providers")
+	// 管理接口：GET 列表/attr-rules → read 组（member 只读）；
+	// 写方法与 reveal-key（敏感）→ write 组
+	adminProvidersGroup := adminWrite.Group("/providers")
+	adminProvidersReadGroup := adminRead.Group("/providers")
 	{
-		adminProvidersGroup.GET("", providerHandler.ListAdmin)
+		adminProvidersReadGroup.GET("", providerHandler.ListAdmin)
 		adminProvidersGroup.POST("", providerHandler.Create)
 		adminProvidersGroup.POST("/probe", providerHandler.ProbeConfig)
 		adminProvidersGroup.PUT("/:id", providerHandler.Update)
 		adminProvidersGroup.DELETE("/:id", providerHandler.Delete)
 		adminProvidersGroup.POST("/:id/probe", providerHandler.Probe)
 		adminProvidersGroup.POST("/:id/reveal-key", providerHandler.RevealAPIKey)
-		adminProvidersGroup.GET("/attr-rules", providerHandler.AttrRules)
+		adminProvidersReadGroup.GET("/attr-rules", providerHandler.AttrRules)
 
 		// Per-model CRUD (Task 5): attach/update/delete a single model row.
 		adminProvidersGroup.POST("/:id/models", providerHandler.AddModel)

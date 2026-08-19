@@ -24,30 +24,37 @@ func NewKnowledgeHandler(service *services.KnowledgeService, multiragMyLLMs prov
 	return &KnowledgeHandler{service: service, multiragMyLLMs: multiragMyLLMs}
 }
 
-func RegisterKnowledgeRoutes(group *gin.RouterGroup, h *KnowledgeHandler) {
-	knowledgeGroup := group.Group("/knowledge")
+// RegisterKnowledgeRoutes 把知识库管理端点注册到两个同路径组：
+// writeGroup 挂 adminWrite（admin|maintainer）——全部写方法（POST/PUT/DELETE）
+// 及 POST /retrieval；readGroup 挂 adminRead（admin|maintainer|member）——
+// 非敏感 GET（health、datasets/documents/chunks/images 的查询与下载、
+// multirag 模型列表）。GET 与写方法路径不重复，gin 允许共存。
+func RegisterKnowledgeRoutes(writeGroup, readGroup *gin.RouterGroup, h *KnowledgeHandler) {
+	knowledgeGroup := writeGroup.Group("/knowledge")
+	knowledgeReadGroup := readGroup.Group("/knowledge")
 	{
-		knowledgeGroup.GET("/health", h.Health)
-		knowledgeGroup.GET("/datasets", h.ListDatasets)
+		knowledgeReadGroup.GET("/health", h.Health)
+		knowledgeReadGroup.GET("/datasets", h.ListDatasets)
 		knowledgeGroup.POST("/datasets", h.CreateDataset)
 		knowledgeGroup.DELETE("/datasets", h.DeleteDatasets)
-		knowledgeGroup.GET("/datasets/:datasetId", h.GetDataset)
+		knowledgeReadGroup.GET("/datasets/:datasetId", h.GetDataset)
 		knowledgeGroup.PUT("/datasets/:datasetId", h.UpdateDataset)
-		knowledgeGroup.GET("/datasets/:datasetId/documents", h.ListDocuments)
+		knowledgeReadGroup.GET("/datasets/:datasetId/documents", h.ListDocuments)
 		knowledgeGroup.POST("/datasets/:datasetId/documents", h.UploadDocuments)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents", h.DeleteDocuments)
-		knowledgeGroup.GET("/datasets/:datasetId/documents/:documentId/download", h.DownloadDocument)
+		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/download", h.DownloadDocument)
 		knowledgeGroup.PUT("/datasets/:datasetId/documents/:documentId", h.UpdateDocument)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/parse", h.ParseDocuments)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents/parse", h.StopParsingDocuments)
-		knowledgeGroup.GET("/datasets/:datasetId/images/:imageId", h.GetImage)
-		knowledgeGroup.GET("/datasets/:datasetId/documents/:documentId/chunks", h.ListChunks)
+		knowledgeReadGroup.GET("/datasets/:datasetId/images/:imageId", h.GetImage)
+		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/chunks", h.ListChunks)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/:documentId/chunks", h.CreateChunk)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents/:documentId/chunks", h.DeleteChunks)
 		knowledgeGroup.PUT("/datasets/:datasetId/documents/:documentId/chunks/:chunkId", h.UpdateChunk)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/:documentId/chunks/switch", h.SwitchChunks)
+		// POST /retrieval 是带 body 的查询，但按 spec「写保持原样」留在 write 组
 		knowledgeGroup.POST("/retrieval", h.Retrieval)
-		knowledgeGroup.GET("/multirag/models", h.ListMultiRAGModels)
+		knowledgeReadGroup.GET("/multirag/models", h.ListMultiRAGModels)
 	}
 }
 
