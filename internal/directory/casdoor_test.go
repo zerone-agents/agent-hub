@@ -211,17 +211,24 @@ func TestListUsersErrorsPropagate(t *testing.T) {
 // ===================== UpdateRole =====================
 
 func TestUpdateRoleMemberIsLocalOnly(t *testing.T) {
-	// 非 admin 的角色调整（member→maintainer）纯本地：fakeClient 零调用
+	// 非 admin 的角色调整（member→maintainer）本地生效，casdoor 零写入。
+	// 新语义下会先 GetUserByUserId 核对 IsAdmin（防控制台直提漏判），
+	// casdoor 侧非管理员（IsAdmin=false）时无需写 is_admin。
 	fs := newFakeStore()
 	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
-	fc := &fakeClient{}
+	fc := &fakeClient{users: []*casdoorsdk.User{
+		{Id: "1", Name: "alice", Owner: "tenant-a", IsAdmin: false},
+	}}
 	d := NewCasdoorDirectory(fc, fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMaintainer, "actor-9"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fc.updates) != 0 || fc.getByIDCalls != 0 {
-		t.Fatalf("fakeClient 必须零调用, updates=%d getByID=%d", len(fc.updates), fc.getByIDCalls)
+	if len(fc.updates) != 0 {
+		t.Fatalf("casdoor 写入必须为零, updates=%d", len(fc.updates))
+	}
+	if fc.getByIDCalls != 1 {
+		t.Fatalf("GetUserByUserId 调用次数 = %d, want 1（核对 IsAdmin）", fc.getByIDCalls)
 	}
 	if len(fs.setCalls) != 1 {
 		t.Fatalf("store 写入次数 = %d, want 1", len(fs.setCalls))
@@ -310,10 +317,14 @@ func TestDemoteAdminWritesCasdoorFirst(t *testing.T) {
 }
 
 func TestUpdateRolePendingUserBecomesActive(t *testing.T) {
-	// 审批动作 = 分配角色：pending 用户被分配 member 时 status 同步置 active
+	// 审批动作 = 分配角色：pending 用户被分配 member 时 status 同步置 active。
+	// 新语义下会先 GetUserByUserId 核对 IsAdmin（carol 非组织管理员 →
+	// 一次读调用、零 casdoor 写入）。
 	fs := newFakeStore()
 	fs.seed("3", "tenant-a", "carol", "", authdom.StatusPending)
-	fc := &fakeClient{}
+	fc := &fakeClient{users: []*casdoorsdk.User{
+		{Id: "3", Name: "carol", Owner: "tenant-a", IsAdmin: false},
+	}}
 	d := NewCasdoorDirectory(fc, fs)
 
 	if err := d.UpdateRole("tenant-a", "3", authdom.RoleMember, "actor-9"); err != nil {
@@ -328,8 +339,61 @@ func TestUpdateRolePendingUserBecomesActive(t *testing.T) {
 	if rec := fs.rec("3"); rec.Role != authdom.RoleMember || rec.Status != authdom.StatusActive {
 		t.Fatalf("本地记录: %+v", rec)
 	}
-	if len(fc.updates) != 0 || fc.getByIDCalls != 0 {
-		t.Fatalf("非 admin 目标不应触达 casdoor: updates=%d getByID=%d", len(fc.updates), fc.getByIDCalls)
+	if len(fc.updates) != 0 {
+		t.Fatalf("非 admin 目标不应写 casdoor: updates=%d", len(fc.updates))
+	}
+	if fc.getByIDCalls != 1 {
+		t.Fatalf("GetUserByUserId 调用次数 = %d, want 1（核对 IsAdmin）", fc.getByIDCalls)
+	}
+}
+
+func TestDemoteCasdoorConsoleAdminWritesCasdoorFirst(t *testing.T) {
+	// F2 回归：目标用户在 Casdoor 控制台被直接提为组织管理员（IsAdmin=true）
+	// 但本地记录仍是 member——对其「降级为 member」时必须触发双写
+	// （先 casdoor is_admin=false，成功后写本地），否则下次登录合成规则
+	// 会按 IsAdmin=true 自动提回 admin，管理动作静默失效。
+	fs := newFakeStore()
+	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
+	fc := &fakeClient{users: []*casdoorsdk.User{
+		{Id: "1", Name: "alice", Owner: "tenant-a", IsAdmin: true},
+	}}
+	var events []string
+	fc.log, fs.log = &events, &events
+	d := NewCasdoorDirectory(fc, fs)
+
+	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.updates) != 1 {
+		t.Fatalf("必须发生 casdoor is_admin=false 写入, got %d", len(fc.updates))
+	}
+	if fc.updates[0].user.IsAdmin || fc.updates[0].columns[0] != "is_admin" {
+		t.Fatalf("update call: %+v cols %v（应写 is_admin=false）", fc.updates[0].user, fc.updates[0].columns)
+	}
+	if len(events) != 2 || events[0] != "casdoor:update" || events[1] != "store:setrole" {
+		t.Fatalf("写入顺序必须 Casdoor 先行: %v", events)
+	}
+	if rec := fs.rec("1"); rec.Role != authdom.RoleMember || rec.Status != authdom.StatusActive {
+		t.Fatalf("本地记录: %+v", rec)
+	}
+}
+
+func TestDemoteCasdoorConsoleAdminRejectedLocalUntouched(t *testing.T) {
+	// F2 防御：控制台管理员降级时 casdoor 被拒 → 本地零写入，保持不一致
+	// 也不制造「本地已降、下次登录又提回」的静默失败。
+	fs := newFakeStore()
+	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
+	fc := &fakeClient{
+		users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a", IsAdmin: true}},
+		updateRejected: true,
+	}
+	d := NewCasdoorDirectory(fc, fs)
+
+	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
+		t.Fatalf("got %v, want ErrUpdateRejected", err)
+	}
+	if len(fs.setCalls) != 0 {
+		t.Fatalf("casdoor 被拒后本地必须零写入, got %d", len(fs.setCalls))
 	}
 }
 
@@ -456,7 +520,7 @@ func TestSDKErrorsPropagate(t *testing.T) {
 	fc := &fakeClient{getByIDErr: sentinel}
 	d := NewCasdoorDirectory(fc, fs)
 
-	// UpdateRole 走 admin 分支（目标 admin）时经 GetUserByUserId
+	// UpdateRole 在分支判断前先经 GetUserByUserId 核对 IsAdmin，错误同样透传
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, sentinel) {
 		t.Fatalf("UpdateRole: got %v, want sentinel", err)
 	}

@@ -99,12 +99,18 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 	if err != nil {
 		return err
 	}
-	// admin 任免（升为 admin，或从 admin 降级）先改 casdoor 的 is_admin
-	if role == authdom.RoleAdmin || rec.Role == authdom.RoleAdmin {
-		u, err := d.getTenantUser(tenantID, userID)
-		if err != nil {
-			return err
-		}
+	// admin 任免先改 casdoor 的 is_admin。判断不能只看本地记录
+	// （rec.Role == admin）：若目标用户在 Casdoor 控制台被直接提为组织
+	// 管理员（本地记录仍是 member），对其降级时也必须双写，否则下次
+	// 登录合成规则会按 IsAdmin=true 自动提回 admin，管理动作静默失效。
+	// 因此先拉取 casdoor 侧用户，双写条件补上 u.IsAdmin。
+	// 「Casdoor 先行」不变：casdoor 写入失败或被拒（ok=false）时整体报错、
+	// 本地不动。
+	u, err := d.getTenantUser(tenantID, userID)
+	if err != nil {
+		return err
+	}
+	if role == authdom.RoleAdmin || rec.Role == authdom.RoleAdmin || u.IsAdmin {
 		u.IsAdmin = role == authdom.RoleAdmin
 		ok, err := d.client.UpdateUserForColumns(u, []string{"is_admin"})
 		if err != nil {
