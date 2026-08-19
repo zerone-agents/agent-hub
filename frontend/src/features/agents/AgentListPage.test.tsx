@@ -6,27 +6,10 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import AgentListPage from './AgentListPage'
 import type { Agent } from '@/api/agents'
+import { setAuthRole } from '@/test/auth-store-mock'
 
-// 角色默认 admin：既有断言依赖写操作按钮可见；member 分支用例在测试内切换 h.user.role。
-const h = vi.hoisted(() => ({
-  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
-}))
-
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: h.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn()
-  })
-}))
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const mockAgents: Agent[] = [
   {
@@ -108,7 +91,7 @@ vi.mock('@/api/agents', () => ({
 
 describe('AgentListPage', () => {
   beforeEach(() => {
-    h.user = { ...h.user, role: 'admin' }
+    setAuthRole('admin')
   })
 
   it('renders agent cards with names and stats', () => {
@@ -172,7 +155,7 @@ describe('AgentListPage', () => {
   })
 
   it('member: hides write actions but still sees agent data', () => {
-    h.user = { ...h.user, role: 'member' }
+    setAuthRole('member')
     render(
       <ConfigProvider theme={antdTheme}>
         <MemoryRouter>

@@ -7,6 +7,7 @@ import { antdTheme } from '@/lib/antd-theme'
 import { tokens as t } from '@/styles/tokens'
 import McpListPage from './McpListPage'
 import type { Mcp } from '@/api/mcps'
+import { setAuthRole } from '@/test/auth-store-mock'
 
 const mockMcpPending: Mcp = {
   id: 1,
@@ -78,26 +79,8 @@ const mcpsList: Mcp[] = []
 const probeMutateAsync = vi.fn().mockResolvedValue({ status: 'success' })
 const deleteMutateAsync = vi.fn().mockResolvedValue({ data: { success: true } })
 
-// 角色默认 admin：既有断言依赖新建/探测/删除按钮可见；member 分支用例内切换。
-const authUser = vi.hoisted(() => ({
-  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
-}))
-
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: authUser.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn()
-  })
-}))
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 vi.mock('@/queries/useMcps', () => ({
   useMcps: () => ({ data: mcpsList, isLoading: false }),
@@ -127,7 +110,7 @@ describe('McpListPage', () => {
     seedMcps(mockMcpPending, mockMcpSuccess, mockMcpFailed, mockMcpBuiltin)
     probeMutateAsync.mockClear()
     deleteMutateAsync.mockClear()
-    authUser.user = { ...authUser.user, role: 'admin' }
+    setAuthRole('admin')
   })
 
   it('renders page title and create button', () => {
@@ -218,7 +201,7 @@ describe('McpListPage', () => {
   })
 
   it('member: hides create/probe/edit/delete but still sees mcps', () => {
-    authUser.user = { ...authUser.user, role: 'member' }
+    setAuthRole('member')
     renderPage()
 
     // 数据仍可见（只读）

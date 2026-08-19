@@ -5,6 +5,10 @@ import { ConfigProvider } from "antd";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeSettingsPage from "./KnowledgeSettingsPage";
+import { setAuthRole } from "@/test/auth-store-mock";
+
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock("@/stores/auth", async () => (await import("@/test/auth-store-mock")).createAuthStoreMock());
 
 const h = vi.hoisted(() => ({
   dataset: {},
@@ -13,24 +17,6 @@ const h = vi.hoisted(() => ({
   syncMock: vi.fn(),
   providers: [] as Record<string, unknown>[],
   multiragEmbedding: [] as Record<string, unknown>[],
-  // 角色默认 admin：既有断言依赖保存按钮可见；member 分支用例内切换。
-  user: { id: "1", name: "admin", email: "admin@zerone.run", role: "admin" },
-}));
-
-vi.mock("@/stores/auth", () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: h.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-  }),
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
@@ -91,7 +77,7 @@ function renderPage() {
 
 describe("KnowledgeSettingsPage embedding model guard", () => {
   beforeEach(() => {
-    h.user = { ...h.user, role: "admin" };
+    setAuthRole("admin");
     h.dataset = { ...baseDataset };
     h.updateMock.mockReset();
     h.updateMock.mockResolvedValue({ id: "kb-1" });
@@ -169,7 +155,7 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
   });
 
   it("member: hides save button and renders the form read-only", () => {
-    h.user = { ...h.user, role: "member" };
+    setAuthRole("member");
     renderPage();
 
     // 表单数据仍可见（只读）

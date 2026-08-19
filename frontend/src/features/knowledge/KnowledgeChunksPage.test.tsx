@@ -5,6 +5,10 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeChunksPage from "./KnowledgeChunksPage";
+import { setAuthRole } from "@/test/auth-store-mock";
+
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock("@/stores/auth", async () => (await import("@/test/auth-store-mock")).createAuthStoreMock());
 
 const h = vi.hoisted(() => ({
   chunks: [] as Record<string, unknown>[],
@@ -15,24 +19,6 @@ const h = vi.hoisted(() => ({
   deleteMock: vi.fn(),
   switchMock: vi.fn(),
   fetchImageMock: vi.fn(),
-  // 角色默认 admin：既有断言依赖新增/编辑/删除/批量按钮可见；member 分支用例内切换。
-  user: { id: "1", name: "admin", email: "admin@zerone.run", role: "admin" },
-}));
-
-vi.mock("@/stores/auth", () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: h.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-  }),
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
@@ -117,7 +103,7 @@ function renderPage() {
 
 describe("KnowledgeChunksPage", () => {
   beforeEach(() => {
-    h.user = { ...h.user, role: "admin" };
+    setAuthRole("admin");
     h.chunks = sampleChunks;
     h.total = sampleChunks.length;
     h.refetchMock.mockReset();
@@ -231,7 +217,7 @@ describe("KnowledgeChunksPage", () => {
   }, 15000);
 
   it("member: hides editor/switch/delete/bulk but keeps data and copy ID", () => {
-    h.user = { ...h.user, role: "member" };
+    setAuthRole("member");
     renderPage();
 
     // 数据仍可见（只读）

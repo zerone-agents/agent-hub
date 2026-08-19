@@ -5,27 +5,10 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import SceneListPage from './SceneListPage'
 import type { Scene } from '@/api/scenes'
+import { setAuthRole } from '@/test/auth-store-mock'
 
-// 角色默认 admin：既有断言依赖新建/编辑/删除按钮可见；member 分支用例内切换。
-const authUser = vi.hoisted(() => ({
-  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
-}))
-
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: authUser.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn()
-  })
-}))
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const mockScenes: Scene[] = [
   { id: 1, name: 'chat', agent: 'general', title: '聊天', titleEn: 'Chat', prompt: 'You are a chatbot', promptEn: '', enabled: true, createdAt: '2026-06-10T10:00:00Z', updatedAt: '' },
@@ -48,7 +31,7 @@ vi.mock('@/queries/useAgents', () => ({
 
 describe('SceneListPage', () => {
   beforeEach(() => {
-    authUser.user = { ...authUser.user, role: 'admin' }
+    setAuthRole('admin')
   })
 
   it('renders scene table with data', () => {
@@ -67,7 +50,7 @@ describe('SceneListPage', () => {
   })
 
   it('member: hides create/edit/delete but still sees scenes', () => {
-    authUser.user = { ...authUser.user, role: 'member' }
+    setAuthRole('member')
     render(
       <ConfigProvider theme={antdTheme}>
         <MemoryRouter>

@@ -6,27 +6,10 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import ToolListPage from './ToolListPage'
 import type { Tool } from '@/api/tools'
+import { setAuthRole } from '@/test/auth-store-mock'
 
-// 角色默认 admin：既有断言依赖新建/编辑/删除按钮可见；member 分支用例内切换。
-const authUser = vi.hoisted(() => ({
-  user: { id: '1', name: 'admin', email: 'admin@zerone.run', role: 'admin' }
-}))
-
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: (selector: (s: {
-    user: { id: string; name: string; email: string; role: string } | null
-    setUser: () => void
-    loginWithPassword: () => Promise<void>
-    login: () => void
-    logout: () => Promise<void>
-  }) => unknown) => selector({
-    user: authUser.user,
-    setUser: vi.fn(),
-    loginWithPassword: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn()
-  })
-}))
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const mockTools: Tool[] = [
   { id: 1, name: 'Read', title: '读取文件', description: '读取文件内容', isDefault: true, createdAt: '2026-06-10T10:00:00Z', updatedAt: '' },
@@ -42,7 +25,7 @@ vi.mock('@/queries/useTools', () => ({
 
 describe('ToolListPage', () => {
   beforeEach(() => {
-    authUser.user = { ...authUser.user, role: 'admin' }
+    setAuthRole('admin')
   })
 
   it('renders tool cards and create button', () => {
@@ -79,7 +62,7 @@ describe('ToolListPage', () => {
   })
 
   it('member: hides create/edit/delete but still sees tools', () => {
-    authUser.user = { ...authUser.user, role: 'member' }
+    setAuthRole('member')
     render(
       <ConfigProvider theme={antdTheme}>
         <MemoryRouter>
