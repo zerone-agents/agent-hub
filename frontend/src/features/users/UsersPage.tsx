@@ -115,11 +115,15 @@ export default function UsersPage() {
       dataIndex: 'status',
       key: 'status',
       width: 90,
-      render: (status: string) => (
-        <Tag color={status === 'active' ? 'green' : 'default'}>
-          {status === 'active' ? '启用' : '禁用'}
-        </Tag>
-      )
+      render: (status: string) => {
+        // pending = casdoor 待审批（本地成员表），分配角色后置 active。
+        if (status === 'pending') return <Tag color="gold">待审批</Tag>
+        return (
+          <Tag color={status === 'active' ? 'green' : 'default'}>
+            {status === 'active' ? '启用' : '禁用'}
+          </Tag>
+        )
+      }
     },
     {
       title: '创建时间',
@@ -134,6 +138,8 @@ export default function UsersPage() {
       width: 200,
       render: (_, record) => {
         const isSelf = String(record.id) === currentUserId
+        // 待审批用户：只保留角色 Select（分配角色即审批），隐藏禁用/重置密码。
+        if (record.status === 'pending') return null
         return (
           <>
             {record.status === 'active' ? (

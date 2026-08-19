@@ -2,7 +2,8 @@ import apiClient, { unwrapResponse } from './client'
 import type { ApiResponse } from '@/types/api'
 
 export type UserRole = 'admin' | 'maintainer' | 'member'
-export type UserStatus = 'active' | 'disabled'
+// casdoor 模式下本地成员表中的待审批用户为 'pending'（分配角色即置 active）。
+export type UserStatus = 'active' | 'pending' | 'disabled'
 
 export interface AdminUser {
   // builtin 模式为 number；casdoor 模式为 casdoor 用户 Id 字符串。

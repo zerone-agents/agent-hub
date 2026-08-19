@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider } from 'antd'
@@ -68,5 +68,47 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
       expect(screen.queryByRole('button', { name: '创建邀请' })).not.toBeInTheDocument()
       expect(screen.queryByText('邀请记录')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('UsersPage casdoor 待审批用户展示', () => {
+  const pendingUser = {
+    id: 'casdoor-u1',
+    username: 'newbie',
+    displayName: '新同学',
+    email: 'newbie@example.com',
+    role: '' as const,
+    status: 'pending' as const,
+    createdAt: '2026-08-18T10:00:00Z'
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    vi.mocked(usersApi.listUsers).mockResolvedValue([pendingUser])
+    vi.mocked(usersApi.listInvites).mockResolvedValue([])
+    vi.mocked(usersApi.getSignupUrl).mockResolvedValue({ signupUrl: 'https://casdoor.example.com/signup/org' })
+  })
+
+  it('pending 用户显示「待审批」标签，分配角色后调用 updateUser', async () => {
+    vi.mocked(usersApi.updateUser).mockResolvedValue(undefined as never)
+    renderUsersPage()
+    expect(await screen.findByText('待审批')).toBeInTheDocument()
+    // 通过角色 Select 分配角色 = 审批动作
+    const combobox = await screen.findByRole('combobox')
+    fireEvent.mouseDown(combobox)
+    const option = await screen.findByText('maintainer', { selector: '.ant-select-item-option-content' })
+    fireEvent.click(option)
+    await waitFor(() => {
+      expect(usersApi.updateUser).toHaveBeenCalledWith('casdoor-u1', { role: 'maintainer' })
+    })
+  })
+
+  it('pending 用户不显示禁用/重置密码按钮', async () => {
+    renderUsersPage()
+    expect(await screen.findByText('待审批')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '启用' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重置密码' })).not.toBeInTheDocument()
   })
 })
