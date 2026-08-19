@@ -3,77 +3,75 @@ package directory
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"time"
 
 	"control-panel/internal/auth"
+	authdom "control-panel/internal/domain/auth"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
-// NewCasdoorDirectory constructs a CasdoorDirectory. roleMapping empty falls
-// back to auth.DefaultCasdoorRoleMapping (same rule as CasdoorProvider).
-func NewCasdoorDirectory(client UserClient, roleMapping map[string]string, defaultRole string) *CasdoorDirectory {
-	if len(roleMapping) == 0 {
-		roleMapping = auth.DefaultCasdoorRoleMapping
-	}
-	return &CasdoorDirectory{client: client, roleMapping: roleMapping, defaultRole: defaultRole}
+// providerCasdoor 是 user_identities 表的 provider 值；casdoor 模式下
+// 外部身份只来自 casdoor。
+const providerCasdoor = "casdoor"
+
+// NewCasdoorDirectory 构造 CasdoorDirectory。角色与审批状态以本地成员表
+// （store，user_identities）为真实源；client 仅用于 casdoor 侧字段的读改
+// （is_admin / is_forbidden / password）。
+func NewCasdoorDirectory(client UserClient, store auth.MembershipStore) *CasdoorDirectory {
+	return &CasdoorDirectory{client: client, store: store}
 }
 
-// ListUsers returns users of tenantID (casdoor organization) with normalized
-// roles. Users with no mapped role get Role "" (display-only; the list must
-// not fail because one user is unmapped).
-//
-// Note: casdoor's get-users API returns users WITHOUT their roles (upstream
-// issue casdoor/casdoor#3688), so roles are resolved from the role objects'
-// Users lists instead (get-roles).
+// ListUsers 列出租户全部成员（本地 user_identities，按记录 id 升序）。
+// casdoor 全量拉一次用户建 is_forbidden 映射（无 N+1）：被禁用成员的
+// Status 合成为 disabled，其余按本地审批状态原样展示（pending/active），
+// Role 也按本地记录原样透传（空 = 未分配）。
 func (d *CasdoorDirectory) ListUsers(tenantID string) ([]ManagedUser, error) {
+	recs, err := d.store.ListByTenant(tenantID)
+	if err != nil {
+		return nil, err
+	}
 	users, err := d.client.GetUsers()
 	if err != nil {
 		return nil, err
 	}
-	roles, err := d.client.GetRoles()
-	if err != nil {
-		return nil, err
-	}
-	// reverse index: user id (owner/name) -> casdoor roles holding that user
-	userRoles := make(map[string][]*casdoorsdk.Role, len(users))
-	for _, r := range roles {
-		if r == nil {
-			continue
-		}
-		for _, uid := range r.Users {
-			userRoles[uid] = append(userRoles[uid], r)
-		}
-	}
-	out := make([]ManagedUser, 0, len(users))
+	forbidden := make(map[string]bool, len(users))
 	for _, u := range users {
-		if u == nil || u.Owner != tenantID {
-			continue
+		if u != nil {
+			forbidden[u.Id] = u.IsForbidden
 		}
-		u.Roles = userRoles[u.GetId()]
-		out = append(out, d.toManagedUser(u))
+	}
+	out := make([]ManagedUser, 0, len(recs))
+	for i := range recs {
+		rec := &recs[i]
+		status := rec.Status
+		if forbidden[rec.ExternalID] {
+			status = authdom.StatusDisabled
+		}
+		out = append(out, ManagedUser{
+			ID: rec.ExternalID, Username: rec.Username, DisplayName: rec.DisplayName,
+			Email: rec.Email, Role: rec.Role, Status: status,
+			CreatedAt: rec.CreatedAt.Format(time.RFC3339),
+		})
 	}
 	return out, nil
 }
 
-// toManagedUser maps a casdoor user to the admin-UI projection.
-func (d *CasdoorDirectory) toManagedUser(u *casdoorsdk.User) ManagedUser {
-	role := ""
-	if roles, err := auth.NormalizeCasdoorRolesMapped(u.Roles, d.roleMapping, d.defaultRole); err == nil && len(roles) > 0 {
-		role = roles[0]
+// localTenantRecord 查本地成员记录并校验租户归属；无记录或跨租户返回
+// ErrUserNotFound（404），store 故障原样透传（502）。
+func (d *CasdoorDirectory) localTenantRecord(tenantID, userID string) (*authdom.UserIdentity, error) {
+	rec, err := d.store.FindByExternalID(providerCasdoor, userID)
+	if err != nil {
+		return nil, err
 	}
-	status := "active"
-	if u.IsForbidden {
-		status = "disabled"
+	if rec == nil || rec.TenantID != tenantID {
+		return nil, ErrUserNotFound
 	}
-	return ManagedUser{
-		ID: u.Id, Username: u.Name, DisplayName: u.DisplayName,
-		Email: u.Email, Role: role, Status: status, CreatedAt: u.CreatedTime,
-	}
+	return rec, nil
 }
 
-// getTenantUser fetches a user and verifies tenant ownership. SDK errors are
-// propagated as-is (mapped to 502 by the handler); only a missing user or a
-// cross-tenant user yields ErrUserNotFound (404).
+// getTenantUser 从 casdoor 拉取用户并校验租户归属。SDK 错误原样透传
+// （handler 映射为 502）；仅用户不存在或跨租户时返回 ErrUserNotFound（404）。
 func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.User, error) {
 	u, err := d.client.GetUserByUserId(userID)
 	if err != nil {
@@ -85,56 +83,36 @@ func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.U
 	return u, nil
 }
 
-// UpdateRole swaps the user's mapped casdoor roles for the one corresponding
-// to role, preserving any roles outside the mapping value set.
-//
-// Casdoor does not support changing a user's roles via update-user (roles are
-// an extended, read-only field on the User API); role membership lives on the
-// Role object's Users list, so we update those instead.
+// UpdateRole 更新成员角色（本地真实源）。admin 的任命/降级需双写 casdoor
+// 的 is_admin 标志，且「Casdoor 先行」：casdoor 写入失败或被拒（ok=false）
+// 时整体报错、本地不动——避免本地已显示 admin 而 casdoor 侧组织管理员
+// 权限未生效的不一致。pending 成员被分配角色视同审批通过（status 同步
+// 置 active），其余成员保持原状态。
 func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
 	if userID == actorID {
 		return ErrSelfOperation
 	}
-	casdoorName, ok := d.roleMapping[role]
-	if !ok {
+	if !authdom.IsValidRole(role) {
 		return ErrInvalidRole
 	}
+	rec, err := d.localTenantRecord(tenantID, userID)
+	if err != nil {
+		return err
+	}
+	// admin 任免先改 casdoor 的 is_admin。判断不能只看本地记录
+	// （rec.Role == admin）：若目标用户在 Casdoor 控制台被直接提为组织
+	// 管理员（本地记录仍是 member），对其降级时也必须双写，否则下次
+	// 登录合成规则会按 IsAdmin=true 自动提回 admin，管理动作静默失效。
+	// 因此先拉取 casdoor 侧用户，双写条件补上 u.IsAdmin。
+	// 「Casdoor 先行」不变：casdoor 写入失败或被拒（ok=false）时整体报错、
+	// 本地不动。
 	u, err := d.getTenantUser(tenantID, userID)
 	if err != nil {
 		return err
 	}
-	mappedValues := make(map[string]bool, len(d.roleMapping))
-	for _, v := range d.roleMapping {
-		mappedValues[v] = true
-	}
-	roles, err := d.client.GetRoles()
-	if err != nil {
-		return err
-	}
-	uid := u.GetId() // "owner/name", the form stored in Role.Users
-	for _, r := range roles {
-		if r == nil || !mappedValues[r.Name] {
-			continue // only touch mapped roles; external roles stay untouched
-		}
-		has := false
-		kept := r.Users[:0]
-		for _, member := range r.Users {
-			if member == uid {
-				has = true
-				continue
-			}
-			kept = append(kept, member)
-		}
-		want := r.Name == casdoorName
-		if has == want {
-			continue // already in the desired state
-		}
-		if want {
-			r.Users = append(r.Users, uid)
-		} else {
-			r.Users = kept
-		}
-		ok, err := d.client.UpdateRoleForColumns(r, []string{"users"})
+	if role == authdom.RoleAdmin || rec.Role == authdom.RoleAdmin || u.IsAdmin {
+		u.IsAdmin = role == authdom.RoleAdmin
+		ok, err := d.client.UpdateUserForColumns(u, []string{"is_admin"})
 		if err != nil {
 			return err
 		}
@@ -142,13 +120,22 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 			return ErrUpdateRejected
 		}
 	}
-	return nil
+	status := rec.Status
+	if status == authdom.StatusPending {
+		status = authdom.StatusActive // 审批动作 = 分配角色
+	}
+	return d.store.SetRole(providerCasdoor, userID, role, status)
 }
 
-// SetDisabled sets the casdoor is_forbidden flag.
+// SetDisabled 直通设置 casdoor 的 is_forbidden 标志（禁用状态不落本地表，
+// ListUsers 时实时合成）。本地成员记录不存在的用户不可操作；pending
+// 成员同样可禁用（无额外防护）。
 func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) error {
 	if userID == actorID {
 		return ErrSelfOperation
+	}
+	if _, err := d.localTenantRecord(tenantID, userID); err != nil {
+		return err
 	}
 	u, err := d.getTenantUser(tenantID, userID)
 	if err != nil {
@@ -165,8 +152,7 @@ func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, a
 	return nil
 }
 
-// ResetPassword sets a random password (casdoor hashes it server-side) and
-// returns the plaintext exactly once.
+// ResetPassword 直通设置随机密码（casdoor 服务端哈希），明文只返回一次。
 func (d *CasdoorDirectory) ResetPassword(tenantID, userID, actorID string) (string, error) {
 	if userID == actorID {
 		return "", ErrSelfOperation
@@ -175,7 +161,7 @@ func (d *CasdoorDirectory) ResetPassword(tenantID, userID, actorID string) (stri
 	if err != nil {
 		return "", err
 	}
-	b := make([]byte, 12) // 24 hex chars
+	b := make([]byte, 12) // 24 个十六进制字符
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}

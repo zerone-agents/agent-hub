@@ -1,37 +1,6 @@
 package auth
 
-import (
-	"errors"
-	"time"
-
-	authdom "control-panel/internal/domain/auth"
-
-	"gorm.io/gorm"
-)
-
-// UpsertIdentity inserts or refreshes the user_identities shadow row for an
-// external identity. Called on successful external (casdoor) logins.
-func UpsertIdentity(db *gorm.DB, provider string, au *AuthUser) error {
-	role := ""
-	if len(au.Roles) > 0 {
-		role = au.Roles[0]
-	}
-	now := time.Now()
-	var row authdom.UserIdentity
-	err := db.Where("provider = ? AND external_id = ?", provider, au.ID).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return db.Create(&authdom.UserIdentity{
-			Provider: provider, ExternalID: au.ID, TenantID: au.TenantID,
-			Username: au.Username, DisplayName: au.DisplayName, Email: au.Email,
-			Role: role, LastLoginAt: now,
-		}).Error
-	}
-	if err != nil {
-		return err
-	}
-	return db.Model(&row).Updates(map[string]any{
-		"tenant_id": au.TenantID, "username": au.Username,
-		"display_name": au.DisplayName, "email": au.Email,
-		"role": role, "last_login_at": now,
-	}).Error
-}
+// 本文件原 UpsertIdentity 已删除：user_identities 影子表的登录时 upsert
+// 由 MembershipStore（membership_store.go）取代。角色/状态不再随登录快照
+// 刷新，只能经用户管理或 SynthesizeMembership 合成规则改变。
+// 调用方接线见 Task 4（internal/handler/auth.go 的 Callback）。

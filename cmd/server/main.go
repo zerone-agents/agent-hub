@@ -11,6 +11,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/config"
 	"control-panel/internal/directory"
 	knowledgedomain "control-panel/internal/domain/knowledge"
@@ -61,6 +62,14 @@ func main() {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
+	// 一次性数据归一：旧模型升级后，存量行 {role:旧快照, status:pending} 与
+	// 新模型语义矛盾（pending 用户仍持有旧角色权限）。此处清空 pending 行的
+	// role，使升级后全员待审批、由 admin 重新分配。幂等（新模型 pending 行
+	// role 恒为 ""），builtin 模式下 user_identities 表无数据、执行无副作用。
+	if err := auth.NormalizePendingRoles(database.GetDB()); err != nil {
+		log.Fatalf("Failed to normalize pending roles: %v", err)
+	}
+
 	if err := cfg.ValidateAuth(); err != nil {
 		log.Fatalf("Invalid auth config: %v", err)
 	}
@@ -85,9 +94,12 @@ func main() {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
 			log.Fatalf("Failed to initialize Casdoor: %v", err)
 		}
-		casdoorProvider = auth.NewCasdoorProvider(cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		// membershipStore 是 user_identities 的唯一句柄：provider（登录时合成
+		// 角色）与 directory（用户管理 CRUD）共享同一实例。
+		membershipStore := auth.NewMembershipStore(database.GetDB())
+		casdoorProvider = auth.NewCasdoorProvider(membershipStore)
 		authProvider = casdoorProvider
-		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), cfg.Casdoor.RoleMapping, cfg.Casdoor.DefaultRole)
+		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), membershipStore)
 		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GetClient().GetSignupUrl(true, ""))
 		log.Println("Auth mode: casdoor")
 	}
@@ -256,14 +268,18 @@ func main() {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
 			})
 			authGroup.GET("/login", handler.Login)
-			authGroup.GET("/callback", handler.Callback(casdoorProvider, database.GetDB()))
+			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
 			authGroup.POST("/refresh", handler.RefreshToken)
 		}
 	}
 
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider))
+	// PendingApprovalGuard 紧跟鉴权中间件挂载（同一链）：casdoor 待审批用户
+	// （角色为空）除白名单（/auth/userinfo、/auth/logout、/health*）外一律 403，
+	// 前端据此渲染等待审批页。builtin 用户必有角色，guard 直接放行，行为零变化。
+	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
+	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
 	// Business-resource admin routes: admin OR maintainer.
 	v1adminGroup := v1group.Group("/admin", middleware.RequireManager())
 

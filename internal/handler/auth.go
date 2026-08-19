@@ -9,7 +9,6 @@ import (
 	"control-panel/internal/auth"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // Login initiates the OAuth flow by redirecting to the Casdoor login page.
@@ -38,9 +37,9 @@ func Login(c *gin.Context) {
 }
 
 // Callback handles the OAuth callback, exchanging the code for tokens.
-// It also upserts the user_identities shadow row on successful login;
-// upsert failures are logged but never block the login.
-func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
+// 登录成功时经 provider.SyncMembership 合成成员角色并落库（本地成员表）；
+// 同步失败仅记日志，不阻断登录（保持宽松语义，待审批由下游中间件拦截）。
+func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Query("code")
 		state := c.Query("state")
@@ -74,10 +73,10 @@ func Callback(provider *auth.CasdoorProvider, db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if user, err := auth.GetUserInfo(tokenResp.AccessToken); err == nil {
-			if au, err := provider.NormalizeUser(user); err == nil {
-				if err := auth.UpsertIdentity(db, "casdoor", au); err != nil {
-					log.Printf("[Callback] shadow identity upsert failed: %v", err)
-				}
+			// 同步成员记录（Admin API 拉权威 IsAdmin 合成 + 落库）；
+			// 失败仅记日志，不阻断登录。
+			if _, err := provider.SyncMembership(user); err != nil {
+				log.Printf("[Callback] sync membership failed: %v", err)
 			}
 		}
 
