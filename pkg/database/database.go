@@ -16,7 +16,6 @@ import (
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
-	"control-panel/internal/domain/tenant"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -83,10 +82,6 @@ func AutoMigrate() error {
 	}
 
 	err := DB.AutoMigrate(
-		&tenant.Tenant{},
-		&tenant.User{},
-		&tenant.ServiceDeployment{},
-		&tenant.Resource{},
 		&agent.AgentConfig{},
 		&agent.AgentSubagent{},
 		&agent.AgentKnowledgeDataset{},
@@ -127,6 +122,10 @@ func AutoMigrate() error {
 
 	if err := migrateDropLegacyProviderColumns(); err != nil {
 		return fmt.Errorf("failed to drop legacy provider columns: %w", err)
+	}
+
+	if err := migrateDropLegacyTenantDomain(); err != nil {
+		return fmt.Errorf("failed to drop legacy tenant domain: %w", err)
 	}
 
 	if err := migrateDropToolRequiredColumn(); err != nil {
@@ -230,6 +229,40 @@ func migrateDropLegacyProviderColumns() error {
 			return fmt.Errorf("drop type failed: %w", err)
 		}
 		log.Println("Dropped legacy column provider_summaries.type")
+	}
+	return nil
+}
+
+// migrateDropLegacyTenantDomain removes the pre-Casdoor self-built
+// multi-tenancy leftovers: the dead tenants / service_deployments /
+// resources tables, plus the stray tenant_id + casdoor_user_id columns that
+// the legacy tenant.User model leaked into the shared users table via
+// AutoMigrate. Casdoor 模式下组织管理不接管，租户标识直接走 JWT org 名
+// （user_identities.tenant_id），这套遗留结构无任何消费方。
+// Idempotent: HasTable/HasColumn guards; raw SQL for the same
+// SQLite-vs-MySQL uniformity reasons as migrateDropLegacyProviderColumns.
+func migrateDropLegacyTenantDomain() error {
+	if DB == nil {
+		return nil
+	}
+	migrator := DB.Migrator()
+	for _, table := range []string{"service_deployments", "resources", "tenants"} {
+		if migrator.HasTable(table) {
+			if err := DB.Exec(fmt.Sprintf("DROP TABLE `%s`", table)).Error; err != nil {
+				return fmt.Errorf("drop %s failed: %w", table, err)
+			}
+			log.Printf("Dropped legacy table %s", table)
+		}
+	}
+	// users 表被 legacy tenant.User 混入的游离列（auth.User 才是 users 表的
+	// owner，不认识这两列）。builtin 模式下 users 表仍承载登录，只清列不删表。
+	for _, col := range []string{"tenant_id", "casdoor_user_id"} {
+		if migrator.HasColumn("users", col) {
+			if err := DB.Exec(fmt.Sprintf("ALTER TABLE users DROP COLUMN `%s`", col)).Error; err != nil {
+				return fmt.Errorf("drop users.%s failed: %w", col, err)
+			}
+			log.Printf("Dropped legacy column users.%s", col)
+		}
 	}
 	return nil
 }

@@ -168,7 +168,6 @@ func main() {
 	deployerService := services.NewAgentDeployerService(deployerClient, cfg.Deployer.PublicHost, cfg.OSS.CDNHost, cfg.Provider.EncryptionKey, cfg.Deployer.RuntimeAPIKey, knowledgeService, kongService, aigcConfigSvc)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
-	tenantHandler := handler.NewTenantHandler()
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
@@ -243,8 +242,6 @@ func main() {
 
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 
-	serviceRouter := handler.NewServiceRouter()
-
 	// ==================== 路由管理 ====================
 
 	// /health
@@ -288,16 +285,6 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
-
-	// ---------- Tenant 领域 ----------
-	tenantsGroup := v1group.Group("/tenants")
-	{
-		tenantsGroup.GET("", tenantHandler.List)
-		tenantsGroup.POST("", tenantHandler.Create)
-		tenantsGroup.GET("/:id", tenantHandler.Get)
-		tenantsGroup.PUT("/:id", tenantHandler.Update)
-		tenantsGroup.DELETE("/:id", tenantHandler.Delete)
-	}
 
 	// ---------- Agent 领域 ----------
 	// 公开接口
@@ -425,9 +412,6 @@ func main() {
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组
 	handler.RegisterKnowledgeRoutes(adminWrite, adminRead, knowledgeHandler)
-
-	// /api/v1/services
-	v1group.GET("/services/:service", serviceRouter.Route)
 
 	// ---------- Chat 领域 ----------
 	chatGroup := v1group.Group("/chat")
