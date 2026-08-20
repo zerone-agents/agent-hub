@@ -39,6 +39,12 @@ var (
 	oauthSessionsMu sync.RWMutex
 )
 
+// applicationNameUnused：SDK 构造要求传 applicationName，但我们使用的链路
+// （自拼 OAuth 授权 URL、token 兑换/吊销、证书验签、组织作用域的管理 API）
+// 都不消费该值——Casdoor 用 client_id 反查应用。传空串即可，不设配置项，
+// 避免"看起来要配但实际无效"的误导。
+const applicationNameUnused = ""
+
 // InitCasdoor initializes the global Casdoor client with the provided configuration.
 func InitCasdoor(cfg *config.CasdoorConfig) error {
 	client = casdoorsdk.NewClient(
@@ -47,7 +53,7 @@ func InitCasdoor(cfg *config.CasdoorConfig) error {
 		cfg.ClientSecret,
 		cfg.Certificate,
 		cfg.Organization,
-		"middle-ground",
+		applicationNameUnused,
 	)
 	casdoorConfig = cfg
 
@@ -78,7 +84,7 @@ func ClientForOrg(org string) *casdoorsdk.Client {
 		casdoorConfig.ClientSecret,
 		casdoorConfig.Certificate,
 		org,
-		"middle-ground",
+		applicationNameUnused,
 	)
 	clientsByOrg[org] = c
 	return c
