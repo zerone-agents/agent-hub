@@ -21,6 +21,14 @@ import (
 var client *casdoorsdk.Client
 var casdoorConfig *config.CasdoorConfig
 
+// clientsByOrg 按组织缓存 SDK client：多租户下 directory 层需要以请求租户
+// （casdoor organization）为 owner 调用管理 API，endpoint/凭证/证书共用，
+// 仅 OrganizationName 不同。
+var (
+	clientsByOrg   = make(map[string]*casdoorsdk.Client)
+	clientsByOrgMu sync.Mutex
+)
+
 type OAuthSession struct {
 	State        string
 	CodeVerifier string
@@ -50,6 +58,30 @@ func InitCasdoor(cfg *config.CasdoorConfig) error {
 // GetClient returns the initialized Casdoor client instance.
 func GetClient() *casdoorsdk.Client {
 	return client
+}
+
+// ClientForOrg returns a cached SDK client whose organization scope is org.
+// Falls back to the configured default organization when org is empty.
+// Must be called after InitCasdoor.
+func ClientForOrg(org string) *casdoorsdk.Client {
+	if org == "" {
+		return client
+	}
+	clientsByOrgMu.Lock()
+	defer clientsByOrgMu.Unlock()
+	if c, ok := clientsByOrg[org]; ok {
+		return c
+	}
+	c := casdoorsdk.NewClient(
+		casdoorConfig.Endpoint,
+		casdoorConfig.ClientID,
+		casdoorConfig.ClientSecret,
+		casdoorConfig.Certificate,
+		org,
+		"middle-ground",
+	)
+	clientsByOrg[org] = c
+	return c
 }
 
 // GenerateState generates a random OAuth state parameter.

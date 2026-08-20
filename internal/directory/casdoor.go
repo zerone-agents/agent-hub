@@ -18,8 +18,8 @@ const providerCasdoor = "casdoor"
 // NewCasdoorDirectory 构造 CasdoorDirectory。角色与审批状态以本地成员表
 // （store，user_identities）为真实源；client 仅用于 casdoor 侧字段的读改
 // （is_admin / is_forbidden / password）。
-func NewCasdoorDirectory(client UserClient, store auth.MembershipStore) *CasdoorDirectory {
-	return &CasdoorDirectory{client: client, store: store}
+func NewCasdoorDirectory(resolveClient ClientResolver, store auth.MembershipStore) *CasdoorDirectory {
+	return &CasdoorDirectory{resolveClient: resolveClient, store: store}
 }
 
 // ListUsers 列出租户全部成员（本地 user_identities，按记录 id 升序）。
@@ -31,7 +31,7 @@ func (d *CasdoorDirectory) ListUsers(tenantID string) ([]ManagedUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	users, err := d.client.GetUsers()
+	users, err := d.resolveClient(tenantID).GetUsers()
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (d *CasdoorDirectory) localTenantRecord(tenantID, userID string) (*authdom.
 // getTenantUser 从 casdoor 拉取用户并校验租户归属。SDK 错误原样透传
 // （handler 映射为 502）；仅用户不存在或跨租户时返回 ErrUserNotFound（404）。
 func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.User, error) {
-	u, err := d.client.GetUserByUserId(userID)
+	u, err := d.resolveClient(tenantID).GetUserByUserId(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 	}
 	if role == authdom.RoleAdmin || rec.Role == authdom.RoleAdmin || u.IsAdmin {
 		u.IsAdmin = role == authdom.RoleAdmin
-		ok, err := d.client.UpdateUserForColumns(u, []string{"is_admin"})
+		ok, err := d.resolveClient(tenantID).UpdateUserForColumns(u, []string{"is_admin"})
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, a
 		return err
 	}
 	u.IsForbidden = disabled
-	ok, err := d.client.UpdateUserForColumns(u, []string{"is_forbidden"})
+	ok, err := d.resolveClient(tenantID).UpdateUserForColumns(u, []string{"is_forbidden"})
 	if err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func (d *CasdoorDirectory) ResetPassword(tenantID, userID, actorID string) (stri
 	}
 	plain := "Reset!" + hex.EncodeToString(b)
 	u.Password = plain
-	ok, err := d.client.UpdateUserForColumns(u, []string{"password"})
+	ok, err := d.resolveClient(tenantID).UpdateUserForColumns(u, []string{"password"})
 	if err != nil {
 		return "", err
 	}

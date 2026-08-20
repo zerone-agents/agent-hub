@@ -99,8 +99,12 @@ func main() {
 		membershipStore := auth.NewMembershipStore(database.GetDB())
 		casdoorProvider = auth.NewCasdoorProvider(membershipStore)
 		authProvider = casdoorProvider
-		casdoorDir = directory.NewCasdoorDirectory(auth.GetClient(), membershipStore)
-		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GetClient().GetSignupUrl(true, ""))
+		// directory 按请求租户解析 casdoor client（多租户：每个组织独立 API 作用域）。
+		casdoorDir = directory.NewCasdoorDirectory(func(org string) directory.UserClient {
+			return auth.ClientForOrg(org)
+		}, membershipStore)
+		// 注册链接在 handler 里按请求租户动态拼接，这里只传 casdoor 实例地址。
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, cfg.Casdoor.Endpoint)
 		log.Println("Auth mode: casdoor")
 	}
 

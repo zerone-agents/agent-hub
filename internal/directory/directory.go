@@ -37,10 +37,16 @@ type UserClient interface {
 	UpdateUserForColumns(user *casdoorsdk.User, columns []string) (bool, error)
 }
 
+// ClientResolver resolves the tenant-scoped casdoor client for a tenant
+// (casdoor organization). Multi-tenant: SDK API calls filter by the client's
+// OrganizationName, so each tenant needs its own client — see
+// auth.ClientForOrg.
+type ClientResolver func(tenantID string) UserClient
+
 // CasdoorDirectory serves user management from the local membership table
 // (auth.MembershipStore)：角色/审批状态以本地为真实源，仅 is_admin（admin
 // 任免双写）、is_forbidden（禁用直通）、password（重置直通）走 casdoor。
 type CasdoorDirectory struct {
-	client UserClient
-	store  auth.MembershipStore
+	resolveClient ClientResolver
+	store         auth.MembershipStore
 }
