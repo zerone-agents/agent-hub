@@ -6,6 +6,9 @@ import DeployModal from './DeployModal'
 import { agentApi } from '@/api/agents'
 import type { Agent, DeploymentStatus } from '@/api/agents'
 import type { Provider } from '@/api/providers'
+import { setAuthRole } from '@/test/auth-store-mock'
+
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 vi.mock('@/api/agents', () => ({
   agentApi: {
@@ -63,6 +66,7 @@ const mockResponse = <T,>(data: T) => ({ data: { data, success: true } })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  setAuthRole('admin')
 })
 
 describe('DeployModal', () => {
@@ -115,6 +119,30 @@ describe('DeployModal', () => {
       expect(screen.getByText(/localhost:8080/)).toBeInTheDocument()
       expect(screen.getByText('8080')).toBeInTheDocument()
     })
+  })
+
+  it('member: 操作按钮全部 disabled，聊天按钮可用', async () => {
+    setAuthRole('member')
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(
+        makeStatus({
+          status: 'running',
+          health: 'healthy',
+          hostPort: 8080,
+          runtimeUrl: 'http://localhost:8080',
+        })
+      ) as never
+    )
+
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /停止/ })).toBeDisabled()
+    })
+    expect(screen.getByRole('button', { name: /归档/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /重新部署/ })).toBeDisabled()
+    // 聊天是 member 唯一可用操作
+    expect(screen.getByRole('button', { name: /聊天/ })).not.toBeDisabled()
   })
 
   it('clicking deploy button triggers API call', async () => {

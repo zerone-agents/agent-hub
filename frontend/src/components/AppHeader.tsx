@@ -222,12 +222,14 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       label: '修改密码',
       onClick: () => { setPwdModalOpen(true) }
     },
-    {
-      key: 'cli-tokens',
-      icon: <KeyIcon size={14} />,
-      label: 'CLI Tokens',
-      onClick: async () => { await navigate('/settings/cli-tokens'); }
-    },
+    ...(canWrite
+      ? [{
+          key: 'cli-tokens',
+          icon: <KeyIcon size={14} />,
+          label: 'CLI Tokens',
+          onClick: async () => { await navigate('/settings/cli-tokens'); }
+        }]
+      : []),
     ...(canWrite
       ? [{
           key: 'aigc-config',

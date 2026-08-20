@@ -17,6 +17,7 @@ import PrimaryButton from '@/components/PrimaryButton'
 import { agentApi } from '@/api/agents'
 import { parseApiError } from '@/api/client'
 import { useKnowledgeList } from '@/queries/useKnowledge'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Agent, DeploymentStatus } from '@/api/agents'
 import type { Provider } from '@/api/providers'
 import { tokens as t } from '@/styles/tokens'
@@ -258,6 +259,7 @@ function isMidState(s: DeploymentStatus | null): boolean {
 
 export default function DeployModal({ agent, providers, open, onClose }: DeployModalProps) {
   const { styles } = useStyles()
+  const canWrite = useCanWrite()
   const [status, setStatus] = useState<DeploymentStatus | null>(null)
   // Whether the initial getDeployment request has resolved. Until it does, the
   // footer action buttons are hidden to prevent a flash of the "部署" button
@@ -770,6 +772,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<StopIcon size={16} />}
                 onClick={handleStop}
                 loading={loading}
+                disabled={!canWrite || loading}
               >
                 停止
               </Button>
@@ -778,6 +781,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
+                disabled={!canWrite || loading}
               >
                 归档
               </Button>
@@ -785,6 +789,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
+                disabled={!canWrite || loading}
               >
                 重新部署
               </Button>
@@ -803,7 +808,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               icon={<RocketIcon size={16} />}
               onClick={() => handleDeploy()}
               loading={loading}
-              disabled={isMissingConfig}
+              disabled={isMissingConfig || !canWrite || loading}
             >
               部署
             </PrimaryButton>
@@ -816,6 +821,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete(true)}
                 loading={loading}
+                disabled={!canWrite || loading}
               >
                 彻底删除
               </Button>
@@ -823,7 +829,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
-                disabled={isMissingConfig}
+                disabled={isMissingConfig || !canWrite || loading}
               >
                 重新部署
               </PrimaryButton>
@@ -837,6 +843,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<TrashIcon size={16} />}
                 onClick={() => handleDelete()}
                 loading={loading}
+                disabled={!canWrite || loading}
               >
                 归档
               </Button>
@@ -845,6 +852,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                   icon={<PlayIcon size={16} weight="fill" />}
                   onClick={handleStart}
                   loading={loading}
+                  disabled={!canWrite || loading}
                 >
                   启动
                 </PrimaryButton>
@@ -853,7 +861,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 icon={<ArrowClockwiseIcon size={16} />}
                 onClick={openConfirm}
                 loading={loading}
-                disabled={isMissingConfig}
+                disabled={isMissingConfig || !canWrite || loading}
               >
                 重新部署
               </Button>
