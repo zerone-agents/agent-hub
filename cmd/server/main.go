@@ -58,7 +58,11 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := database.AutoMigrate(); err != nil {
+	backfill := "default"
+	if !cfg.Auth.IsBuiltin() {
+		backfill = cfg.Casdoor.Organization
+	}
+	if err := database.AutoMigrate(backfill); err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 

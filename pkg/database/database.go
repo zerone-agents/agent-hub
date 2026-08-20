@@ -72,7 +72,20 @@ func Close() error {
 	return nil
 }
 
-func AutoMigrate() error {
+// defaultBackfillTenant 是回填存量数据 tenant_id 时的兜底租户。
+// 本地常量而非 import internal/domain/tenant，避免 pkg → internal 的循环依赖。
+const defaultBackfillTenant = "default"
+
+// 包级变量，由 AutoMigrate 设置、各 migrate 回填函数消费
+var backfillTenantID = defaultBackfillTenant
+
+// AutoMigrate runs the automatic migration for all models.
+// backfillTenant 指定存量行空 tenant_id 的回填目标；传空时回落到 defaultBackfillTenant。
+func AutoMigrate(backfillTenant string) error {
+	if backfillTenant == "" {
+		backfillTenant = defaultBackfillTenant
+	}
+	backfillTenantID = backfillTenant
 	if DB == nil {
 		return fmt.Errorf("database not initialized")
 	}
@@ -630,5 +643,19 @@ func migrateSessionIndexes() error {
 		return fmt.Errorf("create updated_at index on cloud_sessions: %w", err)
 	}
 	log.Println("cloud_sessions updated_at index created")
+	return nil
+}
+
+// BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。
+// 共享行的空串语义在加列回填之后才引入——回填发生在任何代码写共享行之前，
+// 所以"空即存量"在此刻成立。
+func BackfillTenantID(db *gorm.DB, table string) error {
+	res := db.Exec(fmt.Sprintf("UPDATE `%s` SET tenant_id = ? WHERE tenant_id = '' OR tenant_id IS NULL", table), backfillTenantID)
+	if res.Error != nil {
+		return fmt.Errorf("backfill %s.tenant_id: %w", table, res.Error)
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("Backfilled %d rows in %s to tenant %q", res.RowsAffected, table, backfillTenantID)
+	}
 	return nil
 }
