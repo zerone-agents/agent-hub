@@ -766,6 +766,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 	req := &deployer.CreateAgentRequest{
 		Agent: deployer.AgentDefinition{
 			Name:            cfg.Name,
+			Description:     firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
 			Model:           cfg.ModelID,
 			SystemPrompt:    cfg.SystemPrompt,
 			MaxTurns:        intPtr(cfg.MaxTurns),
