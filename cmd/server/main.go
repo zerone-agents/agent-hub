@@ -311,8 +311,8 @@ func main() {
 		agentsGroup.POST("/:name/chat/sessions/:id/messages", agentChatHandler.SendMessage)
 	}
 
-	// 管理接口：写方法/敏感 GET（deploy 状态、files/content）→ write 组；
-	// 非敏感 GET（列表、detail、tools、skills、mcps、knowledge、files 列表）→ read 组（member 只读）
+	// 管理接口：写方法/敏感 GET（files/content）→ write 组；
+	// 非敏感 GET（列表、detail、tools、skills、mcps、knowledge、files 列表、deploy 状态）→ read 组（member 只读）
 	adminAgentsGroup := adminWrite.Group("/agents")
 	adminAgentsReadGroup := adminRead.Group("/agents")
 	{
@@ -331,8 +331,8 @@ func main() {
 		adminAgentsGroup.PUT("/:name/knowledge", agentHandler.UpdateAgentKnowledge)
 		adminAgentsGroup.POST("/:name/probe", agentHandler.ProbeAgent)
 		adminAgentsGroup.POST("/:name/deploy", agentHandler.DeployAgent)
-		// 部署状态属敏感信息，留 write 组
-		adminAgentsGroup.GET("/:name/deploy", agentHandler.GetDeployment)
+		// 部署状态：member 可读（含 runtimeUrl/apiKey——内部可信环境，产品已确认）
+		adminAgentsReadGroup.GET("/:name/deploy", agentHandler.GetDeployment)
 		adminAgentsGroup.POST("/:name/deploy/stop", agentHandler.StopDeployment)
 		adminAgentsGroup.POST("/:name/deploy/start", agentHandler.StartDeployment)
 		adminAgentsGroup.DELETE("/:name/deploy", agentHandler.DeleteDeployment)
@@ -504,9 +504,9 @@ func main() {
 	}
 
 	// ---------- CLI Token 领域 ----------
-	// 任何已登录用户（Casdoor JWT 或 CLI token）都可以管理自己的 CLI tokens。
-	// 注意：CLI token 自身也能调用这些端点（例如轮换）。
-	cliGroup := v1group.Group("/cli")
+	// CLI token 签发/查看/吊销仅 admin|maintainer（member 不开放；
+	// member 历史签发的 token 不吊销，仍可用于公开聊天接口调用）。
+	cliGroup := v1group.Group("/cli", middleware.RequireManager())
 	{
 		cliGroup.POST("/issue-token", cliTokenHandler.Issue)
 		cliGroup.GET("/tokens", cliTokenHandler.List)
