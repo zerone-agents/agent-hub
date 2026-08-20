@@ -142,7 +142,9 @@ type ListResponse struct {
 	TotalPages int         `json:"total_pages"`
 }
 
-func (s *ChatService) ListSessions(page, pageSize int) (*ListResponse, error) {
+// ListSessions 返回会话列表。userID 非空时按该用户过滤（member 数据范围）；
+// 为空时返回全部（admin/maintainer）。
+func (s *ChatService) ListSessions(page, pageSize int, userID string) (*ListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -150,7 +152,14 @@ func (s *ChatService) ListSessions(page, pageSize int) (*ListResponse, error) {
 		pageSize = 20
 	}
 
-	sessions, total, err := s.repo.ListSessions(page, pageSize)
+	var sessions []*chat.Session
+	var total int64
+	var err error
+	if userID != "" {
+		sessions, total, err = s.repo.ListSessionsByUser(userID, page, pageSize)
+	} else {
+		sessions, total, err = s.repo.ListSessions(page, pageSize)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +178,24 @@ func (s *ChatService) ListSessions(page, pageSize int) (*ListResponse, error) {
 	}, nil
 }
 
-func (s *ChatService) GetSession(sessionID string) (*chat.Session, error) {
+// GetSession 按归属取会话。userID 非空（member）时查不到他人会话——
+// 调用方统一映射为 404（不暴露会话存在性）。
+func (s *ChatService) GetSession(sessionID, userID string) (*chat.Session, error) {
+	if userID != "" {
+		return s.repo.GetSessionForUser(sessionID, userID)
+	}
 	return s.repo.GetSession(sessionID)
 }
 
-func (s *ChatService) ListMessages(sessionID string, page, pageSize int) (*ListResponse, error) {
+// ListMessages 列出会话消息。userID 非空（member）时先校验会话归属，
+// 他人会话返回错误（调用方映射 404）。
+func (s *ChatService) ListMessages(sessionID string, page, pageSize int, userID string) (*ListResponse, error) {
+	if userID != "" {
+		if _, err := s.repo.GetSessionForUser(sessionID, userID); err != nil {
+			return nil, err
+		}
+	}
+
 	if page < 1 {
 		page = 1
 	}
@@ -200,7 +222,14 @@ func (s *ChatService) ListMessages(sessionID string, page, pageSize int) (*ListR
 	}, nil
 }
 
-func (s *ChatService) DeleteSession(sessionID string) error {
+// DeleteSession 删除会话。userID 非空（member）时先校验归属——
+// 只能删自己的会话；admin/maintainer（userID 为空）可删任意会话。
+func (s *ChatService) DeleteSession(sessionID, userID string) error {
+	if userID != "" {
+		if _, err := s.repo.GetSessionForUser(sessionID, userID); err != nil {
+			return err
+		}
+	}
 	return s.repo.DeleteSession(sessionID)
 }
 

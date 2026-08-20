@@ -431,14 +431,14 @@ func main() {
 		chatGroup.POST("/push", chatHandler.Push)
 	}
 
-	// 聊天历史：GET 会话/消息 → read 组（member 只读）；DELETE → write 组
-	adminChatGroup := adminWrite.Group("/chat")
+	// 聊天历史：GET 会话/消息 → read 组（member 只读）；DELETE 也在 read 组（handler 层归属校验）
 	adminChatReadGroup := adminRead.Group("/chat")
 	{
 		adminChatReadGroup.GET("/sessions", chatHandler.ListSessions)
 		adminChatReadGroup.GET("/sessions/:id", chatHandler.GetSession)
 		adminChatReadGroup.GET("/sessions/:id/messages", chatHandler.ListMessages)
-		adminChatGroup.DELETE("/sessions/:id", chatHandler.DeleteSession)
+		// member 可删自己的会话（handler 层归属校验，他人会话 404）
+		adminChatReadGroup.DELETE("/sessions/:id", chatHandler.DeleteSession)
 	}
 
 	// ---------- AIGC 标识配置 ----------

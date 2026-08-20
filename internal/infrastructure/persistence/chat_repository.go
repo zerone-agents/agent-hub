@@ -117,6 +117,22 @@ func (r *ChatRepository) ListSessions(page, pageSize int) ([]*chat.Session, int6
 	return sessions, total, err
 }
 
+// ListSessionsByUser 仅返回指定用户的会话（member 数据范围）。
+func (r *ChatRepository) ListSessionsByUser(userID string, page, pageSize int) ([]*chat.Session, int64, error) {
+	var total int64
+	if err := r.db.Model(&chat.Session{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var sessions []*chat.Session
+	offset := (page - 1) * pageSize
+	err := r.db.Where("user_id = ?", userID).
+		Order("updated_at DESC").
+		Offset(offset).Limit(pageSize).
+		Find(&sessions).Error
+	return sessions, total, err
+}
+
 func (r *ChatRepository) GetSession(sessionID string) (*chat.Session, error) {
 	var sess chat.Session
 	err := r.db.Where("id = ?", sessionID).First(&sess).Error
