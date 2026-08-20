@@ -10,6 +10,7 @@ import type { Scene } from '@/api/scenes'
 import type { Agent } from '@/api/agents'
 import { useScenes, useDeleteScene } from '@/queries/useScenes'
 import { useAgents } from '@/queries/useAgents'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 import BorderedTable from '@/components/BorderedTable'
@@ -63,6 +64,7 @@ export default function SceneListPage() {
   const { data: scenes = [], isLoading } = useScenes()
   const { data: agents = [] } = useAgents()
   const deleteScene = useDeleteScene()
+  const canWrite = useCanWrite()
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingScene, setEditingScene] = useState<Scene | null>(null)
@@ -128,29 +130,33 @@ export default function SceneListPage() {
       fixed: 'right',
       render: (_, record) => (
         <div style={{ display: 'flex', gap: 2 }}>
-          <button
-            type="button"
-            className={styles.actBtn}
-            title="编辑"
-            onClick={() => {
-              setEditingScene(record)
-              setFormOpen(true)
-            }}
-          >
-            <PencilSimpleIcon size={14} />
-          </button>
-          <Popconfirm
-            title="确认删除？"
-            description={`删除 "${record.name}"？此操作不可撤销。`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => { deleteScene.mutate(record.name); }}
-          >
-            <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-              <TrashIcon size={14} />
-            </button>
-          </Popconfirm>
+          {canWrite && (
+            <>
+              <button
+                type="button"
+                className={styles.actBtn}
+                title="编辑"
+                onClick={() => {
+                  setEditingScene(record)
+                  setFormOpen(true)
+                }}
+              >
+                <PencilSimpleIcon size={14} />
+              </button>
+              <Popconfirm
+                title="确认删除？"
+                description={`删除 "${record.name}"？此操作不可撤销。`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => { deleteScene.mutate(record.name); }}
+              >
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                  <TrashIcon size={14} />
+                </button>
+              </Popconfirm>
+            </>
+          )}
         </div>
       )
     }
@@ -163,15 +169,17 @@ export default function SceneListPage() {
           <div className={styles.pageTitle}>场景管理</div>
           <div className={styles.pageSub}>管理 Agent 场景配置，组合 Agent 与提示词预设</div>
         </div>
-        <PrimaryButton
-          icon={<PlusIcon size={16} weight="bold" />}
-          onClick={() => {
-            setEditingScene(null)
-            setFormOpen(true)
-          }}
-        >
-          新建场景
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton
+            icon={<PlusIcon size={16} weight="bold" />}
+            onClick={() => {
+              setEditingScene(null)
+              setFormOpen(true)
+            }}
+          >
+            新建场景
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>

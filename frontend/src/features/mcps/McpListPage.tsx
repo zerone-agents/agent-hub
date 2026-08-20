@@ -5,6 +5,7 @@ import { PlusIcon, PencilSimpleIcon, TrashIcon, PlugsConnectedIcon } from '@phos
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useMcps, useDeleteMcp, useProbeMcp } from '@/queries/useMcps'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Mcp } from '@/api/mcps'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -137,6 +138,7 @@ export default function McpListPage() {
   const { styles } = useStyles()
   const { data: mcps = [], isLoading } = useMcps()
   const deleteMcp = useDeleteMcp()
+  const canWrite = useCanWrite()
   const probeMcp = useProbeMcp()
 
   const [formOpen, setFormOpen] = useState(false)
@@ -191,9 +193,11 @@ export default function McpListPage() {
           <div className={styles.pageTitle}>MCP 配置</div>
           <div className={styles.pageSub}>管理外部 MCP 服务器配置，供 Agent 绑定使用</div>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-          新建 MCP
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
+            新建 MCP
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>
@@ -267,49 +271,51 @@ export default function McpListPage() {
               }
               footerLeft={formatTime(mcp.createdAt)}
               footerRight={
-                <div style={{ display: 'flex', gap: 2 }}>
-                  {!mcp.isBuiltin && (
+                canWrite ? (
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {!mcp.isBuiltin && (
+                      <button
+                        type="button"
+                        className={styles.actBtn}
+                        title="探测"
+                        disabled={probingName === mcp.name}
+                        onClick={() => handleProbe(mcp)}
+                      >
+                        {probingName === mcp.name ? (
+                          <Spin size="small" />
+                        ) : (
+                          <PlugsConnectedIcon size={14} />
+                        )}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={styles.actBtn}
-                      title="探测"
-                      disabled={probingName === mcp.name}
-                      onClick={() => handleProbe(mcp)}
+                      title="编辑"
+                      onClick={() => { showEdit(mcp); }}
                     >
-                      {probingName === mcp.name ? (
-                        <Spin size="small" />
-                      ) : (
-                        <PlugsConnectedIcon size={14} />
-                      )}
+                      <PencilSimpleIcon size={14} />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.actBtn}
-                    title="编辑"
-                    onClick={() => { showEdit(mcp); }}
-                  >
-                    <PencilSimpleIcon size={14} />
-                  </button>
-                  {!mcp.isBuiltin && (
-                    <Popconfirm
-                      title="确认删除？"
-                      description={`删除 "${mcp.name}"？所有 Agent 的绑定关系将一并清除。`}
-                      okText="删除"
-                      okButtonProps={{ danger: true }}
-                      cancelText="取消"
-                      onConfirm={() => handleDelete(mcp.name)}
-                    >
-                      <button
-                        type="button"
-                        className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                        title="删除"
+                    {!mcp.isBuiltin && (
+                      <Popconfirm
+                        title="确认删除？"
+                        description={`删除 "${mcp.name}"？所有 Agent 的绑定关系将一并清除。`}
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                        onConfirm={() => handleDelete(mcp.name)}
                       >
-                        <TrashIcon size={14} />
-                      </button>
-                    </Popconfirm>
-                  )}
-                </div>
+                        <button
+                          type="button"
+                          className={`${styles.actBtn} ${styles.actBtnDanger}`}
+                          title="删除"
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      </Popconfirm>
+                    )}
+                  </div>
+                ) : null
               }
             />
           ))}

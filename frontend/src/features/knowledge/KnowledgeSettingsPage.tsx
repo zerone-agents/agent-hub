@@ -5,6 +5,7 @@ import { useParams } from "react-router";
 import { useKnowledgeDetail, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useMultiragModels } from "@/queries/useMultirag";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
+import { useCanWrite } from "@/hooks/useCanWrite";
 import { parseApiError } from "@/api/client";
 import { tokens as t } from "@/styles/tokens";
 import {
@@ -46,6 +47,7 @@ export default function KnowledgeSettingsPage() {
   const syncProvider = useSyncProviderMultiRAG();
   const providers = useProviders();
   const multiragEmbedding = useMultiragModels("embedding");
+  const canWrite = useCanWrite();
   const embeddingLocked = (dataset?.chunk_num ?? 0) > 0;
 
   const embeddingGroups = useMemo(
@@ -151,7 +153,7 @@ export default function KnowledgeSettingsPage() {
 
   return (
     <div className={styles.card}>
-      <Form form={form} layout="vertical" requiredMark={false}>
+      <Form form={form} layout="vertical" requiredMark={false} disabled={!canWrite}>
         <DatasetFields
           embeddingOptions={embeddingOptions}
           embeddingLoading={candidatesLoading}
@@ -159,13 +161,15 @@ export default function KnowledgeSettingsPage() {
           embeddingChunkCount={dataset?.chunk_num ?? 0}
         />
         <div className={styles.foot}>
-          <Button
-            type="primary"
-            onClick={handleSave}
-            loading={updateKnowledge.isPending}
-          >
-            保存设置
-          </Button>
+          {canWrite && (
+            <Button
+              type="primary"
+              onClick={handleSave}
+              loading={updateKnowledge.isPending}
+            >
+              保存设置
+            </Button>
+          )}
         </div>
       </Form>
     </div>

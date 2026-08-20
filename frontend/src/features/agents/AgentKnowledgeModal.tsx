@@ -11,6 +11,8 @@ import { useKnowledgeList } from '@/queries/useKnowledge'
 interface AgentKnowledgeModalProps {
   open: boolean
   agent: Agent | null
+  /** 只读模式（member）：Transfer 禁改、隐藏保存按钮，仅可查看绑定关系。 */
+  canWrite: boolean
   onClose: () => void
 }
 
@@ -40,7 +42,7 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowledgeModalProps) {
+export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: AgentKnowledgeModalProps) {
   const { styles } = useStyles()
   const name = agent?.name ?? ''
 
@@ -98,7 +100,9 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <Button onClick={handleCancel}>取消</Button>
-          <PrimaryButton onClick={handleOk} loading={updateMutation.isPending}>保存</PrimaryButton>
+          {canWrite && (
+            <PrimaryButton onClick={handleOk} loading={updateMutation.isPending}>保存</PrimaryButton>
+          )}
         </div>
       }
     >
@@ -114,6 +118,7 @@ export default function AgentKnowledgeModal({ open, agent, onClose }: AgentKnowl
           onChange={handleChange}
           titles={['可选知识库', '已绑定']}
           render={(item) => item.title}
+          disabled={!canWrite}
           styles={{ section: { width: 280, height: 360 } }}
         />
       )}

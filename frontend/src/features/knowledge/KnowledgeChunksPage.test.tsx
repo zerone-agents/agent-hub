@@ -5,6 +5,10 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeChunksPage from "./KnowledgeChunksPage";
+import { setAuthRole } from "@/test/auth-store-mock";
+
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock("@/stores/auth", async () => (await import("@/test/auth-store-mock")).createAuthStoreMock());
 
 const h = vi.hoisted(() => ({
   chunks: [] as Record<string, unknown>[],
@@ -99,6 +103,7 @@ function renderPage() {
 
 describe("KnowledgeChunksPage", () => {
   beforeEach(() => {
+    setAuthRole("admin");
     h.chunks = sampleChunks;
     h.total = sampleChunks.length;
     h.refetchMock.mockReset();
@@ -210,4 +215,21 @@ describe("KnowledgeChunksPage", () => {
       }),
     );
   }, 15000);
+
+  it("member: hides editor/switch/delete/bulk but keeps data and copy ID", () => {
+    setAuthRole("member");
+    renderPage();
+
+    // 数据仍可见（只读）
+    expect(screen.getByText("original chunk content")).toBeInTheDocument();
+    expect(screen.getByText("文档信息")).toBeInTheDocument();
+    // 写操作按钮隐藏：新增切片/编辑/删除/启用 Switch
+    expect(screen.queryByRole("button", { name: "新增切片" })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: /编辑/ })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /删除/ })).toHaveLength(0);
+    expect(document.querySelector(".ant-switch")).toBeNull();
+    // 批量勾选与批量栏不存在
+    expect(screen.queryByRole("checkbox", { name: "选择本页" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/已选择/)).not.toBeInTheDocument();
+  });
 });

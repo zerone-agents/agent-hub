@@ -4,6 +4,7 @@ import { useNavigate, useLocation, Link } from 'react-router'
 import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, LockIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
@@ -173,6 +174,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
+  const canWrite = useCanWrite()
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [pwdModalOpen, setPwdModalOpen] = useState(false)
@@ -226,12 +228,14 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       label: 'CLI Tokens',
       onClick: async () => { await navigate('/settings/cli-tokens'); }
     },
-    {
-      key: 'aigc-config',
-      icon: <ShieldCheckIcon size={14} />,
-      label: 'AIGC 标识配置',
-      onClick: async () => { await navigate('/settings/aigc'); }
-    },
+    ...(canWrite
+      ? [{
+          key: 'aigc-config',
+          icon: <ShieldCheckIcon size={14} />,
+          label: 'AIGC 标识配置',
+          onClick: async () => { await navigate('/settings/aigc'); }
+        }]
+      : []),
     {
       key: 'logout',
       icon: <SignOutIcon size={14} />,

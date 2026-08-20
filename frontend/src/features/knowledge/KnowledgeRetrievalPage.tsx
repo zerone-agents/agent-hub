@@ -3,7 +3,6 @@ import {
   Input,
   InputNumber,
   Switch,
-  Button,
   Tag,
   Empty,
   Spin,
@@ -12,6 +11,8 @@ import {
 import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useParams } from 'react-router'
+import PrimaryButton from '@/components/PrimaryButton'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { useRetrievalTest } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 
@@ -73,6 +74,7 @@ export default function KnowledgeRetrievalPage() {
   const { id = '' } = useParams()
   const [form] = Form.useForm<RetrievalFormValues>()
   const retrieval = useRetrievalTest()
+  const canWrite = useCanWrite()
 
   const handleFinish = (values: RetrievalFormValues) => {
     retrieval.mutate({
@@ -116,16 +118,17 @@ export default function KnowledgeRetrievalPage() {
           <Form.Item label="高亮" name="highlight" valuePropName="checked" style={{ marginBottom: 0 }}>
             <Switch />
           </Form.Item>
-          <Form.Item style={{ marginBottom: 0 }}>
-            <Button
-              type="primary"
-              htmlType="submit"
-              icon={<MagnifyingGlassIcon size={16} />}
-              loading={retrieval.isPending}
-            >
-              检索测试
-            </Button>
-          </Form.Item>
+          {canWrite && (
+            <Form.Item style={{ marginBottom: 0 }}>
+              <PrimaryButton
+                htmlType="submit"
+                icon={<MagnifyingGlassIcon size={16} />}
+                loading={retrieval.isPending}
+              >
+                检索测试
+              </PrimaryButton>
+            </Form.Item>
+          )}
         </div>
       </Form>
 

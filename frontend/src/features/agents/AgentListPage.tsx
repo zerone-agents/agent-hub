@@ -14,6 +14,7 @@ import { useTools } from '@/queries/useTools'
 import { useSkills } from '@/queries/useSkills'
 import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
 import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
@@ -70,6 +71,7 @@ export default function AgentListPage() {
   const { styles } = useStyles()
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
+  const canWrite = useCanWrite()
   const { data: skills = [] } = useSkills()
   const { data: providers = [] } = useProviders('chat')
   const { data: mcps = [] } = useMcps()
@@ -480,9 +482,11 @@ export default function AgentListPage() {
           <div className={styles.pageTitle}>Agent 管理</div>
           <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-          新建代理
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
+            新建代理
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>
@@ -516,6 +520,7 @@ export default function AgentListPage() {
                   key={agent.name}
                   agent={agent}
                   modelDisplayName={getModelDisplayName(agent)}
+                  canWrite={canWrite}
                   onEdit={showEdit}
                   onDelete={(name) => { deleteAgent.mutate(name); }}
                   onEditSubagents={handleEditSubagents}
@@ -550,6 +555,7 @@ export default function AgentListPage() {
         <AgentKnowledgeModal
           open={knowledgeOpen}
           agent={knowledgeAgent}
+          canWrite={canWrite}
           onClose={() => {
             setKnowledgeOpen(false)
             setKnowledgeAgent(null)
@@ -566,15 +572,17 @@ export default function AgentListPage() {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setSubagentOpen(false); }}>取消</Button>
-            <PrimaryButton
-              loading={updateSubagents.isPending}
-              onClick={async () => {
-                await updateSubagents.mutateAsync({ name: currentName, subagents: selectedSubagents })
-                setSubagentOpen(false)
-              }}
-            >
-              确认
-            </PrimaryButton>
+            {canWrite && (
+              <PrimaryButton
+                loading={updateSubagents.isPending}
+                onClick={async () => {
+                  await updateSubagents.mutateAsync({ name: currentName, subagents: selectedSubagents })
+                  setSubagentOpen(false)
+                }}
+              >
+                确认
+              </PrimaryButton>
+            )}
           </div>
         }
       >
@@ -587,6 +595,7 @@ export default function AgentListPage() {
           size="large"
           value={selectedSubagents}
           onChange={setSelectedSubagents}
+          disabled={!canWrite}
         />
       </Modal>
 
@@ -599,16 +608,18 @@ export default function AgentListPage() {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setToolOpen(false); }}>取消</Button>
-            <PrimaryButton
-              loading={updateAgentTools.isPending}
-              onClick={async () => {
-                const merged = Array.from(new Set([...selectedTools, ...defaultToolNames]))
-                await updateAgentTools.mutateAsync({ name: currentName, toolNames: merged })
-                setToolOpen(false)
-              }}
-            >
-              确认
-            </PrimaryButton>
+            {canWrite && (
+              <PrimaryButton
+                loading={updateAgentTools.isPending}
+                onClick={async () => {
+                  const merged = Array.from(new Set([...selectedTools, ...defaultToolNames]))
+                  await updateAgentTools.mutateAsync({ name: currentName, toolNames: merged })
+                  setToolOpen(false)
+                }}
+              >
+                确认
+              </PrimaryButton>
+            )}
           </div>
         }
       >
@@ -621,6 +632,7 @@ export default function AgentListPage() {
           size="large"
           value={selectedTools}
           onChange={setSelectedTools}
+          disabled={!canWrite}
         />
       </Modal>
 
@@ -633,15 +645,17 @@ export default function AgentListPage() {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setSkillOpen(false); }}>取消</Button>
-            <PrimaryButton
-              loading={updateAgentSkills.isPending}
-              onClick={async () => {
-                await updateAgentSkills.mutateAsync({ name: currentName, skillNames: selectedSkills })
-                setSkillOpen(false)
-              }}
-            >
-              确认
-            </PrimaryButton>
+            {canWrite && (
+              <PrimaryButton
+                loading={updateAgentSkills.isPending}
+                onClick={async () => {
+                  await updateAgentSkills.mutateAsync({ name: currentName, skillNames: selectedSkills })
+                  setSkillOpen(false)
+                }}
+              >
+                确认
+              </PrimaryButton>
+            )}
           </div>
         }
       >
@@ -656,6 +670,7 @@ export default function AgentListPage() {
           size="large"
           value={selectedSkills}
           onChange={setSelectedSkills}
+          disabled={!canWrite}
         />
       </Modal>
 
@@ -668,15 +683,17 @@ export default function AgentListPage() {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <Button onClick={() => { setMcpOpen(false); }}>取消</Button>
-            <PrimaryButton
-              loading={updateAgentMcps.isPending}
-              onClick={async () => {
-                await updateAgentMcps.mutateAsync({ agentName: currentName, mcpNames: selectedMcps })
-                setMcpOpen(false)
-              }}
-            >
-              确认
-            </PrimaryButton>
+            {canWrite && (
+              <PrimaryButton
+                loading={updateAgentMcps.isPending}
+                onClick={async () => {
+                  await updateAgentMcps.mutateAsync({ agentName: currentName, mcpNames: selectedMcps })
+                  setMcpOpen(false)
+                }}
+              >
+                确认
+              </PrimaryButton>
+            )}
           </div>
         }
       >
@@ -694,6 +711,7 @@ export default function AgentListPage() {
             size="large"
             value={selectedMcps}
             onChange={setSelectedMcps}
+            disabled={!canWrite}
           />
         )}
       </Modal>
@@ -706,14 +724,16 @@ export default function AgentListPage() {
         footer={
           <div className={styles.modalFoot}>
             <Button onClick={() => { setModelOpen(false); }}>取消</Button>
-            <div className={styles.footRight}>
-              <Button onClick={handleTest} disabled={!canTest} loading={testing}>
-                <PlugIcon size={14} /> 测试
-              </Button>
-              <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
-                确认
-              </PrimaryButton>
-            </div>
+            {canWrite && (
+              <div className={styles.footRight}>
+                <Button onClick={handleTest} disabled={!canTest} loading={testing}>
+                  <PlugIcon size={14} /> 测试
+                </Button>
+                <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
+                  确认
+                </PrimaryButton>
+              </div>
+            )}
           </div>
         }
         width={720}
@@ -756,6 +776,7 @@ export default function AgentListPage() {
                 value={selectedProviderId ?? undefined}
                 onChange={handleProviderChange}
                 options={providerOptions}
+                disabled={!canWrite}
                 optionRender={(option) => {
                   const provider = providers.find(p => p.id === option.value)
                   return (
@@ -778,6 +799,7 @@ export default function AgentListPage() {
                   style={{ width: '100%' }}
                   size="large"
                   placeholder="选择模型或输入自定义模型 ID"
+                  disabled={!canWrite}
                   value={modelDropdownOpen || !selectedModelSuggestion ? selectedModelId : selectedModelSuggestion.display}
                   onChange={(value) => {
                     handleModelChange(value)
@@ -841,6 +863,7 @@ export default function AgentListPage() {
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
                     placeholder={`输入${field.label}`}
+                    disabled={!canWrite}
                   />
                 ) : field.type === 'select' ? (
                   <Select
@@ -849,12 +872,14 @@ export default function AgentListPage() {
                     placeholder={`选择${field.label}`}
                     style={{ width: '100%' }}
                     options={[]}
+                    disabled={!canWrite}
                   />
                 ) : (
                   <Input
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
                     placeholder={`输入${field.label}`}
+                    disabled={!canWrite}
                   />
                 )}
                     </div>

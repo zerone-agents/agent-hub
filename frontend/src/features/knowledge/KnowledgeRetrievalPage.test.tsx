@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
+import { setAuthRole } from '@/test/auth-store-mock'
 import KnowledgeRetrievalPage from './KnowledgeRetrievalPage'
 
 const h = vi.hoisted(() => ({
@@ -14,6 +15,8 @@ const h = vi.hoisted(() => ({
 vi.mock('@/queries/useKnowledge', () => ({
   useRetrievalTest: () => ({ mutate: h.retrievalMock, isPending: false, data: h.data })
 }))
+
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const sampleResult = {
   total: 1,
@@ -46,6 +49,7 @@ function renderPage() {
 
 describe('KnowledgeRetrievalPage', () => {
   beforeEach(() => {
+    setAuthRole('admin')
     h.retrievalMock.mockReset()
     h.data = undefined
   })
@@ -70,5 +74,16 @@ describe('KnowledgeRetrievalPage', () => {
     expect(screen.getByText('matched chunk text')).toBeInTheDocument()
     expect(screen.getByText('guide.pdf')).toBeInTheDocument()
     expect(screen.getByText(/相似度 0.873/)).toBeInTheDocument()
+  })
+
+  it('member: hides the retrieval test submit button but keeps results visible', () => {
+    setAuthRole('member')
+    h.data = sampleResult
+    renderPage()
+
+    // 写操作入口（检索测试）隐藏；已渲染的检索结果区不受影响
+    expect(screen.queryByRole('button', { name: /检索测试/ })).not.toBeInTheDocument()
+    expect(screen.getByText('共召回 1 条分块')).toBeInTheDocument()
+    expect(screen.getByText('matched chunk text')).toBeInTheDocument()
   })
 })

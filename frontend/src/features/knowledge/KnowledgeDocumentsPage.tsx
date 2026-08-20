@@ -46,6 +46,7 @@ import {
 } from "@/queries/useKnowledge";
 import BorderedTable from "@/components/BorderedTable";
 import PrimaryButton from "@/components/PrimaryButton";
+import { useCanWrite } from "@/hooks/useCanWrite";
 import { tokens as t } from "@/styles/tokens";
 import { formatTime } from "@/utils/time";
 
@@ -397,6 +398,8 @@ export default function KnowledgeDocumentsPage() {
   const [renameValue, setRenameValue] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
+  const canWrite = useCanWrite();
+
   const query = useDocuments(id, {
     page,
     page_size: PAGE_SIZE,
@@ -585,18 +588,23 @@ export default function KnowledgeDocumentsPage() {
       title: "启用",
       key: "enabled",
       width: 76,
-      render: (_, record) => (
-        <Switch
-          size="small"
-          checked={record.enabled}
-          onChange={(checked) =>
-            { updateDocument.mutate({
-              documentId: record.id,
-              patch: { enabled: checked },
-            }); }
-          }
-        />
-      ),
+      render: (_, record) =>
+        canWrite ? (
+          <Switch
+            size="small"
+            checked={record.enabled}
+            onChange={(checked) =>
+              { updateDocument.mutate({
+                documentId: record.id,
+                patch: { enabled: checked },
+              }); }
+            }
+          />
+        ) : (
+          <Tag color={record.enabled ? "success" : "default"}>
+            {record.enabled ? "启用" : "停用"}
+          </Tag>
+        ),
     },
     {
       title: "创建时间",
@@ -612,27 +620,28 @@ export default function KnowledgeDocumentsPage() {
       fixed: "right",
       render: (_, record) => (
         <Space size={4} wrap>
-          {record.run === "1" ? (
-            <Button
-              type="link"
-              size="small"
-              aria-label={`停止解析 ${record.name}`}
-              icon={<StopIcon size={14} />}
-              onClick={() => { stopParsing.mutate([record.id]); }}
-            >
-              停止
-            </Button>
-          ) : (
-            <Button
-              type="link"
-              size="small"
-              aria-label={`解析文档 ${record.name}`}
-              icon={<PlayIcon size={14} />}
-              onClick={() => { parseDocuments.mutate([record.id]); }}
-            >
-              解析
-            </Button>
-          )}
+          {canWrite &&
+            (record.run === "1" ? (
+              <Button
+                type="link"
+                size="small"
+                aria-label={`停止解析 ${record.name}`}
+                icon={<StopIcon size={14} />}
+                onClick={() => { stopParsing.mutate([record.id]); }}
+              >
+                停止
+              </Button>
+            ) : (
+              <Button
+                type="link"
+                size="small"
+                aria-label={`解析文档 ${record.name}`}
+                icon={<PlayIcon size={14} />}
+                onClick={() => { parseDocuments.mutate([record.id]); }}
+              >
+                解析
+              </Button>
+            ))}
           <Button
             type="link"
             size="small"
@@ -653,29 +662,33 @@ export default function KnowledgeDocumentsPage() {
           >
             下载
           </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<PencilSimpleIcon size={14} />}
-            onClick={() => {
-              setRenaming(record);
-              setRenameValue(record.name);
-            }}
-          >
-            重命名
-          </Button>
-          <Popconfirm
-            title="确认删除？"
-            description={`删除文档 "${record.name}"？`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => { deleteDocuments.mutate([record.id]); }}
-          >
-            <Button type="link" size="small" danger>
-              删除
-            </Button>
-          </Popconfirm>
+          {canWrite && (
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<PencilSimpleIcon size={14} />}
+                onClick={() => {
+                  setRenaming(record);
+                  setRenameValue(record.name);
+                }}
+              >
+                重命名
+              </Button>
+              <Popconfirm
+                title="确认删除？"
+                description={`删除文档 "${record.name}"？`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => { deleteDocuments.mutate([record.id]); }}
+              >
+                <Button type="link" size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            </>
+          )}
         </Space>
       ),
     },
@@ -743,16 +756,18 @@ export default function KnowledgeDocumentsPage() {
           >
             刷新
           </Button>
-          <PrimaryButton
-            icon={<UploadSimpleIcon size={16} />}
-            onClick={() => { setUploadOpen(true); }}
-          >
-            上传文档
-          </PrimaryButton>
+          {canWrite && (
+            <PrimaryButton
+              icon={<UploadSimpleIcon size={16} />}
+              onClick={() => { setUploadOpen(true); }}
+            >
+              上传文档
+            </PrimaryButton>
+          )}
         </div>
       </div>
 
-      {selectedIds.length > 0 ? (
+      {canWrite && selectedIds.length > 0 ? (
         <div className={styles.bulkBar}>
           <Typography.Text strong>
             已选择 {selectedIds.length} 个文档
@@ -815,7 +830,7 @@ export default function KnowledgeDocumentsPage() {
         columns={columns}
         dataSource={documents}
         rowKey="id"
-        rowSelection={rowSelection}
+        rowSelection={canWrite ? rowSelection : undefined}
         size="middle"
         loading={query.isLoading}
         scroll={{ x: 1180 }}
@@ -823,7 +838,11 @@ export default function KnowledgeDocumentsPage() {
           emptyText: (
             <Empty
               description={
-                keywords ? "未找到匹配的文档" : "还没有文档，点击上传"
+                keywords
+                  ? "未找到匹配的文档"
+                  : canWrite
+                    ? "还没有文档，点击上传"
+                    : "暂无文档"
               }
             />
           ),

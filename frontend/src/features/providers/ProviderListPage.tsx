@@ -5,6 +5,7 @@ import { PlusIcon, PencilSimpleIcon, TrashIcon, ClockIcon, PlugIcon, SquaresFour
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useProviders, useDeleteProvider, useProbeProvider } from '@/queries/useProviders'
+import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Provider } from '@/api/providers'
 import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
@@ -170,6 +171,7 @@ const protocolTextColor = (protocol: string) => {
 export default function ProviderListPage() {
   const { styles } = useStyles()
   const { data: providers = [], isLoading } = useProviders()
+  const canWrite = useCanWrite()
 
   const deleteProvider = useDeleteProvider()
   const probeProvider = useProbeProvider()
@@ -323,41 +325,43 @@ export default function ProviderListPage() {
           </span>
         }
         footerRight={
-          <div style={{ display: 'flex', gap: 2 }}>
-            <button
-              type="button"
-              className={styles.actBtn}
-              title="测试连接"
-              onClick={() => handleProbe(provider.id)}
-              disabled={probingId === provider.id}
-            >
-              {probingId === provider.id ? <Spin size="small" /> : <PlugIcon size={14} />}
-            </button>
-            <button
-              type="button"
-              className={styles.actBtn}
-              title="编辑"
-              onClick={() => { showEdit(provider); }}
-            >
-              <PencilSimpleIcon size={14} />
-            </button>
-            <Popconfirm
-              title="确认删除？"
-              description={`删除 "${provider.name}"？此操作不可撤销。`}
-              okText="删除"
-              okButtonProps={{ danger: true }}
-              cancelText="取消"
-              onConfirm={() => handleDelete(provider.id)}
-            >
+          canWrite ? (
+            <div style={{ display: 'flex', gap: 2 }}>
               <button
                 type="button"
-                className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                title="删除"
+                className={styles.actBtn}
+                title="测试连接"
+                onClick={() => handleProbe(provider.id)}
+                disabled={probingId === provider.id}
               >
-                <TrashIcon size={14} />
+                {probingId === provider.id ? <Spin size="small" /> : <PlugIcon size={14} />}
               </button>
-            </Popconfirm>
-          </div>
+              <button
+                type="button"
+                className={styles.actBtn}
+                title="编辑"
+                onClick={() => { showEdit(provider); }}
+              >
+                <PencilSimpleIcon size={14} />
+              </button>
+              <Popconfirm
+                title="确认删除？"
+                description={`删除 "${provider.name}"？此操作不可撤销。`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => handleDelete(provider.id)}
+              >
+                <button
+                  type="button"
+                  className={`${styles.actBtn} ${styles.actBtnDanger}`}
+                  title="删除"
+                >
+                  <TrashIcon size={14} />
+                </button>
+              </Popconfirm>
+            </div>
+          ) : null
         }
       />
     )
@@ -383,9 +387,11 @@ export default function ProviderListPage() {
           <div className={styles.pageTitle}>模型管理</div>
           <div className={styles.pageSub}>管理 Vendor Preset 配置和模型列表</div>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-          新建 Provider
-        </PrimaryButton>
+        {canWrite && (
+          <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
+            新建 Provider
+          </PrimaryButton>
+        )}
       </div>
 
       <div className={styles.toolbar}>

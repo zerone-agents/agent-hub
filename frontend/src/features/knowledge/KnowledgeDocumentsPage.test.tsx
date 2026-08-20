@@ -5,6 +5,10 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeDocumentsPage from "./KnowledgeDocumentsPage";
+import { setAuthRole } from "@/test/auth-store-mock";
+
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock("@/stores/auth", async () => (await import("@/test/auth-store-mock")).createAuthStoreMock());
 
 const h = vi.hoisted(() => ({
   documents: [] as Record<string, unknown>[],
@@ -104,6 +108,7 @@ function renderPage() {
 
 describe("KnowledgeDocumentsPage", () => {
   beforeEach(() => {
+    setAuthRole("admin");
     h.documents = sampleDocs;
     h.total = sampleDocs.length;
     h.refetchMock.mockReset();
@@ -231,5 +236,44 @@ describe("KnowledgeDocumentsPage", () => {
     await user.click(nextCheckboxes[1]);
     await user.click(screen.getByRole("button", { name: "批量解析文档" }));
     expect(h.parseMock).toHaveBeenCalledWith(["d1"]);
+  }, 15000);
+
+  it("member: hides upload/parse/rename/delete/bulk but keeps download and view", async () => {
+    setAuthRole("member");
+    const user = userEvent.setup();
+    renderPage();
+
+    // 数据仍可见（只读）
+    expect(screen.getByText("guide.pdf")).toBeInTheDocument();
+    expect(screen.getByText("running.docx")).toBeInTheDocument();
+    // 只读操作保留：下载、切片
+    expect(screen.getByRole("button", { name: "下载 guide.pdf" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "切片" }).length).toBe(2);
+    // 查看解析状态保留
+    expect(
+      screen.getByRole("button", { name: "查看解析状态：解析中" }),
+    ).toBeInTheDocument();
+
+    // 写操作按钮隐藏
+    expect(screen.queryByText("上传文档")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "解析文档 guide.pdf" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "停止解析 running.docx" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重命名" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    // 批量勾选与批量栏不存在
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryByText(/已选择/)).not.toBeInTheDocument();
+    // 启用列只读展示，不再渲染 Switch
+    expect(document.querySelector(".ant-switch")).toBeNull();
+
+    // 下载功能对 member 仍然可用
+    await user.click(screen.getByRole("button", { name: "下载 guide.pdf" }));
+    await waitFor(() =>
+      { expect(h.downloadMock).toHaveBeenCalledWith("kb1", "d1"); },
+    );
   }, 15000);
 });

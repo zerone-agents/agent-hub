@@ -57,6 +57,25 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
   - 用户列表只显示登录过的用户（列表数据源为本地成员表，而非直通 Casdoor）。
 - **部署要求**：agent-hub 使用的 Casdoor Application 需要所在组织的用户管理权限（读写用户、组织管理员标志）。CasdoorDirectory 与 CasdoorProvider 复用同一份 `CASDOOR_*` 配置。
 
+#### 角色权限矩阵
+
+管理台（`/api/v1/admin/*`）按角色开放如下（builtin 与 casdoor 模式语义一致）：
+
+| 权限 | admin | maintainer | member |
+|---|---|---|---|
+| 用户管理（用户列表/审批/邀请/重置密码） | ✅ | — | — |
+| 管理写操作（创建/编辑/删除 agent、tool、MCP、skill、scene、provider、知识库、聊天删除） | ✅ | ✅ | — |
+| 敏感读（AIGC 配置与密钥、agent 运行时文件内容、部署状态） | ✅ | ✅ | — |
+| 非敏感 GET（agent/tool/MCP/skill/scene/provider/知识库/聊天历史列表与详情） | ✅ | ✅ | ✅ |
+| 普通聊天（公开 `/agents` 聊天接口） | ✅ | ✅ | ✅ |
+| CLI token 自管理（`/cli`） | ✅ | ✅ | ✅ |
+
+要点：
+- **member 只读边界**：member 可读管理台的非敏感数据（列表/详情/知识库/聊天历史），但任何写操作（POST/PUT/PATCH/DELETE，含探活、部署启停）与敏感读（AIGC 配置含密钥、agent 运行时文件内容 `files/content`、部署状态 `deploy`）仍返回 403——中间件是权限墙，前端按钮隐藏仅 UX。
+- **用户管理仅 admin**：审批/角色分配/邀请/重置密码保持 admin 专属（`RequireAdmin`）。
+- **路径未改名**：全部保持 `/api/v1/admin/*`，仅内部按 write（admin/maintainer）/ read（admin/maintainer/member）分组注册。
+- **CLI token 自管理**：`/api/v1/cli` 任何已登录用户管理自己的 token，不属于 `/admin` 面。
+
 ## OSS (S3 / MinIO)
 
 | Variable | Required | Default | Description |

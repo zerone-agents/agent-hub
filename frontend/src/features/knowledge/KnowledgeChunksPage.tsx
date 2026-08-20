@@ -48,6 +48,7 @@ import {
   useDeleteChunks,
   useSwitchChunks,
 } from "@/queries/useKnowledge";
+import { useCanWrite } from "@/hooks/useCanWrite";
 import { tokens as t } from "@/styles/tokens";
 
 const useStyles = createStyles(({ css }) => ({
@@ -705,6 +706,7 @@ export default function KnowledgeChunksPage() {
   });
   const deleteChunks = useDeleteChunks(id, documentId);
   const switchChunks = useSwitchChunks(id, documentId);
+  const canWrite = useCanWrite();
 
   const chunks = useMemo(() => query.data?.chunks ?? [], [query.data?.chunks]);
   const total = query.data?.total ?? 0;
@@ -810,13 +812,15 @@ export default function KnowledgeChunksPage() {
                   setPage(1);
                 }}
               />
-              <Checkbox
-                checked={allCurrentSelected}
-                indeterminate={selectedIds.length > 0 && !allCurrentSelected}
-                onChange={(event) => { toggleAll(event.target.checked); }}
-              >
-                选择本页
-              </Checkbox>
+              {canWrite && (
+                <Checkbox
+                  checked={allCurrentSelected}
+                  indeterminate={selectedIds.length > 0 && !allCurrentSelected}
+                  onChange={(event) => { toggleAll(event.target.checked); }}
+                >
+                  选择本页
+                </Checkbox>
+              )}
             </div>
             <div className={styles.actions}>
               <Button
@@ -826,17 +830,19 @@ export default function KnowledgeChunksPage() {
               >
                 刷新
               </Button>
-              <Button
-                type="primary"
-                icon={<PlusIcon size={16} weight="bold" />}
-                onClick={openCreate}
-              >
-                新增切片
-              </Button>
+              {canWrite && (
+                <Button
+                  type="primary"
+                  icon={<PlusIcon size={16} weight="bold" />}
+                  onClick={openCreate}
+                >
+                  新增切片
+                </Button>
+              )}
             </div>
           </div>
 
-          {selectedIds.length > 0 ? (
+          {canWrite && selectedIds.length > 0 ? (
             <div className={styles.bulkBar}>
               <Typography.Text strong>
                 已选择 {selectedIds.length} 个切片
@@ -887,12 +893,14 @@ export default function KnowledgeChunksPage() {
             ) : null}
             {chunks.map((chunk) => (
               <div className={styles.card} key={chunk.id}>
-                <Checkbox
-                  checked={selectedIds.includes(chunk.id)}
-                  onChange={(event) =>
-                    { toggleOne(chunk.id, event.target.checked); }
-                  }
-                />
+                {canWrite && (
+                  <Checkbox
+                    checked={selectedIds.includes(chunk.id)}
+                    onChange={(event) =>
+                      { toggleOne(chunk.id, event.target.checked); }
+                    }
+                  />
+                )}
                 <div className={styles.cardBody}>
                   <div className={styles.cardMeta}>
                     <Tag color={chunk.image_id ? "purple" : "blue"}>
@@ -938,46 +946,50 @@ export default function KnowledgeChunksPage() {
                   </div>
                 </div>
                 <div className={styles.cardActions}>
-                  <Switch
-                    size="small"
-                    checked={chunk.available}
-                    onChange={(checked) =>
-                      { switchChunks.mutate({
-                        chunkIds: [chunk.id],
-                        available: checked,
-                      }); }
-                    }
-                  />
+                  {canWrite && (
+                    <>
+                      <Switch
+                        size="small"
+                        checked={chunk.available}
+                        onChange={(checked) =>
+                          { switchChunks.mutate({
+                            chunkIds: [chunk.id],
+                            available: checked,
+                          }); }
+                        }
+                      />
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PencilSimpleIcon size={16} />}
+                        onClick={() => { openEdit(chunk); }}
+                      >
+                        编辑
+                      </Button>
+                      <Popconfirm
+                        title="确认删除该切片？"
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                        onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<TrashIcon size={16} />}
+                        >
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </>
+                  )}
                   <Button
                     type="text"
                     size="small"
                     icon={<ClipboardTextIcon size={16} />}
                     onClick={() => void copyChunkId(chunk.id)}
                   />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<PencilSimpleIcon size={16} />}
-                    onClick={() => { openEdit(chunk); }}
-                  >
-                    编辑
-                  </Button>
-                  <Popconfirm
-                    title="确认删除该切片？"
-                    okText="删除"
-                    okButtonProps={{ danger: true }}
-                    cancelText="取消"
-                    onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
-                  >
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      icon={<TrashIcon size={16} />}
-                    >
-                      删除
-                    </Button>
-                  </Popconfirm>
                 </div>
               </div>
             ))}

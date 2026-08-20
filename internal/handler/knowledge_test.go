@@ -114,7 +114,8 @@ func setupKnowledgeRouter(engine knowledge.KnowledgeEngine) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	admin := router.Group("/api/v1/admin")
-	RegisterKnowledgeRoutes(admin, NewKnowledgeHandler(services.NewKnowledgeService(engine, nil), nil))
+	// 测试路由不挂权限中间件，write/read 两组传同一 group 即可覆盖全部端点
+	RegisterKnowledgeRoutes(admin, admin, NewKnowledgeHandler(services.NewKnowledgeService(engine, nil), nil))
 	return router
 }
 

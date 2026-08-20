@@ -5,6 +5,10 @@ import { ConfigProvider } from "antd";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeSettingsPage from "./KnowledgeSettingsPage";
+import { setAuthRole } from "@/test/auth-store-mock";
+
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock("@/stores/auth", async () => (await import("@/test/auth-store-mock")).createAuthStoreMock());
 
 const h = vi.hoisted(() => ({
   dataset: {},
@@ -73,6 +77,7 @@ function renderPage() {
 
 describe("KnowledgeSettingsPage embedding model guard", () => {
   beforeEach(() => {
+    setAuthRole("admin");
     h.dataset = { ...baseDataset };
     h.updateMock.mockReset();
     h.updateMock.mockResolvedValue({ id: "kb-1" });
@@ -147,5 +152,19 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
       ),
     ).toBeInTheDocument();
     expect(h.refetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("member: hides save button and renders the form read-only", () => {
+    setAuthRole("member");
+    renderPage();
+
+    // 表单数据仍可见（只读）
+    const item = screen
+      .getByText("Embedding 模型")
+      .closest<HTMLElement>(".ant-form-item");
+    expect(item).not.toBeNull();
+    // 保存设置按钮隐藏，表单控件整体置为只读（antd Form disabled 经 context 下发）
+    expect(screen.queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
+    expect(within(item!).getByRole("combobox")).toBeDisabled();
   });
 });

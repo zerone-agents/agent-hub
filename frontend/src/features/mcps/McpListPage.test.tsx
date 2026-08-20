@@ -7,6 +7,7 @@ import { antdTheme } from '@/lib/antd-theme'
 import { tokens as t } from '@/styles/tokens'
 import McpListPage from './McpListPage'
 import type { Mcp } from '@/api/mcps'
+import { setAuthRole } from '@/test/auth-store-mock'
 
 const mockMcpPending: Mcp = {
   id: 1,
@@ -78,6 +79,9 @@ const mcpsList: Mcp[] = []
 const probeMutateAsync = vi.fn().mockResolvedValue({ status: 'success' })
 const deleteMutateAsync = vi.fn().mockResolvedValue({ data: { success: true } })
 
+// vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
+vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
+
 vi.mock('@/queries/useMcps', () => ({
   useMcps: () => ({ data: mcpsList, isLoading: false }),
   useDeleteMcp: () => ({ mutateAsync: deleteMutateAsync }),
@@ -106,6 +110,7 @@ describe('McpListPage', () => {
     seedMcps(mockMcpPending, mockMcpSuccess, mockMcpFailed, mockMcpBuiltin)
     probeMutateAsync.mockClear()
     deleteMutateAsync.mockClear()
+    setAuthRole('admin')
   })
 
   it('renders page title and create button', () => {
@@ -193,5 +198,19 @@ describe('McpListPage', () => {
     const probeButtons = screen.getAllByTitle('探测')
     const nonBuiltinCount = mcpsList.filter(m => !m.isBuiltin).length
     expect(probeButtons.length).toBe(nonBuiltinCount)
+  })
+
+  it('member: hides create/probe/edit/delete but still sees mcps', () => {
+    setAuthRole('member')
+    renderPage()
+
+    // 数据仍可见（只读）
+    expect(screen.getByText('filesystem')).toBeInTheDocument()
+    expect(screen.getByText('内置')).toBeInTheDocument()
+    // 写操作按钮隐藏
+    expect(screen.queryByRole('button', { name: /新建 MCP/ })).not.toBeInTheDocument()
+    expect(screen.queryAllByTitle('探测')).toHaveLength(0)
+    expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
+    expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })
 })
