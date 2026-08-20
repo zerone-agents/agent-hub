@@ -5,7 +5,6 @@ import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
 import { useChatSessions, useDeleteChatSession } from '@/queries/useChat'
 import { useProviders } from '@/queries/useProviders'
-import { useCanWrite } from '@/hooks/useCanWrite'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 
@@ -81,7 +80,6 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   const { data, isLoading, page, pageSize, setPage } = useChatSessions()
   const deleteSession = useDeleteChatSession()
   const [search, setSearch] = useState('')
-  const canWrite = useCanWrite()
 
   const sessions = useMemo(() => data?.items ?? [], [data?.items])
   const total = data?.total ?? 0
@@ -162,28 +160,26 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
                   <span>{formatTime(session.updated_at)}</span>
                 </div>
               </div>
-              {canWrite && (
-                <Popconfirm
-                  title="确认删除？"
-                  description="所有消息将被永久删除"
-                  okText="删除"
-                  okButtonProps={{ danger: true }}
-                  cancelText="取消"
-                  onConfirm={(e) => {
-                    e?.stopPropagation()
-                    deleteSession.mutate(session.id)
-                  }}
+              <Popconfirm
+                title="确认删除？"
+                description="所有消息将被永久删除"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={(e) => {
+                  e?.stopPropagation()
+                  deleteSession.mutate(session.id)
+                }}
+              >
+                <button
+                  type="button"
+                  className={styles.delBtn}
+                  title="删除"
+                  onClick={(e) => { e.stopPropagation(); }}
                 >
-                  <button
-                    type="button"
-                    className={styles.delBtn}
-                    title="删除"
-                    onClick={(e) => { e.stopPropagation(); }}
-                  >
-                    <TrashIcon size={13} />
-                  </button>
-                </Popconfirm>
-              )}
+                  <TrashIcon size={13} />
+                </button>
+              </Popconfirm>
             </div>
           ))
         )}

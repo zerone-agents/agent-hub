@@ -54,7 +54,7 @@ const useStyles = createStyles(({ css }) => ({
 interface AgentCardProps {
   agent: Agent
   modelDisplayName: string
-  /** member 无管理台写权限：隐藏部署/编辑/删除等写操作按钮（后端 adminWrite 403 兜底）。 */
+  /** member 无管理台写权限：隐藏编辑/删除按钮（部署按钮只读打开弹窗，全角色可见）。 */
   canWrite: boolean
   onEdit: (agent: Agent) => void
   onDelete: (name: string) => void
@@ -148,28 +148,30 @@ export default function AgentCard({
       }
       footerLeft={formatTime(agent.createdAt)}
       footerRight={
-        canWrite ? (
-          <>
-            <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
-              <RocketIcon size={14} />
-            </button>
-            <button type="button" className={styles.actBtn} title="编辑" onClick={() => { onEdit(agent); }}>
-              <PencilSimpleIcon size={14} />
-            </button>
-            <Popconfirm
-              title="确认删除？"
-              description={`删除 "${agent.name}"？此操作不可撤销。`}
-              okText="删除"
-              okButtonProps={{ danger: true }}
-              cancelText="取消"
-              onConfirm={() => { onDelete(agent.name); }}
-            >
-              <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
-                <TrashIcon size={14} />
+        <>
+          <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
+            <RocketIcon size={14} />
+          </button>
+          {canWrite && (
+            <>
+              <button type="button" className={styles.actBtn} title="编辑" onClick={() => { onEdit(agent); }}>
+                <PencilSimpleIcon size={14} />
               </button>
-            </Popconfirm>
-          </>
-        ) : null
+              <Popconfirm
+                title="确认删除？"
+                description={`删除 "${agent.name}"？此操作不可撤销。`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => { onDelete(agent.name); }}
+              >
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                  <TrashIcon size={14} />
+                </button>
+              </Popconfirm>
+            </>
+          )}
+        </>
       }
     />
   )

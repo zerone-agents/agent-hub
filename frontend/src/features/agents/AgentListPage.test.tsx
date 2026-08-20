@@ -154,7 +154,7 @@ describe('AgentListPage', () => {
     expect(deployButtons.length).toBe(mockAgents.length)
   })
 
-  it('member: hides write actions but still sees agent data', () => {
+  it('member: hides write actions but still sees agent data and deploy button', () => {
     setAuthRole('member')
     render(
       <ConfigProvider theme={antdTheme}>
@@ -168,9 +168,10 @@ describe('AgentListPage', () => {
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
     expect(screen.getByText('通用助手')).toBeInTheDocument()
     expect(screen.getByText('编程助手')).toBeInTheDocument()
-    // 写操作按钮隐藏：新建代理、部署/编辑/删除
+    // 部署按钮全角色可见（member 打开弹窗看状态 + 聊天入口）
+    expect(screen.queryAllByTitle('部署')).toHaveLength(mockAgents.length)
+    // 写操作按钮隐藏：新建代理、编辑/删除
     expect(screen.queryByText('新建代理')).not.toBeInTheDocument()
-    expect(screen.queryAllByTitle('部署')).toHaveLength(0)
     expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
     expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })

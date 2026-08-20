@@ -47,7 +47,7 @@ func (h *ChatHandler) Push(c *gin.Context) {
 func (h *ChatHandler) ListSessions(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 20)
 
-	resp, err := h.service.ListSessions(page, pageSize)
+	resp, err := h.service.ListSessions(page, pageSize, chatScopeUserID(c))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -63,7 +63,8 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 		return
 	}
 
-	session, err := h.service.GetSession(sessionID)
+	// member 访问他人会话时 GetSessionForUser 查不到 → 404（不暴露存在性）
+	session, err := h.service.GetSession(sessionID, chatScopeUserID(c))
 	if err != nil {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
@@ -81,9 +82,10 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 
 	page, pageSize := parsePagination(c, 1, 50)
 
-	resp, err := h.service.ListMessages(sessionID, page, pageSize)
+	// 归属校验失败（member 访问他人会话）或会话不存在 → 404
+	resp, err := h.service.ListMessages(sessionID, page, pageSize, chatScopeUserID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondError(c, http.StatusNotFound, "session not found")
 		return
 	}
 
@@ -97,12 +99,29 @@ func (h *ChatHandler) DeleteSession(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.DeleteSession(sessionID); err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+	// member 删他人会话 → 404；admin/maintainer 任意删
+	if err := h.service.DeleteSession(sessionID, chatScopeUserID(c)); err != nil {
+		respondError(c, http.StatusNotFound, "session not found")
 		return
 	}
 
 	respondMessage(c, http.StatusOK, "session deleted")
+}
+
+// chatScopeUserID 返回调用者的数据范围：admin/maintainer 返回 ""（不过滤），
+// member 返回自己的 user_id（只能看/删自己的会话）。
+func chatScopeUserID(c *gin.Context) string {
+	roles, _ := c.Get("roles")
+	if rs, ok := roles.([]string); ok {
+		for _, r := range rs {
+			if r == "admin" || r == "maintainer" {
+				return ""
+			}
+		}
+	}
+	uid, _ := c.Get("user_id")
+	s, _ := uid.(string)
+	return s
 }
 
 func parsePagination(c *gin.Context, defaultPage, defaultPageSize int) (page, pageSize int) {

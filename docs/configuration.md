@@ -64,17 +64,20 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 | 权限 | admin | maintainer | member |
 |---|---|---|---|
 | 用户管理（用户列表/审批/邀请/重置密码） | ✅ | — | — |
-| 管理写操作（创建/编辑/删除 agent、tool、MCP、skill、scene、provider、知识库、聊天删除） | ✅ | ✅ | — |
-| 敏感读（AIGC 配置与密钥、agent 运行时文件内容、部署状态） | ✅ | ✅ | — |
-| 非敏感 GET（agent/tool/MCP/skill/scene/provider/知识库/聊天历史列表与详情） | ✅ | ✅ | ✅ |
+| 管理写操作（创建/编辑/删除 agent、tool、MCP、skill、scene、provider、知识库） | ✅ | ✅ | — |
+| 敏感读（AIGC 配置与密钥、agent 运行时文件内容） | ✅ | ✅ | — |
+| 非敏感 GET（agent/tool/MCP/skill/scene/provider/知识库列表与详情、部署状态 `deploy`） | ✅ | ✅ | ✅ |
+| 聊天历史会话（查看/删除） | ✅ 全部会话 | ✅ 全部会话 | ✅ 仅自己的会话 |
 | 普通聊天（公开 `/agents` 聊天接口） | ✅ | ✅ | ✅ |
-| CLI token 自管理（`/cli`） | ✅ | ✅ | ✅ |
+| CLI token 自管理（`/cli`） | ✅ | ✅ | — |
 
 要点：
-- **member 只读边界**：member 可读管理台的非敏感数据（列表/详情/知识库/聊天历史），但任何写操作（POST/PUT/PATCH/DELETE，含探活、部署启停）与敏感读（AIGC 配置含密钥、agent 运行时文件内容 `files/content`、部署状态 `deploy`）仍返回 403——中间件是权限墙，前端按钮隐藏仅 UX。
+- **member 只读边界**：member 可读管理台的非敏感数据（列表/详情/知识库/部署状态 `deploy`，含 runtimeUrl/apiKey——已确认不裁剪），但管理写操作（POST/PUT/PATCH/DELETE，含探活、部署启停）与敏感读（AIGC 配置含密钥、agent 运行时文件内容 `files/content`）仍返回 403——中间件是权限墙，前端按钮隐藏仅 UX。例外：member 可删除自己的聊天会话（见下）。
+- **聊天会话按用户隔离**：member 仅可查看/删除自己的聊天会话；admin/maintainer 可见并管理全部会话。
 - **用户管理仅 admin**：审批/角色分配/邀请/重置密码保持 admin 专属（`RequireAdmin`）。
 - **路径未改名**：全部保持 `/api/v1/admin/*`，仅内部按 write（admin/maintainer）/ read（admin/maintainer/member）分组注册。
-- **CLI token 自管理**：`/api/v1/cli` 任何已登录用户管理自己的 token，不属于 `/admin` 面。
+- **CLI token 收口**：`/api/v1/cli` 仅 admin/maintainer 可用（member 403），不属于 `/admin` 面但同样由角色中间件拦截；member 历史已签发的 token 不主动吊销，自然过期后无法续签。
+- **member 部署按钮**：member 在 Agent 页可见部署按钮，弹窗内仅「聊天」可用，其他操作按钮置灰。
 
 ## OSS (S3 / MinIO)
 
