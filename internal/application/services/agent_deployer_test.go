@@ -389,6 +389,48 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 			t.Errorf("unrelated headers must pass through untouched, got %s", body)
 		}
 	})
+
+	t.Run("sends description to deployer (zh preferred)", func(t *testing.T) {
+		f := &deployTokenFixture{}
+		srv := newDeployTokenServer(t, true, f)
+		defer srv.Close()
+
+		repo := deployTokenAgentRepo(f, storedToken)
+		baseGet := repo.getByNameFunc
+		repo.getByNameFunc = func(name string) (*agent.AgentConfig, error) {
+			a, err := baseGet(name)
+			if err != nil {
+				return nil, err
+			}
+			a.Description = map[string]string{"zh": "通用助手", "en": "General assistant"}
+			return a, nil
+		}
+
+		s := newTestAgentDeployerService(t, srv.URL, repo, deployTokenProviderSvc())
+		if _, err := s.Deploy("general", true, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(string(f.postBody), `"description":"通用助手"`) {
+			t.Errorf("request body should carry the zh description, got %s", f.postBody)
+		}
+	})
+
+	t.Run("falls back to agent name when description empty", func(t *testing.T) {
+		f := &deployTokenFixture{}
+		srv := newDeployTokenServer(t, true, f)
+		defer srv.Close()
+
+		// deployTokenAgentRepo returns an AgentConfig with no Description —
+		// the deployer requires a non-blank description, so the service must
+		// fall back to the agent name to keep the request valid.
+		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
+		if _, err := s.Deploy("general", true, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(string(f.postBody), `"description":"general"`) {
+			t.Errorf("request body should fall back to the agent name, got %s", f.postBody)
+		}
+	})
 }
 
 // newGetStatusServer builds a mock deployer whose GET

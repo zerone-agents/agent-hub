@@ -13,7 +13,12 @@ import (
 
 // AgentDefinition defines the agent configuration.
 type AgentDefinition struct {
-	Name            string                     `json:"name"`
+	Name string `json:"name"`
+	// Description is a short human/agent-readable summary of what the agent
+	// does. Required by the deployer: agent-runtime 2.0 rejects configs
+	// without it, and it is what the parent agent's Task tool shows when
+	// mounting subagents.
+	Description     string                     `json:"description"`
 	Model           string                     `json:"model"`
 	SystemPrompt    string                     `json:"systemPrompt"`
 	MaxTurns        *int                       `json:"maxTurns,omitempty"`
