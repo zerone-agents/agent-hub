@@ -233,32 +233,6 @@ func ValidateToken(token string) (*casdoorsdk.User, error) {
 	return GetUserInfo(token)
 }
 
-// CreateOrganization creates a new Casdoor organization.
-func CreateOrganization(name, displayName, owner string) error {
-	org := &casdoorsdk.Organization{
-		Name:        name,
-		DisplayName: displayName,
-		Owner:       owner,
-	}
-
-	_, err := client.AddOrganization(org)
-	if err != nil {
-		return fmt.Errorf("failed to create organization: %w", err)
-	}
-
-	return nil
-}
-
-// DeleteOrganization deletes a Casdoor organization by name.
-func DeleteOrganization(name string) error {
-	_, err := client.DeleteOrganization(&casdoorsdk.Organization{Name: name})
-	if err != nil {
-		return fmt.Errorf("failed to delete organization: %w", err)
-	}
-
-	return nil
-}
-
 func generateRandomString(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
