@@ -2,7 +2,9 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"control-panel/internal/directory"
 	"control-panel/internal/domain/tenant"
@@ -21,14 +23,15 @@ type UserDirectory interface {
 // CasdoorUserHandler serves the admin user-management endpoints backed by a
 // casdoor directory.
 type CasdoorUserHandler struct {
-	dir       UserDirectory
-	signupURL string
+	dir             UserDirectory
+	casdoorEndpoint string
 }
 
-// NewCasdoorUserHandler constructs the handler. signupURL is the casdoor
-// application signup URL handed out to admins for inviting users.
-func NewCasdoorUserHandler(dir UserDirectory, signupURL string) *CasdoorUserHandler {
-	return &CasdoorUserHandler{dir: dir, signupURL: signupURL}
+// NewCasdoorUserHandler constructs the handler. casdoorEndpoint is the base
+// URL of the casdoor instance; the signup URL is built per-request from the
+// caller's tenant (multi-tenant: each org has its own /signup/<org> page).
+func NewCasdoorUserHandler(dir UserDirectory, casdoorEndpoint string) *CasdoorUserHandler {
+	return &CasdoorUserHandler{dir: dir, casdoorEndpoint: casdoorEndpoint}
 }
 
 // ListUsers serves GET /admin/users for casdoor mode.
@@ -88,9 +91,12 @@ func (h *CasdoorUserHandler) ResetUserPassword(c *gin.Context) {
 	respondSuccess(c, gin.H{"password": plain})
 }
 
-// SignupURL serves GET /admin/users/signup-url.
+// SignupURL serves GET /admin/users/signup-url. The URL is built per-request:
+// the org segment comes from the caller's tenant (casdoor organization), so
+// each tenant's admins hand out their own org's signup page.
 func (h *CasdoorUserHandler) SignupURL(c *gin.Context) {
-	respondSuccess(c, gin.H{"signupUrl": h.signupURL})
+	signupURL := fmt.Sprintf("%s/signup/%s", strings.TrimRight(h.casdoorEndpoint, "/"), tenant.GetTenantID(c))
+	respondSuccess(c, gin.H{"signupUrl": signupURL})
 }
 
 // respondDirectoryError maps directory sentinel errors to HTTP status codes.

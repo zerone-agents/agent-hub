@@ -11,6 +11,7 @@ import PageHeader from '@/components/PageHeader'
 import PrimaryButton from '@/components/PrimaryButton'
 import BorderedTable from '@/components/BorderedTable'
 import CreateInviteModal from './CreateInviteModal'
+import SignupLinkModal from './SignupLinkModal'
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
@@ -38,6 +39,7 @@ export default function UsersPage() {
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
+  const [signupLinkModalOpen, setSignupLinkModalOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<{ password: string } | null>(null)
 
   const { data: authMode } = useQuery({
@@ -235,14 +237,8 @@ export default function UsersPage() {
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
           isCasdoor ? (
-            <PrimaryButton
-              onClick={() => {
-                if (signupUrlData?.signupUrl) {
-                  window.open(signupUrlData.signupUrl, '_blank', 'noopener')
-                }
-              }}
-            >
-              去 Casdoor 注册
+            <PrimaryButton onClick={() => { setSignupLinkModalOpen(true); }}>
+              注册链接
             </PrimaryButton>
           ) : (
             <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
@@ -276,6 +272,14 @@ export default function UsersPage() {
 
           <CreateInviteModal open={inviteModalOpen} onClose={() => { setInviteModalOpen(false); }} />
         </>
+      )}
+
+      {isCasdoor && (
+        <SignupLinkModal
+          open={signupLinkModalOpen}
+          signupUrl={signupUrlData?.signupUrl}
+          onClose={() => { setSignupLinkModalOpen(false); }}
+        />
       )}
 
       <Modal

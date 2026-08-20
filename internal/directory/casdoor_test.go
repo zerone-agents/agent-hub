@@ -64,6 +64,12 @@ func (f *fakeClient) UpdateUserForColumns(u *casdoorsdk.User, cols []string) (bo
 	return true, nil
 }
 
+// staticResolver 让单 fake 适配 ClientResolver 签名：忽略 tenantID，恒返回
+// 同一 fakeClient。多租户路由的正确性由 TestCasdoorDirectory_ResolvesClientByTenant 覆盖。
+func staticResolver(c UserClient) ClientResolver {
+	return func(string) UserClient { return c }
+}
+
 // fakeStore 是 MembershipStore 的内存实现（directory 用例）。ListByTenant
 // 按记录 ID 升序，对齐 gorm 实现；SetRole 记录调用并更新记录。
 type fakeStore struct {
@@ -157,7 +163,7 @@ func TestListUsersFromLocalTable(t *testing.T) {
 		{Id: "2", Name: "bob", Owner: "tenant-a", IsForbidden: true},
 		{Id: "9", Name: "dave", Owner: "tenant-b"}, // 他租户用户仅在映射里，不产生条目
 	}}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	got, err := d.ListUsers("tenant-a")
 	if err != nil {
@@ -181,7 +187,7 @@ func TestListUsersFromLocalTable(t *testing.T) {
 }
 
 func TestListUsersEmptyTenant(t *testing.T) {
-	d := NewCasdoorDirectory(&fakeClient{}, newFakeStore())
+	d := NewCasdoorDirectory(staticResolver(&fakeClient{}), newFakeStore())
 	got, err := d.ListUsers("tenant-x")
 	if err != nil {
 		t.Fatal(err)
@@ -195,14 +201,14 @@ func TestListUsersErrorsPropagate(t *testing.T) {
 	// store 错误与 casdoor GetUsers 错误都要透传（handler 映射 502）
 	fs := newFakeStore()
 	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
-	d := NewCasdoorDirectory(&fakeClient{getErr: errors.New("casdoor boom")}, fs)
+	d := NewCasdoorDirectory(staticResolver(&fakeClient{getErr: errors.New("casdoor boom")}), fs)
 	if _, err := d.ListUsers("tenant-a"); err == nil {
 		t.Fatal("want error from GetUsers")
 	}
 
 	fs2 := newFakeStore()
 	fs2.listErr = errors.New("db boom")
-	d2 := NewCasdoorDirectory(&fakeClient{}, fs2)
+	d2 := NewCasdoorDirectory(staticResolver(&fakeClient{}), fs2)
 	if _, err := d2.ListUsers("tenant-a"); err == nil {
 		t.Fatal("want error from ListByTenant")
 	}
@@ -219,7 +225,7 @@ func TestUpdateRoleMemberIsLocalOnly(t *testing.T) {
 	fc := &fakeClient{users: []*casdoorsdk.User{
 		{Id: "1", Name: "alice", Owner: "tenant-a", IsAdmin: false},
 	}}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMaintainer, "actor-9"); err != nil {
 		t.Fatal(err)
@@ -247,7 +253,7 @@ func TestUpdateRoleToAdminWritesCasdoorFirst(t *testing.T) {
 		}}
 		var events []string
 		fc.log, fs.log = &events, &events
-		d := NewCasdoorDirectory(fc, fs)
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 		if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); err != nil {
 			t.Fatal(err)
@@ -274,7 +280,7 @@ func TestUpdateRoleToAdminWritesCasdoorFirst(t *testing.T) {
 			users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
 			updateRejected: true,
 		}
-		d := NewCasdoorDirectory(fc, fs)
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 		if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 			t.Fatalf("got %v, want ErrUpdateRejected", err)
@@ -297,7 +303,7 @@ func TestDemoteAdminWritesCasdoorFirst(t *testing.T) {
 	}}
 	var events []string
 	fc.log, fs.log = &events, &events
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
@@ -325,7 +331,7 @@ func TestUpdateRolePendingUserBecomesActive(t *testing.T) {
 	fc := &fakeClient{users: []*casdoorsdk.User{
 		{Id: "3", Name: "carol", Owner: "tenant-a", IsAdmin: false},
 	}}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "3", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
@@ -359,7 +365,7 @@ func TestDemoteCasdoorConsoleAdminWritesCasdoorFirst(t *testing.T) {
 	}}
 	var events []string
 	fc.log, fs.log = &events, &events
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
@@ -387,7 +393,7 @@ func TestDemoteCasdoorConsoleAdminRejectedLocalUntouched(t *testing.T) {
 		users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a", IsAdmin: true}},
 		updateRejected: true,
 	}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("got %v, want ErrUpdateRejected", err)
@@ -402,7 +408,7 @@ func TestUpdateRoleRejectsSelfAndInvalid(t *testing.T) {
 	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
 	fs.seed("7", "tenant-b", "zoe", authdom.RoleMember, authdom.StatusActive)
 	fc := &fakeClient{}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "1"); !errors.Is(err, ErrSelfOperation) {
 		t.Fatalf("self: %v", err)
@@ -431,7 +437,7 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		fc := &fakeClient{users: []*casdoorsdk.User{
 			{Id: "1", Name: "alice", Owner: "tenant-a"},
 		}}
-		d := NewCasdoorDirectory(fc, fs)
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 		if err := d.SetDisabled("tenant-a", "1", true, "1"); !errors.Is(err, ErrSelfOperation) {
 			t.Fatalf("self disable: %v", err)
@@ -454,7 +460,7 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		fc := &fakeClient{users: []*casdoorsdk.User{
 			{Id: "3", Name: "carol", Owner: "tenant-a"},
 		}}
-		d := NewCasdoorDirectory(fc, fs)
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 		if err := d.SetDisabled("tenant-a", "3", true, "actor-9"); err != nil {
 			t.Fatalf("pending 用户禁用不应报错: %v", err)
@@ -469,7 +475,7 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		fc := &fakeClient{users: []*casdoorsdk.User{
 			{Id: "ghost", Name: "ghost", Owner: "tenant-a"},
 		}}
-		d := NewCasdoorDirectory(fc, fs)
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 		if err := d.SetDisabled("tenant-a", "ghost", true, "actor-9"); !errors.Is(err, ErrUserNotFound) {
 			t.Fatalf("got %v, want ErrUserNotFound", err)
@@ -486,7 +492,7 @@ func TestResetPasswordPassthrough(t *testing.T) {
 	fc := &fakeClient{users: []*casdoorsdk.User{
 		{Id: "1", Name: "alice", Owner: "tenant-a"},
 	}}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if _, err := d.ResetPassword("tenant-a", "1", "1"); !errors.Is(err, ErrSelfOperation) {
 		t.Fatalf("self reset: %v", err)
@@ -518,7 +524,7 @@ func TestSDKErrorsPropagate(t *testing.T) {
 	fs := newFakeStore()
 	fs.seed("1", "tenant-a", "alice", authdom.RoleMember, authdom.StatusActive)
 	fc := &fakeClient{getByIDErr: sentinel}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	// UpdateRole 在分支判断前先经 GetUserByUserId 核对 IsAdmin，错误同样透传
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, sentinel) {
@@ -545,7 +551,7 @@ func TestWriteOpsUpdateRejected(t *testing.T) {
 		users:          []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-a"}},
 		updateRejected: true,
 	}
-	d := NewCasdoorDirectory(fc, fs)
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("UpdateRole: got %v, want ErrUpdateRejected", err)
@@ -558,5 +564,34 @@ func TestWriteOpsUpdateRejected(t *testing.T) {
 	}
 	if _, err := d.ResetPassword("tenant-a", "1", "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("ResetPassword: got %v, want ErrUpdateRejected", err)
+	}
+}
+
+func TestCasdoorDirectoryResolvesClientByTenant(t *testing.T) {
+	// 多租户关键路径：directory 的每个 casdoor API 调用都必须以请求 tenantID
+	// 解析 client，而不是用启动时绑死的单组织 client。
+	var gotTenants []string
+	recording := func(tid string) UserClient {
+		gotTenants = append(gotTenants, tid)
+		return &fakeClient{users: []*casdoorsdk.User{{Id: "1", Name: "alice", Owner: "tenant-b"}}}
+	}
+	fs := newFakeStore()
+	fs.seed("1", "tenant-b", "alice", authdom.RoleMember, authdom.StatusActive)
+	d := NewCasdoorDirectory(recording, fs)
+
+	if _, err := d.ListUsers("tenant-b"); err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if err := d.SetDisabled("tenant-b", "1", true, "actor-9"); err != nil {
+		t.Fatalf("SetDisabled: %v", err)
+	}
+	for i, want := range []string{"tenant-b", "tenant-b", "tenant-b"} {
+		// ListUsers 解析 1 次；SetDisabled 解析 2 次（getTenantUser + Update）
+		if gotTenants[i] != want {
+			t.Fatalf("resolver[%d]: got %q, want %q", i, gotTenants[i], want)
+		}
+	}
+	if len(gotTenants) != 3 {
+		t.Fatalf("resolver 调用次数: got %d, want 3", len(gotTenants))
 	}
 }

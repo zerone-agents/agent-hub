@@ -52,7 +52,7 @@ func (f *fakeUserDirectory) ResetPassword(tenantID, userID, actorID string) (str
 	return f.resetPassword, f.resetErr
 }
 
-const fakeSignupURL = "https://casdoor.example.com/signup/middle-ground"
+const fakeCasdoorEndpoint = "https://casdoor.example.com"
 
 // setupCasdoorUserRouter wires the casdoor admin user routes with a fake
 // directory. The middleware injects the same context the auth middleware
@@ -66,7 +66,7 @@ func setupCasdoorUserRouter(dir UserDirectory) *gin.Engine {
 		c.Set("user_id", "actor")
 		c.Set("roles", []string{"admin"})
 	})
-	h := NewCasdoorUserHandler(dir, fakeSignupURL)
+	h := NewCasdoorUserHandler(dir, fakeCasdoorEndpoint)
 	r.GET("/admin/users/signup-url", h.SignupURL)
 	r.GET("/admin/users", h.ListUsers)
 	r.PATCH("/admin/users/:id", h.UpdateUser)
@@ -217,7 +217,10 @@ func TestCasdoorSignupURL(t *testing.T) {
 		t.Fatalf("signup-url: %d %s", w.Code, w.Body.String())
 	}
 	data := parseData(t, w)
-	if data["signupUrl"] != fakeSignupURL {
-		t.Fatalf("signupUrl: got %v", data["signupUrl"])
+	// signup URL 按请求租户动态拼接：endpoint + /signup/ + tenant_id（tenant-a
+	// 由 setupCasdoorUserRouter 的 middleware 注入）。
+	want := fakeCasdoorEndpoint + "/signup/tenant-a"
+	if data["signupUrl"] != want {
+		t.Fatalf("signupUrl: got %v, want %v", data["signupUrl"], want)
 	}
 }

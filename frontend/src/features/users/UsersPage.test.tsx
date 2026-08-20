@@ -57,17 +57,26 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     renderUsersPage()
     expect(await screen.findByRole('button', { name: '创建邀请' })).toBeInTheDocument()
     expect(await screen.findByText('邀请记录')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '去 Casdoor 注册' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '注册链接' })).not.toBeInTheDocument()
   })
 
-  it('casdoor 模式：渲染「去 Casdoor 注册」，隐藏创建邀请与邀请记录', async () => {
+  it('casdoor 模式：渲染「注册链接」，隐藏创建邀请与邀请记录', async () => {
     vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
-    expect(await screen.findByRole('button', { name: '去 Casdoor 注册' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '注册链接' })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '创建邀请' })).not.toBeInTheDocument()
       expect(screen.queryByText('邀请记录')).not.toBeInTheDocument()
     })
+  })
+
+  it('casdoor 模式：点击「注册链接」弹出 Modal，展示注册链接与复制按钮', async () => {
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    renderUsersPage()
+    fireEvent.click(await screen.findByRole('button', { name: '注册链接' }))
+    expect(await screen.findByText('注册链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('https://casdoor.example.com/signup/org')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
   })
 })
 
