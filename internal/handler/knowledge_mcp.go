@@ -226,7 +226,14 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		return jsonRPCResponse{}, fmt.Errorf("agent not found in context")
 	}
 
-	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenant.GetTenantID(c), agentCfg.Name)
+	tenantID := tenant.GetTenantID(c)
+	if tenantID == "" {
+		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
+		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
+		return jsonRPCResponse{}, fmt.Errorf("tenant context missing on knowledge MCP request")
+	}
+
+	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
 	if err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
 	}

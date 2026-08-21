@@ -74,32 +74,6 @@ type AttrValue struct {
 
 // ── DB entities ──────────────────────────────────────────────────
 
-// LegacyProvider is the LEGACY backup table (vendor_presets). It is retained only
-// as a migration source / safety backup and is no longer written by the app.
-// TODO: once provider_summaries / provider_attributes are confirmed stable
-// in production, DROP TABLE vendor_presets on the next release.
-type LegacyProvider struct {
-	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	Key           string    `gorm:"type:varchar(64);uniqueIndex:uk_key;not null" json:"key"`
-	Name          string    `gorm:"type:varchar(128);not null" json:"name"`
-	Description   string    `gorm:"type:text" json:"description"`
-	DescriptionEn string    `gorm:"column:description_en;type:text" json:"descriptionEn"`
-	Protocol      string    `gorm:"type:varchar(16);not null" json:"protocol"`
-	AuthStyle     string    `gorm:"type:varchar(16);not null" json:"authStyle"`
-	BaseURL       string    `gorm:"column:base_url;type:varchar(512)" json:"baseUrl"`
-	DefaultModels string    `gorm:"column:default_models;type:text" json:"-"`
-	Fields        string    `gorm:"column:fields;type:text" json:"-"`
-	IconKey       string    `gorm:"column:icon_key;type:varchar(32)" json:"iconKey"`
-	Builtin       bool      `gorm:"default:false" json:"builtin"`
-	LockedAPIKey  string    `gorm:"column:locked_api_key;type:text" json:"-"` // encrypted
-	CreatedAt     time.Time `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;index" json:"updatedAt"`
-}
-
-func (LegacyProvider) TableName() string {
-	return "vendor_presets"
-}
-
 // ProviderSummary is the new primary table — the "necessary descriptive
 // info" for a vendor preset. Extensible per-provider config lives in the
 // provider_attributes EAV table instead of as fixed columns.

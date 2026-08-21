@@ -109,7 +109,6 @@ func AutoMigrate(backfillTenant string) error {
 		&chat.Session{},
 		&chat.Message{},
 		&aigc.Config{},
-		&provider.LegacyProvider{},
 		&provider.ProviderSummary{},
 		&provider.ProviderAttribute{},
 		&authdomain.CLIToken{},
@@ -178,17 +177,19 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate aigc_configs tenant id: %w", err)
 	}
 
+	if err := migrateDropVendorPresets(); err != nil {
+		return fmt.Errorf("failed to drop vendor_presets: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
 
 // migrateProviderSplit copies rows from the legacy vendor_presets backup
 // table into the new provider_summaries table — but ONLY when the new
-// table is empty (idempotent). The legacy table is never written to or
-// dropped by this process; it remains as a safety backup.
-//
-// TODO: once provider_summaries / provider_attributes are confirmed
-// stable in production, DROP TABLE vendor_presets on the next release.
+// table is empty (idempotent). The legacy table is dropped for good by
+// migrateDropVendorPresets at the end of the chain; on databases where it
+// is already gone (fresh installs) this is a no-op.
 func migrateProviderSplit() error {
 	var summaryCount int64
 	if err := DB.Model(&provider.ProviderSummary{}).Count(&summaryCount).Error; err != nil {
@@ -199,8 +200,13 @@ func migrateProviderSplit() error {
 		return nil
 	}
 
+	if !DB.Migrator().HasTable("vendor_presets") {
+		// Fresh database or already dropped — nothing to salvage.
+		return nil
+	}
+
 	var legacyCount int64
-	if err := DB.Model(&provider.LegacyProvider{}).Count(&legacyCount).Error; err != nil {
+	if err := DB.Raw("SELECT COUNT(*) FROM `vendor_presets`").Scan(&legacyCount).Error; err != nil {
 		return err
 	}
 	if legacyCount == 0 {
@@ -263,6 +269,26 @@ func migrateDropLegacyProviderColumns() error {
 			return fmt.Errorf("drop type failed: %w", err)
 		}
 		log.Println("Dropped legacy column provider_summaries.type")
+	}
+	return nil
+}
+
+// migrateDropVendorPresets drops the legacy vendor_presets backup table for
+// good — provider_summaries / provider_attributes have been the source of
+// truth long enough to be considered stable, and multi-tenant Phase 3 made
+// the legacy single-tenant table moot anyway. Runs last in the chain so
+// migrateProviderSplit still gets a chance to salvage rows from stale
+// databases first. Idempotent: HasTable guard, no-op when already dropped.
+func migrateDropVendorPresets() error {
+	if DB == nil {
+		return nil
+	}
+	migrator := DB.Migrator()
+	if migrator.HasTable("vendor_presets") {
+		if err := DB.Exec("DROP TABLE `vendor_presets`").Error; err != nil {
+			return fmt.Errorf("drop vendor_presets failed: %w", err)
+		}
+		log.Println("Dropped legacy table vendor_presets")
 	}
 	return nil
 }

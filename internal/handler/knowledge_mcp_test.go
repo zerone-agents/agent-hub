@@ -12,6 +12,7 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,6 +53,7 @@ func testAgentAuthMiddleware(validToken string) gin.HandlerFunc {
 			return
 		}
 		c.Set("agent", &agent.AgentConfig{Name: "test-agent"})
+		tenant.SetTenantID(c, tenant.DefaultID)
 		c.Next()
 	}
 }
@@ -304,6 +306,67 @@ func TestKnowledgeMcpHandler_ToolsCall_ServiceError(t *testing.T) {
 	if !strings.Contains(resultText(resp.Result), "检索失败") {
 		t.Fatalf("expected retrieval failure message, got %v", resp.Result)
 	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
+	// 理论不可达（middleware 命中 agents 行必写 tenant），防御性验证：
+	// 无 tenant 时必须返回明确错误，而非用空串静默查询全表。
+	gin.SetMode(gin.TestMode)
+	var gotTenantID string
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, agentName string) ([]string, error) {
+		gotTenantID = tenantID
+		return []string{"allowed-dataset"}, nil
+	}}
+	router := gin.New()
+	router.POST("/api/v1/knowledge/mcp", func(c *gin.Context) {
+		// deliberately no tenant.SetTenantID
+		c.Set("agent", &agent.AgentConfig{Name: "test-agent"})
+		c.Next()
+	}, NewKnowledgeMcpHandler(&fakeKnowledgeMcpService{}, agentSvc).HandleMessage)
+
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if gotTenantID != "" {
+		t.Fatalf("agent service should not be called with empty tenant, got %q", gotTenantID)
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "tenant") {
+		t.Fatalf("expected explicit tenant-missing error, got %+v", resp)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
+	// 验证 handler 把 context 里的 tenant_id 原样传给 dataset 反查。
+	var gotTenantID, gotAgentName string
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, agentName string) ([]string, error) {
+		gotTenantID, gotAgentName = tenantID, agentName
+		return []string{"tenant-a-dataset"}, nil
+	}}
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	if gotTenantID != tenant.DefaultID {
+		t.Fatalf("tenantID = %q, want %q", gotTenantID, tenant.DefaultID)
+	}
+	if gotAgentName != "test-agent" {
+		t.Fatalf("agentName = %q, want test-agent", gotAgentName)
+	}
+}
+
+type tenantAwareAgentMcpService struct {
+	fn func(tenantID, agentName string) ([]string, error)
+}
+
+func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
+	return f.fn(tenantID, agentName)
 }
 
 func isErrorResult(result interface{}) bool {
