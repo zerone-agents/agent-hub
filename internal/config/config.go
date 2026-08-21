@@ -61,11 +61,9 @@ func (c *Config) ValidateAuth() error {
 	case "casdoor":
 		// Casdoor 使用自身签名的 token 校验，无需本地 JWT secret；
 		// 角色已改为 agent-hub 本地管理，不再有 role mapping / default role 配置。
-		// Organization 必填：它同时是租户 ID 和存量数据 tenant_id 回填目标，
-		// 为空会把存量行回填到错误租户且不可逆。
-		if strings.TrimSpace(c.Casdoor.Organization) == "" {
-			return fmt.Errorf("casdoor.organization 必填（casdoor 模式）：它是租户 ID 与存量数据回填目标")
-		}
+		// Organization 可选：仅作为存量数据回填目标的显式覆盖（一次性升级
+		// 逃生舱）。未配置时 AutoMigrate 从 user_identities 自动推断；仅在
+		// 存量数据无法归属（0 或多个租户）时才需要临时配置。
 	default:
 		return fmt.Errorf("auth.mode 必须是 builtin 或 casdoor，当前: %q", c.Auth.Mode)
 	}

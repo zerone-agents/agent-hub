@@ -42,14 +42,13 @@ func TestValidateAuthCasdoorSkipsSecret(t *testing.T) {
 	}
 }
 
-func TestValidateAuthCasdoorRequiresOrganization(t *testing.T) {
+// TestValidateAuthCasdoorOrganizationOptional：Organization 不再必填——它只是
+// 存量数据回填目标的一次性显式覆盖（升级逃生舱），未配置时 AutoMigrate 从
+// user_identities 自动推断。
+func TestValidateAuthCasdoorOrganizationOptional(t *testing.T) {
 	cfg := &Config{Auth: AuthConfig{Mode: "casdoor"}, Casdoor: CasdoorConfig{Organization: ""}}
-	if err := cfg.ValidateAuth(); err == nil {
-		t.Fatal("want error for empty casdoor organization")
-	}
-	cfg.Casdoor.Organization = "   "
-	if err := cfg.ValidateAuth(); err == nil {
-		t.Fatal("want error for whitespace-only casdoor organization")
+	if err := cfg.ValidateAuth(); err != nil {
+		t.Fatalf("casdoor mode must not require organization: %v", err)
 	}
 	cfg.Casdoor.Organization = "zerone"
 	if err := cfg.ValidateAuth(); err != nil {

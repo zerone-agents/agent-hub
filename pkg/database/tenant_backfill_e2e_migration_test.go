@@ -44,6 +44,20 @@ func runAutoMigrateWithRestore(t *testing.T, db *gorm.DB, backfillTenant string)
 	require.NoError(t, AutoMigrate(backfillTenant))
 }
 
+// runAutoMigrateExpectError 同 runAutoMigrateWithRestore，但期望 AutoMigrate
+// 返回错误（歧义升级的 fail-fast 路径）。
+func runAutoMigrateExpectError(t *testing.T, db *gorm.DB, backfillTenant string) error {
+	t.Helper()
+	oldDB, oldBackfill := DB, backfillTenantID
+	t.Cleanup(func() {
+		DB, backfillTenantID = oldDB, oldBackfill
+	})
+	DB = db
+	err := AutoMigrate(backfillTenant)
+	require.Error(t, err)
+	return err
+}
+
 // TestTenantBackfillE2E_Casdoor 守护终审 C-1：model tag 若是 default:'default'，
 // AutoMigrate 的 ADD COLUMN ... NOT NULL DEFAULT 'default' 会把存量行在加列
 // 那一刻填成 'default'，BackfillTenantID 的 WHERE tenant_id = ” 永不命中，
@@ -64,11 +78,12 @@ func TestTenantBackfillE2E_Casdoor(t *testing.T) {
 	}
 }
 
-// TestTenantBackfillE2E_Builtin builtin 模式：backfill 传空串回落 'default'，
-// 存量行回填后应恰为 'default'（与旧行为等价）。
+// TestTenantBackfillE2E_Builtin builtin 模式：main.go 显式传 "default"
+// （builtin 无 user_identities 记录，不参与自动推断），存量行回填后
+// 应恰为 'default'（与旧行为等价）。
 func TestTenantBackfillE2E_Builtin(t *testing.T) {
 	db := setupLegacyAgentsChatDB(t)
-	runAutoMigrateWithRestore(t, db, "")
+	runAutoMigrateWithRestore(t, db, "default")
 
 	for table, key := range map[string]string{
 		"agents":         "name = 'legacy-agent-2'",
@@ -79,4 +94,53 @@ func TestTenantBackfillE2E_Builtin(t *testing.T) {
 		require.NoError(t, db.Raw("SELECT tenant_id FROM "+table+" WHERE "+key).Scan(&tenantID).Error)
 		require.Equal(t, "default", tenantID, table+" 存量行在 builtin 模式必须回填为 'default'")
 	}
+}
+
+// TestTenantBackfillE2E_InferredSingleTenant casdoor 模式零配置升级的主路径：
+// CASDOOR_ORGANIZATION 未配置（AutoMigrate 传空），user_identities 恰好一个
+// 租户 → 自动推断为回填目标，存量数据归属该租户。
+func TestTenantBackfillE2E_InferredSingleTenant(t *testing.T) {
+	db := setupLegacyAgentsChatDB(t)
+	// 模拟 Phase 1+ 已部署的库：user_identities 已存在且只有一个组织的登录记录
+	require.NoError(t, db.Exec(`CREATE TABLE user_identities (id INTEGER PRIMARY KEY AUTOINCREMENT, provider VARCHAR(16) NOT NULL DEFAULT 'casdoor', external_id VARCHAR(64) NOT NULL, tenant_id VARCHAR(64) NOT NULL, username VARCHAR(64), display_name VARCHAR(64), email VARCHAR(128), role VARCHAR(16), status VARCHAR(16) NOT NULL DEFAULT 'pending', last_login_at DATETIME, created_at DATETIME, updated_at DATETIME)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO user_identities (external_id, tenant_id, username, status) VALUES ('u-1', 'acme-org', 'alice', 'active')`).Error)
+	// 聊天存量行的 user 恰好映射到该租户（真实升级中登录过的用户都有记录）
+	require.NoError(t, db.Exec(`INSERT INTO user_identities (external_id, tenant_id, username, status) VALUES ('u-legacy', 'acme-org', 'legacy-user', 'active')`).Error)
+
+	runAutoMigrateWithRestore(t, db, "") // 未显式指定 → 自动推断
+
+	for table, key := range map[string]string{
+		"agents":         "name = 'legacy-agent'",
+		"cloud_sessions": "id = 's-1'",
+		"cloud_messages": "id = 'm-1'",
+	} {
+		var tenantID string
+		require.NoError(t, db.Raw("SELECT tenant_id FROM "+table+" WHERE "+key).Scan(&tenantID).Error)
+		require.Equal(t, "acme-org", tenantID, table+" 存量行必须回填为推断租户 acme-org")
+	}
+}
+
+// TestTenantBackfillE2E_Ambiguous 多个租户登录过且存在无归属存量数据：
+// 无法推断 → 指引性报错（配置一次 CASDOOR_ORGANIZATION 完成迁移），
+// 绝不静默回填到任意租户。
+func TestTenantBackfillE2E_Ambiguous(t *testing.T) {
+	db := setupLegacyAgentsChatDB(t)
+	require.NoError(t, db.Exec(`CREATE TABLE user_identities (id INTEGER PRIMARY KEY AUTOINCREMENT, provider VARCHAR(16) NOT NULL DEFAULT 'casdoor', external_id VARCHAR(64) NOT NULL, tenant_id VARCHAR(64) NOT NULL, username VARCHAR(64), display_name VARCHAR(64), email VARCHAR(128), role VARCHAR(16), status VARCHAR(16) NOT NULL DEFAULT 'pending', last_login_at DATETIME, created_at DATETIME, updated_at DATETIME)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO user_identities (external_id, tenant_id, username, status) VALUES ('u-1', 'org-a', 'alice', 'active'), ('u-2', 'org-b', 'bob', 'active')`).Error)
+
+	err := runAutoMigrateExpectError(t, db, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "CASDOOR_ORGANIZATION", "报错必须指引配置 CASDOOR_ORGANIZATION")
+}
+
+// TestTenantBackfillE2E_AlreadyMigratedNoop 已完成迁移的库正常重启：
+// 未配置 org 也能启动（推断出唯一租户或无待回填行），幂等 no-op。
+func TestTenantBackfillE2E_AlreadyMigratedNoop(t *testing.T) {
+	db := setupLegacyAgentsChatDB(t)
+	require.NoError(t, db.Exec(`CREATE TABLE user_identities (id INTEGER PRIMARY KEY AUTOINCREMENT, provider VARCHAR(16) NOT NULL DEFAULT 'casdoor', external_id VARCHAR(64) NOT NULL, tenant_id VARCHAR(64) NOT NULL, username VARCHAR(64), display_name VARCHAR(64), email VARCHAR(128), role VARCHAR(16), status VARCHAR(16) NOT NULL DEFAULT 'pending', last_login_at DATETIME, created_at DATETIME, updated_at DATETIME)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO user_identities (external_id, tenant_id, username, status) VALUES ('u-legacy', 'acme-org', 'legacy-user', 'active')`).Error)
+
+	runAutoMigrateWithRestore(t, db, "") // 首次：推断回填
+	// 模拟运维按新文档移除了 CASDOOR_ORGANIZATION 后的重启：再次传空
+	require.NoError(t, AutoMigrate(""))
 }

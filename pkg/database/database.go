@@ -73,19 +73,41 @@ func Close() error {
 	return nil
 }
 
-// defaultBackfillTenant 是回填存量数据 tenant_id 时的兜底租户。
+// defaultBackfillTenant 是 builtin 模式（单租户）的回填租户。
 // 本地常量而非 import internal/domain/tenant，避免 pkg → internal 的循环依赖。
 const defaultBackfillTenant = "default"
 
-// 包级变量，由 AutoMigrate 设置、各 migrate 回填函数消费
+// 包级变量，由 AutoMigrate 设置、各 migrate 回填函数消费。
+// 空串 = 未显式指定且无法从数据推断——BackfillTenantID 会在实际存在
+// 待回填行时报错兜底（仅歧义升级需要一次性显式配置）。
 var backfillTenantID = defaultBackfillTenant
 
-// AutoMigrate runs the automatic migration for all models.
-// backfillTenant 指定存量行空 tenant_id 的回填目标；传空时回落到 defaultBackfillTenant。
-func AutoMigrate(backfillTenant string) error {
-	if backfillTenant == "" {
-		backfillTenant = defaultBackfillTenant
+// resolveBackfillTenant 在未显式指定回填租户时从 user_identities 推断：
+// 恰好一个租户 → 该租户（单组织部署的升级语义：存量数据属于唯一存在的
+// 租户，无需任何配置）；0 个（新装库/更早版本的备份恢复）或多个
+// （多组织登录过，存量数据无法归属）→ 返回空串，交给 BackfillTenantID
+// 按是否存在待回填行决定放行或报错。必须在 user_identities 表存在后调用
+// （AutoMigrate 的 GORM 建表之后）。
+func resolveBackfillTenant() string {
+	if DB == nil {
+		return ""
 	}
+	var tenants []string
+	if err := DB.Raw("SELECT DISTINCT tenant_id FROM user_identities WHERE tenant_id != ''").Scan(&tenants).Error; err != nil {
+		return "" // 表不存在等查询失败：按无法推断处理
+	}
+	if len(tenants) == 1 {
+		log.Printf("未配置回填租户，已从 user_identities 自动推断为 %q（单租户部署）", tenants[0])
+		return tenants[0]
+	}
+	return ""
+}
+
+// AutoMigrate runs the automatic migration for all models.
+// backfillTenant 指定存量行空 tenant_id 的回填目标；传空表示未显式指定
+// （仅 casdoor 模式合法），AutoMigrate 会从 user_identities 自动推断；
+// 推断不出时若有待回填行，BackfillTenantID 会返回指引性错误。
+func AutoMigrate(backfillTenant string) error {
 	backfillTenantID = backfillTenant
 	if DB == nil {
 		return fmt.Errorf("database not initialized")
@@ -119,6 +141,13 @@ func AutoMigrate(backfillTenant string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
+	}
+
+	// 未显式指定回填租户（casdoor 模式未配 CASDOOR_ORGANIZATION）：建表后
+	// 从 user_identities 推断。推断不出则保持空串，由 BackfillTenantID 按
+	// 是否存在待回填行决定放行（no-op）或报错（歧义升级需一次性显式配置）。
+	if backfillTenantID == "" {
+		backfillTenantID = resolveBackfillTenant()
 	}
 
 	if err := migrateProviderSplit(); err != nil {
@@ -919,7 +948,22 @@ func migrateAigcConfigsTenantID() error {
 // 的 ADD COLUMN ... NOT NULL DEFAULT ” 会把全部存量行一次性填为 ”，因此
 // WHERE tenant_id = ” OR tenant_id IS NULL 恰好命中且仅命中存量行；共享行
 // 的空串语义在回填之后才由代码引入，不会与回填条件冲突。
+//
+// 回填目标为空串（未显式指定且无法推断）时：无待回填行则放行（no-op，
+// 覆盖新装库与已迁移完成的正常重启）；存在待回填行则返回指引性错误——
+// 这是一次性升级逃生舱的触发点，配置一次 CASDOOR_ORGANIZATION 完成
+// 迁移后即可移除该配置。
 func BackfillTenantID(db *gorm.DB, table string) error {
+	if backfillTenantID == "" {
+		var pending int64
+		if err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE tenant_id = '' OR tenant_id IS NULL", table)).Scan(&pending).Error; err != nil {
+			return fmt.Errorf("count pending backfill rows in %s: %w", table, err)
+		}
+		if pending > 0 {
+			return fmt.Errorf("表 %s 有 %d 行存量数据无法归属租户（user_identities 为空或含多个租户，无法自动推断）：请临时配置 CASDOOR_ORGANIZATION 指定回填目标，完成本次一次性迁移后移除该配置", table, pending)
+		}
+		return nil
+	}
 	res := db.Exec(fmt.Sprintf("UPDATE `%s` SET tenant_id = ? WHERE tenant_id = '' OR tenant_id IS NULL", table), backfillTenantID)
 	if res.Error != nil {
 		return fmt.Errorf("backfill %s.tenant_id: %w", table, res.Error)
