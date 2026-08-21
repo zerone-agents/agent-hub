@@ -21,13 +21,52 @@ func NewToolService() *ToolService {
 	}
 }
 
+// presetToolSpec 是预设工具的单源定义：名字集合必须与 agent.PresetToolNames
+// 一一对应（seedAlways=true 的三条走 SeedBuiltins 幂等补种，其余走
+// SeedIfEmpty 空表首种）。新增预设工具时改 agent.PresetToolNames + 这里。
+type presetToolSpec struct {
+	tool       agent.Tool
+	seedAlways bool
+}
+
+var presetToolSpecs = []presetToolSpec{
+	{agent.Tool{Name: "Skill", Title: "技能加载", Description: "加载专门的技能，为特定任务提供领域专用指令和工作流程", IsDefault: false}, true},
+	{agent.Tool{Name: "Task", Title: "任务派发", Description: "将子任务派发给指定的子 Agent 执行，获取其结果", IsDefault: false}, true},
+	{agent.Tool{Name: "MultiTask", Title: "并行任务派发", Description: "一次性将多个子任务并行派发给子 Agent 执行", IsDefault: false}, true},
+	{agent.Tool{Name: "Bash", Title: "执行命令", Description: "在持久化的 shell 会话中执行 bash 命令，支持超时和工作目录设置", IsDefault: false}, false},
+	{agent.Tool{Name: "Read", Title: "读取文件", Description: "读取文件内容，支持文本文件、图片和 PDF，带行号显示", IsDefault: false}, false},
+	{agent.Tool{Name: "Write", Title: "写入文件", Description: "将内容写入指定文件，不存在则创建，存在则覆盖", IsDefault: false}, false},
+	{agent.Tool{Name: "Edit", Title: "编辑文件", Description: "对文件执行精确的字符串替换，支持多行匹配", IsDefault: false}, false},
+	{agent.Tool{Name: "Glob", Title: "搜索文件", Description: "按 glob 模式匹配查找文件，支持递归搜索", IsDefault: false}, false},
+	{agent.Tool{Name: "Grep", Title: "搜索内容", Description: "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行", IsDefault: false}, false},
+}
+
+func init() {
+	byName := make(map[string]presetToolSpec, len(presetToolSpecs))
+	for _, s := range presetToolSpecs {
+		byName[s.tool.Name] = s
+	}
+	if len(byName) != len(agent.PresetToolNames) {
+		panic("presetToolSpecs and agent.PresetToolNames are out of sync")
+	}
+	for _, name := range agent.PresetToolNames {
+		if _, ok := byName[name]; !ok {
+			panic("presetToolSpecs and agent.PresetToolNames are out of sync")
+		}
+	}
+}
+
 // builtinTools lists the built-in tools that must always exist in the database.
 // Order matters only for determinism; each row is seeded idempotently.
-var builtinTools = []agent.Tool{
-	{Name: "Skill", Title: "技能加载", Description: "加载专门的技能，为特定任务提供领域专用指令和工作流程", IsDefault: false},
-	{Name: "Task", Title: "任务派发", Description: "将子任务派发给指定的子 Agent 执行，获取其结果", IsDefault: false},
-	{Name: "MultiTask", Title: "并行任务派发", Description: "一次性将多个子任务并行派发给子 Agent 执行", IsDefault: false},
-}
+var builtinTools = func() []agent.Tool {
+	tools := make([]agent.Tool, 0, len(presetToolSpecs))
+	for _, s := range presetToolSpecs {
+		if s.seedAlways {
+			tools = append(tools, s.tool)
+		}
+	}
+	return tools
+}()
 
 // SeedBuiltins ensures built-in tools exist in the database. Idempotent: rows
 // that already exist (matched by Name) are left untouched. This covers both
@@ -218,25 +257,19 @@ func (s *ToolService) SeedIfEmpty() error {
 		return nil
 	}
 
-	presets := []struct {
-		Name, Title, Description string
-	}{
-		{"Bash", "执行命令", "在持久化的 shell 会话中执行 bash 命令，支持超时和工作目录设置"},
-		{"Read", "读取文件", "读取文件内容，支持文本文件、图片和 PDF，带行号显示"},
-		{"Write", "写入文件", "将内容写入文件，不存在则创建，存在则覆盖"},
-		{"Edit", "编辑文件", "对文件执行精确的字符串替换，支持多行匹配"},
-		{"Glob", "搜索文件", "按 glob 模式匹配查找文件，支持递归搜索"},
-		{"Grep", "搜索内容", "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行"},
-	}
-
-	for _, p := range presets {
+	// 预设行单源：presetToolSpecs（与 agent.PresetToolNames 对齐），此处只取
+	// SeedIfEmpty 负责的六条（seedAlways=false）。
+	for _, p := range presetToolSpecs {
+		if p.seedAlways {
+			continue
+		}
 		t := &agent.Tool{
-			Name:        p.Name,
-			Title:       p.Title,
-			Description: p.Description,
+			Name:        p.tool.Name,
+			Title:       p.tool.Title,
+			Description: p.tool.Description,
 		}
 		if err := s.repo.Create(sysTenant, t); err != nil {
-			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", p.Name, err)
+			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", t.Name, err)
 		}
 	}
 

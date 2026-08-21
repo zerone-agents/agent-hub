@@ -66,13 +66,21 @@ func (r *SkillRepository) GetByName(tenantID, name string) (*skill.Skill, error)
 }
 
 // Create 写入前强制盖章 TenantID——调用方传入的 TenantID 不可信。
+// skills 没有系统写通道：空 tenantID 直接拒绝（ErrTenantIDRequired），
+// 防止把私有行静默提升为共享。
 func (r *SkillRepository) Create(tenantID string, s *skill.Skill) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	s.TenantID = tenantID
 	return r.db.Create(s).Error
 }
 
 // Update 先校验归属（跨租户返回 ErrRecordNotFound），再盖章保存。
 func (r *SkillRepository) Update(tenantID string, s *skill.Skill) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	if err := r.mustOwnSkill(r.db, tenantID, s.ID); err != nil {
 		return err
 	}
@@ -81,6 +89,9 @@ func (r *SkillRepository) Update(tenantID string, s *skill.Skill) error {
 }
 
 func (r *SkillRepository) Delete(tenantID string, id uint64) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	if err := r.mustOwnSkill(r.db, tenantID, id); err != nil {
 		return err
 	}

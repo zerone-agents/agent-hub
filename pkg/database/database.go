@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"control-panel/internal/config"
@@ -747,41 +748,66 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 	}
 	m := DB.Migrator()
 
-	// scenes：先按 agents 主表回填（同 migrateChatTenantID 的 JOIN 回填）
-	if m.HasColumn("scenes", "tenant_id") {
-		if err := DB.Exec(
-			"UPDATE `scenes` SET tenant_id = (SELECT tenant_id FROM `agents` WHERE `agents`.id = `scenes`.agent_id LIMIT 1) WHERE agent_id IN (SELECT id FROM `agents`)",
-		).Error; err != nil {
-			return fmt.Errorf("backfill scenes from agents: %w", err)
-		}
-	}
-
-	for _, table := range []string{"mcp_servers", "tools", "skills", "scenes"} {
-		if err := BackfillTenantID(DB, table); err != nil {
-			return err
-		}
-	}
-
-	// 回填后，内置行改为共享（''）：这些是全平台模板，不属于任何租户
-	if err := DB.Exec("UPDATE `tools` SET tenant_id = '' WHERE is_builtin = ?", true).Error; err != nil {
-		return fmt.Errorf("reset builtin tools to shared: %w", err)
-	}
-	if err := DB.Exec("UPDATE `mcp_servers` SET tenant_id = '' WHERE is_builtin = ?", true).Error; err != nil {
-		return fmt.Errorf("reset builtin mcp_servers to shared: %w", err)
-	}
-	// tools 的 SeedIfEmpty 预设行（Skill/Task/MultiTask/Bash/Read/...）没有
-	// is_builtin 标志，按启动前 seeding 的固定名单一并归入共享模板。
-	if err := DB.Exec("UPDATE `tools` SET tenant_id = '' WHERE name IN ('Skill','Task','MultiTask','Bash','Read','Write','Edit','Glob','Grep')").Error; err != nil {
-		return fmt.Errorf("reset seeded tools to shared: %w", err)
-	}
-
-	dropLegacy := map[string]interface{}{
+	legacyModels := map[string]interface{}{
 		"mcp_servers": &mcp.McpServer{},
 		"tools":       &agent.Tool{},
 		"skills":      &skill.Skill{},
 		"scenes":      &scene.Scene{},
 	}
-	for table, model := range dropLegacy {
+
+	// 幂等守卫：回填 + 归零 + 删旧索引只在真正执行迁移的那一次跑——判据
+	// 是旧全局唯一索引 uk_name 仍存在（AutoMigrate 已建 uk_tenant_name，
+	// 本函数删掉 uk_name 后重跑即为纯 no-op）。归零 UPDATE 绝不能每次启动
+	// 都跑：租户可与共享预设行同名（('org-a','Skill') 与 ('','Skill') 合法
+	// 共存），无条件按名单归零会把租户私有行劫持进共享域，甚至撞
+	// uk_tenant_name 唯一索引导致启动失败。
+	needsMigration := false
+	for _, model := range legacyModels {
+		if m.HasIndex(model, "uk_name") {
+			needsMigration = true
+			break
+		}
+	}
+
+	if needsMigration {
+		// scenes：先按 agents 主表回填（同 migrateChatTenantID 的 JOIN 回填）
+		if m.HasColumn("scenes", "tenant_id") {
+			if err := DB.Exec(
+				"UPDATE `scenes` SET tenant_id = (SELECT tenant_id FROM `agents` WHERE `agents`.id = `scenes`.agent_id LIMIT 1) WHERE agent_id IN (SELECT id FROM `agents`)",
+			).Error; err != nil {
+				return fmt.Errorf("backfill scenes from agents: %w", err)
+			}
+		}
+
+		for _, table := range []string{"mcp_servers", "tools", "skills", "scenes"} {
+			if err := BackfillTenantID(DB, table); err != nil {
+				return err
+			}
+		}
+
+		// 回填后，内置行改为共享（''）：这些是全平台模板，不属于任何租户。
+		// 注：tools 表没有 is_builtin 列（预设行名单见下一条 UPDATE）。
+		if err := DB.Exec("UPDATE `mcp_servers` SET tenant_id = '' WHERE is_builtin = ?", true).Error; err != nil {
+			return fmt.Errorf("reset builtin mcp_servers to shared: %w", err)
+		}
+		// tools 的 SeedIfEmpty/SeedBuiltins 预设行没有 is_builtin 标志，按
+		// agent.PresetToolNames 固定名单一并归入共享模板——名单与 seeding
+		// 同源维护，新增预设工具两处自动同步。
+		placeholders := make([]string, len(agent.PresetToolNames))
+		args := make([]interface{}, len(agent.PresetToolNames))
+		for i, name := range agent.PresetToolNames {
+			placeholders[i] = "?"
+			args[i] = name
+		}
+		if err := DB.Exec(
+			fmt.Sprintf("UPDATE `tools` SET tenant_id = '' WHERE name IN (%s)", strings.Join(placeholders, ",")),
+			args...,
+		).Error; err != nil {
+			return fmt.Errorf("reset seeded tools to shared: %w", err)
+		}
+	}
+
+	for table, model := range legacyModels {
 		if m.HasIndex(model, "uk_name") {
 			if err := m.DropIndex(model, "uk_name"); err != nil {
 				return fmt.Errorf("drop %s.uk_name: %w", table, err)

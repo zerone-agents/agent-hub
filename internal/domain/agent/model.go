@@ -75,6 +75,16 @@ func (Tool) TableName() string {
 	return "tools"
 }
 
+// PresetToolNames 是以共享模板行（tenant_id=”）写入 tools 表的全部预设
+// 工具名单，来源 = ToolService.SeedBuiltins（前三个：Skill/Task/MultiTask）
+// + ToolService.SeedIfEmpty（其余六个）。pkg/database 的租户迁移按此名单
+// 把旧存量预设行归零为共享——seeding 与迁移两边必须同源引用本常量，
+// 新增预设工具时只改这里。
+var PresetToolNames = []string{
+	"Skill", "Task", "MultiTask",
+	"Bash", "Read", "Write", "Edit", "Glob", "Grep",
+}
+
 type AgentTool struct {
 	AgentID   uint64      `gorm:"primaryKey;index:idx_agent_id"`
 	ToolID    uint64      `gorm:"primaryKey;index:idx_tool_id"`

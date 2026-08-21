@@ -60,13 +60,21 @@ func (r *SceneRepository) GetByName(tenantID, name string) (*scene.Scene, error)
 }
 
 // Create 写入前强制盖章 TenantID——调用方传入的 TenantID 不可信。
+// scenes 没有系统写通道：空 tenantID 直接拒绝（ErrTenantIDRequired），
+// 防止把私有行静默提升为共享。
 func (r *SceneRepository) Create(tenantID string, s *scene.Scene) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	s.TenantID = tenantID
 	return r.db.Create(s).Error
 }
 
 // Update 先校验归属（跨租户返回 ErrRecordNotFound），再盖章保存。
 func (r *SceneRepository) Update(tenantID string, s *scene.Scene) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	if err := r.mustOwnScene(r.db, tenantID, s.ID); err != nil {
 		return err
 	}
@@ -75,6 +83,9 @@ func (r *SceneRepository) Update(tenantID string, s *scene.Scene) error {
 }
 
 func (r *SceneRepository) Delete(tenantID string, id uint64) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
 	if err := r.mustOwnScene(r.db, tenantID, id); err != nil {
 		return err
 	}

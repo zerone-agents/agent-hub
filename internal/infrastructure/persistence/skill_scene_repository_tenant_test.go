@@ -130,6 +130,37 @@ func TestSkillRepository_WriteScopes(t *testing.T) {
 	require.Equal(t, "org-a", sk.TenantID, "Create 必须强制盖章请求租户")
 }
 
+// TestSkillRepository_RejectsEmptyTenantID skills 没有系统写通道：空
+// tenantID 的 Create/Update/Delete 必须显式拒绝，防止 mustOwn 的系统路径
+// 放行 + 盖章 ” 把租户私有 skill 静默提升为全局共享行。
+func TestSkillRepository_RejectsEmptyTenantID(t *testing.T) {
+	db := setupSkillSceneTestDB(t)
+	seedSkillTenantData(t, db)
+	repo := NewSkillRepository()
+
+	own, err := repo.GetByName("org-a", "writer-a")
+	require.NoError(t, err)
+
+	err = repo.Create("", &skill.Skill{Name: "ghost", Title: "t"})
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Create 必须返回 ErrTenantIDRequired, got %v", err)
+
+	own.Title = "promoted"
+	err = repo.Update("", own)
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Update 必须返回 ErrTenantIDRequired, got %v", err)
+
+	err = repo.Delete("", own.ID)
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Delete 必须返回 ErrTenantIDRequired, got %v", err)
+
+	// 行本身未被改动/提升
+	got, err := repo.GetByName("org-a", "writer-a")
+	require.NoError(t, err)
+	require.Equal(t, "A 技能", got.Title)
+	require.Equal(t, "org-a", got.TenantID, "租户行不得被盖章为共享")
+	var ghostCount int64
+	db.Raw(`SELECT COUNT(*) FROM skills WHERE name = 'ghost'`).Scan(&ghostCount)
+	require.Equal(t, int64(0), ghostCount)
+}
+
 func seedSceneTenantData(t *testing.T, db *gorm.DB) (aScene, bScene uint64) {
 	t.Helper()
 	require.NoError(t, db.Exec(`INSERT INTO agents (name, tenant_id) VALUES ('bot-a', 'org-a')`).Error)
@@ -198,4 +229,34 @@ func TestSceneRepository_WriteScopes(t *testing.T) {
 	sc := &scene.Scene{Name: "coder", AgentID: own.AgentID, Title: "t", Prompt: "p", TenantID: "forged"}
 	require.NoError(t, repo.Create("org-a", sc))
 	require.Equal(t, "org-a", sc.TenantID, "Create 必须强制盖章请求租户")
+}
+
+// TestSceneRepository_RejectsEmptyTenantID scenes 没有系统写通道：空
+// tenantID 的 Create/Update/Delete 必须显式拒绝（同 skill，防止私有行被
+// 盖章 ” 提升为全局共享行）。
+func TestSceneRepository_RejectsEmptyTenantID(t *testing.T) {
+	db := setupSkillSceneTestDB(t)
+	seedSceneTenantData(t, db)
+	repo := NewSceneRepository()
+
+	own, err := repo.GetByName("org-a", "chat-a")
+	require.NoError(t, err)
+
+	err = repo.Create("", &scene.Scene{Name: "ghost", AgentID: own.AgentID, Title: "t", Prompt: "p"})
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Create 必须返回 ErrTenantIDRequired, got %v", err)
+
+	own.Title = "promoted"
+	err = repo.Update("", own)
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Update 必须返回 ErrTenantIDRequired, got %v", err)
+
+	err = repo.Delete("", own.ID)
+	require.True(t, errors.Is(err, ErrTenantIDRequired), "空租户 Delete 必须返回 ErrTenantIDRequired, got %v", err)
+
+	got, err := repo.GetByName("org-a", "chat-a")
+	require.NoError(t, err)
+	require.Equal(t, "A 场景", got.Title)
+	require.Equal(t, "org-a", got.TenantID, "租户行不得被盖章为共享")
+	var ghostCount int64
+	db.Raw(`SELECT COUNT(*) FROM scenes WHERE name = 'ghost'`).Scan(&ghostCount)
+	require.Equal(t, int64(0), ghostCount)
 }
