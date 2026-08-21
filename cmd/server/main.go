@@ -256,6 +256,16 @@ func main() {
 	r.GET("/health", handler.HealthCheck)
 	r.GET("/health/:service", handler.ServiceHealthCheck)
 
+	// /api/v1/ops — 运维端点（组织 OAuth 客户端管理），不走 JWT 链，
+	// 由 X-Ops-Key 常量时间鉴权。OPS_API_KEY 为空 = 功能未启用，端点不挂载（等效 404）。
+	if cfg.Ops.APIKey != "" {
+		opsGroup := r.Group("/api/v1/ops", middleware.RequireOpsKey(cfg.Ops.APIKey))
+		opsHandler := handler.NewOpsTenantClientHandler(repository.NewTenantOAuthClientRepository(), cfg.Provider.EncryptionKey)
+		opsGroup.POST("/tenant-clients", opsHandler.Upsert)
+		opsGroup.GET("/tenant-clients", opsHandler.List)
+		opsGroup.DELETE("/tenant-clients/:org", opsHandler.Delete)
+	}
+
 	// /auth — endpoints are mode-conditional. builtin mode serves setup/login/
 	// register/refresh/change-password locally; casdoor mode keeps the OAuth
 	// redirect flow. /auth/mode and /auth/userinfo are common to both.
