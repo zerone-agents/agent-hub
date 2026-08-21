@@ -20,7 +20,7 @@ type mockAgentRuntimeAuthRepo struct {
 	listAllFunc func() ([]*agent.AgentConfig, error)
 }
 
-func (m *mockAgentRuntimeAuthRepo) ListAll() ([]*agent.AgentConfig, error) {
+func (m *mockAgentRuntimeAuthRepo) ListAllUnscoped() ([]*agent.AgentConfig, error) {
 	if m.listAllFunc != nil {
 		return m.listAllFunc()
 	}

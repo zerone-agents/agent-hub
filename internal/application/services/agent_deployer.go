@@ -33,10 +33,10 @@ type DeploymentDTO struct {
 
 // agentRepository defines the methods needed from the agent repository.
 type agentRepository interface {
-	GetByName(name string) (*agent.AgentConfig, error)
+	GetByName(tenantID, name string) (*agent.AgentConfig, error)
 	GetSubagents(agentID uint64) ([]string, error)
 	GetKnowledgeDatasetIDsByAgent(agentID uint64) ([]string, error)
-	Update(a *agent.AgentConfig) error
+	Update(tenantID string, a *agent.AgentConfig) error
 }
 
 // toolRepository defines the methods needed from the tool repository.
@@ -58,7 +58,7 @@ type providerService interface {
 
 // mcpService defines the methods needed from the MCP service.
 type mcpService interface {
-	GetClientMcpsByAgent(name string) (map[string]*McpClientDTO, error)
+	GetClientMcpsByAgent(tenantID, name string) (map[string]*McpClientDTO, error)
 }
 
 // knowledgeService defines the methods needed from the knowledge service.
@@ -246,10 +246,10 @@ func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, 
 // rotateKey requests a fresh runtime token; it only takes effect when the
 // container is actually (re)created (force=true or first deploy), matching
 // the deployer's idempotent-return semantics for existing containers.
-func (s *AgentDeployerService) Deploy(name string, force bool, rotateKey bool) (*DeploymentDTO, error) {
+func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateKey bool) (*DeploymentDTO, error) {
 	name = NormalizeAgentName(name)
 	// Load agent from DB
-	agentCfg, err := s.agentRepo.GetByName(name)
+	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
@@ -266,13 +266,13 @@ func (s *AgentDeployerService) Deploy(name string, force bool, rotateKey bool) (
 	}
 
 	// Load relations
-	tools, skills, subagents, err := s.loadAgentRelations(agentCfg)
+	tools, skills, subagents, err := s.loadAgentRelations(tenantID, agentCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	// Load MCP servers (already decrypted)
-	mcpServers, err := s.mcpSvc.GetClientMcpsByAgent(agentCfg.Name)
+	mcpServers, err := s.mcpSvc.GetClientMcpsByAgent(tenantID, agentCfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("load mcp servers failed: %w", err)
 	}
@@ -306,7 +306,7 @@ func (s *AgentDeployerService) Deploy(name string, force bool, rotateKey bool) (
 	if err != nil {
 		// Clean up failed container
 		_ = s.client.DeleteAgent(ctx, name, false)
-		_ = s.updateStatus(agentCfg, "error", 0, nil)
+		_ = s.updateStatus(tenantID, agentCfg, "error", 0, nil)
 		return nil, fmt.Errorf("deploy agent failed: %w", err)
 	}
 
@@ -319,7 +319,7 @@ func (s *AgentDeployerService) Deploy(name string, force bool, rotateKey bool) (
 		return nil, fmt.Errorf("encrypt runtime token failed: %w", err)
 	}
 	agentCfg.RuntimeToken = encryptedToken
-	if err := s.updateStatus(agentCfg, resp.Status, resp.HostPort, &deployedAt); err != nil {
+	if err := s.updateStatus(tenantID, agentCfg, resp.Status, resp.HostPort, &deployedAt); err != nil {
 		return nil, fmt.Errorf("update deployment status failed: %w", err)
 	}
 
@@ -439,10 +439,10 @@ func (s *AgentDeployerService) registerWhenHealthy(name string, hostPort int) {
 }
 
 // GetStatus queries the deployer for the current status of an agent container.
-func (s *AgentDeployerService) GetStatus(name string) (*DeploymentDTO, error) {
+func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO, error) {
 	name = NormalizeAgentName(name)
 	// Load agent from DB
-	agentCfg, err := s.agentRepo.GetByName(name)
+	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
@@ -497,7 +497,7 @@ func (s *AgentDeployerService) GetStatus(name string) (*DeploymentDTO, error) {
 		(statusResp.Status != agentCfg.DeploymentStatus || statusResp.HostPort != agentCfg.RuntimePort) {
 		agentCfg.DeploymentStatus = statusResp.Status
 		agentCfg.RuntimePort = statusResp.HostPort
-		if err := s.agentRepo.Update(agentCfg); err != nil {
+		if err := s.agentRepo.Update(tenantID, agentCfg); err != nil {
 			log.Printf("GetStatus: failed to update agent %s: %v", name, err)
 		}
 	}
@@ -514,10 +514,10 @@ func (s *AgentDeployerService) GetStatus(name string) (*DeploymentDTO, error) {
 }
 
 // Stop stops an agent container.
-func (s *AgentDeployerService) Stop(name string) error {
+func (s *AgentDeployerService) Stop(tenantID, name string) error {
 	name = NormalizeAgentName(name)
 	// Load agent from DB
-	agentCfg, err := s.agentRepo.GetByName(name)
+	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
 		return fmt.Errorf("agent not found: %w", err)
 	}
@@ -529,7 +529,7 @@ func (s *AgentDeployerService) Stop(name string) error {
 
 	// Update DB status to stopped, clear RuntimePort but keep encrypted token so
 	// it can be shown again when the container is restarted.
-	if err := s.updateStatus(agentCfg, "stopped", 0, agentCfg.DeployedAt); err != nil {
+	if err := s.updateStatus(tenantID, agentCfg, "stopped", 0, agentCfg.DeployedAt); err != nil {
 		return fmt.Errorf("update status failed: %w", err)
 	}
 
@@ -541,9 +541,9 @@ func (s *AgentDeployerService) Stop(name string) error {
 }
 
 // Start starts a stopped agent container and refreshes its port/status.
-func (s *AgentDeployerService) Start(name string) (*DeploymentDTO, error) {
+func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, error) {
 	name = NormalizeAgentName(name)
-	agentCfg, err := s.agentRepo.GetByName(name)
+	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
@@ -563,7 +563,7 @@ func (s *AgentDeployerService) Start(name string) (*DeploymentDTO, error) {
 		return nil, fmt.Errorf("get status after start failed: %w", err)
 	}
 
-	if err := s.updateStatus(agentCfg, statusResp.Status, statusResp.HostPort, agentCfg.DeployedAt); err != nil {
+	if err := s.updateStatus(tenantID, agentCfg, statusResp.Status, statusResp.HostPort, agentCfg.DeployedAt); err != nil {
 		return nil, fmt.Errorf("update status failed: %w", err)
 	}
 
@@ -580,19 +580,19 @@ func (s *AgentDeployerService) Start(name string) (*DeploymentDTO, error) {
 
 // Delete archives an agent container (container removed, data retained).
 // The deployer marks the agent as status=archived afterwards.
-func (s *AgentDeployerService) Delete(name string) error {
-	return s.deleteWithPurge(name, false)
+func (s *AgentDeployerService) Delete(tenantID, name string) error {
+	return s.deleteWithPurge(tenantID, name, false)
 }
 
 // Purge permanently deletes an agent container and its data.
-func (s *AgentDeployerService) Purge(name string) error {
-	return s.deleteWithPurge(name, true)
+func (s *AgentDeployerService) Purge(tenantID, name string) error {
+	return s.deleteWithPurge(tenantID, name, true)
 }
 
-func (s *AgentDeployerService) deleteWithPurge(name string, purge bool) error {
+func (s *AgentDeployerService) deleteWithPurge(tenantID, name string, purge bool) error {
 	name = NormalizeAgentName(name)
 	// Load agent from DB
-	agentCfg, err := s.agentRepo.GetByName(name)
+	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
 		return fmt.Errorf("agent not found: %w", err)
 	}
@@ -611,14 +611,14 @@ func (s *AgentDeployerService) deleteWithPurge(name string, purge bool) error {
 	// the record entirely since both container and data are gone.
 	if purge {
 		agentCfg.RuntimeToken = ""
-		if err := s.updateStatus(agentCfg, "", 0, nil); err != nil {
+		if err := s.updateStatus(tenantID, agentCfg, "", 0, nil); err != nil {
 			return fmt.Errorf("update status failed: %w", err)
 		}
 	} else {
 		agentCfg.RuntimePort = 0
 		// Keep runtime token encrypted; it is still valid after redeploy and is
 		// decrypted and returned again by GetStatus when the container is back.
-		if err := s.updateStatus(agentCfg, "archived", 0, agentCfg.DeployedAt); err != nil {
+		if err := s.updateStatus(tenantID, agentCfg, "archived", 0, agentCfg.DeployedAt); err != nil {
 			return fmt.Errorf("update status failed: %w", err)
 		}
 	}
@@ -640,7 +640,7 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 }
 
 // loadAgentRelations loads tools, skills, and subagents for an agent.
-func (s *AgentDeployerService) loadAgentRelations(cfg *agent.AgentConfig) ([]string, []*skill.Skill, []agent.AgentConfig, error) {
+func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.AgentConfig) ([]string, []*skill.Skill, []agent.AgentConfig, error) {
 	tools, err := s.toolRepo.GetToolsByAgent(cfg.ID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("load tools failed: %w", err)
@@ -659,7 +659,7 @@ func (s *AgentDeployerService) loadAgentRelations(cfg *agent.AgentConfig) ([]str
 	// Load full subagent configs
 	subagents := make([]agent.AgentConfig, 0, len(subagentNames))
 	for _, subName := range subagentNames {
-		sub, err := s.agentRepo.GetByName(subName)
+		sub, err := s.agentRepo.GetByName(tenantID, subName)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("load subagent %s failed: %w", subName, err)
 		}
@@ -805,11 +805,11 @@ func (s *AgentDeployerService) applyAigc(req *deployer.CreateAgentRequest) error
 }
 
 // updateStatus updates the agent's deployment status in the database.
-func (s *AgentDeployerService) updateStatus(cfg *agent.AgentConfig, status string, port int, deployedAt *time.Time) error {
+func (s *AgentDeployerService) updateStatus(tenantID string, cfg *agent.AgentConfig, status string, port int, deployedAt *time.Time) error {
 	cfg.DeploymentStatus = status
 	cfg.RuntimePort = port
 	cfg.DeployedAt = deployedAt
-	return s.agentRepo.Update(cfg)
+	return s.agentRepo.Update(tenantID, cfg)
 }
 
 // runtimeURL returns the public runtime URL for an agent given its host port.

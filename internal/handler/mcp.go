@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -83,7 +84,7 @@ type updateAgentMcpsReq struct {
 
 func (h *McpHandler) GetAgentMcps(c *gin.Context) {
 	agentName := c.Param("name")
-	names, err := h.service.GetAgentMcps(agentName)
+	names, err := h.service.GetAgentMcps(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -98,7 +99,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentMcps(agentName, req.McpNames); err != nil {
+	if err := h.service.UpdateAgentMcps(tenant.GetTenantID(c), agentName, req.McpNames); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -139,7 +140,7 @@ func (h *McpHandler) GetClientMcpsByAgent(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "缺少 agent 查询参数")
 		return
 	}
-	items, err := h.service.GetClientMcpsByAgent(agentName)
+	items, err := h.service.GetClientMcpsByAgent(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return

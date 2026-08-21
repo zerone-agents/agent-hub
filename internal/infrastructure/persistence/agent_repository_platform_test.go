@@ -20,6 +20,7 @@ func setupPlatformTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(`CREATE TABLE agents (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name VARCHAR(64) NOT NULL,
+		tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
 		content_hash VARCHAR(128) NOT NULL DEFAULT '',
 		system_prompt TEXT NOT NULL DEFAULT '',
 		permission_mode VARCHAR(32) NOT NULL DEFAULT 'auto',
@@ -66,16 +67,16 @@ func TestListForPlatform(t *testing.T) {
 		require.NoError(t, db.Create(&seed[i]).Error)
 	}
 
-	desktop, err := repo.ListForPlatform(agent.PlatformDesktop)
+	desktop, err := repo.ListForPlatform("default", agent.PlatformDesktop)
 	require.NoError(t, err)
 	require.Equal(t, []string{"both", "desktop-only"}, namesOf(desktop))
 
-	mobile, err := repo.ListForPlatform(agent.PlatformMobile)
+	mobile, err := repo.ListForPlatform("default", agent.PlatformMobile)
 	require.NoError(t, err)
 	require.Equal(t, []string{"both", "mobile-only"}, namesOf(mobile))
 
 	// Empty platform string defaults to desktop (back-compat for existing clients).
-	def, err := repo.ListForPlatform("")
+	def, err := repo.ListForPlatform("default", "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"both", "desktop-only"}, namesOf(def))
 }

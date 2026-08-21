@@ -34,7 +34,7 @@ type fakeAgentMcpService struct {
 	err      error
 }
 
-func (f *fakeAgentMcpService) GetAgentKnowledgeDatasets(agentName string) ([]string, error) {
+func (f *fakeAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
 	return f.datasets, f.err
 }
 

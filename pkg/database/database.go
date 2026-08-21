@@ -161,6 +161,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate chat tenant id: %w", err)
 	}
 
+	if err := migrateAgentsTenantID(); err != nil {
+		return fmt.Errorf("failed to migrate agents tenant id: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -672,6 +676,26 @@ func migrateChatTenantID() error {
 		if err := BackfillTenantID(DB, table); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// migrateAgentsTenantID 回填 agents 存量行的 tenant_id（启动租户），并把旧的
+// 全局唯一索引 uk_name 换成复合索引 uk_tenant_name (tenant_id, name)——
+// 加列和建新索引由 AutoMigrate 完成，这里只负责回填 + 删旧索引。
+func migrateAgentsTenantID() error {
+	if DB == nil {
+		return nil
+	}
+	m := DB.Migrator()
+	if err := BackfillTenantID(DB, "agents"); err != nil {
+		return err
+	}
+	if m.HasIndex(&agent.AgentConfig{}, "uk_name") {
+		if err := m.DropIndex(&agent.AgentConfig{}, "uk_name"); err != nil {
+			return fmt.Errorf("drop agents.uk_name: %w", err)
+		}
+		log.Println("Dropped agents.uk_name (replaced by uk_tenant_name)")
 	}
 	return nil
 }

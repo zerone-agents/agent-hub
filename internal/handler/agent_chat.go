@@ -127,7 +127,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 
 	// 2. Resolve runtime URL and API key
-	baseURL, apiKey, err := h.svc.ResolveRuntime(agentName)
+	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 暂不可用："+err.Error())
 		respondError(c, http.StatusConflict, "agent not available: "+err.Error())

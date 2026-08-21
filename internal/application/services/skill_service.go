@@ -401,9 +401,9 @@ func (s *SkillService) toDTO(sk *skill.Skill) *SkillDTO {
 }
 
 // GetAgentSkills returns the skill names associated with an agent.
-func (s *SkillService) GetAgentSkills(agentName string) ([]string, error) {
+func (s *SkillService) GetAgentSkills(tenantID, agentName string) ([]string, error) {
 	agentRepo := repository.NewAgentRepository()
-	agentCfg, err := agentRepo.GetByName(agentName)
+	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
@@ -412,10 +412,10 @@ func (s *SkillService) GetAgentSkills(agentName string) ([]string, error) {
 
 // UpdateAgentSkills replaces the skill list associated with an agent and
 // automatically mounts/unmounts the built-in Skill tool accordingly.
-func (s *SkillService) UpdateAgentSkills(agentName string, skillNames []string) error {
+func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames []string) error {
 	agentRepo := repository.NewAgentRepository()
 	toolRepo := repository.NewToolRepository()
-	agentCfg, err := agentRepo.GetByName(agentName)
+	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}

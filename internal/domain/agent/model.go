@@ -8,7 +8,8 @@ import (
 
 type AgentConfig struct {
 	ID               uint64            `gorm:"primaryKey;autoIncrement"`
-	Name             string            `gorm:"type:varchar(64);uniqueIndex:uk_name;not null"`
+	Name             string            `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null"`
+	TenantID         string            `gorm:"type:varchar(64);not null;default:'default';uniqueIndex:uk_tenant_name,priority:1;index"`
 	ContentHash      string            `gorm:"column:content_hash;type:varchar(128);not null"`
 	SystemPrompt     string            `gorm:"column:system_prompt;type:text;not null"`
 	PermissionMode   string            `gorm:"column:permission_mode;type:varchar(32);not null;default:'auto'"`

@@ -527,16 +527,16 @@ func (s *McpService) saveProbeResult(m *mcp.McpServer, result *mcpprobe.ProbeRes
 
 // ==================== Agent ↔ MCP 绑定 ====================
 
-func (s *McpService) GetAgentMcps(agentName string) ([]string, error) {
-	agentCfg, err := s.agentRepo.GetByName(agentName)
+func (s *McpService) GetAgentMcps(tenantID, agentName string) ([]string, error) {
+	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
 	return s.repo.GetMcpNamesByAgent(agentCfg.ID)
 }
 
-func (s *McpService) UpdateAgentMcps(agentName string, mcpNames []string) error {
-	agentCfg, err := s.agentRepo.GetByName(agentName)
+func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []string) error {
+	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
@@ -555,8 +555,8 @@ func (s *McpService) UpdateAgentMcps(agentName string, mcpNames []string) error 
 // ==================== 客户端拉取接口（公开） ====================
 
 // GetClientMcpsByAgent 返回某 Agent 绑定的所有 MCP 配置（已解密，可直接喂给 SDK）。
-func (s *McpService) GetClientMcpsByAgent(agentName string) (map[string]*McpClientDTO, error) {
-	agentCfg, err := s.agentRepo.GetByName(agentName)
+func (s *McpService) GetClientMcpsByAgent(tenantID, agentName string) (map[string]*McpClientDTO, error) {
+	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}

@@ -87,14 +87,14 @@ func TestWaitForHealthy_Timeout(t *testing.T) {
 // Test helpers for the existing agent_validator_test.go.
 
 type mockAgentRepo struct {
-	getByNameFunc                 func(name string) (*agent.AgentConfig, error)
+	getByNameFunc                 func(tenantID, name string) (*agent.AgentConfig, error)
 	getSubagentsFunc              func(agentID uint64) ([]string, error)
 	getKnowledgeDatasetIDsByAgent func(agentID uint64) ([]string, error)
-	updateFunc                    func(a *agent.AgentConfig) error
+	updateFunc                    func(tenantID string, a *agent.AgentConfig) error
 }
 
-func (m *mockAgentRepo) GetByName(name string) (*agent.AgentConfig, error) {
-	return m.getByNameFunc(name)
+func (m *mockAgentRepo) GetByName(tenantID, name string) (*agent.AgentConfig, error) {
+	return m.getByNameFunc(tenantID, name)
 }
 
 func (m *mockAgentRepo) GetSubagents(agentID uint64) ([]string, error) {
@@ -111,8 +111,8 @@ func (m *mockAgentRepo) GetKnowledgeDatasetIDsByAgent(agentID uint64) ([]string,
 	return nil, nil
 }
 
-func (m *mockAgentRepo) Update(a *agent.AgentConfig) error {
-	return m.updateFunc(a)
+func (m *mockAgentRepo) Update(tenantID string, a *agent.AgentConfig) error {
+	return m.updateFunc(tenantID, a)
 }
 
 type mockProviderSvc struct {
@@ -142,7 +142,7 @@ type mockMcpSvc struct {
 	err  error
 }
 
-func (m *mockMcpSvc) GetClientMcpsByAgent(name string) (map[string]*McpClientDTO, error) {
+func (m *mockMcpSvc) GetClientMcpsByAgent(tenantID, name string) (map[string]*McpClientDTO, error) {
 	if m.mcps != nil || m.err != nil {
 		return m.mcps, m.err
 	}
@@ -222,7 +222,7 @@ func (f *deployTokenFixture) sentToken(t *testing.T) string {
 func deployTokenAgentRepo(f *deployTokenFixture, runtimeToken string) *mockAgentRepo {
 	providerID := uint64(1)
 	return &mockAgentRepo{
-		getByNameFunc: func(name string) (*agent.AgentConfig, error) {
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
 			return &agent.AgentConfig{
 				ID:           1,
 				Name:         "general",
@@ -231,7 +231,7 @@ func deployTokenAgentRepo(f *deployTokenFixture, runtimeToken string) *mockAgent
 				RuntimeToken: runtimeToken,
 			}, nil
 		},
-		updateFunc: func(a *agent.AgentConfig) error {
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
 			f.persisted = a.RuntimeToken
 			return nil
 		},
@@ -266,7 +266,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
-		dto, err := s.Deploy("general", true, false)
+		dto, err := s.Deploy("tenant-a", "general", true, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -287,7 +287,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
-		if _, err := s.Deploy("general", false, true); err != nil {
+		if _, err := s.Deploy("tenant-a", "general", false, true); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got := f.sentToken(t); got != storedToken {
@@ -301,7 +301,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
-		dto, err := s.Deploy("general", true, true)
+		dto, err := s.Deploy("tenant-a", "general", true, true)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -326,7 +326,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, ""), deployTokenProviderSvc())
-		dto, err := s.Deploy("general", false, false)
+		dto, err := s.Deploy("tenant-a", "general", false, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -345,7 +345,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, ""), deployTokenProviderSvc())
-		_, err := s.Deploy("general", false, false)
+		_, err := s.Deploy("tenant-a", "general", false, false)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -375,7 +375,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 			},
 		}}
 
-		if _, err := s.Deploy("general", true, false); err != nil {
+		if _, err := s.Deploy("tenant-a", "general", true, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		body := string(f.postBody)
@@ -397,8 +397,8 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 		repo := deployTokenAgentRepo(f, storedToken)
 		baseGet := repo.getByNameFunc
-		repo.getByNameFunc = func(name string) (*agent.AgentConfig, error) {
-			a, err := baseGet(name)
+		repo.getByNameFunc = func(tenantID, name string) (*agent.AgentConfig, error) {
+			a, err := baseGet(tenantID, name)
 			if err != nil {
 				return nil, err
 			}
@@ -407,7 +407,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		}
 
 		s := newTestAgentDeployerService(t, srv.URL, repo, deployTokenProviderSvc())
-		if _, err := s.Deploy("general", true, false); err != nil {
+		if _, err := s.Deploy("tenant-a", "general", true, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if !strings.Contains(string(f.postBody), `"description":"通用助手"`) {
@@ -424,7 +424,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		// the deployer requires a non-blank description, so the service must
 		// fall back to the agent name to keep the request valid.
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
-		if _, err := s.Deploy("general", true, false); err != nil {
+		if _, err := s.Deploy("tenant-a", "general", true, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if !strings.Contains(string(f.postBody), `"description":"general"`) {
@@ -445,7 +445,7 @@ func newGetStatusServer(t *testing.T, status string) *httptest.Server {
 
 func getStatusRepo(persisted *string) *mockAgentRepo {
 	return &mockAgentRepo{
-		getByNameFunc: func(name string) (*agent.AgentConfig, error) {
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
 			return &agent.AgentConfig{
 				ID:               1,
 				Name:             "general",
@@ -453,7 +453,7 @@ func getStatusRepo(persisted *string) *mockAgentRepo {
 				RuntimePort:      3000,
 			}, nil
 		},
-		updateFunc: func(a *agent.AgentConfig) error {
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
 			*persisted = a.DeploymentStatus
 			return nil
 		},
@@ -468,7 +468,7 @@ func TestGetStatus_TransientStatusNotPersisted(t *testing.T) {
 			var persisted string
 			s := newTestAgentDeployerService(t, srv.URL, getStatusRepo(&persisted), deployTokenProviderSvc())
 
-			dto, err := s.GetStatus("general")
+			dto, err := s.GetStatus("tenant-a", "general")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -491,7 +491,7 @@ func TestGetStatus_StableStatusPersisted(t *testing.T) {
 			var persisted string
 			s := newTestAgentDeployerService(t, srv.URL, getStatusRepo(&persisted), deployTokenProviderSvc())
 
-			if _, err := s.GetStatus("general"); err != nil {
+			if _, err := s.GetStatus("tenant-a", "general"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if status == "running" {

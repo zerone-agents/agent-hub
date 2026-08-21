@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"control-panel/internal/domain/knowledge"
+	"control-panel/internal/domain/tenant"
 	"control-panel/internal/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,7 @@ type KnowledgeMcpService interface {
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
 type AgentMcpService interface {
-	GetAgentKnowledgeDatasets(agentName string) ([]string, error)
+	GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error)
 }
 
 type jsonRPCRequest struct {
@@ -225,7 +226,7 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		return jsonRPCResponse{}, fmt.Errorf("agent not found in context")
 	}
 
-	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(agentCfg.Name)
+	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenant.GetTenantID(c), agentCfg.Name)
 	if err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
 	}

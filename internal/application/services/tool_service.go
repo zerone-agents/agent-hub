@@ -174,16 +174,16 @@ func (s *ToolService) Delete(name string) error {
 	return s.repo.Delete(t.ID)
 }
 
-func (s *ToolService) GetAgentTools(agentName string) ([]string, error) {
-	agentCfg, err := s.agentRepo.GetByName(agentName)
+func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error) {
+	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
 	return s.repo.GetToolsByAgent(agentCfg.ID)
 }
 
-func (s *ToolService) UpdateAgentTools(agentName string, toolNames []string) error {
-	agentCfg, err := s.agentRepo.GetByName(agentName)
+func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []string) error {
+	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
@@ -261,8 +261,11 @@ func mergeStringSlices(base, extra []string) []string {
 // created before the auto-mount logic existed. The operation is idempotent:
 // agents already correctly bound are left as-is (EnsureAgentToolBinding
 // counts before insert).
+//
+// 启动回填无租户上下文，显式跨租户全量（ListAllUnscoped）；关联表按 agent_id
+// 过滤，agent 行本身的租户归属在业务写路径（主表先校验）保证。
 func (s *ToolService) BackfillSubagentToolBindings() error {
-	agents, err := s.agentRepo.ListAll()
+	agents, err := s.agentRepo.ListAllUnscoped()
 	if err != nil {
 		return fmt.Errorf("列出 Agent 失败: %w", err)
 	}

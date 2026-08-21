@@ -5,6 +5,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/skill"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -224,7 +225,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentSkills(agentName, req.SkillNames); err != nil {
+	if err := h.service.UpdateAgentSkills(tenant.GetTenantID(c), agentName, req.SkillNames); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -234,7 +235,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 // GetAgentSkills returns the skill names associated with an agent.
 func (h *SkillHandler) GetAgentSkills(c *gin.Context) {
 	agentName := c.Param("name")
-	skillNames, err := h.service.GetAgentSkills(agentName)
+	skillNames, err := h.service.GetAgentSkills(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return

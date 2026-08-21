@@ -16,7 +16,31 @@ func NewAgentRepository() *AgentRepository {
 	return &AgentRepository{db: database.GetDB()}
 }
 
-func (r *AgentRepository) ListAll() ([]*agent.AgentConfig, error) {
+// mustOwnAgent 写路径统一入口校验：agent 不属于该租户则返回
+// gorm.ErrRecordNotFound（不暴露存在性）。关联表操作前的归属校验也用它。
+func (r *AgentRepository) mustOwnAgent(tx *gorm.DB, tenantID string, agentID uint64) error {
+	var count int64
+	err := TenantOwned(tx.Model(&agent.AgentConfig{}), tenantID).
+		Where("id = ?", agentID).Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *AgentRepository) ListAll(tenantID string) ([]*agent.AgentConfig, error) {
+	var agents []*agent.AgentConfig
+	err := TenantOwned(r.db, tenantID).Order("id ASC").Find(&agents).Error
+	return agents, err
+}
+
+// ListAllUnscoped 跨租户全量列出 agents。仅限无租户上下文的系统链路使用：
+// runtime token 鉴权（token 本身即凭证，命中后再回填租户）和启动时的
+// 存量数据回填。业务请求必须走 ListAll(tenantID)。
+func (r *AgentRepository) ListAllUnscoped() ([]*agent.AgentConfig, error) {
 	var agents []*agent.AgentConfig
 	err := r.db.Order("id ASC").Find(&agents).Error
 	return agents, err
@@ -24,46 +48,60 @@ func (r *AgentRepository) ListAll() ([]*agent.AgentConfig, error) {
 
 // ListForPlatform returns agents enabled for the given client platform
 // ("desktop" or "mobile"). Unknown platforms yield an empty list.
-func (r *AgentRepository) ListForPlatform(platform string) ([]*agent.AgentConfig, error) {
+func (r *AgentRepository) ListForPlatform(tenantID, platform string) ([]*agent.AgentConfig, error) {
 	var agents []*agent.AgentConfig
 	var err error
+	scoped := TenantOwned(r.db, tenantID)
 	switch platform {
 	case agent.PlatformMobile:
-		err = r.db.Where("mobile_enabled = ?", true).Order("id ASC").Find(&agents).Error
+		err = scoped.Where("mobile_enabled = ?", true).Order("id ASC").Find(&agents).Error
 	default: // agent.PlatformDesktop
-		err = r.db.Where("desktop_enabled = ?", true).Order("id ASC").Find(&agents).Error
+		err = scoped.Where("desktop_enabled = ?", true).Order("id ASC").Find(&agents).Error
 	}
 	return agents, err
 }
 
-func (r *AgentRepository) GetByID(id uint64) (*agent.AgentConfig, error) {
+func (r *AgentRepository) GetByID(tenantID string, id uint64) (*agent.AgentConfig, error) {
 	var a agent.AgentConfig
-	err := r.db.Where("id = ?", id).First(&a).Error
+	err := TenantOwned(r.db, tenantID).Where("id = ?", id).First(&a).Error
 	if err != nil {
 		return nil, err
 	}
 	return &a, nil
 }
 
-func (r *AgentRepository) GetByName(name string) (*agent.AgentConfig, error) {
+func (r *AgentRepository) GetByName(tenantID, name string) (*agent.AgentConfig, error) {
 	var a agent.AgentConfig
-	err := r.db.Where("name = ?", name).First(&a).Error
+	err := TenantOwned(r.db, tenantID).Where("name = ?", name).First(&a).Error
 	if err != nil {
 		return nil, err
 	}
 	return &a, nil
 }
 
-func (r *AgentRepository) Create(a *agent.AgentConfig) error {
+// Create 写入前强制盖章 TenantID——调用方传入的 TenantID 不可信。
+func (r *AgentRepository) Create(tenantID string, a *agent.AgentConfig) error {
+	a.TenantID = tenantID
 	return r.db.Create(a).Error
 }
 
-func (r *AgentRepository) Update(a *agent.AgentConfig) error {
+// Update 先校验归属（跨租户返回 ErrRecordNotFound，不暴露存在性），
+// 再盖章 TenantID 后保存——调用方传入的 TenantID 不可信。
+func (r *AgentRepository) Update(tenantID string, a *agent.AgentConfig) error {
+	if err := r.mustOwnAgent(r.db, tenantID, a.ID); err != nil {
+		return err
+	}
+	a.TenantID = tenantID
 	return r.db.Save(a).Error
 }
 
-func (r *AgentRepository) Delete(id uint64) error {
+func (r *AgentRepository) Delete(tenantID string, id uint64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 入口校验：agent 不属于该租户则整体失败（不暴露存在性），
+		// 关联表级联删除也不会发生。
+		if err := r.mustOwnAgent(tx, tenantID, id); err != nil {
+			return err
+		}
 		// Cascade-delete all association rows that reference the agent.
 		// AgentSubagent can reference the agent either as the parent
 		// (agent_id) or as the subagent (subagent_id), so clear both.
@@ -82,19 +120,19 @@ func (r *AgentRepository) Delete(id uint64) error {
 		if err := tx.Where("agent_id = ?", id).Delete(&agent.AgentKnowledgeDataset{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id = ?", id).Delete(&agent.AgentConfig{}).Error
+		return tx.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&agent.AgentConfig{}).Error
 	})
 }
 
-func (r *AgentRepository) Exists(id uint64) (bool, error) {
+func (r *AgentRepository) Exists(tenantID string, id uint64) (bool, error) {
 	var count int64
-	err := r.db.Model(&agent.AgentConfig{}).Where("id = ?", id).Count(&count).Error
+	err := TenantOwned(r.db.Model(&agent.AgentConfig{}), tenantID).Where("id = ?", id).Count(&count).Error
 	return count > 0, err
 }
 
-func (r *AgentRepository) ExistsByName(name string) (bool, error) {
+func (r *AgentRepository) ExistsByName(tenantID, name string) (bool, error) {
 	var count int64
-	err := r.db.Model(&agent.AgentConfig{}).Where("name = ?", name).Count(&count).Error
+	err := TenantOwned(r.db.Model(&agent.AgentConfig{}), tenantID).Where("name = ?", name).Count(&count).Error
 	return count > 0, err
 }
 
@@ -108,7 +146,10 @@ func (r *AgentRepository) GetSubagents(agentID uint64) ([]string, error) {
 	return names, err
 }
 
-func (r *AgentRepository) GetAllSubagents() (map[string][]string, error) {
+// GetAllSubagents 返回本租户内 agent name -> subagent names 的映射。
+// 按 agent_id 过滤的关联表查询不改签名；这个跨 agent 聚合方法以 name 为 key，
+// 必须带租户过滤，否则跨租户同名 agent 的绑定会被合并到同一 map 条目。
+func (r *AgentRepository) GetAllSubagents(tenantID string) (map[string][]string, error) {
 	type row struct {
 		AgentName    string
 		SubagentName string
@@ -118,6 +159,7 @@ func (r *AgentRepository) GetAllSubagents() (map[string][]string, error) {
 		Select("main.name as agent_name, sub.name as subagent_name").
 		Joins("JOIN agents AS main ON agent_subagents.agent_id = main.id").
 		Joins("JOIN agents AS sub ON agent_subagents.subagent_id = sub.id").
+		Where("main.tenant_id = ?", tenantID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -153,14 +195,14 @@ func (r *AgentRepository) ReplaceSubagents(agentID uint64, subagentIDs []uint64)
 	return tx.Commit().Error
 }
 
-func (r *AgentRepository) ClearDefaultExcept(exceptID uint64) error {
-	return r.db.Model(&agent.AgentConfig{}).
+func (r *AgentRepository) ClearDefaultExcept(tenantID string, exceptID uint64) error {
+	return TenantOwned(r.db.Model(&agent.AgentConfig{}), tenantID).
 		Where("id != ? AND is_default = ?", exceptID, true).
 		Update("is_default", false).Error
 }
 
-func (r *AgentRepository) ClearAllDefault() error {
-	return r.db.Model(&agent.AgentConfig{}).
+func (r *AgentRepository) ClearAllDefault(tenantID string) error {
+	return TenantOwned(r.db.Model(&agent.AgentConfig{}), tenantID).
 		Where("is_default = ?", true).
 		Update("is_default", false).Error
 }
@@ -202,8 +244,9 @@ func (r *AgentRepository) GetKnowledgeDatasetIDsByAgent(agentID uint64) ([]strin
 	return ids, err
 }
 
-// GetAllAgentKnowledgeDatasetIDs returns all Agent name -> dataset IDs bindings.
-func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs() (map[string][]string, error) {
+// GetAllAgentKnowledgeDatasetIDs 返回本租户内 agent name -> dataset IDs 的映射。
+// 与 GetAllSubagents 同理：以 name 为 key 的跨 agent 聚合必须带租户过滤。
+func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs(tenantID string) (map[string][]string, error) {
 	type row struct {
 		AgentName string
 		DatasetID string
@@ -212,6 +255,7 @@ func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs() (map[string][]string,
 	err := r.db.Table("agent_knowledge_datasets").
 		Select("agents.name as agent_name, agent_knowledge_datasets.dataset_id as dataset_id").
 		Joins("JOIN agents ON agent_knowledge_datasets.agent_id = agents.id").
+		Where("agents.tenant_id = ?", tenantID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -272,6 +316,7 @@ func (r *AgentRepository) RemoveAgentMcpBinding(agentID, mcpServerID uint64) err
 }
 
 // ListAllForReconcile 列出所有 agent 的 name/状态/runtime_port，供对账使用。
+// 后台对账任务无租户上下文，Kong 路由按 agent ID 全局唯一，显式全量。
 func (r *AgentRepository) ListAllForReconcile() ([]agent.AgentConfig, error) {
 	var items []agent.AgentConfig
 	err := r.db.Select("id, name, deployment_status, runtime_port").Find(&items).Error

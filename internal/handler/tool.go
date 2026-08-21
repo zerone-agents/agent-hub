@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -123,7 +124,7 @@ func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 		})
 		return
 	}
-	if err := h.service.UpdateAgentTools(agentName, req.ToolNames); err != nil {
+	if err := h.service.UpdateAgentTools(tenant.GetTenantID(c), agentName, req.ToolNames); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -138,7 +139,7 @@ func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 
 func (h *ToolHandler) GetAgentTools(c *gin.Context) {
 	agentName := c.Param("name")
-	toolNames, err := h.service.GetAgentTools(agentName)
+	toolNames, err := h.service.GetAgentTools(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,

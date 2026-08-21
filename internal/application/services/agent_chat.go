@@ -26,7 +26,7 @@ type chatRepositoryForAgent interface {
 
 // agentRepoForChat is the subset of AgentRepository used by AgentChatService.
 type agentRepoForChat interface {
-	GetByName(name string) (*agent.AgentConfig, error)
+	GetByName(tenantID, name string) (*agent.AgentConfig, error)
 }
 
 // AgentChatService handles agent chat sessions and message persistence.
@@ -84,7 +84,7 @@ func (s *AgentChatService) ListSessions(tenantID, userID, agentName, source stri
 // userName and displayName are taken from the JWT context so the session header
 // can show a human-readable creator name instead of a truncated user id.
 func (s *AgentChatService) CreateSession(tenantID, userID, agentName, title, userName, displayName string) (*chat.Session, error) {
-	cfg, err := s.agentRepo.GetByName(agentName)
+	cfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
@@ -236,8 +236,8 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 // agent-name prefix and forwards the canonical runtime API path to the
 // container. When Kong is not configured, RuntimeURL falls back to a
 // direct http://{publicHost}:{hostPort} URL.
-func (s *AgentChatService) ResolveRuntime(agentName string) (string, string, error) {
-	status, err := s.deployerSvc.GetStatus(agentName)
+func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
+	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
 		return "", "", fmt.Errorf("get deployment status: %w", err)
 	}

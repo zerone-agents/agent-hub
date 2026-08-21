@@ -102,11 +102,11 @@ func TestAgentDeployerService_NormalizesNameOnBoundary(t *testing.T) {
 		entry string
 		run   func(svc *AgentDeployerService)
 	}{
-		{entry: "GetStatus", run: func(svc *AgentDeployerService) { _, _ = svc.GetStatus("My.Agent") }},
-		{entry: "Stop", run: func(svc *AgentDeployerService) { _ = svc.Stop("My.Agent") }},
-		{entry: "Start", run: func(svc *AgentDeployerService) { _, _ = svc.Start("My.Agent") }},
-		{entry: "Delete", run: func(svc *AgentDeployerService) { _ = svc.Delete("My.Agent") }},
-		{entry: "Purge", run: func(svc *AgentDeployerService) { _ = svc.Purge("My.Agent") }},
+		{entry: "GetStatus", run: func(svc *AgentDeployerService) { _, _ = svc.GetStatus("tenant-a", "My.Agent") }},
+		{entry: "Stop", run: func(svc *AgentDeployerService) { _ = svc.Stop("tenant-a", "My.Agent") }},
+		{entry: "Start", run: func(svc *AgentDeployerService) { _, _ = svc.Start("tenant-a", "My.Agent") }},
+		{entry: "Delete", run: func(svc *AgentDeployerService) { _ = svc.Delete("tenant-a", "My.Agent") }},
+		{entry: "Purge", run: func(svc *AgentDeployerService) { _ = svc.Purge("tenant-a", "My.Agent") }},
 	}
 
 	for _, tt := range tests {
@@ -129,14 +129,14 @@ func TestAgentDeployerService_NormalizesNameOnBoundary(t *testing.T) {
 
 			now := time.Now()
 			agentRepo := &mockAgentRepo{
-				getByNameFunc: func(name string) (*agent.AgentConfig, error) {
+				getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
 					return &agent.AgentConfig{
 						ID: 1, Name: name,
 						ProviderID: uint64Ptr(1), ModelID: "m",
 						CreatedAt: now, UpdatedAt: now,
 					}, nil
 				},
-				updateFunc: func(a *agent.AgentConfig) error { return nil },
+				updateFunc: func(tenantID string, a *agent.AgentConfig) error { return nil },
 			}
 			providerSvc := &mockProviderSvc{
 				getByIDFunc: func(id uint64) (providerdomain.Provider, error) {

@@ -6,6 +6,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/scene"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +34,7 @@ func (h *SceneHandler) List(c *gin.Context) {
 		}
 	}
 
-	scenes, err := h.service.List(agentID)
+	scenes, err := h.service.List(tenant.GetTenantID(c), agentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -51,7 +52,7 @@ func (h *SceneHandler) List(c *gin.Context) {
 func (h *SceneHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 
-	sc, err := h.service.GetScene(name)
+	sc, err := h.service.GetScene(tenant.GetTenantID(c), name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -67,7 +68,7 @@ func (h *SceneHandler) Get(c *gin.Context) {
 }
 
 func (h *SceneHandler) ListAdmin(c *gin.Context) {
-	scenes, err := h.service.ListAll()
+	scenes, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -101,7 +102,7 @@ func (h *SceneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	sc, err := h.service.CreateScene(&services.CreateSceneInput{
+	sc, err := h.service.CreateScene(tenant.GetTenantID(c), &services.CreateSceneInput{
 		Name:     req.Name,
 		AgentID:  req.AgentID,
 		Title:    req.Title,
@@ -144,7 +145,7 @@ func (h *SceneHandler) Update(c *gin.Context) {
 		return
 	}
 
-	sc, err := h.service.UpdateScene(name, &services.UpdateSceneInput{
+	sc, err := h.service.UpdateScene(tenant.GetTenantID(c), name, &services.UpdateSceneInput{
 		AgentID:  req.AgentID,
 		Title:    req.Title,
 		TitleEn:  req.TitleEn,

@@ -99,7 +99,7 @@ type mockAgentRepoForChat struct {
 	cfg *agent.AgentConfig
 }
 
-func (m *mockAgentRepoForChat) GetByName(name string) (*agent.AgentConfig, error) {
+func (m *mockAgentRepoForChat) GetByName(tenantID, name string) (*agent.AgentConfig, error) {
 	return m.cfg, nil
 }
 

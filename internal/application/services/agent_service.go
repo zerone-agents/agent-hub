@@ -95,8 +95,8 @@ type AgentDTO struct {
 // GetManifest returns the agent manifest for the given client platform
 // (agent.PlatformDesktop / agent.PlatformMobile; empty defaults to desktop),
 // containing the agents enabled for that platform and their content hashes.
-func (s *AgentService) GetManifest(platform string) (*ManifestDTO, error) {
-	configs, err := s.repo.ListForPlatform(platform)
+func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, error) {
+	configs, err := s.repo.ListForPlatform(tenantID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
 	}
@@ -123,28 +123,28 @@ func (s *AgentService) GetManifest(platform string) (*ManifestDTO, error) {
 }
 
 // GetDesktopAgents returns all desktop-enabled agents with their full details.
-func (s *AgentService) GetDesktopAgents() (*AgentsDTO, error) {
-	configs, err := s.repo.ListForPlatform(agent.PlatformDesktop)
+func (s *AgentService) GetDesktopAgents(tenantID string) (*AgentsDTO, error) {
+	configs, err := s.repo.ListForPlatform(tenantID, agent.PlatformDesktop)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
 	}
 
-	return s.buildAgentsDTO(configs)
+	return s.buildAgentsDTO(tenantID, configs)
 }
 
 // GetAllAgentsAdmin returns all agents (including disabled) with their full details.
-func (s *AgentService) GetAllAgentsAdmin() (*AgentsDTO, error) {
-	configs, err := s.repo.ListAll()
+func (s *AgentService) GetAllAgentsAdmin(tenantID string) (*AgentsDTO, error) {
+	configs, err := s.repo.ListAll(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
 	}
 
-	return s.buildAgentsDTO(configs)
+	return s.buildAgentsDTO(tenantID, configs)
 }
 
 // buildAgentsDTO converts a list of agent configs into an AgentsDTO, enriching with subagent/tool/skill/mcp relations.
-func (s *AgentService) buildAgentsDTO(configs []*agent.AgentConfig) (*AgentsDTO, error) {
-	subagentsMap, err := s.repo.GetAllSubagents()
+func (s *AgentService) buildAgentsDTO(tenantID string, configs []*agent.AgentConfig) (*AgentsDTO, error) {
+	subagentsMap, err := s.repo.GetAllSubagents(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取子 Agent 关系失败: %w", err)
 	}
@@ -164,7 +164,7 @@ func (s *AgentService) buildAgentsDTO(configs []*agent.AgentConfig) (*AgentsDTO,
 		return nil, fmt.Errorf("获取 Agent MCP 关系失败: %w", err)
 	}
 
-	datasetsMap, err := s.repo.GetAllAgentKnowledgeDatasetIDs()
+	datasetsMap, err := s.repo.GetAllAgentKnowledgeDatasetIDs(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent 知识库绑定失败: %w", err)
 	}
@@ -198,8 +198,8 @@ func (s *AgentService) buildAgentsDTO(configs []*agent.AgentConfig) (*AgentsDTO,
 }
 
 // GetAgent returns a single agent by name with full details.
-func (s *AgentService) GetAgent(name string) (*AgentDTO, error) {
-	cfg, err := s.repo.GetByName(name)
+func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
+	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("Agent 不存在: %w", err)
 	}
@@ -248,8 +248,8 @@ func (s *AgentService) GetAgent(name string) (*AgentDTO, error) {
 	return &dto, nil
 }
 
-func (s *AgentService) ProbeAgent(name string, providerID *uint64, apiKey, baseURL string) (*ProbeResult, error) {
-	a, err := s.repo.GetByName(name)
+func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, apiKey, baseURL string) (*ProbeResult, error) {
+	a, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("Agent 不存在: %w", err)
 	}
@@ -335,12 +335,12 @@ func (s *AgentService) buildAgentDTO(cfg *agent.AgentConfig, subs, tools, skills
 }
 
 // CreateAgent validates, creates, and returns a new agent configuration.
-func (s *AgentService) CreateAgent(input *CreateAgentInput) (*AgentDTO, error) {
+func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*AgentDTO, error) {
 	if err := ValidateAgentName(input.Name); err != nil {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查 Agent 存在性失败: %w", err)
 	}
@@ -355,7 +355,7 @@ func (s *AgentService) CreateAgent(input *CreateAgentInput) (*AgentDTO, error) {
 	cfg := s.prepareCreateConfig(input)
 
 	if cfg.IsDefault {
-		if err := s.repo.ClearAllDefault(); err != nil {
+		if err := s.repo.ClearAllDefault(tenantID); err != nil {
 			return nil, fmt.Errorf("清除默认 Agent 失败: %w", err)
 		}
 	}
@@ -368,7 +368,7 @@ func (s *AgentService) CreateAgent(input *CreateAgentInput) (*AgentDTO, error) {
 	}
 	cfg.ContentHash = contentHash
 
-	if err := s.repo.Create(cfg); err != nil {
+	if err := s.repo.Create(tenantID, cfg); err != nil {
 		return nil, fmt.Errorf("创建 Agent 失败: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func (s *AgentService) CreateAgent(input *CreateAgentInput) (*AgentDTO, error) {
 		return nil, fmt.Errorf("绑定默认 Tool 失败: %w", err)
 	}
 
-	return s.GetAgent(input.Name)
+	return s.GetAgent(tenantID, input.Name)
 }
 
 // prepareCreateConfig builds an AgentConfig from creation input with enabled/isDefault resolution.
@@ -416,13 +416,13 @@ func (s *AgentService) applyCreateDefaults(cfg *agent.AgentConfig) {
 }
 
 // UpdateAgent modifies an existing agent configuration by name.
-func (s *AgentService) UpdateAgent(name string, input *UpdateAgentInput) (*AgentDTO, error) {
-	cfg, err := s.repo.GetByName(name)
+func (s *AgentService) UpdateAgent(tenantID, name string, input *UpdateAgentInput) (*AgentDTO, error) {
+	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("Agent 不存在: %w", err)
 	}
 
-	if err := s.applyUpdateConfig(cfg, input); err != nil {
+	if err := s.applyUpdateConfig(tenantID, cfg, input); err != nil {
 		return nil, err
 	}
 
@@ -432,15 +432,15 @@ func (s *AgentService) UpdateAgent(name string, input *UpdateAgentInput) (*Agent
 	}
 	cfg.ContentHash = contentHash
 
-	if err := s.repo.Update(cfg); err != nil {
+	if err := s.repo.Update(tenantID, cfg); err != nil {
 		return nil, fmt.Errorf("更新 Agent 失败: %w", err)
 	}
 
-	return s.GetAgent(name)
+	return s.GetAgent(tenantID, name)
 }
 
 // applyUpdateConfig applies the update input fields to an existing agent config.
-func (s *AgentService) applyUpdateConfig(cfg *agent.AgentConfig, input *UpdateAgentInput) error {
+func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig, input *UpdateAgentInput) error {
 	if input.Config != nil {
 		if err := ValidateConfig(*input.Config); err != nil {
 			return err
@@ -455,7 +455,7 @@ func (s *AgentService) applyUpdateConfig(cfg *agent.AgentConfig, input *UpdateAg
 		cfg.MobileEnabled = *input.MobileEnabled
 	}
 	if input.IsDefault != nil {
-		if err := s.handleDefaultUpdate(cfg.ID, *input.IsDefault); err != nil {
+		if err := s.handleDefaultUpdate(tenantID, cfg.ID, *input.IsDefault); err != nil {
 			return err
 		}
 		cfg.IsDefault = *input.IsDefault
@@ -467,39 +467,39 @@ func (s *AgentService) applyUpdateConfig(cfg *agent.AgentConfig, input *UpdateAg
 }
 
 // handleDefaultUpdate clears other defaults when setting a new default agent.
-func (s *AgentService) handleDefaultUpdate(agentID uint64, isDefault bool) error {
+func (s *AgentService) handleDefaultUpdate(tenantID string, agentID uint64, isDefault bool) error {
 	if !isDefault {
 		return nil
 	}
-	if err := s.repo.ClearDefaultExcept(agentID); err != nil {
+	if err := s.repo.ClearDefaultExcept(tenantID, agentID); err != nil {
 		return fmt.Errorf("清除默认 Agent 失败: %w", err)
 	}
 	return nil
 }
 
 // DeleteAgent removes an agent configuration by name.
-func (s *AgentService) DeleteAgent(name string) error {
-	cfg, err := s.repo.GetByName(name)
+func (s *AgentService) DeleteAgent(tenantID, name string) error {
+	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", name)
 	}
 
-	return s.repo.Delete(cfg.ID)
+	return s.repo.Delete(tenantID, cfg.ID)
 }
 
 // UpdateSubagents replaces the subagent list for the specified agent and
 // automatically mounts/unmounts the built-in Task and MultiTask tools so that
 // any agent with subagents gains the ability to dispatch work to them. This
 // mirrors the Skill/Knowledge auto-mount patterns.
-func (s *AgentService) UpdateSubagents(agentName string, subagentNames []string) error {
-	cfg, err := s.repo.GetByName(agentName)
+func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames []string) error {
+	cfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
 	for _, subName := range subagentNames {
-		subCfg, err := s.repo.GetByName(subName)
+		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
 			return fmt.Errorf("子 Agent '%s' 不存在", subName)
 		}
@@ -829,8 +829,8 @@ func canonicalJSON(v interface{}) ([]byte, error) {
 }
 
 // GetAgentKnowledgeDatasets returns the dataset IDs bound to an agent.
-func (s *AgentService) GetAgentKnowledgeDatasets(agentName string) ([]string, error) {
-	agentCfg, err := s.repo.GetByName(agentName)
+func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
+	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
 	}
@@ -839,8 +839,8 @@ func (s *AgentService) GetAgentKnowledgeDatasets(agentName string) ([]string, er
 
 // UpdateAgentKnowledgeDatasets replaces the dataset bindings for an agent and
 // automatically enables/disables the built-in 'knowledge' MCP binding.
-func (s *AgentService) UpdateAgentKnowledgeDatasets(agentName string, datasetIDs []string) error {
-	agentCfg, err := s.repo.GetByName(agentName)
+func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, datasetIDs []string) error {
+	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
 	}
