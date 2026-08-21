@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"control-panel/internal/config"
@@ -32,6 +33,25 @@ var (
 type OAuthSession struct {
 	State        string
 	CodeVerifier string
+	Org          string
+}
+
+// TenantClientCreds 是某个组织（casdoor organization）对应的 OAuth client
+// 凭证。CertPEM 为空串 = 该组织用全局 CASDOOR_CERTIFICATE 验签。
+type TenantClientCreds struct {
+	ClientID     string
+	ClientSecret string
+	CertPEM      string
+}
+
+// tenantClientLookup 由 main.go 注入（auth 不能反向依赖 persistence 层）：
+// 按组织名查 tenant_oauth_clients 并解密凭证；org="" 语义为查 default 行。
+// 未注册/无 default/查询出错均返回 false（fail closed）。
+var tenantClientLookup func(org string) (*TenantClientCreds, bool)
+
+// SetTenantClientLookup 注入（或传 nil 清除）组织凭证查询回调。
+func SetTenantClientLookup(fn func(org string) (*TenantClientCreds, bool)) {
+	tenantClientLookup = fn
 }
 
 var (
@@ -105,12 +125,89 @@ func GenerateCodeChallenge(verifier string) string {
 	return generateCodeChallenge(verifier)
 }
 
-// GetLoginURL builds the Casdoor authorization URL and stores the OAuth session.
-func GetLoginURL(state string, codeVerifier string) string {
+// resolveClientCreds 按 org 解析 OAuth 凭证（多组织登录入口解析链）：
+//   - org != ""：查注入的 lookup，未命中返回错误（调用方转 404 统一文案，
+//     绝不回落全局，避免把请求发给错误组织的 application）；
+//   - org == ""：查 default 行；表空（无 default）→ 全局 env client
+//     （存量单组织部署兜底）。
+func resolveClientCreds(org string) (*TenantClientCreds, error) {
+	if org != "" {
+		if tenantClientLookup == nil {
+			return nil, fmt.Errorf("组织未注册或不存在，请联系平台管理员")
+		}
+		creds, ok := tenantClientLookup(org)
+		if !ok || creds == nil {
+			return nil, fmt.Errorf("组织未注册或不存在，请联系平台管理员")
+		}
+		return creds, nil
+	}
+	// org 为空：default 行优先，无则全局 env client。
+	if tenantClientLookup != nil {
+		if creds, ok := tenantClientLookup(""); ok && creds != nil {
+			return creds, nil
+		}
+	}
+	return &TenantClientCreds{
+		ClientID:     casdoorConfig.ClientID,
+		ClientSecret: casdoorConfig.ClientSecret,
+	}, nil
+}
+
+// perOrgJWTClient 返回用指定组织的证书构建的 SDK client（certPEM 空则用
+// 全局 client），供 ParseJwtToken 验签：casdoorsdk.NewClient(endpoint,
+// clientID, secret, certPEM, org, "")。owner 是 casdoor 签进 token 的
+// 组织名，可信——签名本身验证了它。
+func perOrgJWTClient(org string) *casdoorsdk.Client {
+	if tenantClientLookup != nil {
+		if creds, ok := tenantClientLookup(org); ok && creds != nil && creds.CertPEM != "" {
+			return casdoorsdk.NewClient(
+				casdoorConfig.Endpoint,
+				creds.ClientID,
+				creds.ClientSecret,
+				creds.CertPEM,
+				org,
+				applicationNameUnused,
+			)
+		}
+	}
+	return client
+}
+
+// tokenOwner 不经验签地读 JWT payload 的 owner 字段（仅用于选择验签证书，
+// 安全性仍由 ParseJwtToken 的签名校验保证；篡改 owner 只会导致选错证书而
+// 验签失败）。
+func tokenOwner(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payload, err = base64.StdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+	var claims struct {
+		Owner string `json:"owner"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return claims.Owner
+}
+
+// GetLoginURL builds the Casdoor authorization URL for the given org and
+// stores the OAuth session (with Org) for the callback.
+func GetLoginURL(org, state, codeVerifier string) (string, error) {
+	creds, err := resolveClientCreds(org)
+	if err != nil {
+		return "", err
+	}
 	callbackURL := GetCallbackURL()
 
 	params := url.Values{}
-	params.Set("client_id", casdoorConfig.ClientID)
+	params.Set("client_id", creds.ClientID)
 	params.Set("response_type", "code")
 	params.Set("redirect_uri", callbackURL)
 	params.Set("scope", "read")
@@ -127,12 +224,13 @@ func GetLoginURL(state string, codeVerifier string) string {
 	oauthSessions[state] = &OAuthSession{
 		State:        state,
 		CodeVerifier: codeVerifier,
+		Org:          org,
 	}
 	oauthSessionsMu.Unlock()
 
-	log.Printf("[OAuth] Stored session: state=%s, sessions count=%d", state, len(oauthSessions))
+	log.Printf("[OAuth] Stored session: state=%s, org=%q, sessions count=%d", state, org, len(oauthSessions))
 
-	return loginURL
+	return loginURL, nil
 }
 
 // GetCallbackURL returns the configured OAuth callback URL.
@@ -152,8 +250,13 @@ type TokenResponse struct {
 	IdToken      string `json:"id_token"`
 }
 
-// ExchangeCodeForToken exchanges an authorization code for access and refresh tokens.
-func ExchangeCodeForToken(code, codeVerifier string) (*TokenResponse, error) {
+// ExchangeCodeForToken exchanges an authorization code for tokens using the
+// OAuth client resolved for org.
+func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error) {
+	creds, err := resolveClientCreds(org)
+	if err != nil {
+		return nil, err
+	}
 	callbackURL := GetCallbackURL()
 
 	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
@@ -161,8 +264,8 @@ func ExchangeCodeForToken(code, codeVerifier string) (*TokenResponse, error) {
 	data := map[string]string{
 		"grant_type":    "authorization_code",
 		"code":          code,
-		"client_id":     client.ClientId,
-		"client_secret": client.ClientSecret,
+		"client_id":     creds.ClientID,
+		"client_secret": creds.ClientSecret,
 		"callback_url":  callbackURL,
 	}
 
@@ -216,7 +319,7 @@ func GetUserInfo(accessToken string) (*casdoorsdk.User, error) {
 		return nil, fmt.Errorf("access token is empty")
 	}
 
-	claims, err := client.ParseJwtToken(accessToken)
+	claims, err := perOrgJWTClient(tokenOwner(accessToken)).ParseJwtToken(accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("token校验失败: %w", err)
 	}
