@@ -289,16 +289,18 @@ func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// 记录调试信息
-	log.Printf("Token exchange response status: %d", resp.StatusCode)
-	log.Printf("Token exchange response body: %s", string(body))
+	// 记录调试信息：不打印响应体原文（含 access/refresh token），只打状态码 + 长度
+	log.Printf("Token exchange response status: %d, body length: %d", resp.StatusCode, len(body))
 
 	if resp.StatusCode != http.StatusOK {
+		// 只提取非敏感的错误字段，避免完整响应体（可能含凭据）进入日志/错误消息
 		var errorResp map[string]interface{}
 		if err := json.Unmarshal(body, &errorResp); err == nil {
-			return nil, fmt.Errorf("casdoor error: %v", errorResp)
+			if msg, ok := errorResp["error"]; ok {
+				return nil, fmt.Errorf("casdoor error: %v", msg)
+			}
 		}
-		return nil, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("token exchange failed with status %d (body length %d)", resp.StatusCode, len(body))
 	}
 
 	var tokenResp TokenResponse

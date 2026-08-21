@@ -29,7 +29,7 @@ func Login(c *gin.Context) {
 		})
 		return
 	}
-	org := c.Query("org")
+	org := strings.TrimSpace(c.Query("org"))
 	loginURL, err := auth.GetLoginURL(org, state, codeVerifier)
 	if err != nil {
 		// 未注册/不存在的组织统一文案，不区分两种情况（避免探测）。
