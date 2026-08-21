@@ -228,8 +228,8 @@ func validateMcpConfig(transport, url string) error {
 
 // ==================== Service 方法 ====================
 
-func (s *McpService) ListAll() ([]*McpDTO, error) {
-	items, err := s.repo.ListAll()
+func (s *McpService) ListAll(tenantID string) ([]*McpDTO, error) {
+	items, err := s.repo.ListAll(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 MCP 列表失败: %w", err)
 	}
@@ -240,20 +240,20 @@ func (s *McpService) ListAll() ([]*McpDTO, error) {
 	return dtos, nil
 }
 
-func (s *McpService) GetByName(name string) (*McpDetailDTO, error) {
-	m, err := s.repo.GetByName(name)
+func (s *McpService) GetByName(tenantID, name string) (*McpDetailDTO, error) {
+	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("MCP 不存在: %w", err)
 	}
 	return s.toDetailDTO(m)
 }
 
-func (s *McpService) Create(input *CreateMcpInput) (*McpDTO, error) {
+func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, error) {
 	if err := validateMcpConfig(input.TransportType, input.URL); err != nil {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查 MCP 存在性失败: %w", err)
 	}
@@ -295,14 +295,14 @@ func (s *McpService) Create(input *CreateMcpInput) (*McpDTO, error) {
 		RetryTimeoutMs:  input.RetryTimeoutMs,
 	}
 
-	if err := s.repo.Create(m); err != nil {
+	if err := s.repo.Create(tenantID, m); err != nil {
 		return nil, fmt.Errorf("创建 MCP 失败: %w", err)
 	}
 	return s.toDTO(m), nil
 }
 
-func (s *McpService) Update(name string, input *UpdateMcpInput) (*McpDTO, error) {
-	m, err := s.repo.GetByName(name)
+func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpDTO, error) {
+	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("MCP 不存在: %w", err)
 	}
@@ -355,21 +355,21 @@ func (s *McpService) Update(name string, input *UpdateMcpInput) (*McpDTO, error)
 		return nil, err
 	}
 
-	if err := s.repo.Update(m); err != nil {
+	if err := s.repo.Update(tenantID, m); err != nil {
 		return nil, fmt.Errorf("更新 MCP 失败: %w", err)
 	}
 	return s.toDTO(m), nil
 }
 
-func (s *McpService) Delete(name string) error {
-	m, err := s.repo.GetByName(name)
+func (s *McpService) Delete(tenantID, name string) error {
+	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return fmt.Errorf("MCP '%s' 不存在", name)
 	}
 	if m.IsBuiltin {
 		return fmt.Errorf("MCP '%s' 是内置服务，不可删除", name)
 	}
-	return s.repo.Delete(m.ID)
+	return s.repo.Delete(tenantID, m.ID)
 }
 
 // BuiltinKnowledgeAuthHeader is the Authorization header template seeded for the
@@ -442,24 +442,26 @@ func (s *McpService) SeedBuiltins() error {
 	return nil
 }
 
+// seedBuiltinMcp 是系统路径（tenantID=”）：内置行写入/刷新为共享行。
 func (s *McpService) seedBuiltinMcp(m *mcp.McpServer) error {
-	exists, err := s.repo.ExistsByName(m.Name)
+	const sysTenant = ""
+	exists, err := s.repo.ExistsByName(sysTenant, m.Name)
 	if err != nil {
 		return fmt.Errorf("check builtin MCP %s failed: %w", m.Name, err)
 	}
 	if exists {
-		existing, err := s.repo.GetByName(m.Name)
+		existing, err := s.repo.GetByName(sysTenant, m.Name)
 		if err != nil {
 			return err
 		}
 		if applyBuiltinMetadata(existing, m) {
-			if err := s.repo.Update(existing); err != nil {
+			if err := s.repo.Update(sysTenant, existing); err != nil {
 				return fmt.Errorf("refresh builtin MCP %s failed: %w", m.Name, err)
 			}
 		}
 		return nil
 	}
-	return s.repo.Create(m)
+	return s.repo.Create(sysTenant, m)
 }
 
 // ==================== Probe 探测 ====================
@@ -479,8 +481,8 @@ func (s *McpService) ProbeByConfig(ctx context.Context, input *McpProbeInput) (*
 	return result, nil
 }
 
-func (s *McpService) ProbeByName(ctx context.Context, name string) (*mcpprobe.ProbeResult, error) {
-	m, err := s.repo.GetByName(name)
+func (s *McpService) ProbeByName(ctx context.Context, tenantID, name string) (*mcpprobe.ProbeResult, error) {
+	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("MCP 不存在: %w", err)
 	}
@@ -503,13 +505,13 @@ func (s *McpService) ProbeByName(ctx context.Context, name string) (*mcpprobe.Pr
 	if err != nil {
 		result = &mcpprobe.ProbeResult{Status: "failed", Error: err.Error()}
 	}
-	if err := s.saveProbeResult(m, result); err != nil {
+	if err := s.saveProbeResult(tenantID, m, result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (s *McpService) saveProbeResult(m *mcp.McpServer, result *mcpprobe.ProbeResult) error {
+func (s *McpService) saveProbeResult(tenantID string, m *mcp.McpServer, result *mcpprobe.ProbeResult) error {
 	m.ProbeStatus = result.Status
 	now := time.Now().UTC()
 	m.LastProbedAt = &now
@@ -522,7 +524,7 @@ func (s *McpService) saveProbeResult(m *mcp.McpServer, result *mcpprobe.ProbeRes
 		toolsJSON = string(raw)
 	}
 	m.ToolsJSON = toolsJSON
-	return s.repo.Update(m)
+	return s.repo.Update(tenantID, m)
 }
 
 // ==================== Agent ↔ MCP 绑定 ====================
@@ -543,7 +545,7 @@ func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []stri
 
 	mcpIDs := make([]uint64, 0, len(mcpNames))
 	for _, mcpName := range mcpNames {
-		m, err := s.repo.GetByName(mcpName)
+		m, err := s.repo.GetByName(tenantID, mcpName)
 		if err != nil {
 			return fmt.Errorf("MCP '%s' 不存在", mcpName)
 		}
@@ -560,7 +562,7 @@ func (s *McpService) GetClientMcpsByAgent(tenantID, agentName string) (map[strin
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
-	items, err := s.repo.GetMcpServersByAgent(agentCfg.ID)
+	items, err := s.repo.GetMcpServersByAgent(tenantID, agentCfg.ID)
 	if err != nil {
 		return nil, fmt.Errorf("查询 Agent MCP 失败: %w", err)
 	}

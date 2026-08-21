@@ -4,7 +4,8 @@ import "time"
 
 type Scene struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name      string    `gorm:"type:varchar(64);uniqueIndex:uk_name;not null" json:"name"`
+	Name      string    `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null" json:"name"`
+	TenantID  string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_name,priority:1;index" json:"-"`
 	AgentID   uint64    `gorm:"column:agent_id;not null;index" json:"agentId"`
 	Title     string    `gorm:"type:varchar(128);not null" json:"title"`
 	TitleEn   string    `gorm:"column:title_en;type:varchar(128)" json:"titleEn"`

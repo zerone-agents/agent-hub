@@ -169,6 +169,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate providers tenant id: %w", err)
 	}
 
+	if err := migrateMcpToolsSkillsScenesTenantID(); err != nil {
+		return fmt.Errorf("failed to migrate mcp/tools/skills/scenes tenant id: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -727,8 +731,68 @@ func migrateProvidersTenantID() error {
 	return nil
 }
 
-// BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。
-// 共享行的空串语义在加列回填之后才引入——回填发生在任何代码写共享行之前，
+// migrateMcpToolsSkillsScenesTenantID 回填 mcp_servers / tools / skills /
+// scenes 四表存量行的 tenant_id（启动租户），并把旧的全局唯一索引 uk_name
+// 换成复合索引 uk_tenant_name (tenant_id, name)——加列和建新索引由
+// AutoMigrate 完成，这里只负责回填 + 删旧索引。
+//
+// 内置行处理（决策 1A）：tools/mcps 的内置行（is_builtin=true，及
+// tools SeedIfEmpty 的预设行）是全平台模板，回填后统一改回共享语义
+// tenant_id=”；scenes 有 agent_id 归属列，优先按 agents 主表回填，
+// 映射不到的再走启动租户兜底。关联表（agent_tools/agent_skills/
+// agent_mcp_servers）不加 tenant 列，归属校验经主表。
+func migrateMcpToolsSkillsScenesTenantID() error {
+	if DB == nil {
+		return nil
+	}
+	m := DB.Migrator()
+
+	// scenes：先按 agents 主表回填（同 migrateChatTenantID 的 JOIN 回填）
+	if m.HasColumn("scenes", "tenant_id") {
+		if err := DB.Exec(
+			"UPDATE `scenes` SET tenant_id = (SELECT tenant_id FROM `agents` WHERE `agents`.id = `scenes`.agent_id LIMIT 1) WHERE agent_id IN (SELECT id FROM `agents`)",
+		).Error; err != nil {
+			return fmt.Errorf("backfill scenes from agents: %w", err)
+		}
+	}
+
+	for _, table := range []string{"mcp_servers", "tools", "skills", "scenes"} {
+		if err := BackfillTenantID(DB, table); err != nil {
+			return err
+		}
+	}
+
+	// 回填后，内置行改为共享（''）：这些是全平台模板，不属于任何租户
+	if err := DB.Exec("UPDATE `tools` SET tenant_id = '' WHERE is_builtin = ?", true).Error; err != nil {
+		return fmt.Errorf("reset builtin tools to shared: %w", err)
+	}
+	if err := DB.Exec("UPDATE `mcp_servers` SET tenant_id = '' WHERE is_builtin = ?", true).Error; err != nil {
+		return fmt.Errorf("reset builtin mcp_servers to shared: %w", err)
+	}
+	// tools 的 SeedIfEmpty 预设行（Skill/Task/MultiTask/Bash/Read/...）没有
+	// is_builtin 标志，按启动前 seeding 的固定名单一并归入共享模板。
+	if err := DB.Exec("UPDATE `tools` SET tenant_id = '' WHERE name IN ('Skill','Task','MultiTask','Bash','Read','Write','Edit','Glob','Grep')").Error; err != nil {
+		return fmt.Errorf("reset seeded tools to shared: %w", err)
+	}
+
+	dropLegacy := map[string]interface{}{
+		"mcp_servers": &mcp.McpServer{},
+		"tools":       &agent.Tool{},
+		"skills":      &skill.Skill{},
+		"scenes":      &scene.Scene{},
+	}
+	for table, model := range dropLegacy {
+		if m.HasIndex(model, "uk_name") {
+			if err := m.DropIndex(model, "uk_name"); err != nil {
+				return fmt.Errorf("drop %s.uk_name: %w", table, err)
+			}
+			log.Printf("Dropped %s.uk_name (replaced by uk_tenant_name)", table)
+		}
+	}
+	return nil
+}
+
+// BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。// 共享行的空串语义在加列回填之后才引入——回填发生在任何代码写共享行之前，
 // 所以"空即存量"在此刻成立。
 func BackfillTenantID(db *gorm.DB, table string) error {
 	res := db.Exec(fmt.Sprintf("UPDATE `%s` SET tenant_id = ? WHERE tenant_id = '' OR tenant_id IS NULL", table), backfillTenantID)

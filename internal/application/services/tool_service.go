@@ -32,17 +32,19 @@ var builtinTools = []agent.Tool{
 // SeedBuiltins ensures built-in tools exist in the database. Idempotent: rows
 // that already exist (matched by Name) are left untouched. This covers both
 // first-time bootstrap and the upgrade path where only "Skill" pre-exists.
+// SeedBuiltins 是系统路径（tenantID=”）：内置行写入为共享行。
 func (s *ToolService) SeedBuiltins() error {
+	const sysTenant = ""
 	for i := range builtinTools {
 		t := builtinTools[i]
-		exists, err := s.repo.ExistsByName(t.Name)
+		exists, err := s.repo.ExistsByName(sysTenant, t.Name)
 		if err != nil {
 			return fmt.Errorf("检查内置 %s tool 失败: %w", t.Name, err)
 		}
 		if exists {
 			continue
 		}
-		if err := s.repo.Create(&t); err != nil {
+		if err := s.repo.Create(sysTenant, &t); err != nil {
 			return fmt.Errorf("创建内置 %s tool 失败: %w", t.Name, err)
 		}
 	}
@@ -84,8 +86,8 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 	}
 }
 
-func (s *ToolService) ListAll() ([]*ToolDTO, error) {
-	tools, err := s.repo.ListAll()
+func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
+	tools, err := s.repo.ListAll(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Tool 列表失败: %w", err)
 	}
@@ -96,20 +98,20 @@ func (s *ToolService) ListAll() ([]*ToolDTO, error) {
 	return dtos, nil
 }
 
-func (s *ToolService) GetByName(name string) (*ToolDTO, error) {
-	t, err := s.repo.GetByName(name)
+func (s *ToolService) GetByName(tenantID, name string) (*ToolDTO, error) {
+	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("Tool 不存在: %w", err)
 	}
 	return toolToDTO(t), nil
 }
 
-func (s *ToolService) Create(input *CreateToolInput) (*ToolDTO, error) {
+func (s *ToolService) Create(tenantID string, input *CreateToolInput) (*ToolDTO, error) {
 	if err := ValidateToolName(input.Name); err != nil {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查 Tool 存在性失败: %w", err)
 	}
@@ -124,7 +126,7 @@ func (s *ToolService) Create(input *CreateToolInput) (*ToolDTO, error) {
 		IsDefault:   input.IsDefault,
 	}
 
-	if err := s.repo.Create(t); err != nil {
+	if err := s.repo.Create(tenantID, t); err != nil {
 		return nil, fmt.Errorf("创建 Tool 失败: %w", err)
 	}
 
@@ -137,8 +139,8 @@ func (s *ToolService) Create(input *CreateToolInput) (*ToolDTO, error) {
 	return toolToDTO(t), nil
 }
 
-func (s *ToolService) Update(name string, input *UpdateToolInput) (*ToolDTO, error) {
-	t, err := s.repo.GetByName(name)
+func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*ToolDTO, error) {
+	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, fmt.Errorf("Tool 不存在: %w", err)
 	}
@@ -159,19 +161,19 @@ func (s *ToolService) Update(name string, input *UpdateToolInput) (*ToolDTO, err
 		t.IsDefault = *input.IsDefault
 	}
 
-	if err := s.repo.Update(t); err != nil {
+	if err := s.repo.Update(tenantID, t); err != nil {
 		return nil, fmt.Errorf("更新 Tool 失败: %w", err)
 	}
 
 	return toolToDTO(t), nil
 }
 
-func (s *ToolService) Delete(name string) error {
-	t, err := s.repo.GetByName(name)
+func (s *ToolService) Delete(tenantID, name string) error {
+	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return fmt.Errorf("Tool '%s' 不存在", name)
 	}
-	return s.repo.Delete(t.ID)
+	return s.repo.Delete(tenantID, t.ID)
 }
 
 func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error) {
@@ -196,7 +198,7 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 
 	toolIDs := make([]uint64, 0, len(toolNames))
 	for _, toolName := range toolNames {
-		t, err := s.repo.GetByName(toolName)
+		t, err := s.repo.GetByName(tenantID, toolName)
 		if err != nil {
 			return fmt.Errorf("Tool '%s' 不存在", toolName)
 		}
@@ -205,8 +207,10 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 	return s.repo.ReplaceAgentTools(agentCfg.ID, toolIDs)
 }
 
+// SeedIfEmpty 是系统路径（tenantID=”）：预设行写入为共享行。
 func (s *ToolService) SeedIfEmpty() error {
-	tools, err := s.repo.ListAll()
+	const sysTenant = ""
+	tools, err := s.repo.ListAll(sysTenant)
 	if err != nil {
 		return fmt.Errorf("获取 Tool 列表失败: %w", err)
 	}
@@ -231,7 +235,7 @@ func (s *ToolService) SeedIfEmpty() error {
 			Title:       p.Title,
 			Description: p.Description,
 		}
-		if err := s.repo.Create(t); err != nil {
+		if err := s.repo.Create(sysTenant, t); err != nil {
 			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", p.Name, err)
 		}
 	}

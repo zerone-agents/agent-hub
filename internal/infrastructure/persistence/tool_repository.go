@@ -15,36 +15,71 @@ func NewToolRepository() *ToolRepository {
 	return &ToolRepository{db: database.GetDB()}
 }
 
-func (r *ToolRepository) ListAll() ([]*agent.Tool, error) {
+// mustOwnTool 写路径统一入口校验（同 mustOwnProvider 模式）：tool 不属于该
+// 租户则返回 gorm.ErrRecordNotFound，不暴露存在性。共享内置行（tenant_id=”
+// 的 Skill/Task/... 模板）只读——tenantID 为空串的系统路径（SeedBuiltins）
+// 例外，允许刷新共享行。
+func (r *ToolRepository) mustOwnTool(tx *gorm.DB, tenantID string, toolID uint64) error {
+	if tenantID == "" {
+		return nil // 系统路径（启动 seeding）
+	}
+	var count int64
+	err := tx.Model(&agent.Tool{}).Where("tenant_id = ? AND tenant_id != ''", tenantID).
+		Where("id = ?", toolID).Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// ListAll 返回本租户可见的 tools（本租户行 + 共享内置行）。
+func (r *ToolRepository) ListAll(tenantID string) ([]*agent.Tool, error) {
 	var tools []*agent.Tool
-	err := r.db.Order("id ASC").Find(&tools).Error
+	err := TenantWithShared(r.db.Model(&agent.Tool{}), tenantID).
+		Order("id ASC").Find(&tools).Error
 	return tools, err
 }
 
-func (r *ToolRepository) GetByName(name string) (*agent.Tool, error) {
+func (r *ToolRepository) GetByName(tenantID, name string) (*agent.Tool, error) {
 	var t agent.Tool
-	err := r.db.Where("name = ?", name).First(&t).Error
+	err := TenantWithShared(r.db.Model(&agent.Tool{}), tenantID).
+		Where("name = ?", name).First(&t).Error
 	if err != nil {
 		return nil, err
 	}
 	return &t, nil
 }
 
-func (r *ToolRepository) Create(t *agent.Tool) error {
+// Create 写入前强制盖章 TenantID——调用方传入的 TenantID 不可信。
+// tenantID 传空串即系统路径（SeedBuiltins/SeedIfEmpty 写共享行）。
+func (r *ToolRepository) Create(tenantID string, t *agent.Tool) error {
+	t.TenantID = tenantID
 	return r.db.Create(t).Error
 }
 
-func (r *ToolRepository) Update(t *agent.Tool) error {
+// Update 先校验归属（跨租户/共享内置行返回 ErrRecordNotFound），再盖章保存。
+func (r *ToolRepository) Update(tenantID string, t *agent.Tool) error {
+	if err := r.mustOwnTool(r.db, tenantID, t.ID); err != nil {
+		return err
+	}
+	t.TenantID = tenantID
 	return r.db.Save(t).Error
 }
 
-func (r *ToolRepository) Delete(id uint64) error {
+func (r *ToolRepository) Delete(tenantID string, id uint64) error {
+	if err := r.mustOwnTool(r.db, tenantID, id); err != nil {
+		return err
+	}
 	return r.db.Where("id = ?", id).Delete(&agent.Tool{}).Error
 }
 
-func (r *ToolRepository) ExistsByName(name string) (bool, error) {
+func (r *ToolRepository) ExistsByName(tenantID, name string) (bool, error) {
 	var count int64
-	err := r.db.Model(&agent.Tool{}).Where("name = ?", name).Count(&count).Error
+	err := TenantWithShared(r.db.Model(&agent.Tool{}), tenantID).
+		Where("name = ?", name).Count(&count).Error
 	return count > 0, err
 }
 

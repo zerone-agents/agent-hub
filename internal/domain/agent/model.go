@@ -62,7 +62,8 @@ func (AgentSubagent) TableName() string {
 
 type Tool struct {
 	ID          uint64    `gorm:"primaryKey;autoIncrement"`
-	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_name;not null"`
+	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null"`
+	TenantID    string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_name,priority:1;index"`
 	Title       string    `gorm:"type:varchar(128)"`
 	Description string    `gorm:"type:text"`
 	IsDefault   bool      `gorm:"column:is_default;not null;default:false"`

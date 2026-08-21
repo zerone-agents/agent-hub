@@ -22,42 +22,75 @@ func NewSkillRepositoryWithDB(db *gorm.DB) *SkillRepository {
 	return &SkillRepository{db: db}
 }
 
-func (r *SkillRepository) ListAll() ([]*skill.Skill, error) {
+// mustOwnSkill 写路径统一入口校验（同 mustOwnProvider 模式）：skill 不属于
+// 该租户则返回 gorm.ErrRecordNotFound，不暴露存在性。
+func (r *SkillRepository) mustOwnSkill(tx *gorm.DB, tenantID string, skillID uint64) error {
+	if tenantID == "" {
+		return nil // 系统路径
+	}
+	var count int64
+	err := TenantOwned(tx.Model(&skill.Skill{}), tenantID).
+		Where("id = ?", skillID).Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// ListAll 返回本租户可见的 skills（本租户行 + 共享行）。
+func (r *SkillRepository) ListAll(tenantID string) ([]*skill.Skill, error) {
 	var skills []*skill.Skill
-	err := r.db.Order("id ASC").Find(&skills).Error
+	err := TenantWithShared(r.db.Model(&skill.Skill{}), tenantID).
+		Order("id ASC").Find(&skills).Error
 	return skills, err
 }
 
-func (r *SkillRepository) ListByType(skillType string) ([]*skill.Skill, error) {
+func (r *SkillRepository) ListByType(tenantID, skillType string) ([]*skill.Skill, error) {
 	var skills []*skill.Skill
-	err := r.db.Where("type = ?", skillType).Order("id ASC").Find(&skills).Error
+	err := TenantWithShared(r.db.Model(&skill.Skill{}), tenantID).
+		Where("type = ?", skillType).Order("id ASC").Find(&skills).Error
 	return skills, err
 }
 
-func (r *SkillRepository) GetByName(name string) (*skill.Skill, error) {
+func (r *SkillRepository) GetByName(tenantID, name string) (*skill.Skill, error) {
 	var s skill.Skill
-	err := r.db.Where("name = ?", name).First(&s).Error
+	err := TenantWithShared(r.db.Model(&skill.Skill{}), tenantID).
+		Where("name = ?", name).First(&s).Error
 	if err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
-func (r *SkillRepository) Create(s *skill.Skill) error {
+// Create 写入前强制盖章 TenantID——调用方传入的 TenantID 不可信。
+func (r *SkillRepository) Create(tenantID string, s *skill.Skill) error {
+	s.TenantID = tenantID
 	return r.db.Create(s).Error
 }
 
-func (r *SkillRepository) Update(s *skill.Skill) error {
+// Update 先校验归属（跨租户返回 ErrRecordNotFound），再盖章保存。
+func (r *SkillRepository) Update(tenantID string, s *skill.Skill) error {
+	if err := r.mustOwnSkill(r.db, tenantID, s.ID); err != nil {
+		return err
+	}
+	s.TenantID = tenantID
 	return r.db.Save(s).Error
 }
 
-func (r *SkillRepository) Delete(id uint64) error {
+func (r *SkillRepository) Delete(tenantID string, id uint64) error {
+	if err := r.mustOwnSkill(r.db, tenantID, id); err != nil {
+		return err
+	}
 	return r.db.Where("id = ?", id).Delete(&skill.Skill{}).Error
 }
 
-func (r *SkillRepository) ExistsByName(name string) (bool, error) {
+func (r *SkillRepository) ExistsByName(tenantID, name string) (bool, error) {
 	var count int64
-	err := r.db.Model(&skill.Skill{}).Where("name = ?", name).Count(&count).Error
+	err := TenantWithShared(r.db.Model(&skill.Skill{}), tenantID).
+		Where("name = ?", name).Count(&count).Error
 	return count > 0, err
 }
 

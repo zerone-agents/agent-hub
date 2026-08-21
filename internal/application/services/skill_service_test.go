@@ -97,7 +97,7 @@ func TestGetSkillMd(t *testing.T) {
 		cdnHost:  "https://cdn.example.com",
 	}
 
-	entries, err := svc.GetSkillMd("test-skill")
+	entries, err := svc.GetSkillMd("default", "test-skill")
 	if err != nil {
 		t.Fatalf("GetSkillMd failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestGetSkillMd_SkillNotFound(t *testing.T) {
 		cdnHost:  "https://cdn.example.com",
 	}
 
-	_, err := svc.GetSkillMd("does-not-exist")
+	_, err := svc.GetSkillMd("default", "does-not-exist")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -151,7 +151,7 @@ func TestGetSkillMd_FileNotFound(t *testing.T) {
 		cdnHost:  "https://cdn.example.com",
 	}
 
-	_, err := svc.GetSkillMd("no-file-skill")
+	_, err := svc.GetSkillMd("default", "no-file-skill")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -182,7 +182,7 @@ func TestGetSkillMd_DownloadFailure(t *testing.T) {
 		cdnHost: "https://cdn.example.com",
 	}
 
-	_, err := svc.GetSkillMd("broken-download-skill")
+	_, err := svc.GetSkillMd("default", "broken-download-skill")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -223,7 +223,7 @@ func TestGetSkillMd_UnsafePath(t *testing.T) {
 		cdnHost:  "https://cdn.example.com",
 	}
 
-	_, err := svc.GetSkillMd("unsafe-skill")
+	_, err := svc.GetSkillMd("default", "unsafe-skill")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

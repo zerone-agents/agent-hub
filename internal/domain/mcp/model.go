@@ -16,7 +16,8 @@ const (
 // headers 字段以密文形式存储（由 service 层用 provider.Encrypt/Decrypt 处理）。
 type McpServer struct {
 	ID            uint64 `gorm:"primaryKey;autoIncrement"`
-	Name          string `gorm:"type:varchar(64);uniqueIndex:uk_name;not null"`
+	Name          string `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null"`
+	TenantID      string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_name,priority:1;index"`
 	Title         string `gorm:"type:varchar(128);not null"`
 	Description   string `gorm:"type:text"`
 	TransportType string `gorm:"column:transport_type;type:varchar(16);not null"`

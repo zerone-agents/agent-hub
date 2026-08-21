@@ -66,13 +66,14 @@ func setupSubagentToolsTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE tools (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name VARCHAR(64) NOT NULL,
+			tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 			title VARCHAR(128) DEFAULT '',
 			description TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
-		`CREATE UNIQUE INDEX tools_uk_name ON tools(name)`,
+		`CREATE UNIQUE INDEX tools_uk_tenant_name ON tools(tenant_id, name)`,
 		`CREATE TABLE agent_tools (
 			agent_id INTEGER NOT NULL,
 			tool_id INTEGER NOT NULL,
@@ -178,7 +179,7 @@ func TestUpdateSubagents_ReattachesAfterManualRemoval(t *testing.T) {
 	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	toolRepo := repository.NewToolRepository()
-	taskTool, err := toolRepo.GetByName("Task")
+	taskTool, err := toolRepo.GetByName("", "Task")
 	require.NoError(t, err)
 	require.NoError(t, agentRepo.RemoveAgentToolBinding(parent.ID, taskTool.ID))
 	assert.NotContains(t, agentToolNames(t, parent.ID), "Task")

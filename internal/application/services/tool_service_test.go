@@ -37,7 +37,7 @@ func TestSeedBuiltins_CreatesSkillTaskMultiTask(t *testing.T) {
 	toolRepo := repository.NewToolRepository()
 	for _, name := range []string{"Skill", "Task", "MultiTask"} {
 		t.Run(name, func(t *testing.T) {
-			got, err := toolRepo.GetByName(name)
+			got, err := toolRepo.GetByName("", name)
 			require.NoError(t, err)
 			assert.Equal(t, name, got.Name)
 			assert.False(t, got.IsDefault, "%s must be IsDefault=false so it does not auto-attach to every agent", name)
@@ -55,7 +55,7 @@ func TestSeedBuiltins_IsIdempotent(t *testing.T) {
 	require.NoError(t, svc.SeedBuiltins()) // second run must not fail or duplicate
 
 	toolRepo := repository.NewToolRepository()
-	tools, err := toolRepo.ListAll()
+	tools, err := toolRepo.ListAll("")
 	require.NoError(t, err)
 	assert.Len(t, tools, 3, "expected exactly Skill/Task/MultiTask after two SeedBuiltins runs")
 }
@@ -79,12 +79,12 @@ func TestSeedBuiltins_PreservesExistingSkillWhenAddingTasks(t *testing.T) {
 	require.NoError(t, svc.SeedBuiltins())
 
 	toolRepo := repository.NewToolRepository()
-	skill, err := toolRepo.GetByName("Skill")
+	skill, err := toolRepo.GetByName("", "Skill")
 	require.NoError(t, err)
 	assert.Equal(t, "PRE-EXISTING TITLE", skill.Title, "existing Skill row must not be overwritten")
 
 	for _, name := range []string{"Task", "MultiTask"} {
-		got, err := toolRepo.GetByName(name)
+		got, err := toolRepo.GetByName("", name)
 		require.NoError(t, err)
 		assert.Equal(t, name, got.Name)
 	}

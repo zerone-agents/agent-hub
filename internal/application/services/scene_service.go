@@ -62,9 +62,9 @@ func (s *SceneService) List(tenantID string, agentID uint64) ([]*SceneDTO, error
 	var err error
 
 	if agentID > 0 {
-		scenes, err = s.repo.ListByAgent(agentID)
+		scenes, err = s.repo.ListByAgent(tenantID, agentID)
 	} else {
-		scenes, err = s.repo.ListAll()
+		scenes, err = s.repo.ListAll(tenantID)
 	}
 
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *SceneService) ListAll(tenantID string) ([]*SceneDTO, error) {
 
 // GetScene returns a single scene by name.
 func (s *SceneService) GetScene(tenantID, name string) (*SceneDTO, error) {
-	sc, err := s.repo.GetByName(name)
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, scene.ErrSceneNotFound
 	}
@@ -104,7 +104,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查场景存在性失败: %w", err)
 	}
@@ -130,7 +130,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 		Enabled:  true,
 	}
 
-	if err := s.repo.Create(sc); err != nil {
+	if err := s.repo.Create(tenantID, sc); err != nil {
 		return nil, fmt.Errorf("创建场景失败: %w", err)
 	}
 
@@ -139,7 +139,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 
 // UpdateScene modifies an existing scene by name.
 func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInput) (*SceneDTO, error) {
-	sc, err := s.repo.GetByName(name)
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, scene.ErrSceneNotFound
 	}
@@ -148,7 +148,7 @@ func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInpu
 		return nil, err
 	}
 
-	if err := s.repo.Update(sc); err != nil {
+	if err := s.repo.Update(tenantID, sc); err != nil {
 		return nil, fmt.Errorf("更新场景失败: %w", err)
 	}
 
@@ -195,13 +195,13 @@ func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.S
 }
 
 // DeleteScene removes a scene by name.
-func (s *SceneService) DeleteScene(name string) error {
-	sc, err := s.repo.GetByName(name)
+func (s *SceneService) DeleteScene(tenantID, name string) error {
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return scene.ErrSceneNotFound
 	}
 
-	if err := s.repo.Delete(sc.ID); err != nil {
+	if err := s.repo.Delete(tenantID, sc.ID); err != nil {
 		return fmt.Errorf("删除场景失败: %w", err)
 	}
 

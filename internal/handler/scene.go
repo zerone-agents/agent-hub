@@ -184,7 +184,7 @@ func (h *SceneHandler) Update(c *gin.Context) {
 func (h *SceneHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
-	if err := h.service.DeleteScene(name); err != nil {
+	if err := h.service.DeleteScene(tenant.GetTenantID(c), name); err != nil {
 		if err == scene.ErrSceneNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,

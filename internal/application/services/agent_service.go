@@ -857,7 +857,7 @@ func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, 
 		return fmt.Errorf("替换 Agent knowledge dataset 失败: %w", err)
 	}
 
-	knowledgeMcp, err := s.mcpRepo.GetByName("knowledge")
+	knowledgeMcp, err := s.mcpRepo.GetByName(tenantID, "knowledge")
 	if err != nil {
 		return fmt.Errorf("内置 MCP 'knowledge' 不存在: %w", err)
 	}
@@ -884,7 +884,9 @@ func syncSubagentToolBindings(
 	hasSubagents bool,
 ) error {
 	for _, name := range subagentToolNames {
-		t, err := toolRepo.GetByName(name)
+		// Task/MultiTask 是共享内置行：tenantID='' 恒读共享行，
+		// 启动回填（无租户上下文）与业务路径统一走此读法。
+		t, err := toolRepo.GetByName("", name)
 		if err != nil {
 			return fmt.Errorf("内置 %s tool 不存在: %w", name, err)
 		}
