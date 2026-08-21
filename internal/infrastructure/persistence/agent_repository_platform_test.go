@@ -20,7 +20,7 @@ func setupPlatformTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(`CREATE TABLE agents (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name VARCHAR(64) NOT NULL,
-		tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+		tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 		content_hash VARCHAR(128) NOT NULL DEFAULT '',
 		system_prompt TEXT NOT NULL DEFAULT '',
 		permission_mode VARCHAR(32) NOT NULL DEFAULT 'auto',
@@ -57,11 +57,12 @@ func TestListForPlatform(t *testing.T) {
 	db := setupPlatformTestDB(t)
 	repo := NewAgentRepository()
 
+	// 写路径约定：TenantID 由代码显式盖章（DB 默认值仅是 '' 哨兵，见 C-1）。
 	seed := []agent.AgentConfig{
-		{Name: "both", DesktopEnabled: true, MobileEnabled: true},
-		{Name: "desktop-only", DesktopEnabled: true},
-		{Name: "mobile-only", MobileEnabled: true},
-		{Name: "neither"},
+		{Name: "both", TenantID: "default", DesktopEnabled: true, MobileEnabled: true},
+		{Name: "desktop-only", TenantID: "default", DesktopEnabled: true},
+		{Name: "mobile-only", TenantID: "default", MobileEnabled: true},
+		{Name: "neither", TenantID: "default"},
 	}
 	for i := range seed {
 		require.NoError(t, db.Create(&seed[i]).Error)

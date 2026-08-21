@@ -51,7 +51,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 - **新用户待审批流程**：新用户首次登录成功后自动创建 pending 记录，前端渲染「等待审批」页（可访问 /auth/userinfo 与 logout，其余 API 返回 403 PENDING_APPROVAL）。admin 在用户管理页为其分配角色后自动转为 active。
 - **admin 锚定 Casdoor 组织管理员**：本地 admin 资格与 Casdoor 组织管理员（IsAdmin）双向同步——组织管理员登录/CLI 身份核对时自动成为本地 admin；被取消组织管理员则本地 admin 撤销为待审批。admin 任命/降级采用「Casdoor 先行」双写：先成功修改 Casdoor is_admin，再写本地。
 - **用户管理（admin）**：列表来自本地成员表（禁用状态实时查 Casdoor）；审批 = 给 pending 用户分配角色（自动转 active）；禁用/重置密码直通 Casdoor；创建用户引导至 Casdoor 注册页。邀请制接口仅 builtin 模式可用。
-- **升级指引（breaking）**：升级到此模型后所有现有用户变为待审批；Casdoor 组织管理员登录后自动成为 admin，再逐个为其他用户分配角色。业务数据方面：升级时存量数据（agents / 聊天记录 / providers / AIGC 配置等）自动回填到 `CASDOOR_ORGANIZATION` 指定的租户；**casdoor 模式未配置 `CASDOOR_ORGANIZATION` 会拒绝启动**（避免回填到错误租户），请先补齐配置再升级。
+- **升级指引（breaking）**：升级到此模型后所有现有用户变为待审批；Casdoor 组织管理员登录后自动成为 admin，再逐个为其他用户分配角色。业务数据方面：升级时存量 agents / providers / AIGC 配置等自动回填到 `CASDOOR_ORGANIZATION` 指定的租户；聊天记录按 `user_id → user_identities` 映射回填到各用户所属租户，映射不到的兜底回填启动租户。**casdoor 模式未配置 `CASDOOR_ORGANIZATION` 会拒绝启动**（避免回填到错误租户），请先补齐配置再升级。
 - **已知限制**：
   - JWT 无吊销通道：admin 在 Casdoor 侧被降级后，其未过期的 access token 在过期前仍有效；CLI token 最迟 5 分钟内经身份缓存纠正。
   - 用户列表只显示登录过的用户（列表数据源为本地成员表，而非直通 Casdoor）。
@@ -62,6 +62,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 业务表（agents / cloud_sessions / cloud_messages / provider_summaries / tools / mcp_servers / skills / scenes / aigc_configs）均含 `tenant_id` 列并按租户隔离：
 
 - **tenant_id = Casdoor 组织名**：与登录 token 的组织（owner）一致；builtin 模式恒为 `default`。
+- **哨兵约定**：业务表 `tenant_id` 列的默认值为空串 `''`（共享哨兵，对齐全仓 tools/mcp/skills/scenes/providers/aigc 的约定）——写入时由代码显式盖章请求租户，不依赖数据库默认值；空串仅在共享行（内置/种子数据）合法。
 - **内置/种子数据全局共享**：内置 tools、MCP servers、skills、scenes 及共享 provider 种子行的 `tenant_id` 为空串（全局共享行）——各租户均可读、不可修改；租户编辑共享 provider 时按 copy-on-write 复制为本租户行后再改动，原共享行不受影响。
 - **存量数据回填**：从旧版本升级时，启动迁移会把存量业务数据回填到启动租户（builtin 模式 → `default`；casdoor 模式 → `CASDOOR_ORGANIZATION` 指定的组织）。casdoor 模式未配置 `CASDOOR_ORGANIZATION` 时启动直接失败（fail fast），以避免数据回填到错误租户。
 - **同名资源跨租户共存**：原全局唯一约束（如 agents 的 `uk_name`、provider_summaries 的 `uk_key`）已改为 `(tenant_id, name)` / `(tenant_id, key)` 复合唯一索引——不同租户可各自持有同名 agent / 同 key provider。

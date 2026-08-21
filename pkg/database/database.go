@@ -173,6 +173,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate mcp/tools/skills/scenes tenant id: %w", err)
 	}
 
+	if err := migrateDropLegacyUkTenantName(); err != nil {
+		return fmt.Errorf("failed to drop legacy uk_tenant_name indexes: %w", err)
+	}
+
 	if err := migrateAigcConfigsTenantID(); err != nil {
 		return fmt.Errorf("failed to migrate aigc_configs tenant id: %w", err)
 	}
@@ -332,6 +336,11 @@ func migrateDropLegacyTenantDomain() error {
 // mobile_enabled columns themselves are created by AutoMigrate from the model
 // tags. Idempotent: a no-op once the legacy column is gone.
 func migrateAgentPlatformFlags() error {
+	// information_schema 是 MySQL 专有；sqlite（迁移测试）直接跳过——本函数
+	// 只处理遗留 enabled 列的回填/删除，不影响加列与租户回填。
+	if DB.Dialector.Name() != "mysql" {
+		return nil
+	}
 	var colCount int
 	if err := DB.Raw(
 		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agents' AND COLUMN_NAME = 'enabled'",
@@ -360,6 +369,11 @@ func migrateAgentPlatformFlags() error {
 // AutoMigrate then recreates uk_provider_attr as a composite index per the
 // updated GORM tags in model.go.
 func migrateProviderAttributeIndex() error {
+	// information_schema 是 MySQL 专有；sqlite（迁移测试）直接跳过——
+	// 本函数只做索引修正/孤儿行清理，不影响加列与数据回填。
+	if DB.Dialector.Name() != "mysql" {
+		return nil
+	}
 	var tableExists bool
 	if err := DB.Raw(
 		"SELECT COUNT(*) > 0 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_attributes'",
@@ -411,10 +425,9 @@ func migrateDropToolRequiredColumn() error {
 		return err
 	}
 
-	hasColumn := false
-	if err := DB.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tools' AND COLUMN_NAME = 'required'").Scan(&hasColumn).Error; err != nil {
-		return err
-	}
+	// 用 Migrator().HasColumn 而非 information_schema——后者是 MySQL 专有，
+	// sqlite（迁移测试）没有该表。
+	hasColumn := DB.Migrator().HasColumn("tools", "required")
 
 	if hasColumn {
 		log.Println("Dropping 'required' column from 'tools' table...")
@@ -848,6 +861,34 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 	return nil
 }
 
+// migrateDropLegacyUkTenantName 清理索引改名残留：复合唯一索引原名
+// uk_tenant_name 在 agents/tools/skills/mcp_servers/scenes 五表共用（MySQL
+// 索引名 table-scoped 合法，SQLite 全局唯一会撞名，导致真实 AutoMigrate
+// 无法在 sqlite 测试库上运行），已改为每表唯一名（uk_agents_tenant_name
+// 等）。旧库升级后 AutoMigrate 会建好新名索引，这里删掉旧名残留；新库
+// 无旧名索引，纯 no-op，天然幂等。
+func migrateDropLegacyUkTenantName() error {
+	if DB == nil {
+		return nil
+	}
+	m := DB.Migrator()
+	for table, model := range map[string]interface{}{
+		"agents":      &agent.AgentConfig{},
+		"tools":       &agent.Tool{},
+		"skills":      &skill.Skill{},
+		"mcp_servers": &mcp.McpServer{},
+		"scenes":      &scene.Scene{},
+	} {
+		if m.HasIndex(model, "uk_tenant_name") {
+			if err := m.DropIndex(model, "uk_tenant_name"); err != nil {
+				return fmt.Errorf("drop %s.uk_tenant_name: %w", table, err)
+			}
+			log.Printf("Dropped %s.uk_tenant_name (replaced by per-table unique index)", table)
+		}
+	}
+	return nil
+}
+
 // migrateAigcConfigsTenantID 把 aigc_configs 从"id 恒为 1"的单行全局配置
 // 迁到 per-tenant + 共享回退。存量行的 tenant_id 置 ”（共享默认），保持
 // 升级前"全局一份"的行为逐字节等价：任何租户没有自己的行时都读到同一份。
@@ -873,8 +914,11 @@ func migrateAigcConfigsTenantID() error {
 	return nil
 }
 
-// BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。// 共享行的空串语义在加列回填之后才引入——回填发生在任何代码写共享行之前，
-// 所以"空即存量"在此刻成立。
+// BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。
+// "空即存量"的前提是各 model 的 tenant_id 列以 default:” 加出——AutoMigrate
+// 的 ADD COLUMN ... NOT NULL DEFAULT ” 会把全部存量行一次性填为 ”，因此
+// WHERE tenant_id = ” OR tenant_id IS NULL 恰好命中且仅命中存量行；共享行
+// 的空串语义在回填之后才由代码引入，不会与回填条件冲突。
 func BackfillTenantID(db *gorm.DB, table string) error {
 	res := db.Exec(fmt.Sprintf("UPDATE `%s` SET tenant_id = ? WHERE tenant_id = '' OR tenant_id IS NULL", table), backfillTenantID)
 	if res.Error != nil {

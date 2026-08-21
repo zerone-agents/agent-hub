@@ -35,6 +35,9 @@ type PushResult struct {
 	Conflicts       []ConflictInfo
 }
 
+// PushSessions 同步客户端会话到服务端。安全性前提：一个 user_id 只映射一个
+// 租户（casdoor 单组织成员模型），因此 PK (user_id, id) 不含 tenant_id 也不会
+// 出现同 PK 跨租户冲突——该前提若被多组织成员模型打破，需同步调整 PK 设计。
 func (r *ChatRepository) PushSessions(tenantID, userID string, sessions []*chat.Session, messagesPerSession [][]*chat.Message) (*PushResult, error) {
 	result := &PushResult{}
 

@@ -892,7 +892,7 @@ func stringOrEmpty(v interface{}) string {
 }
 
 // mapProtocolToRuntime translates the internal short protocol identifiers
-// stored in vendor_presets (anthropic / openai) into the API type names
+// stored in provider_summaries (anthropic / openai) into the API type names
 // expected by open-agent-runtime (anthropic-messages / openai-completions).
 // agent-deployer should accept these full names; if it rejects with a
 // "protocol must be one of: anthropic, openai" error, that's a deployer-side

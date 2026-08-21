@@ -11,10 +11,10 @@ import (
 )
 
 // createLegacyVendorPresetsForTest creates the vendor_presets table with raw
-// DDL. The production table is AutoMigrated from provider.LegacyProvider,
-// which declares a unique index named uk_key — same as ProviderSummary. That
-// works on MySQL (indexes are table-scoped) but not on SQLite (global index
-// names), so we recreate the table here without the conflicting index.
+// DDL, mirroring the pre-split production schema (its model has since been
+// removed in favor of ProviderSummary, whose unique index is also named
+// uk_key). Index names are global in SQLite but table-scoped on MySQL, so we
+// recreate the table here without the conflicting index.
 func createLegacyVendorPresetsForTest(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`

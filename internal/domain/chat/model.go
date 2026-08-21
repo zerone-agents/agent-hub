@@ -6,7 +6,7 @@ import (
 
 type Session struct {
 	UserID            string    `json:"user_id" gorm:"primaryKey;type:varchar(255);not null"`
-	TenantID          string    `json:"tenant_id" gorm:"type:varchar(64);not null;default:'default';index"`
+	TenantID          string    `json:"tenant_id" gorm:"type:varchar(64);not null;default:'';index"`
 	ID                string    `json:"id" gorm:"primaryKey;type:varchar(255);not null"`
 	Title             string    `json:"title" gorm:"type:varchar(512)"`
 	UserName          string    `json:"user_name" gorm:"type:varchar(255)"`
@@ -34,7 +34,7 @@ func (Session) TableName() string { return "cloud_sessions" }
 
 type Message struct {
 	UserID     string    `json:"user_id" gorm:"primaryKey;type:varchar(255);not null"`
-	TenantID   string    `json:"tenant_id" gorm:"type:varchar(64);not null;default:'default';index"`
+	TenantID   string    `json:"tenant_id" gorm:"type:varchar(64);not null;default:'';index"`
 	ID         string    `json:"id" gorm:"primaryKey;type:varchar(255);not null"`
 	SessionID  string    `json:"session_id" gorm:"primaryKey;type:varchar(255);not null"`
 	Role       string    `json:"role" gorm:"type:varchar(50)"`

@@ -8,8 +8,8 @@ import (
 
 type AgentConfig struct {
 	ID               uint64            `gorm:"primaryKey;autoIncrement"`
-	Name             string            `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null"`
-	TenantID         string            `gorm:"type:varchar(64);not null;default:'default';uniqueIndex:uk_tenant_name,priority:1;index"`
+	Name             string            `gorm:"type:varchar(64);uniqueIndex:uk_agents_tenant_name,priority:2;not null"`
+	TenantID         string            `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_agents_tenant_name,priority:1;index"`
 	ContentHash      string            `gorm:"column:content_hash;type:varchar(128);not null"`
 	SystemPrompt     string            `gorm:"column:system_prompt;type:text;not null"`
 	PermissionMode   string            `gorm:"column:permission_mode;type:varchar(32);not null;default:'auto'"`
@@ -49,7 +49,7 @@ const (
 )
 
 type AgentSubagent struct {
-	AgentID    uint64      `gorm:"primaryKey;index:idx_agent_id"`
+	AgentID    uint64      `gorm:"primaryKey"` // agent_id 是复合 PK 首列，单列索引冗余且曾跨表撞名（sqlite 索引名全局唯一）
 	SubagentID uint64      `gorm:"primaryKey;index:idx_subagent_id"`
 	Agent      AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
 	Subagent   AgentConfig `gorm:"foreignKey:SubagentID;constraint:OnDelete:CASCADE" json:"-"`
@@ -62,8 +62,8 @@ func (AgentSubagent) TableName() string {
 
 type Tool struct {
 	ID          uint64    `gorm:"primaryKey;autoIncrement"`
-	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_tenant_name,priority:2;not null"`
-	TenantID    string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_name,priority:1;index"`
+	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_tools_tenant_name,priority:2;not null"`
+	TenantID    string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tools_tenant_name,priority:1;index"`
 	Title       string    `gorm:"type:varchar(128)"`
 	Description string    `gorm:"type:text"`
 	IsDefault   bool      `gorm:"column:is_default;not null;default:false"`
@@ -86,7 +86,7 @@ var PresetToolNames = []string{
 }
 
 type AgentTool struct {
-	AgentID   uint64      `gorm:"primaryKey;index:idx_agent_id"`
+	AgentID   uint64      `gorm:"primaryKey"`
 	ToolID    uint64      `gorm:"primaryKey;index:idx_tool_id"`
 	Agent     AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
 	Tool      Tool        `gorm:"foreignKey:ToolID;constraint:OnDelete:CASCADE" json:"-"`
@@ -98,7 +98,7 @@ func (AgentTool) TableName() string {
 }
 
 type AgentSkill struct {
-	AgentID   uint64      `gorm:"primaryKey;index:idx_agent_id"`
+	AgentID   uint64      `gorm:"primaryKey"`
 	SkillID   uint64      `gorm:"primaryKey;index:idx_skill_id"`
 	Agent     AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
 	Skill     skill.Skill `gorm:"foreignKey:SkillID;constraint:OnDelete:CASCADE" json:"-"`
