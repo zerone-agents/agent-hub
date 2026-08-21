@@ -191,6 +191,32 @@ func matchProviderType(filter, modelType string) bool {
 	return filter == modelType
 }
 
+// dedupeSummariesTenantFirst CoW 后同 key 会同时存在共享行（tenant_id==”
+// 的种子模板）与本租户拷贝行；对外口径是"每个 key 一个 provider"——本租户
+// 行遮蔽共享行，避免列表出现同 key 双行、以及 first-match 命中模板配置。
+// 顺序保持首次出现的 key 顺序（repo 按 id ASC 返回，共享行先出现）。
+func dedupeSummariesTenantFirst(summaries []*provider.ProviderSummary, tenantID string) []*provider.ProviderSummary {
+	byKey := make(map[string]*provider.ProviderSummary, len(summaries))
+	order := make([]string, 0, len(summaries))
+	for _, s := range summaries {
+		existing, ok := byKey[s.Key]
+		if !ok {
+			byKey[s.Key] = s
+			order = append(order, s.Key)
+			continue
+		}
+		// 同 key 冲突：本租户行胜出（existing 是共享行时才替换）。
+		if existing.TenantID != tenantID && s.TenantID == tenantID {
+			byKey[s.Key] = s
+		}
+	}
+	out := make([]*provider.ProviderSummary, 0, len(order))
+	for _, k := range order {
+		out = append(out, byKey[k])
+	}
+	return out
+}
+
 // ListAll returns all providers. When typeFilter is non-empty ("llm" or
 // "ocr" or "embedding" or "vlm" — plus the pseudo-type "chat" which matches
 // both llm and vlm), only providers that have at least one model of that
@@ -200,6 +226,7 @@ func (s *ProviderService) ListAll(tenantID string, typeFilter string) ([]provide
 	if err != nil {
 		return nil, fmt.Errorf("获取 Provider 列表失败: %w", err)
 	}
+	summaries = dedupeSummariesTenantFirst(summaries, tenantID)
 
 	// Load all models once, group by provider_id. This avoids N+1 queries
 	// when the provider list grows.
@@ -927,6 +954,7 @@ func (s *ProviderService) ListRuntimeConfigs(tenantID string) ([]*ProviderRuntim
 	if err != nil {
 		return nil, fmt.Errorf("获取 Provider 列表失败: %w", err)
 	}
+	summaries = dedupeSummariesTenantFirst(summaries, tenantID)
 
 	configs := make([]*ProviderRuntimeConfig, 0, len(summaries))
 	for _, summary := range summaries {
@@ -1048,6 +1076,8 @@ func (s *ProviderService) GetByIDAsDTO(tenantID string, providerID uint64) (*Pro
 // Returns provider.ErrProviderNotFound when no provider matches, or when
 // modelID is empty (short-circuit — never match providers whose rows
 // happen to also have an empty model_id).
+//
+// 走 ListAll 的去重口径：CoW 后同 key 双行时，本租户定制行遮蔽共享模板行。
 func (s *ProviderService) FindProviderByModelID(tenantID string, modelID string) (provider.Provider, error) {
 	if modelID == "" {
 		return nil, provider.ErrProviderNotFound

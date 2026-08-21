@@ -814,3 +814,76 @@ func TestProviderService_CopyOnWrite_UpdateSharedProvider(t *testing.T) {
 		require.NotEqual(t, dto.ID, p.ID)
 	}
 }
+
+// TestProviderService_CopyOnWrite_ListAllDedupes CoW 后同 key 存在共享行 +
+// 本租户拷贝行时，service 层 ListAll 必须只返回一行（本租户行遮蔽共享行）。
+func TestProviderService_CopyOnWrite_ListAllDedupes(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	// 找 glm-cn 共享行并 CoW 修改名称
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	var shared *provider.ProviderSummary
+	for _, s := range summaries {
+		if s.Key == "glm-cn" {
+			shared = s
+		}
+	}
+	require.NotNil(t, shared)
+	require.Equal(t, "", shared.TenantID)
+
+	newName := "tenant-a glm"
+	dto, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+
+	listed, err := svc.ListAll("tenant-a", "")
+	require.NoError(t, err)
+	seen := make(map[string]int)
+	for _, p := range listed {
+		seen[p.Key()]++
+	}
+	for key, n := range seen {
+		require.Equal(t, 1, n, "key %s 出现 %d 次，CoW 后列表不得有同 key 双行", key, n)
+	}
+
+	// 遮蔽：glm-cn 命中的应是本租户定制行（新名称 + 新 ID）
+	for _, p := range listed {
+		if p.Key() == "glm-cn" {
+			require.Equal(t, newName, p.Name())
+			require.Equal(t, dto.ID, p.ID())
+		}
+	}
+}
+
+// TestProviderService_CopyOnWrite_FindProviderByModelIDTenantFirst CoW 后
+// 双行存在时，FindProviderByModelID 必须返回本租户的定制配置（而非共享模板）。
+func TestProviderService_CopyOnWrite_FindProviderByModelIDTenantFirst(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	var shared *provider.ProviderSummary
+	for _, s := range summaries {
+		if s.Key == "glm-cn" {
+			shared = s
+		}
+	}
+	require.NotNil(t, shared)
+
+	// 挑 glm-cn 的一个 model_id，然后 CoW 改名
+	models, err := svc.repo.ListModels("", shared.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, models)
+	modelID := models[0].ModelID
+
+	newName := "tenant-a glm"
+	dto, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+
+	p, err := svc.FindProviderByModelID("tenant-a", modelID)
+	require.NoError(t, err)
+	require.Equal(t, newName, p.Name())
+	require.Equal(t, dto.ID, p.ID(), "必须命中本租户拷贝行，而非共享模板行")
+}
