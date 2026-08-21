@@ -24,11 +24,15 @@ func setupChatHandlerTestDB(t *testing.T) {
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
 
-	require.NoError(t, db.Create(&chat.Session{UserID: "u1", ID: "s-own", Title: "自己的会话"}).Error)
-	require.NoError(t, db.Create(&chat.Session{UserID: "u2", ID: "s-other", Title: "他人会话"}).Error)
-	require.NoError(t, db.Create(&chat.Message{UserID: "u1", ID: "m1", SessionID: "s-own", Role: "user", Content: "hi"}).Error)
-	require.NoError(t, db.Create(&chat.Message{UserID: "u2", ID: "m2", SessionID: "s-other", Role: "user", Content: "secret"}).Error)
+	require.NoError(t, db.Create(&chat.Session{UserID: "u1", TenantID: chatTestTenant, ID: "s-own", Title: "自己的会话"}).Error)
+	require.NoError(t, db.Create(&chat.Session{UserID: "u2", TenantID: chatTestTenant, ID: "s-other", Title: "他人会话"}).Error)
+	require.NoError(t, db.Create(&chat.Message{UserID: "u1", TenantID: chatTestTenant, ID: "m1", SessionID: "s-own", Role: "user", Content: "hi"}).Error)
+	require.NoError(t, db.Create(&chat.Message{UserID: "u2", TenantID: chatTestTenant, ID: "m2", SessionID: "s-other", Role: "user", Content: "secret"}).Error)
 }
+
+// chatTestTenant 是 handler 测试共用的租户 ID；种子数据与 gin context 必须一致，
+// 否则 TenantOwned 过滤后查不到任何行。
+const chatTestTenant = "tenant-a"
 
 // newChatContext 构造携带身份信息的 gin 测试 context（绕过中间件直调 handler；
 // 中间件角色判定已由 middleware 测试锁定）。
@@ -37,6 +41,7 @@ func newChatContext(w *httptest.ResponseRecorder, roles []string, userID string)
 	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 	c.Set("roles", roles)
 	c.Set("user_id", userID)
+	c.Set("tenant_id", chatTestTenant)
 	return c
 }
 

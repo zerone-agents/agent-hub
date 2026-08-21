@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,7 +29,7 @@ func (h *AgentChatHandler) ListSessions(c *gin.Context) {
 	source := c.Query("source")
 
 	page, pageSize := parsePagination(c, 1, 30)
-	sessions, total, err := h.svc.ListSessions(userID, agentName, source, page, pageSize)
+	sessions, total, err := h.svc.ListSessions(tenant.GetTenantID(c), userID, agentName, source, page, pageSize)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -53,6 +54,7 @@ func (h *AgentChatHandler) CreateSession(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	sess, err := h.svc.CreateSession(
+		tenant.GetTenantID(c),
 		userID,
 		agentName,
 		req.Title,
@@ -71,7 +73,7 @@ func (h *AgentChatHandler) ListMessages(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 
 	page, pageSize := parsePagination(c, 1, 50)
-	msgs, total, err := h.svc.GetMessages(userID, sessionID, page, pageSize)
+	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, sessionID, page, pageSize)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -86,7 +88,7 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 
-	if err := h.svc.DeleteSession(userID, sessionID); err != nil {
+	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, sessionID); err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
@@ -102,6 +104,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
+	tenantID := tenant.GetTenantID(c)
 
 	var req sendMessageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -110,14 +113,14 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 
 	// 1. Persist user message and load session metadata
-	if _, err := h.svc.SaveUserMessage(userID, sessionID, req.Content); err != nil {
+	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content); err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
 	// Name a new session after the first user message (truncated to 20 chars).
-	_ = h.svc.AutoTitleSession(sessionID, req.Content)
+	_ = h.svc.AutoTitleSession(tenantID, sessionID, req.Content)
 
-	sess, err := h.svc.GetSession(userID, sessionID)
+	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -126,7 +129,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 2. Resolve runtime URL and API key
 	baseURL, apiKey, err := h.svc.ResolveRuntime(agentName)
 	if err != nil {
-		h.saveErrorMessage(userID, sessionID, "Agent 暂不可用："+err.Error())
+		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 暂不可用："+err.Error())
 		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
 		return
 	}
@@ -143,7 +146,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	ctx := c.Request.Context()
 	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, agentName, apiKey, bodyBytes)
 	if err != nil {
-		h.saveErrorMessage(userID, sessionID, "Runtime 连接失败："+err.Error())
+		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
 		return
 	}
@@ -215,12 +218,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 失败，scanner.Err 为 nil 覆盖不到；落库为系统错误消息，刷新后历史可见。
 	// 与流中断分支互斥，避免同一次失败双重落库。
 	if runErr := extractRuntimeError(aggregateStr); runErr != "" {
-		h.saveErrorMessage(userID, sessionID, runErr)
+		h.saveErrorMessage(tenantID, userID, sessionID, runErr)
 	} else if scanErr := scanner.Err(); scanErr != nil {
 		// scanner.Err() != nil means the runtime stream was truncated (network
 		// error, runtime crash, ctx cancellation, etc.). Surface it to the user so
 		// a refresh shows that the turn was interrupted.
-		h.saveErrorMessage(userID, sessionID, "Runtime 流中断："+scanErr.Error())
+		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 流中断："+scanErr.Error())
 	}
 
 	// 8. Bind the runtime SDK session id returned on the first run. The runtime
@@ -228,22 +231,22 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// preserve context.
 	if sess.RuntimeSessionID == "" {
 		if runtimeSID := extractRuntimeSessionID(aggregateStr); runtimeSID != "" {
-			_ = h.svc.BindRuntimeSessionID(sessionID, runtimeSID)
+			_ = h.svc.BindRuntimeSessionID(tenantID, sessionID, runtimeSID)
 		}
 	}
 
 	contentJSON := aggregateSSEToContent(aggregateStr)
 	if contentJSON != "" {
 		aigcLabel := extractAigcLabel(aggregateStr)
-		_, _ = h.svc.SaveAssistantMessage(userID, sessionID, contentJSON, aigcLabel)
+		_, _ = h.svc.SaveAssistantMessage(tenantID, userID, sessionID, contentJSON, aigcLabel)
 	}
 }
 
 // saveErrorMessage persists a system error message so the failure is visible
 // in the chat history after a refresh.
-func (h *AgentChatHandler) saveErrorMessage(userID, sessionID, message string) {
+func (h *AgentChatHandler) saveErrorMessage(tenantID, userID, sessionID, message string) {
 	payload, _ := json.Marshal([]map[string]string{{"type": "error", "message": message}})
-	_, _ = h.svc.SaveSystemMessage(userID, sessionID, string(payload))
+	_, _ = h.svc.SaveSystemMessage(tenantID, userID, sessionID, string(payload))
 }
 
 // extractRuntimeError scans the buffered SSE stream for a result event with

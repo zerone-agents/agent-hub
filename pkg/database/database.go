@@ -157,6 +157,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate session indexes: %w", err)
 	}
 
+	if err := migrateChatTenantID(); err != nil {
+		return fmt.Errorf("failed to migrate chat tenant id: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -643,6 +647,32 @@ func migrateSessionIndexes() error {
 		return fmt.Errorf("create updated_at index on cloud_sessions: %w", err)
 	}
 	log.Println("cloud_sessions updated_at index created")
+	return nil
+}
+
+// migrateChatTenantID backfills tenant_id on cloud_sessions / cloud_messages.
+// The column itself is added by AutoMigrate from the model tags.
+func migrateChatTenantID() error {
+	if DB == nil {
+		return nil
+	}
+	// 加列由 AutoMigrate 完成；这里回填：
+	// 1) 能经 user_id → user_identities.tenant_id 映射的按映射回填
+	// 2) 映射不到的（历史脏数据）回填启动租户
+	for _, table := range []string{"cloud_sessions", "cloud_messages"} {
+		if !DB.Migrator().HasColumn(table, "tenant_id") {
+			continue // 防御：列还没加（理论不会发生，AutoMigrate 已跑）
+		}
+		// MySQL/SQLite 通用 UPDATE...WHERE IN (SELECT)
+		if err := DB.Exec(fmt.Sprintf(
+			"UPDATE `%s` SET tenant_id = (SELECT tenant_id FROM user_identities WHERE user_identities.external_id = `%s`.user_id LIMIT 1) WHERE user_id IN (SELECT external_id FROM user_identities)",
+			table, table)).Error; err != nil {
+			return fmt.Errorf("backfill %s from user_identities: %w", table, err)
+		}
+		if err := BackfillTenantID(DB, table); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
