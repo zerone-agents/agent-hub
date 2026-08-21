@@ -149,17 +149,17 @@ func (s *AgentService) buildAgentsDTO(tenantID string, configs []*agent.AgentCon
 		return nil, fmt.Errorf("获取子 Agent 关系失败: %w", err)
 	}
 
-	toolsMap, err := s.toolRepo.GetAllAgentTools()
+	toolsMap, err := s.toolRepo.GetAllAgentTools(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent Tool 关系失败: %w", err)
 	}
 
-	skillsMap, err := s.skillRepo.GetAllAgentSkills()
+	skillsMap, err := s.skillRepo.GetAllAgentSkills(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent Skill 关系失败: %w", err)
 	}
 
-	mcpsMap, err := s.mcpRepo.GetAllAgentMcpNames()
+	mcpsMap, err := s.mcpRepo.GetAllAgentMcpNames(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("获取 Agent MCP 关系失败: %w", err)
 	}

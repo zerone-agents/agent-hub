@@ -82,7 +82,10 @@ func (r *SkillRepository) GetAgentSkillsFull(agentID uint64) ([]*skill.Skill, er
 	return skills, err
 }
 
-func (r *SkillRepository) GetAllAgentSkills() (map[string][]string, error) {
+// GetAllAgentSkills 返回本租户内 agent name -> skill names 的映射。
+// 与 GetAllSubagents 同理：以 name 为 key 的跨 agent 聚合必须带租户过滤，
+// 否则跨租户同名 agent 的绑定会被合并到同一 map 条目。
+func (r *SkillRepository) GetAllAgentSkills(tenantID string) (map[string][]string, error) {
 	type row struct {
 		AgentName string
 		SkillName string
@@ -92,6 +95,7 @@ func (r *SkillRepository) GetAllAgentSkills() (map[string][]string, error) {
 		Select("agent.name as agent_name, skills.name as skill_name").
 		Joins("JOIN agents AS agent ON agent_skills.agent_id = agent.id").
 		Joins("JOIN skills ON agent_skills.skill_id = skills.id").
+		Where("agent.tenant_id = ?", tenantID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

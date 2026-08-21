@@ -84,6 +84,19 @@ func setupAgentRepoTestDB(t *testing.T) *gorm.DB {
 			created_at DATETIME,
 			PRIMARY KEY (agent_id, dataset_id)
 		)`,
+		// 聚合查询 JOIN 的对端表，只需 id/name 两列（插入走裸 SQL）
+		`CREATE TABLE tools (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name VARCHAR(64) NOT NULL
+		)`,
+		`CREATE TABLE skills (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name VARCHAR(64) NOT NULL
+		)`,
+		`CREATE TABLE mcp_servers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name VARCHAR(64) NOT NULL
+		)`,
 	} {
 		require.NoError(t, db.Exec(stmt).Error)
 	}

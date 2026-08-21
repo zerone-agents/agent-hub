@@ -577,7 +577,7 @@ func (s *McpService) GetClientMcpsByAgent(tenantID, agentName string) (map[strin
 
 // ==================== Manifest 聚合（供 Agent Manifest 用） ====================
 
-// GetAllAgentMcpNames 返回 agentName -> []mcpName 映射。
-func (s *McpService) GetAllAgentMcpNames() (map[string][]string, error) {
-	return s.repo.GetAllAgentMcpNames()
+// GetAllAgentMcpNames 返回本租户内 agentName -> []mcpName 映射。
+func (s *McpService) GetAllAgentMcpNames(tenantID string) (map[string][]string, error) {
+	return s.repo.GetAllAgentMcpNames(tenantID)
 }

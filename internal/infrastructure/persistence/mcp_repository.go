@@ -104,8 +104,10 @@ func (r *McpRepository) ReplaceAgentMcps(agentID uint64, mcpIDs []uint64) error 
 	return tx.Commit().Error
 }
 
-// GetAllAgentMcpNames 返回所有 Agent -> McpServerNames 映射（供 manifest 聚合用）。
-func (r *McpRepository) GetAllAgentMcpNames() (map[string][]string, error) {
+// GetAllAgentMcpNames 返回本租户内 Agent -> McpServerNames 映射（供 manifest 聚合用）。
+// 与 GetAllSubagents 同理：以 name 为 key 的跨 agent 聚合必须带租户过滤，
+// 否则跨租户同名 agent 的绑定会被合并到同一 map 条目。
+func (r *McpRepository) GetAllAgentMcpNames(tenantID string) (map[string][]string, error) {
 	type row struct {
 		AgentName string
 		McpName   string
@@ -115,6 +117,7 @@ func (r *McpRepository) GetAllAgentMcpNames() (map[string][]string, error) {
 		Select("agent.name as agent_name, mcp_servers.name as mcp_name").
 		Joins("JOIN agents AS agent ON agent_mcp_servers.agent_id = agent.id").
 		Joins("JOIN mcp_servers ON agent_mcp_servers.mcp_server_id = mcp_servers.id").
+		Where("agent.tenant_id = ?", tenantID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

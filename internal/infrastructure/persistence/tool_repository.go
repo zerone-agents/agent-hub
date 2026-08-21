@@ -58,7 +58,10 @@ func (r *ToolRepository) GetToolsByAgent(agentID uint64) ([]string, error) {
 	return names, err
 }
 
-func (r *ToolRepository) GetAllAgentTools() (map[string][]string, error) {
+// GetAllAgentTools 返回本租户内 agent name -> tool names 的映射。
+// 与 GetAllSubagents 同理：以 name 为 key 的跨 agent 聚合必须带租户过滤，
+// 否则跨租户同名 agent 的绑定会被合并到同一 map 条目。
+func (r *ToolRepository) GetAllAgentTools(tenantID string) (map[string][]string, error) {
 	type row struct {
 		AgentName string
 		ToolName  string
@@ -68,6 +71,7 @@ func (r *ToolRepository) GetAllAgentTools() (map[string][]string, error) {
 		Select("agent.name as agent_name, tools.name as tool_name").
 		Joins("JOIN agents AS agent ON agent_tools.agent_id = agent.id").
 		Joins("JOIN tools ON agent_tools.tool_id = tools.id").
+		Where("agent.tenant_id = ?", tenantID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
