@@ -14,19 +14,19 @@ import (
 
 // chatRepositoryForAgent is the subset of ChatRepository used by AgentChatService.
 type chatRepositoryForAgent interface {
-	ListSessionsByAgentAndUser(agentID, userID, source string, page, pageSize int) ([]*chat.Session, int64, error)
-	GetSessionForUser(sessionID, userID string) (*chat.Session, error)
-	CreateSession(sess *chat.Session) error
-	CreateMessage(msg *chat.Message) error
-	DeleteSession(sessionID string) error
-	ListMessages(sessionID string, page, pageSize int) ([]*chat.Message, int64, error)
-	UpdateSessionRuntimeSessionID(sessionID, runtimeSessionID string) error
-	UpdateSessionTitle(sessionID, title string) error
+	ListSessionsByAgentAndUser(tenantID, agentID, userID, source string, page, pageSize int) ([]*chat.Session, int64, error)
+	GetSessionForUser(tenantID, sessionID, userID string) (*chat.Session, error)
+	CreateSession(tenantID string, sess *chat.Session) error
+	CreateMessage(tenantID string, msg *chat.Message) error
+	DeleteSession(tenantID, sessionID string) error
+	ListMessages(tenantID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error)
+	UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error
+	UpdateSessionTitle(tenantID, sessionID, title string) error
 }
 
 // agentRepoForChat is the subset of AgentRepository used by AgentChatService.
 type agentRepoForChat interface {
-	GetByName(name string) (*agent.AgentConfig, error)
+	GetByName(tenantID, name string) (*agent.AgentConfig, error)
 }
 
 // AgentChatService handles agent chat sessions and message persistence.
@@ -75,16 +75,16 @@ const SourceAgentChatPage = "agent_chat_page"
 
 // ListSessions returns sessions for the given (agent, user) pair.
 // source filters the session origin (e.g. "agent_chat_page"); pass empty to list all.
-func (s *AgentChatService) ListSessions(userID, agentName, source string, page, pageSize int) ([]*chat.Session, int64, error) {
-	return s.chatRepo.ListSessionsByAgentAndUser(agentName, userID, source, page, pageSize)
+func (s *AgentChatService) ListSessions(tenantID, userID, agentName, source string, page, pageSize int) ([]*chat.Session, int64, error) {
+	return s.chatRepo.ListSessionsByAgentAndUser(tenantID, agentName, userID, source, page, pageSize)
 }
 
 // CreateSession creates a new empty session for the given user + agent.
 // Agent config (model, system_prompt, provider_id, permission_mode) is copied in.
 // userName and displayName are taken from the JWT context so the session header
 // can show a human-readable creator name instead of a truncated user id.
-func (s *AgentChatService) CreateSession(userID, agentName, title, userName, displayName string) (*chat.Session, error) {
-	cfg, err := s.agentRepo.GetByName(agentName)
+func (s *AgentChatService) CreateSession(tenantID, userID, agentName, title, userName, displayName string) (*chat.Session, error) {
+	cfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *AgentChatService) CreateSession(userID, agentName, title, userName, dis
 		PermissionProfile: cfg.PermissionMode,
 		Source:            SourceAgentChatPage,
 	}
-	if err := s.chatRepo.CreateSession(sess); err != nil {
+	if err := s.chatRepo.CreateSession(tenantID, sess); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 	return sess, nil
@@ -130,25 +130,25 @@ type contentPart struct {
 }
 
 // GetMessages returns messages for a session owned by userID.
-func (s *AgentChatService) GetMessages(userID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
-	if _, err := s.chatRepo.GetSessionForUser(sessionID, userID); err != nil {
+func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return nil, 0, fmt.Errorf("session not found: %w", err)
 	}
-	return s.chatRepo.ListMessages(sessionID, page, pageSize)
+	return s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
 }
 
 // DeleteSession deletes a session owned by userID.
-func (s *AgentChatService) DeleteSession(userID, sessionID string) error {
-	if _, err := s.chatRepo.GetSessionForUser(sessionID, userID); err != nil {
+func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) error {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
-	return s.chatRepo.DeleteSession(sessionID)
+	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }
 
 // SaveUserMessage persists a user message in the given session.
 // content is wrapped into the canonical JSON array format.
-func (s *AgentChatService) SaveUserMessage(userID, sessionID, content string) (*chat.Message, error) {
-	if _, err := s.chatRepo.GetSessionForUser(sessionID, userID); err != nil {
+func (s *AgentChatService) SaveUserMessage(tenantID, userID, sessionID, content string) (*chat.Message, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func (s *AgentChatService) SaveUserMessage(userID, sessionID, content string) (*
 		Content:   string(wrapped),
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := s.chatRepo.CreateMessage(msg); err != nil {
+	if err := s.chatRepo.CreateMessage(tenantID, msg); err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
 	return msg, nil
@@ -172,17 +172,17 @@ func (s *AgentChatService) SaveUserMessage(userID, sessionID, content string) (*
 
 // SaveAssistantMessage persists an assistant message with pre-aggregated JSON
 // content and the AIGC label extracted from the stream ("" when unlabeled).
-func (s *AgentChatService) SaveAssistantMessage(userID, sessionID, content, aigc string) (*chat.Message, error) {
-	return s.saveMessage(userID, sessionID, "assistant", content, aigc)
+func (s *AgentChatService) SaveAssistantMessage(tenantID, userID, sessionID, content, aigc string) (*chat.Message, error) {
+	return s.saveMessage(tenantID, userID, sessionID, "assistant", content, aigc)
 }
 
 // SaveSystemMessage persists a system message (e.g. runtime error) into the session.
-func (s *AgentChatService) SaveSystemMessage(userID, sessionID, content string) (*chat.Message, error) {
-	return s.saveMessage(userID, sessionID, "system", content, "")
+func (s *AgentChatService) SaveSystemMessage(tenantID, userID, sessionID, content string) (*chat.Message, error) {
+	return s.saveMessage(tenantID, userID, sessionID, "system", content, "")
 }
 
-func (s *AgentChatService) saveMessage(userID, sessionID, role, content, aigc string) (*chat.Message, error) {
-	if _, err := s.chatRepo.GetSessionForUser(sessionID, userID); err != nil {
+func (s *AgentChatService) saveMessage(tenantID, userID, sessionID, role, content, aigc string) (*chat.Message, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
@@ -195,26 +195,26 @@ func (s *AgentChatService) saveMessage(userID, sessionID, role, content, aigc st
 		Aigc:      aigc,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := s.chatRepo.CreateMessage(msg); err != nil {
+	if err := s.chatRepo.CreateMessage(tenantID, msg); err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
 	return msg, nil
 }
 
 // GetSession returns a session owned by userID.
-func (s *AgentChatService) GetSession(userID, sessionID string) (*chat.Session, error) {
-	return s.chatRepo.GetSessionForUser(sessionID, userID)
+func (s *AgentChatService) GetSession(tenantID, userID, sessionID string) (*chat.Session, error) {
+	return s.chatRepo.GetSessionForUser(tenantID, sessionID, userID)
 }
 
 // BindRuntimeSessionID stores the runtime SDK session id returned by the first
 // run so subsequent messages in the same control-panel session can resume it.
-func (s *AgentChatService) BindRuntimeSessionID(sessionID, runtimeSessionID string) error {
-	return s.chatRepo.UpdateSessionRuntimeSessionID(sessionID, runtimeSessionID)
+func (s *AgentChatService) BindRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error {
+	return s.chatRepo.UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID)
 }
 
 // AutoTitleSession sets the session title from the first user message if the
 // session has no title yet. Long titles are truncated to 50 characters with "...".
-func (s *AgentChatService) AutoTitleSession(sessionID, firstUserContent string) error {
+func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserContent string) error {
 	if firstUserContent == "" {
 		return nil
 	}
@@ -222,7 +222,7 @@ func (s *AgentChatService) AutoTitleSession(sessionID, firstUserContent string) 
 	if len([]rune(title)) > 50 {
 		title = string([]rune(title)[:50]) + "..."
 	}
-	return s.chatRepo.UpdateSessionTitle(sessionID, title)
+	return s.chatRepo.UpdateSessionTitle(tenantID, sessionID, title)
 }
 
 // ResolveRuntime verifies the agent is deployed and running, and returns
@@ -236,8 +236,8 @@ func (s *AgentChatService) AutoTitleSession(sessionID, firstUserContent string) 
 // agent-name prefix and forwards the canonical runtime API path to the
 // container. When Kong is not configured, RuntimeURL falls back to a
 // direct http://{publicHost}:{hostPort} URL.
-func (s *AgentChatService) ResolveRuntime(agentName string) (string, string, error) {
-	status, err := s.deployerSvc.GetStatus(agentName)
+func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
+	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
 		return "", "", fmt.Errorf("get deployment status: %w", err)
 	}

@@ -65,7 +65,7 @@ func TestProviderService_SeedIfEmpty(t *testing.T) {
 
 	require.NoError(t, svc.SeedIfEmpty())
 
-	summaries, err := svc.repo.ListAll()
+	summaries, err := svc.repo.ListAll("")
 	require.NoError(t, err)
 	require.Len(t, summaries, 7)
 
@@ -86,7 +86,7 @@ func TestProviderService_SeedIfEmpty(t *testing.T) {
 	require.True(t, keys["paddleocr"])
 
 	require.NotNil(t, mineruSummary)
-	attrs, err := svc.repo.GetAttributes(mineruSummary.ID)
+	attrs, err := svc.repo.GetAttributes("", mineruSummary.ID)
 	require.NoError(t, err)
 	require.Equal(t, map[string]provider.AttrValue{
 		"backend":       {Type: "string", Value: ""},
@@ -102,7 +102,7 @@ func TestProviderService_SeedIfEmpty(t *testing.T) {
 		}
 	}
 	require.NotNil(t, glmSummary)
-	glmModels, err := svc.repo.ListModels(glmSummary.ID)
+	glmModels, err := svc.repo.ListModels("", glmSummary.ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, glmModels, "glm-cn seed must persist models to provider_models")
 	for _, m := range glmModels {
@@ -112,7 +112,7 @@ func TestProviderService_SeedIfEmpty(t *testing.T) {
 
 	// Idempotent
 	require.NoError(t, svc.SeedIfEmpty())
-	summaries, err = svc.repo.ListAll()
+	summaries, err = svc.repo.ListAll("")
 	require.NoError(t, err)
 	require.Len(t, summaries, 7)
 }
@@ -121,10 +121,10 @@ func TestProviderServiceUpdate_PreservesKeyWhenMaskedValueIsSubmitted(t *testing
 	svc := setupProviderService(t, "sk-original-secret-1234")
 	maskedKey := "sk-o****1234"
 
-	_, err := svc.Update(1, &UpdateProviderInput{LockedAPIKey: &maskedKey})
+	_, err := svc.Update("", 1, &UpdateProviderInput{LockedAPIKey: &maskedKey})
 	require.NoError(t, err)
 
-	storedKey, err := svc.GetRawAPIKey(1)
+	storedKey, err := svc.GetRawAPIKey("", 1)
 	require.NoError(t, err)
 	require.Equal(t, "sk-original-secret-1234", storedKey)
 }
@@ -133,10 +133,10 @@ func TestProviderServiceUpdate_ReplacesKeyWhenNewValueIsSubmitted(t *testing.T) 
 	svc := setupProviderService(t, "sk-original-secret-1234")
 	replacementKey := "sk-replacement-secret-5678"
 
-	_, err := svc.Update(1, &UpdateProviderInput{LockedAPIKey: &replacementKey})
+	_, err := svc.Update("", 1, &UpdateProviderInput{LockedAPIKey: &replacementKey})
 	require.NoError(t, err)
 
-	storedKey, err := svc.GetRawAPIKey(1)
+	storedKey, err := svc.GetRawAPIKey("", 1)
 	require.NoError(t, err)
 	require.Equal(t, replacementKey, storedKey)
 }
@@ -183,7 +183,7 @@ func setupProviderServiceWithModels(t *testing.T) *ProviderService {
 func TestProviderService_ReadRepair_BackfillsSelectionIDs(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	p, err := svc.GetByID(1)
+	p, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
 	models := p.DefaultModels()
@@ -192,13 +192,13 @@ func TestProviderService_ReadRepair_BackfillsSelectionIDs(t *testing.T) {
 	require.Equal(t, "gpt-4-2", models[1].SelectionID)
 
 	// Read-repair persisted the new SelectionID to the row.
-	rows, err := svc.repo.ListModels(1)
+	rows, err := svc.repo.ListModels("", 1)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-4", rows[0].SelectionID)
 	require.Equal(t, "gpt-4-2", rows[1].SelectionID)
 
 	// Idempotent: second read returns the same IDs.
-	p2, err := svc.GetByID(1)
+	p2, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	require.Equal(t, models[0].SelectionID, p2.DefaultModels()[0].SelectionID)
 	require.Equal(t, models[1].SelectionID, p2.DefaultModels()[1].SelectionID)
@@ -207,7 +207,7 @@ func TestProviderService_ReadRepair_BackfillsSelectionIDs(t *testing.T) {
 func TestProviderService_ReadRepair_ListAll(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	providers, err := svc.ListAll("")
+	providers, err := svc.ListAll("", "")
 	require.NoError(t, err)
 	require.Len(t, providers, 1)
 	for _, m := range providers[0].DefaultModels() {
@@ -219,7 +219,7 @@ func TestProviderService_Update_PreservesSelectionIDOnRename(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// First, run read-repair so both rows have selection_ids.
-	p, err := svc.GetByID(1)
+	p, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	models := p.DefaultModels()
 	require.Equal(t, "gpt-4", models[0].SelectionID)
@@ -228,10 +228,10 @@ func TestProviderService_Update_PreservesSelectionIDOnRename(t *testing.T) {
 	renamed := models[0]
 	renamed.DisplayName = "GPT-4 Renamed"
 	newModels := []provider.CatalogModel{renamed, models[1]}
-	_, err = svc.Update(1, &UpdateProviderInput{DefaultModels: &newModels})
+	_, err = svc.Update("", 1, &UpdateProviderInput{DefaultModels: &newModels})
 	require.NoError(t, err)
 
-	p2, err := svc.GetByID(1)
+	p2, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-4", p2.DefaultModels()[0].SelectionID)
 	require.Equal(t, "GPT-4 Renamed", p2.DefaultModels()[0].DisplayName)
@@ -242,7 +242,7 @@ func TestProviderService_Update_GeneratesSelectionIDForNewModels(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// First, run read-repair so both rows have selection_ids.
-	p, err := svc.GetByID(1)
+	p, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	models := p.DefaultModels()
 
@@ -253,10 +253,10 @@ func TestProviderService_Update_GeneratesSelectionIDForNewModels(t *testing.T) {
 		ModelID: "gpt-4", DisplayName: "GPT-4 (128K)",
 		ContextWindow: 131072, ModelType: "llm",
 	})
-	_, err = svc.Update(1, &UpdateProviderInput{DefaultModels: &newModels})
+	_, err = svc.Update("", 1, &UpdateProviderInput{DefaultModels: &newModels})
 	require.NoError(t, err)
 
-	p2, err := svc.GetByID(1)
+	p2, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	got := p2.DefaultModels()
 	require.Len(t, got, 3)
@@ -271,11 +271,11 @@ func TestProviderService_AddModel_AppendsAndReturnsUpdatedDTO(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Baseline: 2 models after read-repair, sort_order 0 and 1.
-	p, err := svc.GetByID(1)
+	p, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	require.Len(t, p.DefaultModels(), 2)
 
-	dto, err := svc.AddModel(1, &AddModelInput{
+	dto, err := svc.AddModel("", 1, &AddModelInput{
 		ModelID:       "gpt-4o",
 		DisplayName:   "GPT-4o",
 		ModelType:     "llm",
@@ -298,7 +298,7 @@ func TestProviderService_AddModel_AppendsAndReturnsUpdatedDTO(t *testing.T) {
 	// The appended model must be sorted AFTER the existing two. Without
 	// setting SortOrder it would default to 0, tying with the first row
 	// and surfacing in a surprising position.
-	rows, err := svc.repo.ListModels(1)
+	rows, err := svc.repo.ListModels("", 1)
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
 	require.Equal(t, 0, rows[0].SortOrder)
@@ -310,7 +310,7 @@ func TestProviderService_AddModel_AppendsAndReturnsUpdatedDTO(t *testing.T) {
 func TestProviderService_AddModel_RejectsUnknownModelType(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	_, err := svc.AddModel(1, &AddModelInput{
+	_, err := svc.AddModel("", 1, &AddModelInput{
 		ModelID:   "weird",
 		ModelType: "bogus",
 	})
@@ -321,7 +321,7 @@ func TestProviderService_AddModel_RejectsUnknownModelType(t *testing.T) {
 func TestProviderService_AddModel_RejectsEmptyModelID(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	_, err := svc.AddModel(1, &AddModelInput{
+	_, err := svc.AddModel("", 1, &AddModelInput{
 		ModelID:   "",
 		ModelType: "llm",
 	})
@@ -332,7 +332,7 @@ func TestProviderService_AddModel_RejectsEmptyModelID(t *testing.T) {
 func TestProviderService_AddModel_RejectsUnknownProvider(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	_, err := svc.AddModel(999, &AddModelInput{ModelID: "x", ModelType: "llm"})
+	_, err := svc.AddModel("", 999, &AddModelInput{ModelID: "x", ModelType: "llm"})
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 }
 
@@ -340,12 +340,12 @@ func TestProviderService_UpdateModel_PatchesFields(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Read-repair first to materialise "gpt-4" as the selection_id.
-	_, err := svc.GetByID(1)
+	_, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
 	newName := "GPT-4 (Renamed)"
 	newContext := 65000
-	dto, err := svc.UpdateModel(1, "gpt-4", &UpdateModelInput{
+	dto, err := svc.UpdateModel("", 1, "gpt-4", &UpdateModelInput{
 		DisplayName:   &newName,
 		ContextWindow: &newContext,
 	})
@@ -366,11 +366,11 @@ func TestProviderService_UpdateModel_RejectsUnknownModelType(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Run read-repair first so "gpt-4" exists as a selection_id.
-	_, err := svc.GetByID(1)
+	_, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
 	bad := "bogus"
-	_, err = svc.UpdateModel(1, "gpt-4", &UpdateModelInput{ModelType: &bad})
+	_, err = svc.UpdateModel("", 1, "gpt-4", &UpdateModelInput{ModelType: &bad})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "type")
 }
@@ -378,7 +378,7 @@ func TestProviderService_UpdateModel_RejectsUnknownModelType(t *testing.T) {
 func TestProviderService_UpdateModel_RejectsUnknownSelectionID(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	_, err := svc.UpdateModel(1, "ghost", &UpdateModelInput{})
+	_, err := svc.UpdateModel("", 1, "ghost", &UpdateModelInput{})
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 }
 
@@ -386,12 +386,12 @@ func TestProviderService_DeleteModel_RemovesRow(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Read-repair first.
-	_, err := svc.GetByID(1)
+	_, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.DeleteModel(1, "gpt-4-2"))
+	require.NoError(t, svc.DeleteModel("", 1, "gpt-4-2"))
 
-	rows, err := svc.repo.ListModels(1)
+	rows, err := svc.repo.ListModels("", 1)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "gpt-4", rows[0].SelectionID)
@@ -400,7 +400,7 @@ func TestProviderService_DeleteModel_RemovesRow(t *testing.T) {
 func TestProviderService_DeleteModel_RejectsUnknownSelectionID(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	err := svc.DeleteModel(1, "ghost")
+	err := svc.DeleteModel("", 1, "ghost")
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 }
 
@@ -408,10 +408,10 @@ func TestProviderService_GetByIDAsDTO_ReturnsFullDTO(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Read-repair first.
-	_, err := svc.GetByID(1)
+	_, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
-	dto, err := svc.GetByIDAsDTO(1)
+	dto, err := svc.GetByIDAsDTO("", 1)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), dto.ID)
 	require.Len(t, dto.DefaultModels, 2)
@@ -420,7 +420,7 @@ func TestProviderService_GetByIDAsDTO_ReturnsFullDTO(t *testing.T) {
 func TestProviderService_GetByIDAsDTO_UnknownProvider(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
-	_, err := svc.GetByIDAsDTO(999)
+	_, err := svc.GetByIDAsDTO("", 999)
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 }
 
@@ -430,7 +430,7 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 	svc := setupEmptyProviderService(t)
 
 	// Create an LLM-only provider.
-	_, err := svc.Create(&CreateProviderInput{
+	_, err := svc.Create("", &CreateProviderInput{
 		Key: "llm-only", Name: "LLM Only",
 		Protocol: "openai", AuthStyle: "api_key",
 		BaseURL: "http://llm.example.com",
@@ -441,7 +441,7 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a mixed provider with one LLM and one embedding model.
-	_, err = svc.Create(&CreateProviderInput{
+	_, err = svc.Create("", &CreateProviderInput{
 		Key: "mixed", Name: "Mixed",
 		Protocol: "openai", AuthStyle: "api_key",
 		BaseURL: "http://mixed.example.com",
@@ -453,18 +453,18 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 	require.NoError(t, err)
 
 	// ?type=embedding → only the mixed provider.
-	emb, err := svc.ListAll("embedding")
+	emb, err := svc.ListAll("", "embedding")
 	require.NoError(t, err)
 	require.Len(t, emb, 1)
 	require.Equal(t, "mixed", emb[0].Key())
 
 	// ?type=llm → both providers.
-	llm, err := svc.ListAll("llm")
+	llm, err := svc.ListAll("", "llm")
 	require.NoError(t, err)
 	require.Len(t, llm, 2)
 
 	// No filter → both.
-	all, err := svc.ListAll("")
+	all, err := svc.ListAll("", "")
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 }
@@ -472,7 +472,7 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 func TestProviderService_Create_RejectsEmptyModelType(t *testing.T) {
 	svc := setupEmptyProviderService(t)
 
-	_, err := svc.Create(&CreateProviderInput{
+	_, err := svc.Create("", &CreateProviderInput{
 		Key: "bad", Name: "Bad",
 		Protocol: "openai", AuthStyle: "api_key",
 		BaseURL: "http://x.example.com",
@@ -488,13 +488,13 @@ func TestProviderService_Update_RejectsEmptyModelType(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Read-repair first so rows have selection_ids.
-	_, err := svc.GetByID(1)
+	_, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 
 	bad := []provider.CatalogModel{
 		{ModelID: "gpt-4", DisplayName: "GPT-4"},
 	}
-	_, err = svc.Update(1, &UpdateProviderInput{DefaultModels: &bad})
+	_, err = svc.Update("", 1, &UpdateProviderInput{DefaultModels: &bad})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "modelType")
 }
@@ -505,20 +505,20 @@ func TestProviderService_FindProviderByModelID(t *testing.T) {
 	svc := setupProviderServiceWithModels(t)
 
 	// Existing model_id — both seed rows share "gpt-4".
-	p, err := svc.FindProviderByModelID("gpt-4")
+	p, err := svc.FindProviderByModelID("", "gpt-4")
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	require.Equal(t, "legacy-provider", p.Key())
 
 	// Unknown model_id → sentinel error, nil provider.
-	p, err = svc.FindProviderByModelID("does-not-exist")
+	p, err = svc.FindProviderByModelID("", "does-not-exist")
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 	require.Nil(t, p)
 
 	// Empty model_id short-circuits to ErrProviderNotFound so we don't
 	// accidentally return an arbitrary provider whose row happens to also
 	// have an empty model_id (defense against degenerate matches).
-	p, err = svc.FindProviderByModelID("")
+	p, err = svc.FindProviderByModelID("", "")
 	require.ErrorIs(t, err, provider.ErrProviderNotFound)
 	require.Nil(t, p)
 }
@@ -546,14 +546,14 @@ func TestEffortsFromJSON_InvalidReturnsNil(t *testing.T) {
 func TestProviderService_AddModel_WithEfforts(t *testing.T) {
 	svc := setupProviderService(t, "sk-test")
 
-	_, err := svc.AddModel(1, &AddModelInput{
+	_, err := svc.AddModel("", 1, &AddModelInput{
 		ModelID:   "k3",
 		ModelType: "llm",
 		Efforts:   []string{"low", "high"},
 	})
 	require.NoError(t, err)
 
-	dto, err := svc.GetByIDAsDTO(1)
+	dto, err := svc.GetByIDAsDTO("", 1)
 	require.NoError(t, err)
 	require.Len(t, dto.DefaultModels, 1)
 	require.Equal(t, []string{"low", "high"}, dto.DefaultModels[0].Efforts)
@@ -562,22 +562,22 @@ func TestProviderService_AddModel_WithEfforts(t *testing.T) {
 func TestProviderService_UpdateModel_Efforts(t *testing.T) {
 	svc := setupProviderService(t, "sk-test")
 
-	_, err := svc.AddModel(1, &AddModelInput{ModelID: "k3", ModelType: "llm"})
+	_, err := svc.AddModel("", 1, &AddModelInput{ModelID: "k3", ModelType: "llm"})
 	require.NoError(t, err)
 
 	efforts := []string{"max"}
-	dto, err := svc.UpdateModel(1, "k3", &UpdateModelInput{Efforts: &efforts})
+	dto, err := svc.UpdateModel("", 1, "k3", &UpdateModelInput{Efforts: &efforts})
 	require.NoError(t, err)
 	require.Equal(t, []string{"max"}, dto.DefaultModels[0].Efforts)
 
 	// nil = 不修改
-	dto, err = svc.UpdateModel(1, "k3", &UpdateModelInput{})
+	dto, err = svc.UpdateModel("", 1, "k3", &UpdateModelInput{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"max"}, dto.DefaultModels[0].Efforts)
 
 	// 空切片 = 清空
 	empty := []string{}
-	dto, err = svc.UpdateModel(1, "k3", &UpdateModelInput{Efforts: &empty})
+	dto, err = svc.UpdateModel("", 1, "k3", &UpdateModelInput{Efforts: &empty})
 	require.NoError(t, err)
 	require.Empty(t, dto.DefaultModels[0].Efforts)
 }
@@ -677,7 +677,7 @@ func TestAddModel_AssignsAigcCode(t *testing.T) {
 	svc, db := setupProviderSvc(t)
 	pid := seedEmptyProvider(t, db)
 
-	dto, err := svc.AddModel(pid, &AddModelInput{
+	dto, err := svc.AddModel("", pid, &AddModelInput{
 		ModelID:     "glm-4.5",
 		DisplayName: "GLM-4.5",
 		ModelType:   "llm",
@@ -687,7 +687,7 @@ func TestAddModel_AssignsAigcCode(t *testing.T) {
 	require.Equal(t, "0001", dto.DefaultModels[0].AigcCode)
 
 	// 第二个不同模型递增
-	dto2, err := svc.AddModel(pid, &AddModelInput{
+	dto2, err := svc.AddModel("", pid, &AddModelInput{
 		ModelID:     "gpt-4o",
 		DisplayName: "GPT-4o",
 		ModelType:   "llm",
@@ -701,9 +701,9 @@ func TestAddModel_ReusesCodeForSameModelIDCrossProvider(t *testing.T) {
 	pidA := seedEmptyProvider(t, db)
 	pidB := seedEmptyProvider(t, db)
 
-	_, err := svc.AddModel(pidA, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
+	_, err := svc.AddModel("", pidA, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
 	require.NoError(t, err)
-	dto, err := svc.AddModel(pidB, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
+	dto, err := svc.AddModel("", pidB, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
 	require.NoError(t, err)
 	require.Equal(t, "0001", findModel(dto.DefaultModels, "glm-4.5").AigcCode)
 }
@@ -725,18 +725,18 @@ func TestUpdate_PreservesExistingCodeAcrossEdit(t *testing.T) {
 	pid := seedEmptyProvider(t, db)
 
 	// 先添加一个模型，拿到码
-	_, err := svc.AddModel(pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
+	_, err := svc.AddModel("", pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
 	require.NoError(t, err)
 
 	// bulk Update：改 displayName 但保留 modelId → 码应稳定
-	_, err = svc.Update(pid, &UpdateProviderInput{
+	_, err = svc.Update("", pid, &UpdateProviderInput{
 		DefaultModels: &[]provider.CatalogModel{
 			{ModelID: "glm-4.5", DisplayName: "GLM 4.5 改名", ModelType: "llm"},
 		},
 	})
 	require.NoError(t, err)
 
-	dto, err := svc.GetByIDAsDTO(pid)
+	dto, err := svc.GetByIDAsDTO("", pid)
 	require.NoError(t, err)
 	require.Equal(t, "0001", dto.DefaultModels[0].AigcCode)
 }
@@ -745,10 +745,10 @@ func TestUpdate_AssignsNewCodeForNewModel(t *testing.T) {
 	svc, db := setupProviderSvc(t)
 	pid := seedEmptyProvider(t, db)
 
-	_, err := svc.AddModel(pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
+	_, err := svc.AddModel("", pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
 	require.NoError(t, err)
 
-	_, err = svc.Update(pid, &UpdateProviderInput{
+	_, err = svc.Update("", pid, &UpdateProviderInput{
 		DefaultModels: &[]provider.CatalogModel{
 			{ModelID: "glm-4.5", ModelType: "llm"},
 			{ModelID: "gpt-4o", ModelType: "llm"},
@@ -756,7 +756,7 @@ func TestUpdate_AssignsNewCodeForNewModel(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	dto, err := svc.GetByIDAsDTO(pid)
+	dto, err := svc.GetByIDAsDTO("", pid)
 	require.NoError(t, err)
 	require.Equal(t, "0001", findModel(dto.DefaultModels, "glm-4.5").AigcCode)
 	require.Equal(t, "0002", findModel(dto.DefaultModels, "gpt-4o").AigcCode)
@@ -766,16 +766,124 @@ func TestUpdate_DroppingModelDoesNotError(t *testing.T) {
 	svc, db := setupProviderSvc(t)
 	pid := seedEmptyProvider(t, db)
 
-	_, err := svc.AddModel(pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
+	_, err := svc.AddModel("", pid, &AddModelInput{ModelID: "glm-4.5", ModelType: "llm"})
 	require.NoError(t, err)
-	_, err = svc.AddModel(pid, &AddModelInput{ModelID: "gpt-4o", ModelType: "llm"})
+	_, err = svc.AddModel("", pid, &AddModelInput{ModelID: "gpt-4o", ModelType: "llm"})
 	require.NoError(t, err)
 
 	// bulk 只保留 glm-4.5
-	_, err = svc.Update(pid, &UpdateProviderInput{
+	_, err = svc.Update("", pid, &UpdateProviderInput{
 		DefaultModels: &[]provider.CatalogModel{
 			{ModelID: "glm-4.5", ModelType: "llm"},
 		},
 	})
 	require.NoError(t, err)
+}
+
+// ── Tenant isolation (multi-tenant Phase 3 Task 4) ──
+
+// TestProviderService_CopyOnWrite_UpdateSharedProvider 租户修改共享种子
+// provider 时：copy-on-write 复制为本租户行（ID 变化），共享模板原封不动，
+// 其他租户仍看到模板原值。
+func TestProviderService_CopyOnWrite_UpdateSharedProvider(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	require.NotEmpty(t, summaries)
+	shared := summaries[0]
+	require.Equal(t, "", shared.TenantID)
+
+	newName := "tenant-a custom name"
+	dto, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+	require.NotEqual(t, shared.ID, dto.ID) // 复制为本租户行，ID 变化
+	require.Equal(t, newName, dto.Name)
+
+	// 共享模板未被改动
+	orig, err := svc.repo.GetByID("tenant-b", shared.ID)
+	require.NoError(t, err)
+	require.Equal(t, shared.Name, orig.Name)
+	require.Equal(t, "", orig.TenantID)
+
+	// 租户 B 看不到租户 A 的定制行
+	forTenantB, err := svc.repo.ListAll("tenant-b")
+	require.NoError(t, err)
+	for _, p := range forTenantB {
+		require.NotEqual(t, dto.ID, p.ID)
+	}
+}
+
+// TestProviderService_CopyOnWrite_ListAllDedupes CoW 后同 key 存在共享行 +
+// 本租户拷贝行时，service 层 ListAll 必须只返回一行（本租户行遮蔽共享行）。
+func TestProviderService_CopyOnWrite_ListAllDedupes(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	// 找 glm-cn 共享行并 CoW 修改名称
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	var shared *provider.ProviderSummary
+	for _, s := range summaries {
+		if s.Key == "glm-cn" {
+			shared = s
+		}
+	}
+	require.NotNil(t, shared)
+	require.Equal(t, "", shared.TenantID)
+
+	newName := "tenant-a glm"
+	dto, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+
+	listed, err := svc.ListAll("tenant-a", "")
+	require.NoError(t, err)
+	seen := make(map[string]int)
+	for _, p := range listed {
+		seen[p.Key()]++
+	}
+	for key, n := range seen {
+		require.Equal(t, 1, n, "key %s 出现 %d 次，CoW 后列表不得有同 key 双行", key, n)
+	}
+
+	// 遮蔽：glm-cn 命中的应是本租户定制行（新名称 + 新 ID）
+	for _, p := range listed {
+		if p.Key() == "glm-cn" {
+			require.Equal(t, newName, p.Name())
+			require.Equal(t, dto.ID, p.ID())
+		}
+	}
+}
+
+// TestProviderService_CopyOnWrite_FindProviderByModelIDTenantFirst CoW 后
+// 双行存在时，FindProviderByModelID 必须返回本租户的定制配置（而非共享模板）。
+func TestProviderService_CopyOnWrite_FindProviderByModelIDTenantFirst(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	var shared *provider.ProviderSummary
+	for _, s := range summaries {
+		if s.Key == "glm-cn" {
+			shared = s
+		}
+	}
+	require.NotNil(t, shared)
+
+	// 挑 glm-cn 的一个 model_id，然后 CoW 改名
+	models, err := svc.repo.ListModels("", shared.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, models)
+	modelID := models[0].ModelID
+
+	newName := "tenant-a glm"
+	dto, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+
+	p, err := svc.FindProviderByModelID("tenant-a", modelID)
+	require.NoError(t, err)
+	require.Equal(t, newName, p.Name())
+	require.Equal(t, dto.ID, p.ID(), "必须命中本租户拷贝行，而非共享模板行")
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +20,7 @@ func NewMcpHandler(svc *services.McpService) *McpHandler {
 // ==================== 管理：CRUD ====================
 
 func (h *McpHandler) List(c *gin.Context) {
-	items, err := h.service.ListAll()
+	items, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -29,7 +30,7 @@ func (h *McpHandler) List(c *gin.Context) {
 
 func (h *McpHandler) Get(c *gin.Context) {
 	name := c.Param("name")
-	item, err := h.service.GetByName(name)
+	item, err := h.service.GetByName(tenant.GetTenantID(c), name)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -43,7 +44,7 @@ func (h *McpHandler) Create(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	item, err := h.service.Create(&input)
+	item, err := h.service.Create(tenant.GetTenantID(c), &input)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -58,7 +59,7 @@ func (h *McpHandler) Update(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	item, err := h.service.Update(name, &input)
+	item, err := h.service.Update(tenant.GetTenantID(c), name, &input)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -68,7 +69,7 @@ func (h *McpHandler) Update(c *gin.Context) {
 
 func (h *McpHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
-	if err := h.service.Delete(name); err != nil {
+	if err := h.service.Delete(tenant.GetTenantID(c), name); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -83,7 +84,7 @@ type updateAgentMcpsReq struct {
 
 func (h *McpHandler) GetAgentMcps(c *gin.Context) {
 	agentName := c.Param("name")
-	names, err := h.service.GetAgentMcps(agentName)
+	names, err := h.service.GetAgentMcps(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -98,7 +99,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentMcps(agentName, req.McpNames); err != nil {
+	if err := h.service.UpdateAgentMcps(tenant.GetTenantID(c), agentName, req.McpNames); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -121,7 +122,7 @@ func (h *McpHandler) ProbeByConfig(c *gin.Context) {
 
 func (h *McpHandler) ProbeByName(c *gin.Context) {
 	name := c.Param("name")
-	result, err := h.service.ProbeByName(c.Request.Context(), name)
+	result, err := h.service.ProbeByName(c.Request.Context(), tenant.GetTenantID(c), name)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -139,7 +140,7 @@ func (h *McpHandler) GetClientMcpsByAgent(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "缺少 agent 查询参数")
 		return
 	}
-	items, err := h.service.GetClientMcpsByAgent(agentName)
+	items, err := h.service.GetClientMcpsByAgent(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return

@@ -5,6 +5,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/skill"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +24,7 @@ func NewSkillHandler(service *services.SkillService) *SkillHandler {
 func (h *SkillHandler) ListPublic(c *gin.Context) {
 	skillType := c.Query("type")
 
-	skills, err := h.service.ListAll(skillType)
+	skills, err := h.service.ListAll(tenant.GetTenantID(c), skillType)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -36,7 +37,7 @@ func (h *SkillHandler) ListPublic(c *gin.Context) {
 func (h *SkillHandler) GetPublic(c *gin.Context) {
 	name := c.Param("name")
 
-	sk, err := h.service.GetSkill(name)
+	sk, err := h.service.GetSkill(tenant.GetTenantID(c), name)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -49,7 +50,7 @@ func (h *SkillHandler) GetPublic(c *gin.Context) {
 func (h *SkillHandler) Download(c *gin.Context) {
 	name := c.Param("name")
 
-	dto, err := h.service.Download(name)
+	dto, err := h.service.Download(tenant.GetTenantID(c), name)
 	if err != nil {
 		if err == skill.ErrSkillNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -75,7 +76,7 @@ func (h *SkillHandler) Download(c *gin.Context) {
 func (h *SkillHandler) GetSkillMd(c *gin.Context) {
 	name := c.Param("name")
 
-	entries, err := h.service.GetSkillMd(name)
+	entries, err := h.service.GetSkillMd(tenant.GetTenantID(c), name)
 	if err != nil {
 		if err == skill.ErrSkillNotFound || err == skill.ErrSkillFileNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -96,7 +97,7 @@ func (h *SkillHandler) GetSkillMd(c *gin.Context) {
 func (h *SkillHandler) ListAdmin(c *gin.Context) {
 	skillType := c.Query("type")
 
-	skills, err := h.service.ListAll(skillType)
+	skills, err := h.service.ListAll(tenant.GetTenantID(c), skillType)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -126,7 +127,7 @@ func (h *SkillHandler) Create(c *gin.Context) {
 	}
 	defer file.Close()
 
-	sk, err := h.service.CreateSkill(&services.CreateSkillInput{
+	sk, err := h.service.CreateSkill(tenant.GetTenantID(c), &services.CreateSkillInput{
 		Name:          name,
 		Type:          skillType,
 		Title:         title,
@@ -182,7 +183,7 @@ func (h *SkillHandler) Update(c *gin.Context) {
 		input.FileSize = header.Size
 	}
 
-	sk, err := h.service.UpdateSkill(name, input)
+	sk, err := h.service.UpdateSkill(tenant.GetTenantID(c), name, input)
 	if err != nil {
 		if err == skill.ErrSkillNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -199,7 +200,7 @@ func (h *SkillHandler) Update(c *gin.Context) {
 func (h *SkillHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
-	if err := h.service.DeleteSkill(name); err != nil {
+	if err := h.service.DeleteSkill(tenant.GetTenantID(c), name); err != nil {
 		if err == skill.ErrSkillNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -224,7 +225,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentSkills(agentName, req.SkillNames); err != nil {
+	if err := h.service.UpdateAgentSkills(tenant.GetTenantID(c), agentName, req.SkillNames); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -234,7 +235,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 // GetAgentSkills returns the skill names associated with an agent.
 func (h *SkillHandler) GetAgentSkills(c *gin.Context) {
 	agentName := c.Param("name")
-	skillNames, err := h.service.GetAgentSkills(agentName)
+	skillNames, err := h.service.GetAgentSkills(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return

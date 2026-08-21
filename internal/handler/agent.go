@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +24,7 @@ func NewAgentHandler(service *services.AgentService, deployerService *services.A
 }
 
 func (h *AgentHandler) Manifest(c *gin.Context) {
-	resp, err := h.service.GetManifest(c.Query("platform"))
+	resp, err := h.service.GetManifest(tenant.GetTenantID(c), c.Query("platform"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -39,7 +40,7 @@ func (h *AgentHandler) Manifest(c *gin.Context) {
 }
 
 func (h *AgentHandler) List(c *gin.Context) {
-	resp, err := h.service.GetDesktopAgents()
+	resp, err := h.service.GetDesktopAgents(tenant.GetTenantID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -55,7 +56,7 @@ func (h *AgentHandler) List(c *gin.Context) {
 }
 
 func (h *AgentHandler) ListAdmin(c *gin.Context) {
-	resp, err := h.service.GetAllAgentsAdmin()
+	resp, err := h.service.GetAllAgentsAdmin(tenant.GetTenantID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -73,7 +74,7 @@ func (h *AgentHandler) ListAdmin(c *gin.Context) {
 func (h *AgentHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 
-	resp, err := h.service.GetAgent(name)
+	resp, err := h.service.GetAgent(tenant.GetTenantID(c), name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -106,7 +107,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.CreateAgent(&services.CreateAgentInput{
+	resp, err := h.service.CreateAgent(tenant.GetTenantID(c), &services.CreateAgentInput{
 		Name:           req.Name,
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
@@ -147,7 +148,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.UpdateAgent(name, &services.UpdateAgentInput{
+	resp, err := h.service.UpdateAgent(tenant.GetTenantID(c), name, &services.UpdateAgentInput{
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
 		MobileEnabled:  req.MobileEnabled,
@@ -175,7 +176,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 	// syncs the real container state from the deployer, so its result is
 	// authoritative. "not_found" and "archived" mean no container is running
 	// (archived = container removed but data retained by the deployer).
-	if deployment, err := h.deployerService.GetStatus(name); err == nil {
+	if deployment, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name); err == nil {
 		s := deployment.Status
 		if s != "" && s != "not_found" && s != "archived" {
 			c.JSON(http.StatusConflict, gin.H{
@@ -186,7 +187,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 		}
 	}
 
-	if err := h.service.DeleteAgent(name); err != nil {
+	if err := h.service.DeleteAgent(tenant.GetTenantID(c), name); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -218,7 +219,7 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ProbeAgent(name, req.ProviderID, req.APIKey, req.BaseURL)
+	result, err := h.service.ProbeAgent(tenant.GetTenantID(c), name, req.ProviderID, req.APIKey, req.BaseURL)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -248,7 +249,7 @@ func (h *AgentHandler) DeployAgent(c *gin.Context) {
 	force := c.Query("force") == "true"
 	rotateKey := c.Query("rotate_key") == "true"
 
-	resp, err := h.deployerService.Deploy(name, force, rotateKey)
+	resp, err := h.deployerService.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 	if err != nil {
 		respondError(c, deployerErrorStatus(err), err.Error())
 		return
@@ -259,7 +260,7 @@ func (h *AgentHandler) DeployAgent(c *gin.Context) {
 func (h *AgentHandler) GetDeployment(c *gin.Context) {
 	name := c.Param("name")
 
-	resp, err := h.deployerService.GetStatus(name)
+	resp, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -270,7 +271,7 @@ func (h *AgentHandler) GetDeployment(c *gin.Context) {
 func (h *AgentHandler) StopDeployment(c *gin.Context) {
 	name := c.Param("name")
 
-	if err := h.deployerService.Stop(name); err != nil {
+	if err := h.deployerService.Stop(tenant.GetTenantID(c), name); err != nil {
 		respondError(c, deployerErrorStatus(err), err.Error())
 		return
 	}
@@ -280,7 +281,7 @@ func (h *AgentHandler) StopDeployment(c *gin.Context) {
 func (h *AgentHandler) StartDeployment(c *gin.Context) {
 	name := c.Param("name")
 
-	resp, err := h.deployerService.Start(name)
+	resp, err := h.deployerService.Start(tenant.GetTenantID(c), name)
 	if err != nil {
 		respondError(c, deployerErrorStatus(err), err.Error())
 		return
@@ -294,9 +295,9 @@ func (h *AgentHandler) DeleteDeployment(c *gin.Context) {
 
 	var err error
 	if purge {
-		err = h.deployerService.Purge(name)
+		err = h.deployerService.Purge(tenant.GetTenantID(c), name)
 	} else {
-		err = h.deployerService.Delete(name)
+		err = h.deployerService.Delete(tenant.GetTenantID(c), name)
 	}
 	if err != nil {
 		respondError(c, deployerErrorStatus(err), err.Error())
@@ -325,7 +326,7 @@ func (h *AgentHandler) UpdateSubagents(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.UpdateSubagents(name, req.Subagents); err != nil {
+	if err := h.service.UpdateSubagents(tenant.GetTenantID(c), name, req.Subagents); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -345,7 +346,7 @@ type updateAgentKnowledgeReq struct {
 
 func (h *AgentHandler) GetAgentKnowledge(c *gin.Context) {
 	name := c.Param("name")
-	datasetIDs, err := h.service.GetAgentKnowledgeDatasets(name)
+	datasetIDs, err := h.service.GetAgentKnowledgeDatasets(tenant.GetTenantID(c), name)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -373,7 +374,7 @@ func (h *AgentHandler) UpdateAgentKnowledge(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.UpdateAgentKnowledgeDatasets(name, req.DatasetIDs); err != nil {
+	if err := h.service.UpdateAgentKnowledgeDatasets(tenant.GetTenantID(c), name, req.DatasetIDs); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   err.Error(),

@@ -21,10 +21,10 @@ func newMockChatRepo() *mockChatRepo {
 	}
 }
 
-func (m *mockChatRepo) ListSessionsByAgentAndUser(agentID, userID, source string, page, pageSize int) ([]*chat.Session, int64, error) {
+func (m *mockChatRepo) ListSessionsByAgentAndUser(tenantID, agentID, userID, source string, page, pageSize int) ([]*chat.Session, int64, error) {
 	var out []*chat.Session
 	for _, s := range m.listSess {
-		if s.AgentID == agentID && s.UserID == userID {
+		if s.TenantID == tenantID && s.AgentID == agentID && s.UserID == userID {
 			if source == "" || s.Source == source {
 				out = append(out, s)
 			}
@@ -33,49 +33,53 @@ func (m *mockChatRepo) ListSessionsByAgentAndUser(agentID, userID, source string
 	return out, int64(len(out)), nil
 }
 
-func (m *mockChatRepo) GetSessionForUser(sessionID, userID string) (*chat.Session, error) {
+func (m *mockChatRepo) GetSessionForUser(tenantID, sessionID, userID string) (*chat.Session, error) {
 	s, ok := m.sessions[sessionID]
-	if !ok || s.UserID != userID {
+	if !ok || s.TenantID != tenantID || s.UserID != userID {
 		return nil, errNotFound
 	}
 	return s, nil
 }
 
-func (m *mockChatRepo) CreateSession(sess *chat.Session) error {
+func (m *mockChatRepo) CreateSession(tenantID string, sess *chat.Session) error {
+	sess.TenantID = tenantID
 	m.sessions[sess.ID] = sess
 	m.listSess = append(m.listSess, sess)
 	return nil
 }
 
-func (m *mockChatRepo) CreateMessage(msg *chat.Message) error {
+func (m *mockChatRepo) CreateMessage(tenantID string, msg *chat.Message) error {
+	msg.TenantID = tenantID
 	m.messages[msg.ID] = msg
 	return nil
 }
 
-func (m *mockChatRepo) DeleteSession(sessionID string) error {
-	delete(m.sessions, sessionID)
+func (m *mockChatRepo) DeleteSession(tenantID, sessionID string) error {
+	if s, ok := m.sessions[sessionID]; ok && s.TenantID == tenantID {
+		delete(m.sessions, sessionID)
+	}
 	return nil
 }
 
-func (m *mockChatRepo) ListMessages(sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
+func (m *mockChatRepo) ListMessages(tenantID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
 	var out []*chat.Message
 	for _, msg := range m.messages {
-		if msg.SessionID == sessionID {
+		if msg.TenantID == tenantID && msg.SessionID == sessionID {
 			out = append(out, msg)
 		}
 	}
 	return out, int64(len(out)), nil
 }
 
-func (m *mockChatRepo) UpdateSessionRuntimeSessionID(sessionID, runtimeSessionID string) error {
-	if s, ok := m.sessions[sessionID]; ok {
+func (m *mockChatRepo) UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error {
+	if s, ok := m.sessions[sessionID]; ok && s.TenantID == tenantID {
 		s.RuntimeSessionID = runtimeSessionID
 	}
 	return nil
 }
 
-func (m *mockChatRepo) UpdateSessionTitle(sessionID, title string) error {
-	if s, ok := m.sessions[sessionID]; ok {
+func (m *mockChatRepo) UpdateSessionTitle(tenantID, sessionID, title string) error {
+	if s, ok := m.sessions[sessionID]; ok && s.TenantID == tenantID {
 		if s.Title == "" {
 			s.Title = title
 		}
@@ -95,7 +99,7 @@ type mockAgentRepoForChat struct {
 	cfg *agent.AgentConfig
 }
 
-func (m *mockAgentRepoForChat) GetByName(name string) (*agent.AgentConfig, error) {
+func (m *mockAgentRepoForChat) GetByName(tenantID, name string) (*agent.AgentConfig, error) {
 	return m.cfg, nil
 }
 
@@ -111,7 +115,7 @@ func TestCreateSession_PopulatesFromAgent(t *testing.T) {
 		agentRepo: agentRepo,
 	}
 
-	sess, err := svc.CreateSession("u1", "coder", "", "小红", "Xiao Hong")
+	sess, err := svc.CreateSession("tenant-a", "u1", "coder", "", "小红", "Xiao Hong")
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -140,8 +144,8 @@ func TestSaveUserMessage_StoresContent(t *testing.T) {
 	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
-	sess, _ := svc.CreateSession("u1", "coder", "", "", "")
-	msg, err := svc.SaveUserMessage("u1", sess.ID, "hello")
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "hello")
 	if err != nil {
 		t.Fatalf("SaveUserMessage failed: %v", err)
 	}
@@ -158,9 +162,9 @@ func TestSaveAssistantMessage_StoresContent(t *testing.T) {
 	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
-	sess, _ := svc.CreateSession("u1", "coder", "", "", "")
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
 	content := `[{"type":"text","text":"hi back"}]`
-	msg, err := svc.SaveAssistantMessage("u1", sess.ID, content, "")
+	msg, err := svc.SaveAssistantMessage("tenant-a", "u1", sess.ID, content, "")
 	if err != nil {
 		t.Fatalf("SaveAssistantMessage failed: %v", err)
 	}
@@ -174,9 +178,9 @@ func TestSaveAssistantMessage_StoresAigcLabel(t *testing.T) {
 	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
-	sess, _ := svc.CreateSession("u1", "coder", "", "", "")
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
 	label := `{"Label":"1","ProduceID":"p-1"}`
-	msg, err := svc.SaveAssistantMessage("u1", sess.ID, `[{"type":"text","text":"hi"}]`, label)
+	msg, err := svc.SaveAssistantMessage("tenant-a", "u1", sess.ID, `[{"type":"text","text":"hi"}]`, label)
 	if err != nil {
 		t.Fatalf("SaveAssistantMessage failed: %v", err)
 	}
@@ -190,8 +194,8 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
-	sess, _ := svc.CreateSession("u1", "coder", "", "", "")
-	if err := svc.DeleteSession("u1", sess.ID); err != nil {
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	if err := svc.DeleteSession("tenant-a", "u1", sess.ID); err != nil {
 		t.Fatalf("DeleteSession failed: %v", err)
 	}
 	if _, ok := repo.sessions[sess.ID]; ok {

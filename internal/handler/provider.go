@@ -9,6 +9,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/provider"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +34,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	providers, err := h.service.ListAll(typeFilter)
+	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -41,7 +42,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 
 	items := make([]*services.ProviderDTO, 0, len(providers))
 	for _, p := range providers {
-		dto, err := h.service.ToDTO(p)
+		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
@@ -58,7 +59,7 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 		return
 	}
 
-	p, err := h.service.GetByID(id)
+	p, err := h.service.GetByID(tenant.GetTenantID(c), id)
 	if err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -68,7 +69,7 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 		return
 	}
 
-	dto, err := h.service.ToDTO(p)
+	dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -83,7 +84,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 	if !ok {
 		return
 	}
-	providers, err := h.service.ListAll(typeFilter)
+	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -91,7 +92,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 
 	items := make([]*services.ProviderDTO, 0, len(providers))
 	for _, p := range providers {
-		dto, err := h.service.ToDTO(p)
+		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
@@ -135,7 +136,7 @@ func (h *ProviderHandler) Create(c *gin.Context) {
 		return
 	}
 
-	dto, err := h.service.Create(&services.CreateProviderInput{
+	dto, err := h.service.Create(tenant.GetTenantID(c), &services.CreateProviderInput{
 		Key:           req.Key,
 		Name:          req.Name,
 		Description:   req.Description,
@@ -185,7 +186,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 		return
 	}
 
-	dto, err := h.service.Update(id, &services.UpdateProviderInput{
+	dto, err := h.service.Update(tenant.GetTenantID(c), id, &services.UpdateProviderInput{
 		Name:          req.Name,
 		Description:   req.Description,
 		DescriptionEn: req.DescriptionEn,
@@ -217,7 +218,7 @@ func (h *ProviderHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.Delete(id); err != nil {
+	if err := h.service.Delete(tenant.GetTenantID(c), id); err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -246,7 +247,7 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 	// Body is optional; ignore bind errors when no body is sent.
 	_ = c.ShouldBindJSON(&overrideReq)
 
-	result, err := h.service.ProbeWithOverride(id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
+	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
 	if err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -291,7 +292,7 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 // local model calls. The response is marked no-store and the audit log never
 // contains plaintext keys.
 func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
-	configs, err := h.service.ListRuntimeConfigs()
+	configs, err := h.service.ListRuntimeConfigs(tenant.GetTenantID(c))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -312,7 +313,7 @@ func (h *ProviderHandler) RevealAPIKey(c *gin.Context) {
 		return
 	}
 
-	apiKey, err := h.service.RevealAPIKey(id)
+	apiKey, err := h.service.RevealAPIKey(tenant.GetTenantID(c), id)
 	if err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
@@ -368,7 +369,7 @@ func (h *ProviderHandler) AddModel(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	dto, err := h.service.AddModel(id, &services.AddModelInput{
+	dto, err := h.service.AddModel(tenant.GetTenantID(c), id, &services.AddModelInput{
 		ModelID:       req.ModelID,
 		DisplayName:   req.DisplayName,
 		ModelType:     req.ModelType,
@@ -408,7 +409,7 @@ func (h *ProviderHandler) UpdateModel(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	dto, err := h.service.UpdateModel(id, selectionID, &services.UpdateModelInput{
+	dto, err := h.service.UpdateModel(tenant.GetTenantID(c), id, selectionID, &services.UpdateModelInput{
 		DisplayName:   req.DisplayName,
 		ModelType:     req.ModelType,
 		ContextWindow: req.ContextWindow,
@@ -435,7 +436,7 @@ func (h *ProviderHandler) DeleteModel(c *gin.Context) {
 		return
 	}
 	selectionID := c.Param("selectionId")
-	if err := h.service.DeleteModel(id, selectionID); err != nil {
+	if err := h.service.DeleteModel(tenant.GetTenantID(c), id, selectionID); err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -470,7 +471,7 @@ func (h *ProviderHandler) SyncToMultiRAG(c *gin.Context) {
 	// Body is optional; ignore bind errors when no body is sent.
 	_ = c.ShouldBindJSON(&req)
 
-	result, err := h.service.SyncProviderToMultiRAG(c.Request.Context(), id, h.multiragClient, req.VerifyOnly, req.ModelIds)
+	result, err := h.service.SyncProviderToMultiRAG(c.Request.Context(), tenant.GetTenantID(c), id, h.multiragClient, req.VerifyOnly, req.ModelIds)
 	if err != nil {
 		if err == provider.ErrProviderNotFound {
 			respondError(c, http.StatusNotFound, err.Error())

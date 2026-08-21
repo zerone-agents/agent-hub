@@ -7,7 +7,7 @@ import "time"
 // control-panel only stores the dataset IDs and uses them for authorization
 // and to assemble the deployer request.
 type AgentKnowledgeDataset struct {
-	AgentID   uint64    `gorm:"primaryKey;index:idx_agent_id"`
+	AgentID   uint64    `gorm:"primaryKey"`
 	DatasetID string    `gorm:"primaryKey;type:varchar(64)"`
 	CreatedAt time.Time `gorm:"column:created_at"`
 }

@@ -36,9 +36,24 @@ func TestValidateAuthBuiltinRequiresSecret(t *testing.T) {
 }
 
 func TestValidateAuthCasdoorSkipsSecret(t *testing.T) {
-	cfg := &Config{Auth: AuthConfig{Mode: "casdoor"}}
+	cfg := &Config{Auth: AuthConfig{Mode: "casdoor"}, Casdoor: CasdoorConfig{Organization: "zerone"}}
 	if err := cfg.ValidateAuth(); err != nil {
 		t.Fatalf("casdoor mode must not require jwt_secret: %v", err)
+	}
+}
+
+func TestValidateAuthCasdoorRequiresOrganization(t *testing.T) {
+	cfg := &Config{Auth: AuthConfig{Mode: "casdoor"}, Casdoor: CasdoorConfig{Organization: ""}}
+	if err := cfg.ValidateAuth(); err == nil {
+		t.Fatal("want error for empty casdoor organization")
+	}
+	cfg.Casdoor.Organization = "   "
+	if err := cfg.ValidateAuth(); err == nil {
+		t.Fatal("want error for whitespace-only casdoor organization")
+	}
+	cfg.Casdoor.Organization = "zerone"
+	if err := cfg.ValidateAuth(); err != nil {
+		t.Fatalf("unexpected: %v", err)
 	}
 }
 

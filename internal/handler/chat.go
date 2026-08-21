@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +36,7 @@ func (h *ChatHandler) Push(c *gin.Context) {
 	userName, _ := c.Get("user_name")
 	displayName, _ := c.Get("display_name")
 
-	resp, err := h.service.Push(userID.(string), userName.(string), displayName.(string), &req)
+	resp, err := h.service.Push(tenant.GetTenantID(c), userID.(string), userName.(string), displayName.(string), &req)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -47,7 +48,7 @@ func (h *ChatHandler) Push(c *gin.Context) {
 func (h *ChatHandler) ListSessions(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 20)
 
-	resp, err := h.service.ListSessions(page, pageSize, chatScopeUserID(c))
+	resp, err := h.service.ListSessions(tenant.GetTenantID(c), page, pageSize, chatScopeUserID(c))
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -64,7 +65,7 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 	}
 
 	// member 访问他人会话时 GetSessionForUser 查不到 → 404（不暴露存在性）
-	session, err := h.service.GetSession(sessionID, chatScopeUserID(c))
+	session, err := h.service.GetSession(tenant.GetTenantID(c), sessionID, chatScopeUserID(c))
 	if err != nil {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
@@ -83,7 +84,7 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 50)
 
 	// 归属校验失败（member 访问他人会话）或会话不存在 → 404
-	resp, err := h.service.ListMessages(sessionID, page, pageSize, chatScopeUserID(c))
+	resp, err := h.service.ListMessages(tenant.GetTenantID(c), sessionID, page, pageSize, chatScopeUserID(c))
 	if err != nil {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
@@ -100,7 +101,7 @@ func (h *ChatHandler) DeleteSession(c *gin.Context) {
 	}
 
 	// member 删他人会话 → 404；admin/maintainer 任意删
-	if err := h.service.DeleteSession(sessionID, chatScopeUserID(c)); err != nil {
+	if err := h.service.DeleteSession(tenant.GetTenantID(c), sessionID, chatScopeUserID(c)); err != nil {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
 	}

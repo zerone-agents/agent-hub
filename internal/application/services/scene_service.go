@@ -56,14 +56,15 @@ type SceneDTO struct {
 }
 
 // List returns scenes, optionally filtered by agent ID.
-func (s *SceneService) List(agentID uint64) ([]*SceneDTO, error) {
+// tenantID 仅用于解析关联 agent 的展示名（agent 表已租户隔离）。
+func (s *SceneService) List(tenantID string, agentID uint64) ([]*SceneDTO, error) {
 	var scenes []*scene.Scene
 	var err error
 
 	if agentID > 0 {
-		scenes, err = s.repo.ListByAgent(agentID)
+		scenes, err = s.repo.ListByAgent(tenantID, agentID)
 	} else {
-		scenes, err = s.repo.ListAll()
+		scenes, err = s.repo.ListAll(tenantID)
 	}
 
 	if err != nil {
@@ -72,27 +73,27 @@ func (s *SceneService) List(agentID uint64) ([]*SceneDTO, error) {
 
 	result := make([]*SceneDTO, 0, len(scenes))
 	for _, sc := range scenes {
-		result = append(result, s.sceneToDTO(sc))
+		result = append(result, s.sceneToDTO(tenantID, sc))
 	}
 	return result, nil
 }
 
 // ListAll returns all scenes without filtering.
-func (s *SceneService) ListAll() ([]*SceneDTO, error) {
-	return s.List(0)
+func (s *SceneService) ListAll(tenantID string) ([]*SceneDTO, error) {
+	return s.List(tenantID, 0)
 }
 
 // GetScene returns a single scene by name.
-func (s *SceneService) GetScene(name string) (*SceneDTO, error) {
-	sc, err := s.repo.GetByName(name)
+func (s *SceneService) GetScene(tenantID, name string) (*SceneDTO, error) {
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, scene.ErrSceneNotFound
 	}
-	return s.sceneToDTO(sc), nil
+	return s.sceneToDTO(tenantID, sc), nil
 }
 
 // CreateScene validates and creates a new scene.
-func (s *SceneService) CreateScene(input *CreateSceneInput) (*SceneDTO, error) {
+func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*SceneDTO, error) {
 	if err := ValidateSceneName(input.Name); err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func (s *SceneService) CreateScene(input *CreateSceneInput) (*SceneDTO, error) {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查场景存在性失败: %w", err)
 	}
@@ -111,7 +112,7 @@ func (s *SceneService) CreateScene(input *CreateSceneInput) (*SceneDTO, error) {
 		return nil, scene.ErrSceneExists
 	}
 
-	agentExists, err := s.agentRepo.Exists(input.AgentID)
+	agentExists, err := s.agentRepo.Exists(tenantID, input.AgentID)
 	if err != nil {
 		return nil, fmt.Errorf("检查 Agent 存在性失败: %w", err)
 	}
@@ -129,35 +130,35 @@ func (s *SceneService) CreateScene(input *CreateSceneInput) (*SceneDTO, error) {
 		Enabled:  true,
 	}
 
-	if err := s.repo.Create(sc); err != nil {
+	if err := s.repo.Create(tenantID, sc); err != nil {
 		return nil, fmt.Errorf("创建场景失败: %w", err)
 	}
 
-	return s.sceneToDTO(sc), nil
+	return s.sceneToDTO(tenantID, sc), nil
 }
 
 // UpdateScene modifies an existing scene by name.
-func (s *SceneService) UpdateScene(name string, input *UpdateSceneInput) (*SceneDTO, error) {
-	sc, err := s.repo.GetByName(name)
+func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInput) (*SceneDTO, error) {
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, scene.ErrSceneNotFound
 	}
 
-	if err := s.validateAndUpdateSceneFields(sc, input); err != nil {
+	if err := s.validateAndUpdateSceneFields(tenantID, sc, input); err != nil {
 		return nil, err
 	}
 
-	if err := s.repo.Update(sc); err != nil {
+	if err := s.repo.Update(tenantID, sc); err != nil {
 		return nil, fmt.Errorf("更新场景失败: %w", err)
 	}
 
-	return s.sceneToDTO(sc), nil
+	return s.sceneToDTO(tenantID, sc), nil
 }
 
 // validateAndUpdateSceneFields validates and applies update fields to a scene entity.
-func (s *SceneService) validateAndUpdateSceneFields(sc *scene.Scene, input *UpdateSceneInput) error {
+func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.Scene, input *UpdateSceneInput) error {
 	if input.AgentID != nil {
-		agentExists, err := s.agentRepo.Exists(*input.AgentID)
+		agentExists, err := s.agentRepo.Exists(tenantID, *input.AgentID)
 		if err != nil {
 			return fmt.Errorf("检查 Agent 存在性失败: %w", err)
 		}
@@ -194,13 +195,13 @@ func (s *SceneService) validateAndUpdateSceneFields(sc *scene.Scene, input *Upda
 }
 
 // DeleteScene removes a scene by name.
-func (s *SceneService) DeleteScene(name string) error {
-	sc, err := s.repo.GetByName(name)
+func (s *SceneService) DeleteScene(tenantID, name string) error {
+	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return scene.ErrSceneNotFound
 	}
 
-	if err := s.repo.Delete(sc.ID); err != nil {
+	if err := s.repo.Delete(tenantID, sc.ID); err != nil {
 		return fmt.Errorf("删除场景失败: %w", err)
 	}
 
@@ -208,9 +209,9 @@ func (s *SceneService) DeleteScene(name string) error {
 }
 
 // sceneToDTO converts a Scene domain entity to a SceneDTO.
-func (s *SceneService) sceneToDTO(sc *scene.Scene) *SceneDTO {
+func (s *SceneService) sceneToDTO(tenantID string, sc *scene.Scene) *SceneDTO {
 	agentName := ""
-	if cfg, err := s.agentRepo.GetByID(sc.AgentID); err == nil {
+	if cfg, err := s.agentRepo.GetByID(tenantID, sc.AgentID); err == nil {
 		agentName = cfg.Name
 	}
 	return &SceneDTO{

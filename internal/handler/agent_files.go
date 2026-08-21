@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,7 +50,7 @@ func (h *AgentFilesHandler) HeadContent(c *gin.Context) {
 func (h *AgentFilesHandler) proxy(c *gin.Context, method, runtimePath string) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
 
-	baseURL, apiKey, err := h.svc.ResolveRuntime(agentName)
+	baseURL, apiKey, err := h.svc.ResolveRuntime(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
 		return

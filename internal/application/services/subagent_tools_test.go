@@ -34,6 +34,7 @@ func setupSubagentToolsTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE agents (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name VARCHAR(64) NOT NULL,
+			tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
 			content_hash VARCHAR(128) NOT NULL DEFAULT '',
 			system_prompt TEXT NOT NULL DEFAULT '',
 			permission_mode VARCHAR(32) NOT NULL DEFAULT 'auto',
@@ -61,17 +62,18 @@ func setupSubagentToolsTestDB(t *testing.T) *gorm.DB {
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
-		`CREATE UNIQUE INDEX agents_uk_name ON agents(name)`,
+		`CREATE UNIQUE INDEX agents_uk_tenant_name ON agents(tenant_id, name)`,
 		`CREATE TABLE tools (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name VARCHAR(64) NOT NULL,
+			tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 			title VARCHAR(128) DEFAULT '',
 			description TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
-		`CREATE UNIQUE INDEX tools_uk_name ON tools(name)`,
+		`CREATE UNIQUE INDEX tools_uk_tenant_name ON tools(tenant_id, name)`,
 		`CREATE TABLE agent_tools (
 			agent_id INTEGER NOT NULL,
 			tool_id INTEGER NOT NULL,
@@ -113,13 +115,13 @@ func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingSubagent(t *testing.
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
 	// Create parent + one subagent
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child1"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
 	svc := NewAgentService("test-encryption-key")
-	require.NoError(t, svc.UpdateSubagents("parent", []string{"child1"}))
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"}))
 
-	parent, err := agentRepo.GetByName("parent")
+	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	assert.Contains(t, agentToolNames(t, parent.ID), "Task")
 	assert.Contains(t, agentToolNames(t, parent.ID), "MultiTask")
@@ -128,14 +130,14 @@ func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingSubagent(t *testing.
 func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingMultipleSubagents(t *testing.T) {
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child1"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child2"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child2"}))
 
 	svc := NewAgentService("test-encryption-key")
-	require.NoError(t, svc.UpdateSubagents("parent", []string{"child1", "child2"}))
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1", "child2"}))
 
-	parent, err := agentRepo.GetByName("parent")
+	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	got := agentToolNames(t, parent.ID)
 	assert.Contains(t, got, "Task")
@@ -148,14 +150,14 @@ func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingMultipleSubagents(t 
 func TestUpdateSubagents_RemovesTaskAndMultiTaskWhenClearingSubagents(t *testing.T) {
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child1"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
 	svc := NewAgentService("test-encryption-key")
-	require.NoError(t, svc.UpdateSubagents("parent", []string{"child1"})) // attach
-	require.NoError(t, svc.UpdateSubagents("parent", []string{}))         // clear
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"})) // attach
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{}))         // clear
 
-	parent, err := agentRepo.GetByName("parent")
+	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	got := agentToolNames(t, parent.ID)
 	assert.NotContains(t, got, "Task")
@@ -167,36 +169,36 @@ func TestUpdateSubagents_ReattachesAfterManualRemoval(t *testing.T) {
 	// → Task is re-attached automatically.
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child1"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
 	svc := NewAgentService("test-encryption-key")
-	require.NoError(t, svc.UpdateSubagents("parent", []string{"child1"}))
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"}))
 
 	// Simulate manual removal via the repository (bypassing UpdateSubagents).
-	parent, err := agentRepo.GetByName("parent")
+	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	toolRepo := repository.NewToolRepository()
-	taskTool, err := toolRepo.GetByName("Task")
+	taskTool, err := toolRepo.GetByName("", "Task")
 	require.NoError(t, err)
 	require.NoError(t, agentRepo.RemoveAgentToolBinding(parent.ID, taskTool.ID))
 	assert.NotContains(t, agentToolNames(t, parent.ID), "Task")
 
 	// Re-saving subagent list (even unchanged) must re-attach.
-	require.NoError(t, svc.UpdateSubagents("parent", []string{"child1"}))
+	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"}))
 	assert.Contains(t, agentToolNames(t, parent.ID), "Task")
 }
 
 func TestUpdateSubagents_RejectsSelfReferenceAndDoesNotTouchBindings(t *testing.T) {
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 
 	svc := NewAgentService("test-encryption-key")
-	err := svc.UpdateSubagents("parent", []string{"parent"})
+	err := svc.UpdateSubagents("default", "parent", []string{"parent"})
 	require.Error(t, err)
 
-	parent, err := agentRepo.GetByName("parent")
+	parent, err := agentRepo.GetByName("default", "parent")
 	require.NoError(t, err)
 	assert.Empty(t, agentToolNames(t, parent.ID), "no tool binding should exist after a rejected update")
 }
@@ -206,13 +208,13 @@ func TestBackfillSubagentToolBindings_AttachesToAgentsWithSubagents(t *testing.T
 	agentRepo := repository.NewAgentRepository()
 
 	// Pre-upgrade state: agent has subagents but no Task/MultiTask binding.
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent1"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent2"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "lonely"}))
-	p1, _ := agentRepo.GetByName("parent1")
-	p2, _ := agentRepo.GetByName("parent2")
-	c, _ := agentRepo.GetByName("child")
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent1"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent2"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "lonely"}))
+	p1, _ := agentRepo.GetByName("default", "parent1")
+	p2, _ := agentRepo.GetByName("default", "parent2")
+	c, _ := agentRepo.GetByName("default", "child")
 	require.NoError(t, agentRepo.ReplaceSubagents(p1.ID, []uint64{c.ID}))
 	require.NoError(t, agentRepo.ReplaceSubagents(p2.ID, []uint64{c.ID}))
 
@@ -220,7 +222,7 @@ func TestBackfillSubagentToolBindings_AttachesToAgentsWithSubagents(t *testing.T
 	require.NoError(t, svc.BackfillSubagentToolBindings())
 
 	for _, name := range []string{"parent1", "parent2"} {
-		a, err := agentRepo.GetByName(name)
+		a, err := agentRepo.GetByName("default", name)
 		require.NoError(t, err)
 		got := agentToolNames(t, a.ID)
 		assert.Contains(t, got, "Task", "%s should have Task backfilled", name)
@@ -228,7 +230,7 @@ func TestBackfillSubagentToolBindings_AttachesToAgentsWithSubagents(t *testing.T
 	}
 
 	// Lonely agent (no subagents) must not have been touched.
-	lonely, err := agentRepo.GetByName("lonely")
+	lonely, err := agentRepo.GetByName("default", "lonely")
 	require.NoError(t, err)
 	assert.Empty(t, agentToolNames(t, lonely.ID))
 }
@@ -236,10 +238,10 @@ func TestBackfillSubagentToolBindings_AttachesToAgentsWithSubagents(t *testing.T
 func TestBackfillSubagentToolBindings_IsIdempotent(t *testing.T) {
 	setupSubagentToolsTestDB(t)
 	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "parent"}))
-	require.NoError(t, agentRepo.Create(&agent.AgentConfig{Name: "child"}))
-	p, _ := agentRepo.GetByName("parent")
-	c, _ := agentRepo.GetByName("child")
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
+	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child"}))
+	p, _ := agentRepo.GetByName("default", "parent")
+	c, _ := agentRepo.GetByName("default", "child")
 	require.NoError(t, agentRepo.ReplaceSubagents(p.ID, []uint64{c.ID}))
 
 	svc := NewToolService()

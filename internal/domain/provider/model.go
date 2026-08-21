@@ -74,38 +74,13 @@ type AttrValue struct {
 
 // ── DB entities ──────────────────────────────────────────────────
 
-// LegacyProvider is the LEGACY backup table (vendor_presets). It is retained only
-// as a migration source / safety backup and is no longer written by the app.
-// TODO: once provider_summaries / provider_attributes are confirmed stable
-// in production, DROP TABLE vendor_presets on the next release.
-type LegacyProvider struct {
-	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	Key           string    `gorm:"type:varchar(64);uniqueIndex:uk_key;not null" json:"key"`
-	Name          string    `gorm:"type:varchar(128);not null" json:"name"`
-	Description   string    `gorm:"type:text" json:"description"`
-	DescriptionEn string    `gorm:"column:description_en;type:text" json:"descriptionEn"`
-	Protocol      string    `gorm:"type:varchar(16);not null" json:"protocol"`
-	AuthStyle     string    `gorm:"type:varchar(16);not null" json:"authStyle"`
-	BaseURL       string    `gorm:"column:base_url;type:varchar(512)" json:"baseUrl"`
-	DefaultModels string    `gorm:"column:default_models;type:text" json:"-"`
-	Fields        string    `gorm:"column:fields;type:text" json:"-"`
-	IconKey       string    `gorm:"column:icon_key;type:varchar(32)" json:"iconKey"`
-	Builtin       bool      `gorm:"default:false" json:"builtin"`
-	LockedAPIKey  string    `gorm:"column:locked_api_key;type:text" json:"-"` // encrypted
-	CreatedAt     time.Time `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;index" json:"updatedAt"`
-}
-
-func (LegacyProvider) TableName() string {
-	return "vendor_presets"
-}
-
 // ProviderSummary is the new primary table — the "necessary descriptive
 // info" for a vendor preset. Extensible per-provider config lives in the
 // provider_attributes EAV table instead of as fixed columns.
 type ProviderSummary struct {
 	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	Key           string    `gorm:"type:varchar(64);uniqueIndex:uk_key;not null" json:"key"`
+	TenantID      string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_key,priority:1;index" json:"-"`
+	Key           string    `gorm:"type:varchar(64);uniqueIndex:uk_tenant_key,priority:2;not null" json:"key"`
 	Name          string    `gorm:"type:varchar(128);not null" json:"name"`
 	Description   string    `gorm:"type:text" json:"description"`
 	DescriptionEn string    `gorm:"column:description_en;type:text" json:"descriptionEn"`
@@ -165,25 +140,31 @@ func (ProviderModel) TableName() string { return "provider_models" }
 // It is defined at the consumer boundary so the service depends on this
 // interface, not on a concrete GORM repository.
 type Repository interface {
-	// Summary (primary table)
-	ListAll() ([]*ProviderSummary, error)
-	GetByID(id uint64) (*ProviderSummary, error)
-	Create(p *ProviderSummary) error
-	Update(p *ProviderSummary) error
-	Delete(id uint64) error
-	ExistsByKey(key string) (bool, error)
+	// Summary (primary table). 主表方法首参 tenantID：读路径 scope 到
+	// 本租户 + 共享行（tenant_id=''，种子模板），写路径 scope 到本租户。
+	ListAll(tenantID string) ([]*ProviderSummary, error)
+	GetByID(tenantID string, id uint64) (*ProviderSummary, error)
+	Create(tenantID string, p *ProviderSummary) error
+	Update(tenantID string, p *ProviderSummary) error
+	Delete(tenantID string, id uint64) error
+	ExistsByKey(tenantID string, key string) (bool, error)
+	// Count 是无租户上下文的系统路径：仅服务启动期 SeedIfEmpty（表全空
+	// 才播种共享种子），跨租户全表计数。
 	Count() (int64, error)
+	// CopyForTenant copy-on-write：把共享模板（含子表行）复制为本租户行。
+	CopyForTenant(tenantID string, srcID uint64) (*ProviderSummary, error)
 
-	// Attributes (EAV)
-	GetAttributes(providerID uint64) (map[string]AttrValue, error)
-	SetAttributes(providerID uint64, attrs map[string]AttrValue) error
+	// Attributes (EAV). 子表不加 tenant 列，归属校验经主表
+	// mustOwnProvider（同 Task 3 agents 关联表模式）。
+	GetAttributes(tenantID string, providerID uint64) (map[string]AttrValue, error)
+	SetAttributes(tenantID string, providerID uint64, attrs map[string]AttrValue) error
 
 	// Models (new normalized child table)
-	ListModels(providerID uint64) ([]ProviderModel, error)
-	ListAllModels() ([]ProviderModel, error)
-	GetModelBySelectionID(providerID uint64, selectionID string) (*ProviderModel, error)
-	CreateModel(m *ProviderModel) error
-	UpdateModel(m *ProviderModel) error
-	DeleteModel(providerID uint64, selectionID string) error
-	ReplaceModels(providerID uint64, models []ProviderModel) error
+	ListModels(tenantID string, providerID uint64) ([]ProviderModel, error)
+	ListAllModels(tenantID string) ([]ProviderModel, error)
+	GetModelBySelectionID(tenantID string, providerID uint64, selectionID string) (*ProviderModel, error)
+	CreateModel(tenantID string, m *ProviderModel) error
+	UpdateModel(tenantID string, m *ProviderModel) error
+	DeleteModel(tenantID string, providerID uint64, selectionID string) error
+	ReplaceModels(tenantID string, providerID uint64, models []ProviderModel) error
 }

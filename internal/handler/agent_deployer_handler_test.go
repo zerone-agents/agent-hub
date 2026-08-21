@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,17 +19,19 @@ import (
 // be mocked directly without a DB, so we exercise the identical query-parsing
 // path here.
 type deployerForTest interface {
-	Deploy(name string, force bool, rotateKey bool) (*services.DeploymentDTO, error)
+	Deploy(tenantID, name string, force bool, rotateKey bool) (*services.DeploymentDTO, error)
 }
 
 // fakeDeployer records the arguments passed to Deploy.
 type fakeDeployer struct {
+	gotTenantID  string
 	gotName      string
 	gotForce     bool
 	gotRotateKey bool
 }
 
-func (f *fakeDeployer) Deploy(name string, force bool, rotateKey bool) (*services.DeploymentDTO, error) {
+func (f *fakeDeployer) Deploy(tenantID, name string, force bool, rotateKey bool) (*services.DeploymentDTO, error) {
+	f.gotTenantID = tenantID
 	f.gotName = name
 	f.gotForce = force
 	f.gotRotateKey = rotateKey
@@ -43,7 +46,7 @@ func deployHandlerForTest(dep deployerForTest) gin.HandlerFunc {
 		force := c.Query("force") == "true"
 		rotateKey := c.Query("rotate_key") == "true"
 
-		resp, err := dep.Deploy(name, force, rotateKey)
+		resp, err := dep.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 		if err != nil {
 			respondError(c, deployerErrorStatus(err), err.Error())
 			return

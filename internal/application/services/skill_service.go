@@ -75,14 +75,14 @@ type DownloadDTO struct {
 }
 
 // ListAll returns all skills, optionally filtered by type.
-func (s *SkillService) ListAll(skillType string) ([]*SkillDTO, error) {
+func (s *SkillService) ListAll(tenantID, skillType string) ([]*SkillDTO, error) {
 	var skills []*skill.Skill
 	var err error
 
 	if skillType != "" {
-		skills, err = s.repo.ListByType(skillType)
+		skills, err = s.repo.ListByType(tenantID, skillType)
 	} else {
-		skills, err = s.repo.ListAll()
+		skills, err = s.repo.ListAll(tenantID)
 	}
 
 	if err != nil {
@@ -97,8 +97,8 @@ func (s *SkillService) ListAll(skillType string) ([]*SkillDTO, error) {
 }
 
 // GetSkill returns a single skill by name.
-func (s *SkillService) GetSkill(name string) (*SkillDTO, error) {
-	sk, err := s.repo.GetByName(name)
+func (s *SkillService) GetSkill(tenantID, name string) (*SkillDTO, error) {
+	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, skill.ErrSkillNotFound
 	}
@@ -107,7 +107,7 @@ func (s *SkillService) GetSkill(name string) (*SkillDTO, error) {
 }
 
 // CreateSkill validates, uploads the file, and creates a new skill.
-func (s *SkillService) CreateSkill(input *CreateSkillInput) (*SkillDTO, error) {
+func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*SkillDTO, error) {
 	if err := ValidateSkillName(input.Name); err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *SkillService) CreateSkill(input *CreateSkillInput) (*SkillDTO, error) {
 		return nil, err
 	}
 
-	exists, err := s.repo.ExistsByName(input.Name)
+	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查技能存在性失败: %w", err)
 	}
@@ -163,7 +163,7 @@ func (s *SkillService) CreateSkill(input *CreateSkillInput) (*SkillDTO, error) {
 		FileSize:      int64(len(validatedBytes)),
 	}
 
-	if err := s.repo.Create(sk); err != nil {
+	if err := s.repo.Create(tenantID, sk); err != nil {
 		_ = s.uploader.Delete(ctx, ossKey)
 		return nil, fmt.Errorf("创建技能失败: %w", err)
 	}
@@ -172,8 +172,8 @@ func (s *SkillService) CreateSkill(input *CreateSkillInput) (*SkillDTO, error) {
 }
 
 // UpdateSkill modifies an existing skill's metadata and optionally replaces its file.
-func (s *SkillService) UpdateSkill(name string, input *UpdateSkillInput) (*SkillDTO, error) {
-	sk, err := s.repo.GetByName(name)
+func (s *SkillService) UpdateSkill(tenantID, name string, input *UpdateSkillInput) (*SkillDTO, error) {
+	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, skill.ErrSkillNotFound
 	}
@@ -186,7 +186,7 @@ func (s *SkillService) UpdateSkill(name string, input *UpdateSkillInput) (*Skill
 		}
 	}
 
-	if err := s.repo.Update(sk); err != nil {
+	if err := s.repo.Update(tenantID, sk); err != nil {
 		return nil, fmt.Errorf("更新技能失败: %w", err)
 	}
 
@@ -246,8 +246,8 @@ func (s *SkillService) updateSkillFile(sk *skill.Skill, input *UpdateSkillInput)
 }
 
 // DeleteSkill removes a skill and its associated OSS file.
-func (s *SkillService) DeleteSkill(name string) error {
-	sk, err := s.repo.GetByName(name)
+func (s *SkillService) DeleteSkill(tenantID, name string) error {
+	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return skill.ErrSkillNotFound
 	}
@@ -259,7 +259,7 @@ func (s *SkillService) DeleteSkill(name string) error {
 		}
 	}
 
-	if err := s.repo.Delete(sk.ID); err != nil {
+	if err := s.repo.Delete(tenantID, sk.ID); err != nil {
 		return fmt.Errorf("删除技能失败: %w", err)
 	}
 
@@ -269,8 +269,8 @@ func (s *SkillService) DeleteSkill(name string) error {
 // Download generates a download URL for a skill's file. When OSS_CDN_HOST is
 // configured, returns a permanent public CDN URL (ExpiresIn=0); otherwise
 // falls back to a short-lived presigned OSS URL (1h expiry).
-func (s *SkillService) Download(name string) (*DownloadDTO, error) {
-	sk, err := s.repo.GetByName(name)
+func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
+	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, skill.ErrSkillNotFound
 	}
@@ -308,8 +308,8 @@ func (s *SkillService) Download(name string) (*DownloadDTO, error) {
 // no SKILL.md anywhere; that case still surfaces as a preview "no content"
 // state rather than an error, since the upload validator already rejected
 // such zips at write time.
-func (s *SkillService) GetSkillMd(name string) ([]SkillMdEntry, error) {
-	sk, err := s.repo.GetByName(name)
+func (s *SkillService) GetSkillMd(tenantID, name string) ([]SkillMdEntry, error) {
+	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		return nil, skill.ErrSkillNotFound
 	}
@@ -401,9 +401,9 @@ func (s *SkillService) toDTO(sk *skill.Skill) *SkillDTO {
 }
 
 // GetAgentSkills returns the skill names associated with an agent.
-func (s *SkillService) GetAgentSkills(agentName string) ([]string, error) {
+func (s *SkillService) GetAgentSkills(tenantID, agentName string) ([]string, error) {
 	agentRepo := repository.NewAgentRepository()
-	agentCfg, err := agentRepo.GetByName(agentName)
+	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
@@ -412,17 +412,17 @@ func (s *SkillService) GetAgentSkills(agentName string) ([]string, error) {
 
 // UpdateAgentSkills replaces the skill list associated with an agent and
 // automatically mounts/unmounts the built-in Skill tool accordingly.
-func (s *SkillService) UpdateAgentSkills(agentName string, skillNames []string) error {
+func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames []string) error {
 	agentRepo := repository.NewAgentRepository()
 	toolRepo := repository.NewToolRepository()
-	agentCfg, err := agentRepo.GetByName(agentName)
+	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
 
 	skillIDs := make([]uint64, 0, len(skillNames))
 	for _, name := range skillNames {
-		sk, err := s.repo.GetByName(name)
+		sk, err := s.repo.GetByName(tenantID, name)
 		if err != nil {
 			return fmt.Errorf("Skill '%s' 不存在", name)
 		}
@@ -432,7 +432,7 @@ func (s *SkillService) UpdateAgentSkills(agentName string, skillNames []string) 
 		return err
 	}
 
-	skillTool, err := toolRepo.GetByName("Skill")
+	skillTool, err := toolRepo.GetByName(tenantID, "Skill")
 	if err != nil {
 		return fmt.Errorf("内置 Skill tool 不存在: %w", err)
 	}

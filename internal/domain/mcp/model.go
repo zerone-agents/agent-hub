@@ -16,7 +16,8 @@ const (
 // headers 字段以密文形式存储（由 service 层用 provider.Encrypt/Decrypt 处理）。
 type McpServer struct {
 	ID            uint64 `gorm:"primaryKey;autoIncrement"`
-	Name          string `gorm:"type:varchar(64);uniqueIndex:uk_name;not null"`
+	Name          string `gorm:"type:varchar(64);uniqueIndex:uk_mcp_tenant_name,priority:2;not null"`
+	TenantID      string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_mcp_tenant_name,priority:1;index"`
 	Title         string `gorm:"type:varchar(128);not null"`
 	Description   string `gorm:"type:text"`
 	TransportType string `gorm:"column:transport_type;type:varchar(16);not null"`
@@ -48,7 +49,7 @@ func (McpServer) TableName() string {
 // AgentMcpServer 是 Agent 与 McpServer 的多对多绑定关系。
 // 不含 enabled 字段——存在即代表启用，删除即代表禁用。
 type AgentMcpServer struct {
-	AgentID     uint64            `gorm:"primaryKey;index:idx_agent_id"`
+	AgentID     uint64            `gorm:"primaryKey"`
 	McpServerID uint64            `gorm:"primaryKey;index:idx_mcp_id"`
 	Agent       agent.AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
 	McpServer   McpServer         `gorm:"foreignKey:McpServerID;constraint:OnDelete:CASCADE" json:"-"`

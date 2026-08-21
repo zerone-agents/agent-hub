@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +18,8 @@ func NewAigcConfigHandler(svc *services.AigcConfigService) *AigcConfigHandler {
 }
 
 func (h *AigcConfigHandler) Get(c *gin.Context) {
-	dto, err := h.svc.Get()
+	tenantID := tenant.GetTenantID(c)
+	dto, err := h.svc.Get(tenantID)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -36,7 +38,8 @@ func (h *AigcConfigHandler) Save(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "uscc and companyName are required")
 		return
 	}
-	dto, err := h.svc.Save(req.USCC, req.CompanyName)
+	tenantID := tenant.GetTenantID(c)
+	dto, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -45,7 +48,7 @@ func (h *AigcConfigHandler) Save(c *gin.Context) {
 }
 
 func (h *AigcConfigHandler) RotateKey(c *gin.Context) {
-	dto, err := h.svc.RotateKey()
+	dto, err := h.svc.RotateKey(tenant.GetTenantID(c))
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -54,7 +57,7 @@ func (h *AigcConfigHandler) RotateKey(c *gin.Context) {
 }
 
 func (h *AigcConfigHandler) Delete(c *gin.Context) {
-	if err := h.svc.Delete(); err != nil {
+	if err := h.svc.Delete(tenant.GetTenantID(c)); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}

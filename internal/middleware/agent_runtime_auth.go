@@ -6,6 +6,7 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/provider"
+	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/persistence"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +16,7 @@ import (
 // middleware. It is unexported because the middleware is a function, not a
 // struct; tests inject a mock via the package-level helper below.
 type agentRuntimeAuthRepository interface {
-	ListAll() ([]*agent.AgentConfig, error)
+	ListAllUnscoped() ([]*agent.AgentConfig, error)
 }
 
 // AgentRuntimeAuthMiddleware returns a gin middleware that authenticates
@@ -41,7 +42,9 @@ func agentRuntimeAuthMiddleware(encryptionKey string, repo agentRuntimeAuthRepos
 			return
 		}
 
-		agents, err := repo.ListAll()
+		// runtime token 本身即全局凭证，无法预知租户，显式跨租户全量；
+		// 命中后把该行的 tenant_id 写入 context，供下游（knowledge MCP 链）使用。
+		agents, err := repo.ListAllUnscoped()
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
@@ -59,6 +62,7 @@ func agentRuntimeAuthMiddleware(encryptionKey string, repo agentRuntimeAuthRepos
 
 			if decrypted == token {
 				c.Set("agent", a)
+				tenant.SetTenantID(c, a.TenantID)
 				c.Next()
 				return
 			}

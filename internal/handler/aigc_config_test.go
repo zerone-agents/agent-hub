@@ -32,6 +32,7 @@ func setupAigcConfigRouter(t *testing.T) *gin.Engine {
 		if c.GetHeader("X-Test-Admin") == "true" {
 			c.Set("roles", []string{"admin"})
 			c.Set("user_id", "user-1")
+			c.Set("tenant_id", "default") // 模拟 tenant 注入中间件（builtin 恒 default）
 		}
 	})
 	g := router.Group("/api/v1/admin/aigc", middleware.RequireAdmin())
@@ -108,6 +109,6 @@ func TestAigcConfig_SaveAndGetNeverLeaksSigningKey(t *testing.T) {
 // that don't exercise model-code assignment.
 type fakeModelSource struct{}
 
-func (fakeModelSource) ListAllModels() ([]provider.ProviderModel, error) {
+func (fakeModelSource) ListAllModelsUnscoped() ([]provider.ProviderModel, error) {
 	return nil, nil
 }

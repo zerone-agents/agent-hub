@@ -79,7 +79,7 @@ type PushResponse struct {
 	Conflicts       []ConflictOutput `json:"conflicts,omitempty"`
 }
 
-func (s *ChatService) Push(userID string, userName string, displayName string, req *PushRequest) (*PushResponse, error) {
+func (s *ChatService) Push(tenantID, userID string, userName string, displayName string, req *PushRequest) (*PushResponse, error) {
 	if len(req.Sessions) == 0 {
 		return &PushResponse{Success: true}, nil
 	}
@@ -112,7 +112,7 @@ func (s *ChatService) Push(userID string, userName string, displayName string, r
 		allMessages[i] = p.messages
 	}
 
-	result, err := s.repo.PushSessions(userID, sessions, allMessages)
+	result, err := s.repo.PushSessions(tenantID, userID, sessions, allMessages)
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
 	}
@@ -143,8 +143,8 @@ type ListResponse struct {
 }
 
 // ListSessions 返回会话列表。userID 非空时按该用户过滤（member 数据范围）；
-// 为空时返回全部（admin/maintainer）。
-func (s *ChatService) ListSessions(page, pageSize int, userID string) (*ListResponse, error) {
+// 为空时返回全部（admin/maintainer）。两种模式都限定在 tenantID 内。
+func (s *ChatService) ListSessions(tenantID string, page, pageSize int, userID string) (*ListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -156,9 +156,9 @@ func (s *ChatService) ListSessions(page, pageSize int, userID string) (*ListResp
 	var total int64
 	var err error
 	if userID != "" {
-		sessions, total, err = s.repo.ListSessionsByUser(userID, page, pageSize)
+		sessions, total, err = s.repo.ListSessionsByUser(tenantID, userID, page, pageSize)
 	} else {
-		sessions, total, err = s.repo.ListSessions(page, pageSize)
+		sessions, total, err = s.repo.ListSessions(tenantID, page, pageSize)
 	}
 	if err != nil {
 		return nil, err
@@ -179,19 +179,19 @@ func (s *ChatService) ListSessions(page, pageSize int, userID string) (*ListResp
 }
 
 // GetSession 按归属取会话。userID 非空（member）时查不到他人会话——
-// 调用方统一映射为 404（不暴露会话存在性）。
-func (s *ChatService) GetSession(sessionID, userID string) (*chat.Session, error) {
+// 调用方统一映射为 404（不暴露会话存在性）。两种模式都限定在 tenantID 内。
+func (s *ChatService) GetSession(tenantID, sessionID, userID string) (*chat.Session, error) {
 	if userID != "" {
-		return s.repo.GetSessionForUser(sessionID, userID)
+		return s.repo.GetSessionForUser(tenantID, sessionID, userID)
 	}
-	return s.repo.GetSession(sessionID)
+	return s.repo.GetSession(tenantID, sessionID)
 }
 
 // ListMessages 列出会话消息。userID 非空（member）时先校验会话归属，
 // 他人会话返回错误（调用方映射 404）。
-func (s *ChatService) ListMessages(sessionID string, page, pageSize int, userID string) (*ListResponse, error) {
+func (s *ChatService) ListMessages(tenantID, sessionID string, page, pageSize int, userID string) (*ListResponse, error) {
 	if userID != "" {
-		if _, err := s.repo.GetSessionForUser(sessionID, userID); err != nil {
+		if _, err := s.repo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 			return nil, err
 		}
 	}
@@ -203,7 +203,7 @@ func (s *ChatService) ListMessages(sessionID string, page, pageSize int, userID 
 		pageSize = 50
 	}
 
-	messages, total, err := s.repo.ListMessages(sessionID, page, pageSize)
+	messages, total, err := s.repo.ListMessages(tenantID, sessionID, page, pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -224,13 +224,13 @@ func (s *ChatService) ListMessages(sessionID string, page, pageSize int, userID 
 
 // DeleteSession 删除会话。userID 非空（member）时先校验归属——
 // 只能删自己的会话；admin/maintainer（userID 为空）可删任意会话。
-func (s *ChatService) DeleteSession(sessionID, userID string) error {
+func (s *ChatService) DeleteSession(tenantID, sessionID, userID string) error {
 	if userID != "" {
-		if _, err := s.repo.GetSessionForUser(sessionID, userID); err != nil {
+		if _, err := s.repo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 			return err
 		}
 	}
-	return s.repo.DeleteSession(sessionID)
+	return s.repo.DeleteSession(tenantID, sessionID)
 }
 
 func convertSession(in SessionInput) (*chat.Session, error) {
