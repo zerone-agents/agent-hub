@@ -174,6 +174,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate mcp/tools/skills/scenes tenant id: %w", err)
 	}
 
+	if err := migrateAigcConfigsTenantID(); err != nil {
+		return fmt.Errorf("failed to migrate aigc_configs tenant id: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -814,6 +818,31 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 			}
 			log.Printf("Dropped %s.uk_name (replaced by uk_tenant_name)", table)
 		}
+	}
+	return nil
+}
+
+// migrateAigcConfigsTenantID 把 aigc_configs 从"id 恒为 1"的单行全局配置
+// 迁到 per-tenant + 共享回退。存量行的 tenant_id 置 ”（共享默认），保持
+// 升级前"全局一份"的行为逐字节等价：任何租户没有自己的行时都读到同一份。
+//
+// 一次性置 ” 的幂等保证：列由 AutoMigrate 以 default:” 加出（对齐
+// Task 4/5 的共享哨兵约定），MySQL/SQLite 的 ADD COLUMN ... NOT NULL
+// DEFAULT ” 语义本身就一次性地把全部存量行填为 ”，且后续任何代码路径
+// 都不会再写出 ” 以外的默认值或 NULL。本函数因此只兜底归一异常中间态
+// （手工改库、中断的半迁移）产生的 NULL/不存在值——归一条件永不再命中，
+// 天然幂等。不能按 id=1 或 tenant_id='default' 之类条件 UPDATE：新库中
+// id=1 可能已是某租户自己的行，条件 UPDATE 会把租户行误改成共享行。
+func migrateAigcConfigsTenantID() error {
+	if DB == nil {
+		return nil
+	}
+	m := DB.Migrator()
+	if !m.HasTable("aigc_configs") || !m.HasColumn("aigc_configs", "tenant_id") {
+		return nil
+	}
+	if err := DB.Exec("UPDATE aigc_configs SET tenant_id = '' WHERE tenant_id IS NULL").Error; err != nil {
+		return fmt.Errorf("normalize aigc_configs tenant_id: %w", err)
 	}
 	return nil
 }

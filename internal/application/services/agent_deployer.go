@@ -68,7 +68,7 @@ type knowledgeService interface {
 
 // aigcConfigProvider defines the method needed from the AIGC config service.
 type aigcConfigProvider interface {
-	DeployerConfig() (*deployer.AigcConfig, error)
+	DeployerConfig(tenantID string) (*deployer.AigcConfig, error)
 }
 
 // AgentDeployerService handles agent deployment operations.
@@ -782,7 +782,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 		Provider: providerConfig,
 	}
 
-	if err := s.applyAigc(req); err != nil {
+	if err := s.applyAigc(req, tenantID); err != nil {
 		return nil, err
 	}
 
@@ -791,11 +791,11 @@ func (s *AgentDeployerService) buildCreateRequest(
 
 // applyAigc injects the GB 45438-2025 labeling config when configured.
 // A nil service or missing config leaves the request untouched (omitempty).
-func (s *AgentDeployerService) applyAigc(req *deployer.CreateAgentRequest) error {
+func (s *AgentDeployerService) applyAigc(req *deployer.CreateAgentRequest, tenantID string) error {
 	if s.aigcSvc == nil {
 		return nil
 	}
-	cfg, err := s.aigcSvc.DeployerConfig()
+	cfg, err := s.aigcSvc.DeployerConfig(tenantID)
 	if err != nil {
 		return fmt.Errorf("load aigc config: %w", err)
 	}
