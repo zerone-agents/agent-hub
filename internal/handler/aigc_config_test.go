@@ -108,6 +108,6 @@ func TestAigcConfig_SaveAndGetNeverLeaksSigningKey(t *testing.T) {
 // that don't exercise model-code assignment.
 type fakeModelSource struct{}
 
-func (fakeModelSource) ListAllModels() ([]provider.ProviderModel, error) {
+func (fakeModelSource) ListAllModelsUnscoped() ([]provider.ProviderModel, error) {
 	return nil, nil
 }

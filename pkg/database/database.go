@@ -165,6 +165,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate agents tenant id: %w", err)
 	}
 
+	if err := migrateProvidersTenantID(); err != nil {
+		return fmt.Errorf("failed to migrate providers tenant id: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -696,6 +700,29 @@ func migrateAgentsTenantID() error {
 			return fmt.Errorf("drop agents.uk_name: %w", err)
 		}
 		log.Println("Dropped agents.uk_name (replaced by uk_tenant_name)")
+	}
+	return nil
+}
+
+// migrateProvidersTenantID 回填 provider_summaries 存量行的 tenant_id（启动
+// 租户），并把旧的全局唯一索引 uk_key 换成复合索引 uk_tenant_key
+// (tenant_id, key)——加列和建新索引由 AutoMigrate 完成，这里只负责回填 +
+// 删旧索引。provider_attributes / provider_models 子表不加 tenant 列，
+// 归属校验经主表。注意：本次回填之后播种的种子 provider 走共享语义
+// （tenant_id=”），回填只发生在加列后的这一次。
+func migrateProvidersTenantID() error {
+	if DB == nil {
+		return nil
+	}
+	m := DB.Migrator()
+	if err := BackfillTenantID(DB, "provider_summaries"); err != nil {
+		return err
+	}
+	if m.HasIndex(&provider.ProviderSummary{}, "uk_key") {
+		if err := m.DropIndex(&provider.ProviderSummary{}, "uk_key"); err != nil {
+			return fmt.Errorf("drop provider_summaries.uk_key: %w", err)
+		}
+		log.Println("Dropped provider_summaries.uk_key (replaced by uk_tenant_key)")
 	}
 	return nil
 }

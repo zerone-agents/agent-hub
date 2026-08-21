@@ -120,11 +120,11 @@ type mockProviderSvc struct {
 	getRawKeyFunc func(id uint64) (string, error)
 }
 
-func (m *mockProviderSvc) GetByID(id uint64) (providerdomain.Provider, error) {
+func (m *mockProviderSvc) GetByID(tenantID string, id uint64) (providerdomain.Provider, error) {
 	return m.getByIDFunc(id)
 }
 
-func (m *mockProviderSvc) GetRawAPIKey(id uint64) (string, error) {
+func (m *mockProviderSvc) GetRawAPIKey(tenantID string, id uint64) (string, error) {
 	return m.getRawKeyFunc(id)
 }
 

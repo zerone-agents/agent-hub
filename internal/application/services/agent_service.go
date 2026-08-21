@@ -264,7 +264,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 		return nil, fmt.Errorf("Agent 未绑定 Provider")
 	}
 
-	p, err := s.providerSvc.repo.GetByID(*resolvedProviderID)
+	p, err := s.providerSvc.repo.GetByID(tenantID, *resolvedProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("Provider 不存在: %w", err)
 	}
@@ -304,7 +304,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 	// Load models from the normalized provider_models table (Task 4+).
 	// The legacy default_models JSON column on provider_summaries was
 	// dropped in Task 7.
-	modelRows, err := s.providerSvc.repo.ListModels(*resolvedProviderID)
+	modelRows, err := s.providerSvc.repo.ListModels(tenantID, *resolvedProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
 	}

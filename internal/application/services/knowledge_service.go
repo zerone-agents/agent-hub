@@ -43,12 +43,12 @@ func (s *KnowledgeService) ListDatasets(ctx context.Context, req knowledge.Datas
 	return engine.ListDatasets(ctx, req)
 }
 
-func (s *KnowledgeService) CreateDataset(ctx context.Context, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
+func (s *KnowledgeService) CreateDataset(ctx context.Context, tenantID string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
 	}
-	s.translateModelRefs(ctx, req)
+	s.translateModelRefs(ctx, tenantID, req)
 	return engine.CreateDataset(ctx, req)
 }
 
@@ -64,7 +64,7 @@ func (s *KnowledgeService) GetDataset(ctx context.Context, id string) (*knowledg
 	return engine.GetDataset(ctx, id)
 }
 
-func (s *KnowledgeService) UpdateDataset(ctx context.Context, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
+func (s *KnowledgeService) UpdateDataset(ctx context.Context, tenantID string, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (s *KnowledgeService) UpdateDataset(ctx context.Context, id string, req kno
 	if id == "" {
 		return nil, knowledge.NewBadRequestError("datasetId 不能为空")
 	}
-	s.translateModelRefs(ctx, req)
+	s.translateModelRefs(ctx, tenantID, req)
 	return engine.UpdateDataset(ctx, id, req)
 }
 
@@ -314,18 +314,18 @@ func (s *KnowledgeService) requireEngine() (knowledge.KnowledgeEngine, error) {
 // to their MultiRAG-format equivalents in place. It is a no-op when the
 // service has no ProviderService. Both embd_id (top-level) and
 // parser_config.layout_recognize (nested) are translated.
-func (s *KnowledgeService) translateModelRefs(ctx context.Context, req knowledge.DatasetMutationRequest) {
+func (s *KnowledgeService) translateModelRefs(ctx context.Context, tenantID string, req knowledge.DatasetMutationRequest) {
 	if s == nil || s.providerSvc == nil {
 		return
 	}
 	if embd, ok := req["embd_id"].(string); ok {
-		if translated := s.translateLocalModelRef(ctx, embd, "embedding"); translated != "" {
+		if translated := s.translateLocalModelRef(ctx, tenantID, embd, "embedding"); translated != "" {
 			req["embd_id"] = translated
 		}
 	}
 	if cfg, ok := req["parser_config"].(map[string]any); ok {
 		if lr, ok := cfg["layout_recognize"].(string); ok {
-			if translated := s.translateLocalModelRef(ctx, lr, "layout"); translated != "" {
+			if translated := s.translateLocalModelRef(ctx, tenantID, lr, "layout"); translated != "" {
 				cfg["layout_recognize"] = translated
 			}
 		}
@@ -341,11 +341,11 @@ func (s *KnowledgeService) translateModelRefs(ctx context.Context, req knowledge
 // Otherwise returns the original ref unchanged. Empty refs, nil
 // ProviderService, providers without a MultiRAG factory mapping, and
 // unknown model_ids all pass through unchanged.
-func (s *KnowledgeService) translateLocalModelRef(ctx context.Context, ref, mode string) string {
+func (s *KnowledgeService) translateLocalModelRef(ctx context.Context, tenantID, ref, mode string) string {
 	if ref == "" || s == nil || s.providerSvc == nil {
 		return ref
 	}
-	p, err := s.providerSvc.FindProviderByModelID(ref)
+	p, err := s.providerSvc.FindProviderByModelID(tenantID, ref)
 	if err != nil {
 		return ref
 	}

@@ -25,9 +25,11 @@ type AigcConfigService struct {
 
 // providerModelCodeSource is the subset of the provider repository needed to
 // build the deployer's model code map. *repository.ProviderRepository
-// satisfies this via ListAllModels.
+// satisfies this via ListAllModelsUnscoped. AIGC 模型码是全局映射
+// （0001=GLM-4.5 等，按 model_id 跨租户复用），此处走无租户上下文的
+// 系统对账路径。
 type providerModelCodeSource interface {
-	ListAllModels() ([]providerdomain.ProviderModel, error)
+	ListAllModelsUnscoped() ([]providerdomain.ProviderModel, error)
 }
 
 func NewAigcConfigService(db *gorm.DB, encryptionKey string, models providerModelCodeSource) *AigcConfigService {
@@ -197,7 +199,7 @@ func (s *AigcConfigService) DeployerConfig() (*deployer.AigcConfig, error) {
 // buildModelCodes scans all provider_models and builds a deduplicated
 // {modelID: code} map. Rows with empty code or empty modelID are skipped.
 func (s *AigcConfigService) buildModelCodes() (map[string]string, error) {
-	rows, err := s.models.ListAllModels()
+	rows, err := s.models.ListAllModelsUnscoped()
 	if err != nil {
 		return nil, err
 	}

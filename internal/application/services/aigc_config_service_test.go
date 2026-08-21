@@ -30,7 +30,7 @@ type fakeModelSource struct {
 	err  error
 }
 
-func (f fakeModelSource) ListAllModels() ([]providerdomain.ProviderModel, error) {
+func (f fakeModelSource) ListAllModelsUnscoped() ([]providerdomain.ProviderModel, error) {
 	return f.rows, f.err
 }
 

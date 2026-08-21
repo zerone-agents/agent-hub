@@ -207,7 +207,7 @@ func TestProviderHandler_DeleteModel_RemovesRow(t *testing.T) {
 
 	// Verify the model is actually gone via a fresh service lookup.
 	svc := services.NewProviderService(providerModelsTestKey)
-	p, err := svc.GetByID(1)
+	p, err := svc.GetByID("", 1)
 	require.NoError(t, err)
 	require.Empty(t, p.DefaultModels(), "deleted model should not be returned by GetByID")
 }

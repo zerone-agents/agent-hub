@@ -8,6 +8,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -97,7 +98,7 @@ func (h *KnowledgeHandler) CreateDataset(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	dataset, err := h.service.CreateDataset(c.Request.Context(), req)
+	dataset, err := h.service.CreateDataset(c.Request.Context(), tenant.GetTenantID(c), req)
 	if err != nil {
 		respondKnowledgeError(c, err)
 		return
@@ -120,7 +121,7 @@ func (h *KnowledgeHandler) UpdateDataset(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	dataset, err := h.service.UpdateDataset(c.Request.Context(), c.Param("datasetId"), req)
+	dataset, err := h.service.UpdateDataset(c.Request.Context(), tenant.GetTenantID(c), c.Param("datasetId"), req)
 	if err != nil {
 		respondKnowledgeError(c, err)
 		return

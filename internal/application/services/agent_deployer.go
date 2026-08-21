@@ -52,8 +52,8 @@ type skillRepository interface {
 
 // providerService defines the methods needed from the provider service.
 type providerService interface {
-	GetByID(id uint64) (providerdomain.Provider, error)
-	GetRawAPIKey(id uint64) (string, error)
+	GetByID(tenantID string, id uint64) (providerdomain.Provider, error)
+	GetRawAPIKey(tenantID string, id uint64) (string, error)
 }
 
 // mcpService defines the methods needed from the MCP service.
@@ -260,7 +260,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	}
 
 	// Load provider
-	p, err := s.providerSvc.GetByID(*agentCfg.ProviderID)
+	p, err := s.providerSvc.GetByID(tenantID, *agentCfg.ProviderID)
 	if err != nil {
 		return nil, fmt.Errorf("load provider failed: %w", err)
 	}
@@ -294,7 +294,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	if s.kongSvc != nil {
 		_ = s.kongSvc.Deregister(ctx, name)
 	}
-	req, err := s.buildCreateRequest(ctx, agentCfg, p, tools, skills, subagents, mcpServers)
+	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p, tools, skills, subagents, mcpServers)
 	if err != nil {
 		return nil, fmt.Errorf("build create request failed: %w", err)
 	}
@@ -672,6 +672,7 @@ func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.Ag
 // buildCreateRequest builds the deployer.CreateAgentRequest from agent config and relations.
 func (s *AgentDeployerService) buildCreateRequest(
 	ctx context.Context,
+	tenantID string,
 	cfg *agent.AgentConfig,
 	providerDTO providerdomain.Provider,
 	tools []string,
@@ -707,7 +708,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 
 	// Build provider config
 	baseURL := providerDTO.BaseURL()
-	apiKey, _ := s.providerSvc.GetRawAPIKey(providerDTO.ID())
+	apiKey, _ := s.providerSvc.GetRawAPIKey(tenantID, providerDTO.ID())
 	if cfg.FieldOverrides != "" {
 		overrides, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, s.encryptionKey)
 		if err == nil {

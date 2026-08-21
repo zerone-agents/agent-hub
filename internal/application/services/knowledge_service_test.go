@@ -301,7 +301,7 @@ func TestKnowledgeService_TranslatesLocalEmbdID(t *testing.T) {
 	}
 	svc := NewKnowledgeService(engine, setupKnowledgeProviderSvc(t))
 
-	_, err := svc.CreateDataset(context.Background(), knowledge.DatasetMutationRequest{
+	_, err := svc.CreateDataset(context.Background(), "default", knowledge.DatasetMutationRequest{
 		"embd_id": "bge-large-zh",
 	})
 	require.NoError(t, err)
@@ -325,7 +325,7 @@ func TestKnowledgeService_PassThroughMultiRAGEmbdID(t *testing.T) {
 	}
 	svc := NewKnowledgeService(engine, setupKnowledgeProviderSvc(t))
 
-	_, err := svc.CreateDataset(context.Background(), knowledge.DatasetMutationRequest{
+	_, err := svc.CreateDataset(context.Background(), "default", knowledge.DatasetMutationRequest{
 		"embd_id": "bge-m3@BAAI",
 	})
 	require.NoError(t, err)
@@ -348,7 +348,7 @@ func TestKnowledgeService_TranslatesLocalLayout(t *testing.T) {
 	}
 	svc := NewKnowledgeService(engine, setupKnowledgeProviderSvc(t))
 
-	_, err := svc.UpdateDataset(context.Background(), "kb1", knowledge.DatasetMutationRequest{
+	_, err := svc.UpdateDataset(context.Background(), "default", "kb1", knowledge.DatasetMutationRequest{
 		"parser_config": map[string]any{
 			"layout_recognize": "mineru",
 		},
@@ -374,7 +374,7 @@ func TestKnowledgeService_PassThroughBuiltinLayout(t *testing.T) {
 	}
 	svc := NewKnowledgeService(engine, setupKnowledgeProviderSvc(t))
 
-	_, err := svc.UpdateDataset(context.Background(), "kb1", knowledge.DatasetMutationRequest{
+	_, err := svc.UpdateDataset(context.Background(), "default", "kb1", knowledge.DatasetMutationRequest{
 		"parser_config": map[string]any{
 			"layout_recognize": "DeepDOC",
 		},
