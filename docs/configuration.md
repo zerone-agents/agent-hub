@@ -93,6 +93,61 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 - **CLI token 收口**：`/api/v1/cli` 仅 admin/maintainer 可用（member 403），不属于 `/admin` 面但同样由角色中间件拦截；member 历史已签发的 token 不主动吊销，自然过期后无法续签。
 - **member 部署按钮**：member 在 Agent 页可见部署按钮，弹窗内仅「聊天」可用，其他操作按钮置灰。
 
+## Operations (Ops API)
+
+运维端点（`/api/v1/ops/*`，当前用于多组织 OAuth client 登记，见下文 runbook）的鉴权开关：
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `OPS_API_KEY` | No | — | 运维 API 鉴权密钥。**空（默认）= 运维端点不挂载**，请求 `/api/v1/ops/*` 等效 404；配置后所有请求需携带请求头 `X-Ops-Key: <OPS_API_KEY>`，匹配放行，否则拒绝。仅在需要接入新组织时配置。 |
+
+### 多组织接入 runbook（仅 casdoor 模式）
+
+单组织部署（一个 Casdoor 组织 = 一个租户）**无需任何操作**：租户 client 表为空时自动回落 env 全局 `CASDOOR_CLIENT_ID` / `CASDOOR_CLIENT_SECRET` / `CASDOOR_CERTIFICATE`，行为与旧版本完全一致。只有当第二个及以后的组织（租户）需要通过各自 Casdoor Application 登录时，才按以下三步操作。
+
+#### Step 1：Casdoor 侧建组织与应用
+
+每个组织（如 `acme`）在 Casdoor 中：
+
+1. 创建组织 `acme`（组织即租户，业务数据按组织隔离）。
+2. 在该组织下创建一个 Casdoor Application，回调（redirect URL）配置为 hub 全局回调 `CASDOOR_CALLBACK_URL`（无需 per-org 回调），记录其 Client ID / Client Secret。
+3. 在该组织内创建 `agent-hub-admin` / `agent-hub-maintainer` / `agent-hub-member` 三角色（可选，供 Casdoor 侧管理使用；agent-hub 的角色以本地成员表为准，并将 **Casdoor 组织管理员自动同步为本地 admin**）。
+
+#### Step 2：通过 Ops API 登记租户 client
+
+先在 hub 侧配置 `OPS_API_KEY` 并重启，然后：
+
+```bash
+curl -X POST https://<hub>/api/v1/ops/tenant-clients \
+  -H "X-Ops-Key: <OPS_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"org":"acme","clientId":"...","clientSecret":"..."}'
+```
+
+字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文）；`isDefault` 可选。
+
+default tenant 语义（不变式：**有且唯一**）：
+
+- **首行自动成为 default**：登记的第一条记录自动 `isDefault=true`。
+- 登录页组织输入框**留空**（或无 `org` 参数访问）即走 default 行。
+- **切换 default**：给新行显式传 `"isDefault":true`（原子切换，旧 default 自动降级）。
+- **降级保护**：把当前 default 降级（新增非 default 行时）且表内还有其他行 → 409；**删除 default 行**且表内还有其他行 → 409（响应含迁移指引：先把 default 切给其他组织再删）。删 default 是最后一行时允许；删除不存在的 org 幂等返回 204。
+
+管理查询：`GET /api/v1/ops/tenant-clients`（返回 org / clientId / isDefault / hasCert / 时间，**不返回 secret**）。
+
+#### Step 3：分发组织专属登录链接
+
+给该组织成员分发：`https://<hub>/login?org=acme`
+
+- 登录页「更多」折叠区内会出现组织输入框（仅存在多组织配置时渲染），成员也可手动填组织名。
+- 组织用户首次登录自动创建 pending 记录（等待 admin 审批分配角色）；Casdoor 组织管理员登录自动成为该租户 admin。
+- 登录后的 refresh token 按 token 内的 owner 自解析对应组织凭证，**无需额外配置**。
+
+#### 解析链与边界行为
+
+- **显式 org 未注册 → 404，绝不回落**：`?org=xxx` 指定了不存在/未登记的组织，登录预检就地报错，不会回退到 default。
+- **留空 / 无参数 → default 行 → env 全局**：default 行不存在（表空）时回落 env `CASDOOR_CLIENT_ID`（存量单组织部署零改动）。
+
 ## OSS (S3 / MinIO)
 
 | Variable | Required | Default | Description |
