@@ -14,6 +14,7 @@ import LoginPage from './LoginPage'
 vi.mock('@/api/auth', () => ({
   authApi: {
     login: vi.fn(),
+    checkOrg: vi.fn(),
     getAuthMode: vi.fn(),
     loginWithPassword: vi.fn()
   }
@@ -22,6 +23,9 @@ vi.mock('@/api/auth', () => ({
 import { authApi } from '@/api/auth'
 
 function renderLogin() {
+  // builtin 流程会经真实 auth store 落 token 到 localStorage，跨用例清理，
+  // 否则后续 casdoor 用例因 token 存在走 useUserInfo 分支卡在 LoadingState。
+  localStorage.clear()
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   })
@@ -63,5 +67,63 @@ describe('LoginPage (builtin mode)', () => {
     await user.type(screen.getByPlaceholderText('密码'), 'Passw0rd!')
     await user.click(screen.getByRole('button', { name: '登录' }))
     expect(authApi.loginWithPassword).toHaveBeenCalledWith('alice', 'Passw0rd!')
+  })
+})
+
+describe('LoginPage (casdoor multi-org)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true, multiOrg: true })
+    vi.mocked(authApi.checkOrg).mockResolvedValue({ exists: true })
+  })
+
+  function renderCasdoorLogin() {
+    return renderLogin()
+  }
+
+  it('renders 更多 entry when multiOrg=true and hides it when false', async () => {
+    const view = renderCasdoorLogin()
+    expect(await screen.findByRole('button', { name: '登录 Agent Hub' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多' })).toBeInTheDocument()
+    view.unmount()
+
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true, multiOrg: false })
+    renderLogin()
+    expect(await screen.findByRole('button', { name: '登录 Agent Hub' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
+  })
+
+  it('expands org input, prechecks then logs in with org', async () => {
+    const user = userEvent.setup()
+    renderCasdoorLogin()
+    await screen.findByRole('button', { name: '登录 Agent Hub' })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.type(screen.getByPlaceholderText('留空使用默认组织'), 'acme')
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    await screen.findByRole('button', { name: '确认' })
+    expect(authApi.checkOrg).toHaveBeenCalledWith('acme')
+    expect(authApi.login).toHaveBeenCalledWith('acme')
+  })
+
+  it('shows inline error and does not redirect when checkOrg fails', async () => {
+    vi.mocked(authApi.checkOrg).mockRejectedValue(new Error('org not found'))
+    const user = userEvent.setup()
+    renderCasdoorLogin()
+    await screen.findByRole('button', { name: '登录 Agent Hub' })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.type(screen.getByPlaceholderText('留空使用默认组织'), 'ghost')
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    expect(await screen.findByText('组织不存在或未注册，请检查后重试')).toBeInTheDocument()
+    expect(authApi.login).not.toHaveBeenCalled()
+  })
+
+  it('empty org confirm logs in with default (no org arg)', async () => {
+    const user = userEvent.setup()
+    renderCasdoorLogin()
+    await screen.findByRole('button', { name: '登录 Agent Hub' })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    expect(authApi.checkOrg).not.toHaveBeenCalled()
+    expect(authApi.login).toHaveBeenCalledWith()
   })
 })

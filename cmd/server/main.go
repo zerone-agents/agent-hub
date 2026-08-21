@@ -319,9 +319,9 @@ func main() {
 			authGroup.POST("/change-password", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), builtinAuthHandler.ChangePassword)
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 		} else {
-			authGroup.GET("/mode", func(c *gin.Context) {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
-			})
+			orgCheckHandler := handler.NewOrgCheckHandler(tenantOAuthRepo)
+			authGroup.GET("/mode", orgCheckHandler.CasdoorMode)
+			authGroup.GET("/org-check", orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", handler.Login)
 			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)

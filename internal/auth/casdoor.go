@@ -362,19 +362,39 @@ func GetSession(state string) *OAuthSession {
 	return nil
 }
 
+// refreshCreds 为 refresh token 解析 OAuth 凭证：casdoor 的 refresh token 是
+// JWT，payload 携带 owner（签发组织）。此处用 tokenOwner 不经验签地读 owner——
+// 安全论证：owner 仅用于"选择哪组 client 凭证"，真正的安全边界是 Casdoor 校验
+// refresh token 本身 + client_secret（拿错凭证刷新会被 Casdoor 拒绝，篡改
+// owner 至多导致刷新失败，不会绕过认证）。owner 命中 lookup → 用该组织凭证；
+// 否则回退全局解析链（default 行 → env 凭证），尽力恢复会话。
+func refreshCreds(refreshToken string) *TenantClientCreds {
+	if owner := tokenOwner(refreshToken); owner != "" && tenantClientLookup != nil {
+		if creds, ok := tenantClientLookup(owner); ok && creds != nil {
+			return creds
+		}
+	}
+	if creds, err := resolveClientCreds(""); err == nil {
+		return creds
+	}
+	return &TenantClientCreds{ClientID: client.ClientId, ClientSecret: client.ClientSecret}
+}
+
 // RefreshAccessToken exchanges a refresh token for a new access token.
+// 多组织部署下按 token 的 owner 自解析凭证（见 refreshCreds），签名不变。
 func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 	if refreshToken == "" {
 		return nil, fmt.Errorf("refresh token is empty")
 	}
 
+	creds := refreshCreds(refreshToken)
 	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
 
 	data := map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": refreshToken,
-		"client_id":     client.ClientId,
-		"client_secret": client.ClientSecret,
+		"client_id":     creds.ClientID,
+		"client_secret": creds.ClientSecret,
 	}
 
 	jsonData, err := json.Marshal(data)

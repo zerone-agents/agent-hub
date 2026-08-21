@@ -8,6 +8,13 @@ import (
 
 	"control-panel/internal/auth"
 	"control-panel/internal/config"
+	authdom "control-panel/internal/domain/auth"
+	repository "control-panel/internal/infrastructure/persistence"
+	"control-panel/pkg/database"
+
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/gin-gonic/gin"
 )
@@ -89,4 +96,68 @@ func TestLoginNoOrgFallsBackToGlobal(t *testing.T) {
 	if loc := w.Header().Get("Location"); !strings.Contains(loc, "client_id=global-id") {
 		t.Fatalf("Location missing global client_id: %s", loc)
 	}
+}
+
+// ---- OrgCheck / CasdoorMode（Task 4：组织预检端点 + /auth/mode multiOrg）----
+
+func setupOrgCheckRouter(t *testing.T, seed ...string) *gin.Engine {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&authdom.TenantOAuthClient{}))
+	for i, org := range seed {
+		row := authdom.TenantOAuthClient{Org: org, ClientID: "cid-" + org, ClientSecretEnc: "enc"}
+		if i == 0 {
+			dk := "default"
+			row.DefaultKey = &dk // 首行设为 default，符合 repo 语义
+		}
+		require.NoError(t, db.Create(&row).Error)
+	}
+	old := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = old })
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewOrgCheckHandler(repository.NewTenantOAuthClientRepository())
+	r.GET("/auth/org-check", h.OrgCheck)
+	r.GET("/auth/mode", h.CasdoorMode)
+	return r
+}
+
+func TestOrgCheckMissingParam(t *testing.T) {
+	r := setupOrgCheckRouter(t, "acme")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/org-check", nil))
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestOrgCheckRegistered(t *testing.T) {
+	r := setupOrgCheckRouter(t, "acme")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/org-check?org=acme", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"exists":true`)
+}
+
+func TestOrgCheckNotRegistered(t *testing.T) {
+	r := setupOrgCheckRouter(t, "acme")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/org-check?org=ghost", nil))
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Contains(t, w.Body.String(), "组织不存在或未注册")
+}
+
+func TestCasdoorModeMultiOrg(t *testing.T) {
+	r := setupOrgCheckRouter(t) // 空表
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/mode", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"multiOrg":false`)
+
+	r2 := setupOrgCheckRouter(t, "acme")
+	w2 := httptest.NewRecorder()
+	r2.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/auth/mode", nil))
+	require.Equal(t, http.StatusOK, w2.Code)
+	require.Contains(t, w2.Body.String(), `"multiOrg":true`)
 }

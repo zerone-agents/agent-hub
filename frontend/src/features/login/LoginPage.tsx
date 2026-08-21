@@ -132,6 +132,20 @@ const useStyles = createStyles(({ css }) => ({
   foot: css`
     font-size: 11px;
     color: ${t.textMuted};
+  `,
+  moreSection: css`
+    margin-top: 12px;
+  `,
+  moreLink: css`
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: ${t.textSm};
+    color: ${t.textMuted};
+    cursor: pointer;
+    &:hover {
+      color: ${t.text};
+    }
   `
 }))
 
@@ -141,6 +155,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showOrg, setShowOrg] = useState(false)
+  const [org, setOrg] = useState('')
+  const [orgError, setOrgError] = useState('')
+  const [orgChecking, setOrgChecking] = useState(false)
   const navigate = useNavigate()
   const token = getAccessToken()
   const { data: user, isLoading } = useUserInfo({ enabled: !!token })
@@ -178,6 +196,27 @@ export default function LoginPage() {
     authApi.login()
   }
 
+  // 多组织确认：空 → 默认组织直接跳转；非空 → 先预检，未注册就地报错不跳转。
+  const handleOrgConfirm = async () => {
+    const value = org.trim()
+    setOrgError('')
+    if (!value) {
+      setLoading(true)
+      authApi.login()
+      return
+    }
+    setOrgChecking(true)
+    try {
+      await authApi.checkOrg(value)
+      setLoading(true)
+      authApi.login(value)
+    } catch {
+      setOrgError('组织不存在或未注册，请检查后重试')
+    } finally {
+      setOrgChecking(false)
+    }
+  }
+
   if ((token && isLoading) || modeLoading) {
     return (
       <div className={styles.page}>
@@ -208,14 +247,48 @@ export default function LoginPage() {
           </div>
           {error && <div className={styles.error}>{error}</div>}
           {isCasdoor ? (
-            <button
-              type="button"
-              className={styles.loginBtn}
-              onClick={handleCasdoorLogin}
-              disabled={loading}
-            >
-              {loading ? <Spin size="small" /> : '登录 Agent Hub'}
-            </button>
+            <>
+              <button
+                type="button"
+                className={styles.loginBtn}
+                onClick={handleCasdoorLogin}
+                disabled={loading}
+              >
+                {loading ? <Spin size="small" /> : '登录 Agent Hub'}
+              </button>
+              {mode.multiOrg === true && (
+                <div className={styles.moreSection}>
+                  <button
+                    type="button"
+                    className={styles.moreLink}
+                    onClick={() => { setShowOrg((v) => !v); setOrgError('') }}
+                  >
+                    {showOrg ? '收起' : '更多'}
+                  </button>
+                  {showOrg && (
+                    <div className={styles.field}>
+                      <Input
+                        placeholder="留空使用默认组织"
+                        value={org}
+                        onChange={(e) => { setOrg(e.target.value); setOrgError('') }}
+                        size="large"
+                        aria-label="组织"
+                      />
+                      {orgError && <div className={styles.error}>{orgError}</div>}
+                      <button
+                        type="button"
+                        className={styles.loginBtn}
+                        style={{ marginTop: 12 }}
+                        onClick={() => { void handleOrgConfirm() }}
+                        disabled={orgChecking}
+                      >
+                        {orgChecking ? <Spin size="small" /> : '确认'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <form noValidate onSubmit={(e) => { e.preventDefault(); void handleBuiltinLogin(); }}>
               <div className={styles.field}>
