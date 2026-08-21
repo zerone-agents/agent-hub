@@ -138,6 +138,7 @@ func AutoMigrate(backfillTenant string) error {
 		&authdomain.Invite{},
 		&authdomain.RefreshToken{},
 		&authdomain.UserIdentity{},
+		&authdomain.TenantOAuthClient{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
