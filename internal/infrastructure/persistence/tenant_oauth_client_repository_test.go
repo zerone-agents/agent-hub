@@ -50,6 +50,10 @@ func TestTenantOAuthClientUpsertAndFind(t *testing.T) {
 	if row.DefaultKey == nil || *row.DefaultKey != "org-a" {
 		t.Fatalf("org-a should be default: %+v", row.DefaultKey)
 	}
+	firstCreatedAt := row.CreatedAt
+	if firstCreatedAt.IsZero() {
+		t.Fatal("CreatedAt after first upsert should be non-zero")
+	}
 	if n, err := repo.Count(); err != nil || n != 1 {
 		t.Fatalf("Count: got (%d, %v), want 1", n, err)
 	}
@@ -64,6 +68,10 @@ func TestTenantOAuthClientUpsertAndFind(t *testing.T) {
 	row, err = repo.Find("org-a")
 	if err != nil || row.ClientID != "client-2" {
 		t.Fatalf("Find after re-upsert: got (%+v, %v)", row, err)
+	}
+	// 更新已有行不得覆写 created_at
+	if !row.CreatedAt.Equal(firstCreatedAt) {
+		t.Fatalf("CreatedAt should be preserved on update: got %v, want %v", row.CreatedAt, firstCreatedAt)
 	}
 	// org-a 仍是 default（isDefault=false 不应摘掉 default 标记，因它是唯一行）
 	if d, _ := repo.FindDefault(); d == nil || d.Org != "org-a" {

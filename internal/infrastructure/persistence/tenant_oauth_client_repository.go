@@ -72,6 +72,11 @@ func (r *TenantOAuthClientRepository) Upsert(org, clientID, secretEnc, certEnc s
 		} else {
 			row.DefaultKey = nil
 		}
+		// 已有行时保留原 created_at：Save 对含主键记录做全字段 UPDATE，
+		// 零值 CreatedAt 会覆写为空时间（MySQL strict mode 报错、sqlite 丢数据）。
+		if err == nil {
+			row.CreatedAt = existing.CreatedAt
+		}
 		return tx.Save(&row).Error
 	})
 }
