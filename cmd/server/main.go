@@ -59,15 +59,12 @@ func main() {
 	}
 	defer database.Close()
 
-	// casdoor 模式下 Organization 是存量数据 tenant_id 的回填目标；为空会回落到
-	// "default" 且回填不可逆（之后运行时 tenant 来自 token 组织名，读不到数据）。
-	// 必须在 AutoMigrate 真实执行前 fail fast。
-	if !cfg.Auth.IsBuiltin() && strings.TrimSpace(cfg.Casdoor.Organization) == "" {
-		log.Fatalf("casdoor 模式必须配置 CASDOOR_ORGANIZATION（当前为空）：否则存量数据会被回填到错误租户且无法自我纠正")
-	}
+	// 回填租户：builtin 恒 default；casdoor 模式取 CASDOOR_ORGANIZATION
+	// （可选）——未配置时 AutoMigrate 从 user_identities 自动推断（单租户
+	// 部署零配置升级）；仅在存量数据无法归属时才要求一次性显式配置。
 	backfill := "default"
 	if !cfg.Auth.IsBuiltin() {
-		backfill = cfg.Casdoor.Organization
+		backfill = strings.TrimSpace(cfg.Casdoor.Organization)
 	}
 	if err := database.AutoMigrate(backfill); err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)
