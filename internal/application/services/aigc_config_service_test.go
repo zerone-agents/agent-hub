@@ -7,6 +7,7 @@ import (
 
 	"control-panel/internal/domain/aigc"
 	providerdomain "control-panel/internal/domain/provider"
+	persistence "control-panel/internal/infrastructure/persistence"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -274,6 +275,80 @@ func TestAigcDelete_OnlyOwnRow(t *testing.T) {
 	require.EqualValues(t, 1, count) // 共享行仍在
 	db.Model(&aigc.Config{}).Where("tenant_id = ?", "acme").Count(&count)
 	require.EqualValues(t, 0, count)
+}
+
+func TestAigcRotateKey_NoOwnRowDoesNotRotateShared(t *testing.T) {
+	svc, db := setupAigcSvc(t)
+	seedSharedRow(t, db) // 租户只有共享行可读，无自有行
+
+	_, err := svc.RotateKey("acme")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "共享默认配置不支持轮换")
+
+	// 共享行密钥保持不变
+	var shared aigc.Config
+	require.NoError(t, db.Where("tenant_id = ''").First(&shared).Error)
+	require.Equal(t, "enc:shared", shared.SigningKeyEncrypted)
+}
+
+func TestAigcRotateKey_OwnRowRotatedSharedUntouched(t *testing.T) {
+	svc, db := setupAigcSvc(t)
+	seedSharedRow(t, db)
+	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	require.NoError(t, err)
+	var before aigc.Config
+	require.NoError(t, db.Where("tenant_id = ?", "acme").First(&before).Error)
+
+	_, err = svc.RotateKey("acme")
+	require.NoError(t, err)
+	var after aigc.Config
+	require.NoError(t, db.Where("tenant_id = ?", "acme").First(&after).Error)
+	require.NotEqual(t, before.SigningKeyEncrypted, after.SigningKeyEncrypted)
+
+	var shared aigc.Config
+	require.NoError(t, db.Where("tenant_id = ''").First(&shared).Error)
+	require.Equal(t, "enc:shared", shared.SigningKeyEncrypted)
+}
+
+// --- 空租户守卫（I-2）：三个写方法必须拒绝 tenantID=""，且数据无变化 ---
+
+func TestAigcSave_EmptyTenantIDRejected(t *testing.T) {
+	svc, db := setupAigcSvc(t)
+	seedSharedRow(t, db)
+
+	_, err := svc.Save("", testUSCC, "越权公司")
+	require.True(t, errors.Is(err, persistence.ErrTenantIDRequired), "空租户 Save 必须返回 ErrTenantIDRequired, got %v", err)
+
+	var shared aigc.Config
+	require.NoError(t, db.Where("tenant_id = ''").First(&shared).Error)
+	require.Equal(t, "共享公司", shared.CompanyName) // 共享行未被覆写
+	var count int64
+	db.Model(&aigc.Config{}).Count(&count)
+	require.EqualValues(t, 1, count) // 也没有新建行
+}
+
+func TestAigcRotateKey_EmptyTenantIDRejected(t *testing.T) {
+	svc, db := setupAigcSvc(t)
+	seedSharedRow(t, db)
+
+	_, err := svc.RotateKey("")
+	require.True(t, errors.Is(err, persistence.ErrTenantIDRequired), "空租户 RotateKey 必须返回 ErrTenantIDRequired, got %v", err)
+
+	var shared aigc.Config
+	require.NoError(t, db.Where("tenant_id = ''").First(&shared).Error)
+	require.Equal(t, "enc:shared", shared.SigningKeyEncrypted)
+}
+
+func TestAigcDelete_EmptyTenantIDRejected(t *testing.T) {
+	svc, db := setupAigcSvc(t)
+	seedSharedRow(t, db)
+
+	err := svc.Delete("")
+	require.True(t, errors.Is(err, persistence.ErrTenantIDRequired), "空租户 Delete 必须返回 ErrTenantIDRequired, got %v", err)
+
+	var count int64
+	db.Model(&aigc.Config{}).Where("tenant_id = ''").Count(&count)
+	require.EqualValues(t, 1, count) // 共享行未被删除
 }
 
 func TestAigcRotateKey_RotatesResolvedRow(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"control-panel/internal/domain/aigc"
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/internal/infrastructure/deployer"
+	persistence "control-panel/internal/infrastructure/persistence"
 
 	"gorm.io/gorm"
 )
@@ -109,6 +110,9 @@ func (s *AigcConfigService) Get(tenantID string) (*ConfigDTO, error) {
 // shared row. On create it generates the signing key and derives the
 // ContentProducer; on update it keeps the existing signing key.
 func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO, error) {
+	if tenantID == "" {
+		return nil, persistence.ErrTenantIDRequired
+	}
 	uscc = strings.ToUpper(strings.TrimSpace(uscc))
 	if !usccPattern.MatchString(uscc) {
 		return nil, errors.New("统一社会信用代码须为 18 位数字与大写字母（不含 I/O/S/V/Z）")
@@ -155,14 +159,19 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 	return &dto, nil
 }
 
-// RotateKey rotates the key of the row the tenant reads (own row, else the
-// shared fallback row) — matching read semantics: whoever reads that row
-// is affected by its key.
+// RotateKey rotates only the tenant's own row. The tenant_id=” shared
+// default row is never rotated — any tenant rotating it would change the
+// signing key every fallback tenant verifies against.
 func (s *AigcConfigService) RotateKey(tenantID string) (*ConfigDTO, error) {
-	rec, err := s.fetch(tenantID)
+	if tenantID == "" {
+		return nil, persistence.ErrTenantIDRequired
+	}
+	// 只查本租户自有行，不回退共享行：无自有行时报错而非轮换全局默认。
+	var rec aigc.Config
+	err := s.db.Where("tenant_id = ?", tenantID).First(&rec).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("AIGC 标识尚未配置")
+			return nil, errors.New("本租户尚未配置 AIGC 信息，请先保存本租户配置再轮换密钥（共享默认配置不支持轮换）")
 		}
 		return nil, err
 	}
@@ -175,16 +184,19 @@ func (s *AigcConfigService) RotateKey(tenantID string) (*ConfigDTO, error) {
 		return nil, err
 	}
 	rec.SigningKeyEncrypted = enc
-	if err := s.db.Save(rec).Error; err != nil {
+	if err := s.db.Save(&rec).Error; err != nil {
 		return nil, err
 	}
-	dto := aigcToDTO(rec)
+	dto := aigcToDTO(&rec)
 	return &dto, nil
 }
 
 // Delete removes the tenant's own row only; the shared default row is left
 // for other tenants that still fall back to it.
 func (s *AigcConfigService) Delete(tenantID string) error {
+	if tenantID == "" {
+		return persistence.ErrTenantIDRequired
+	}
 	return s.db.Where("tenant_id = ?", tenantID).Delete(&aigc.Config{}).Error
 }
 
