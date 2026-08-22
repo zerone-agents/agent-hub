@@ -372,7 +372,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, fmt.Errorf("创建 Agent 失败: %w", err)
 	}
 
-	if err := s.toolRepo.BindDefaultToolsToAgent(cfg.ID); err != nil {
+	if err := s.toolRepo.BindDefaultToolsToAgent(tenantID, cfg.ID); err != nil {
 		return nil, fmt.Errorf("绑定默认 Tool 失败: %w", err)
 	}
 
