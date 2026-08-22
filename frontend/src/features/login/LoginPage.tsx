@@ -252,7 +252,8 @@ export default function LoginPage() {
                 type="button"
                 className={styles.loginBtn}
                 onClick={handleCasdoorLogin}
-                disabled={loading}
+                disabled={loading || showOrg}
+                title={showOrg ? '请使用下方「确认」按钮以应用所填组织' : undefined}
               >
                 {loading ? <Spin size="small" /> : '登录 Agent Hub'}
               </button>
@@ -266,7 +267,7 @@ export default function LoginPage() {
                     {showOrg ? '收起' : '更多'}
                   </button>
                   {showOrg && (
-                    <div className={styles.field}>
+                    <div className={styles.field} style={{ marginTop: 12 }}>
                       <Input
                         placeholder="留空使用默认组织"
                         value={org}

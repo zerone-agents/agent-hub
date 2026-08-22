@@ -126,4 +126,18 @@ describe('LoginPage (casdoor multi-org)', () => {
     expect(authApi.checkOrg).not.toHaveBeenCalled()
     expect(authApi.login).toHaveBeenCalledWith()
   })
+
+  it('main login button is disabled while 更多 is expanded and re-enabled on collapse', async () => {
+    const user = userEvent.setup()
+    renderCasdoorLogin()
+    const mainBtn = await screen.findByRole('button', { name: '登录 Agent Hub' })
+    expect(mainBtn).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    // 展开时主按钮禁用：组织输入必须走「确认」的预检流程
+    expect(screen.getByRole('button', { name: '登录 Agent Hub' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: '收起' }))
+    expect(screen.getByRole('button', { name: '登录 Agent Hub' })).toBeEnabled()
+  })
 })
