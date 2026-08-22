@@ -206,14 +206,14 @@ func seedSharedRow(t *testing.T, db *gorm.DB) {
 	}).Error)
 }
 
-func TestAigcGet_FallsBackToSharedRow(t *testing.T) {
+// 方案 A：无共享回退——即使存在 tenant_id=” 行，无自有行的租户也视为未配置。
+func TestAigcGet_SharedRowNotUsedAsFallback(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
 	dto, err := svc.Get("acme")
 	require.NoError(t, err)
-	require.True(t, dto.Configured)
-	require.Equal(t, "共享公司", dto.CompanyName)
+	require.False(t, dto.Configured)
 }
 
 func TestAigcSave_TenantRowShadowsShared(t *testing.T) {
@@ -234,7 +234,7 @@ func TestAigcSave_TenantRowShadowsShared(t *testing.T) {
 	require.Equal(t, "enc:shared", shared.SigningKeyEncrypted)
 }
 
-func TestAigcGet_OtherTenantStillReadsShared(t *testing.T) {
+func TestAigcGet_OtherTenantWithoutOwnRowNotConfigured(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
@@ -243,7 +243,7 @@ func TestAigcGet_OtherTenantStillReadsShared(t *testing.T) {
 
 	dto, err := svc.Get("other")
 	require.NoError(t, err)
-	require.Equal(t, "共享公司", dto.CompanyName)
+	require.False(t, dto.Configured)
 }
 
 func TestAigcDeployerConfig_TenantRowPreferred(t *testing.T) {
@@ -258,9 +258,10 @@ func TestAigcDeployerConfig_TenantRowPreferred(t *testing.T) {
 	require.NotNil(t, cfg)
 	require.NotEqual(t, "enc:shared", cfg.SigningKey) // 不是共享行的（密文占位解不开也轮不到它）
 
-	// 无自有行的租户走共享行 → 解密共享占位会失败（证明读到的是共享行）
-	_, err = svc.DeployerConfig("other")
-	require.Error(t, err)
+	// 无自有行的租户不走共享行 → (nil, nil)，部署不注入 AIGC 标识
+	cfg, err = svc.DeployerConfig("other")
+	require.NoError(t, err)
+	require.Nil(t, cfg)
 }
 
 func TestAigcDelete_OnlyOwnRow(t *testing.T) {
@@ -277,13 +278,13 @@ func TestAigcDelete_OnlyOwnRow(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
-func TestAigcRotateKey_NoOwnRowDoesNotRotateShared(t *testing.T) {
+func TestAigcRotateKey_NoOwnRowRejected(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db) // 租户只有共享行可读，无自有行
 
 	_, err := svc.RotateKey("acme")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "共享默认配置不支持轮换")
+	require.Contains(t, err.Error(), "本租户尚未配置 AIGC 信息，请先保存本租户配置再轮换密钥")
 
 	// 共享行密钥保持不变
 	var shared aigc.Config

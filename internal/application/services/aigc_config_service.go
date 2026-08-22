@@ -17,7 +17,9 @@ import (
 )
 
 // AigcConfigService manages the per-tenant AIGC content-labeling config
-// (GB 45438-2025) with a tenant_id=” shared default row as fallback.
+// (GB 45438-2025). aigc_configs is purely per-tenant: there is no shared
+// row and no fallback — a tenant without its own row is simply
+// unconfigured (no AIGC label injected on deploy).
 // Backed by GORM directly, like CLITokenService.
 type AigcConfigService struct {
 	db            *gorm.DB
@@ -79,15 +81,11 @@ func aigcToDTO(rec *aigc.Config) ConfigDTO {
 	}
 }
 
-// fetch resolves the config row for a tenant: own row first, then the
-// tenant_id=” shared default row (legacy global config), else
-// gorm.ErrRecordNotFound.
+// fetch resolves the tenant's own config row (tenant_id = ?), else
+// gorm.ErrRecordNotFound. No shared fallback.
 func (s *AigcConfigService) fetch(tenantID string) (*aigc.Config, error) {
 	var rec aigc.Config
 	err := s.db.Where("tenant_id = ?", tenantID).First(&rec).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) && tenantID != "" {
-		err = s.db.Where("tenant_id = ''").First(&rec).Error
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +104,9 @@ func (s *AigcConfigService) Get(tenantID string) (*ConfigDTO, error) {
 	return &dto, nil
 }
 
-// Save creates or updates the tenant's own config row and never touches the
-// shared row. On create it generates the signing key and derives the
-// ContentProducer; on update it keeps the existing signing key.
+// Save creates or updates the tenant's own config row. On create it
+// generates the signing key and derives the ContentProducer; on update it
+// keeps the existing signing key.
 func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO, error) {
 	if tenantID == "" {
 		return nil, persistence.ErrTenantIDRequired
@@ -122,7 +120,7 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 		return nil, errors.New("公司完整名称不能为空")
 	}
 
-	// 只查本租户行——共享行（tenant_id=''）不参与 upsert，永远不被覆盖。
+	// 只查本租户行——upsert 永远只作用于本租户自有行。
 	var rec aigc.Config
 	err := s.db.Where("tenant_id = ?", tenantID).First(&rec).Error
 	switch {
@@ -159,19 +157,18 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 	return &dto, nil
 }
 
-// RotateKey rotates only the tenant's own row. The tenant_id=” shared
-// default row is never rotated — any tenant rotating it would change the
-// signing key every fallback tenant verifies against.
+// RotateKey rotates the tenant's own row. A tenant without its own row is
+// unconfigured and must Save first before rotating.
 func (s *AigcConfigService) RotateKey(tenantID string) (*ConfigDTO, error) {
 	if tenantID == "" {
 		return nil, persistence.ErrTenantIDRequired
 	}
-	// 只查本租户自有行，不回退共享行：无自有行时报错而非轮换全局默认。
+	// 只查本租户自有行：无自有行即未配置，报错而非轮换。
 	var rec aigc.Config
 	err := s.db.Where("tenant_id = ?", tenantID).First(&rec).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("本租户尚未配置 AIGC 信息，请先保存本租户配置再轮换密钥（共享默认配置不支持轮换）")
+			return nil, errors.New("本租户尚未配置 AIGC 信息，请先保存本租户配置再轮换密钥")
 		}
 		return nil, err
 	}
@@ -191,8 +188,7 @@ func (s *AigcConfigService) RotateKey(tenantID string) (*ConfigDTO, error) {
 	return &dto, nil
 }
 
-// Delete removes the tenant's own row only; the shared default row is left
-// for other tenants that still fall back to it.
+// Delete removes the tenant's own row only.
 func (s *AigcConfigService) Delete(tenantID string) error {
 	if tenantID == "" {
 		return persistence.ErrTenantIDRequired
@@ -200,10 +196,10 @@ func (s *AigcConfigService) Delete(tenantID string) error {
 	return s.db.Where("tenant_id = ?", tenantID).Delete(&aigc.Config{}).Error
 }
 
-// DeployerConfig builds the deployer payload for the tenant's effective
-// config (own row, else shared fallback). Returns (nil, nil) when not
-// configured so callers can leave the request field unset. A decryption
-// failure is an error — never silently deploy without a signature.
+// DeployerConfig builds the deployer payload for the tenant's own config.
+// Returns (nil, nil) when the tenant has no own row (unconfigured) so
+// callers can leave the request field unset. A decryption failure is an
+// error — never silently deploy without a signature.
 func (s *AigcConfigService) DeployerConfig(tenantID string) (*deployer.AigcConfig, error) {
 	rec, err := s.fetch(tenantID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
