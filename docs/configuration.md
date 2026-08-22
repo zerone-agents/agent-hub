@@ -67,7 +67,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 - **存量数据回填**：从旧版本升级时，启动迁移把存量业务数据回填到归属租户（builtin 模式 → `default`；casdoor 模式 → 从 `user_identities` 自动推断的唯一组织，可用 `CASDOOR_ORGANIZATION` 显式覆盖）。系统形态上原生多租户：正常运行不依赖任何组织配置，`CASDOOR_ORGANIZATION` 仅在存量数据无法自动归属（0 或多个组织登录过）时作为一次性升级逃生舱存在。
 - **同名资源跨租户共存**：原全局唯一约束（如 agents 的 `uk_name`、provider_summaries 的 `uk_key`）已改为 `(tenant_id, name)` / `(tenant_id, key)` 复合唯一索引——不同租户可各自持有同名 agent / 同 key provider。
 - **聊天数据两级隔离**：cloud_sessions / cloud_messages 首先按租户隔离，会话列表在租户内再按用户隔离（member 仅见自己的会话，admin/maintainer 可见本租户全部会话）。
-- **AIGC 配置 per-tenant + 共享默认回退**：读取时本租户的 aigc_configs 行优先；本租户未配置则回退到共享默认行（ContentProducer 主体编码等全局默认值）。写操作（Save / RotateKey / Delete）只作用于本租户行，且拒绝在租户身份缺失（builtin 之外的空租户上下文）时执行。
+- **AIGC 配置纯 per-tenant**：每个运营主体（租户）各自配置自己的 aigc_configs 行（ContentProducer 主体编码等）；未配置的租户不注入 AIGC 标识，不存在跨租户的共享默认回退。写操作（Save / RotateKey / Delete）只作用于本租户行，且拒绝在租户身份缺失（builtin 之外的空租户上下文）时执行。升级时，旧"全局一份"时代的遗留共享行自动归属回填租户（显式指定或自动推断的唯一租户）；若该租户已保存自有配置，则丢弃遗留共享行、保留租户自有配置。
 - **knowledge MCP 链（runtime token）**：以 runtime token 访问知识库时，租户取自所命中的 agents 行的 TenantID，与操作者无关。
 - **Kong 对账为全局语义**：后台 Kong 路由对账任务扫描全表（agent ID 全局唯一），不受租户隔离过滤影响。
 
