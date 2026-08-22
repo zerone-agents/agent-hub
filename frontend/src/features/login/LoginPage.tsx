@@ -266,7 +266,7 @@ export default function LoginPage() {
                     {showOrg ? '收起' : '更多'}
                   </button>
                   {showOrg && (
-                    <div className={styles.field}>
+                    <div className={styles.field} style={{ marginTop: 12 }}>
                       <Input
                         placeholder="留空使用默认组织"
                         value={org}
