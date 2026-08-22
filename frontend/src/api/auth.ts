@@ -33,13 +33,21 @@ export interface TokenPair {
 export interface AuthMode {
   mode: 'builtin' | 'casdoor'
   initialized: boolean
+  /** casdoor 模式下 tenant_oauth_clients 有行即 true——前端据此渲染组织选择入口。 */
+  multiOrg?: boolean
 }
 
 export const authApi = {
   /** Casdoor SSO redirect entry. Only used when auth.mode = casdoor. */
-  login: () => {
-    window.location.href = '/auth/login'
+  login: (org?: string) => {
+    const target = org ?? new URLSearchParams(window.location.search).get('org') ?? ''
+    window.location.href = target ? `/auth/login?org=${encodeURIComponent(target)}` : '/auth/login'
   },
+  /** 组织预检：登录跳转前确认组织已注册（不存在就地报错，不整页跳 404）。 */
+  checkOrg: (org: string) =>
+    apiClient
+      .get<ApiResponse<{ exists: boolean }>>(`/auth/org-check`, { params: { org } })
+      .then((res) => unwrapResponse<{ exists: boolean }>(res)),
   /** Reports the active auth backend so the login page can render the right UI. */
   getAuthMode: () =>
     apiClient.get<ApiResponse<AuthMode>>('/auth/mode').then((res) => unwrapResponse<AuthMode>(res)),

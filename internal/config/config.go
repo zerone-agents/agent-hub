@@ -33,6 +33,13 @@ type Config struct {
 	Deployer  DeployerConfig  `mapstructure:"deployer"`
 	Knowledge KnowledgeConfig `mapstructure:"knowledge"`
 	Kong      KongConfig      `mapstructure:"kong"`
+	Ops       OpsConfig       `mapstructure:"ops"`
+}
+
+// OpsConfig 是运维端点（/api/v1/ops/*）配置。APIKey 可选：为空时 ops 端点
+// 不挂载（等效 404）；非空时要求 X-Ops-Key 头常量时间匹配。
+type OpsConfig struct {
+	APIKey string `mapstructure:"api_key"`
 }
 
 // AuthConfig selects the authentication backend. Mode "builtin" (default) uses
@@ -153,6 +160,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("knowledge.upload_timeout_seconds", "MULTIRAG_UPLOAD_TIMEOUT_SECONDS")
 	viper.BindEnv("kong.admin_url", "KONG_ADMIN_URL")
 	viper.BindEnv("kong.reconcile_sec", "KONG_RECONCILE_SEC")
+	viper.BindEnv("ops.api_key", "OPS_API_KEY")
 
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)

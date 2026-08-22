@@ -15,6 +15,7 @@ import (
 	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/config"
 	"control-panel/internal/directory"
+	authdom "control-panel/internal/domain/auth"
 	knowledgedomain "control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/handler"
@@ -256,6 +257,51 @@ func main() {
 	r.GET("/health", handler.HealthCheck)
 	r.GET("/health/:service", handler.ServiceHealthCheck)
 
+	// /api/v1/ops — 运维端点（组织 OAuth 客户端管理），不走 JWT 链，
+	// 由 X-Ops-Key 常量时间鉴权。OPS_API_KEY 为空 = 功能未启用，端点不挂载（等效 404）。
+	if cfg.Ops.APIKey != "" {
+		opsGroup := r.Group("/api/v1/ops", middleware.RequireOpsKey(cfg.Ops.APIKey))
+		opsHandler := handler.NewOpsTenantClientHandler(repository.NewTenantOAuthClientRepository(), cfg.Provider.EncryptionKey)
+		opsGroup.POST("/tenant-clients", opsHandler.Upsert)
+		opsGroup.GET("/tenant-clients", opsHandler.List)
+		opsGroup.DELETE("/tenant-clients/:org", opsHandler.Delete)
+	}
+
+	// 多组织 OAuth：把 tenant_oauth_clients 查询以回调注入 auth 包（auth 不能
+	// 反向依赖 persistence）。org="" 语义为查 default 行；查询出错/未注册/无
+	// default 均返回 false（fail closed，resolveClientCreds 决定回落链）。
+	tenantOAuthRepo := repository.NewTenantOAuthClientRepository()
+	hexKey := cfg.Provider.EncryptionKey
+	auth.SetTenantClientLookup(func(org string) (*auth.TenantClientCreds, bool) {
+		row, err := func() (*authdom.TenantOAuthClient, error) {
+			if org == "" {
+				return tenantOAuthRepo.FindDefault()
+			}
+			return tenantOAuthRepo.Find(org)
+		}()
+		if err != nil {
+			log.Printf("[OAuth] tenant client lookup org=%q failed: %v", org, err)
+			return nil, false
+		}
+		if row == nil {
+			return nil, false
+		}
+		secret, err := provider.Decrypt(row.ClientSecretEnc, hexKey)
+		if err != nil {
+			log.Printf("[OAuth] decrypt client secret org=%q failed: %v", org, err)
+			return nil, false
+		}
+		certPEM := ""
+		if row.CertEnc != "" {
+			certPEM, err = provider.Decrypt(row.CertEnc, hexKey)
+			if err != nil {
+				log.Printf("[OAuth] decrypt cert org=%q failed: %v", org, err)
+				return nil, false
+			}
+		}
+		return &auth.TenantClientCreds{ClientID: row.ClientID, ClientSecret: secret, CertPEM: certPEM}, true
+	})
+
 	// /auth — endpoints are mode-conditional. builtin mode serves setup/login/
 	// register/refresh/change-password locally; casdoor mode keeps the OAuth
 	// redirect flow. /auth/mode and /auth/userinfo are common to both.
@@ -273,9 +319,9 @@ func main() {
 			authGroup.POST("/change-password", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), builtinAuthHandler.ChangePassword)
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 		} else {
-			authGroup.GET("/mode", func(c *gin.Context) {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"mode": "casdoor", "initialized": true}})
-			})
+			orgCheckHandler := handler.NewOrgCheckHandler(tenantOAuthRepo)
+			authGroup.GET("/mode", orgCheckHandler.CasdoorMode)
+			authGroup.GET("/org-check", orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", handler.Login)
 			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)

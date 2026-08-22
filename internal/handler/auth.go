@@ -29,7 +29,16 @@ func Login(c *gin.Context) {
 		})
 		return
 	}
-	loginURL := auth.GetLoginURL(state, codeVerifier)
+	org := strings.TrimSpace(c.Query("org"))
+	loginURL, err := auth.GetLoginURL(org, state, codeVerifier)
+	if err != nil {
+		// 未注册/不存在的组织统一文案，不区分两种情况（避免探测）。
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "组织未注册或不存在，请联系平台管理员",
+		})
+		return
+	}
 
 	log.Printf("[Login] Generated: state=%s, redirecting to=%s", state, loginURL)
 
@@ -63,7 +72,7 @@ func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 
 		codeVerifier := session.CodeVerifier
 
-		tokenResp, err := auth.ExchangeCodeForToken(code, codeVerifier)
+		tokenResp, err := auth.ExchangeCodeForToken(session.Org, code, codeVerifier)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
