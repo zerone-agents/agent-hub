@@ -100,7 +100,7 @@ func newTestProvider(store MembershipStore) *CasdoorProvider {
 	p.parseToken = func(string) (*casdoorsdk.User, error) {
 		return nil, errors.New("parseToken 未注入")
 	}
-	p.fetchUser = func(string) (*casdoorsdk.User, error) {
+	p.fetchUser = func(string, string) (*casdoorsdk.User, error) {
 		return nil, errors.New("fetchUser 未注入")
 	}
 	return p
@@ -186,14 +186,17 @@ func TestValidateAccessTokenInvalidLocalRoleGetsEmptyRoles(t *testing.T) {
 }
 
 // IsAdmin=false 的新用户登录：合成 pending 记录并落库，返回空 roles。
+// fetchUser 必须收到用户的 Owner 作为 org（跨组织解析 client 的关键参数）。
 func TestSyncMembershipCreatesPendingForNewUser(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
-	p.fetchUser = func(id string) (*casdoorsdk.User, error) {
+	var gotOrg string
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		gotOrg = org
 		return &casdoorsdk.User{Id: id, Name: "alice", Owner: "org1", IsAdmin: false}, nil
 	}
 
-	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1"})
+	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org1"})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -213,17 +216,20 @@ func TestSyncMembershipCreatesPendingForNewUser(t *testing.T) {
 	if rec.Username != "alice" || rec.TenantID != "org1" {
 		t.Fatalf("快照字段未写入: %+v", rec)
 	}
+	if gotOrg != "org1" {
+		t.Fatalf("fetchUser 收到的 org = %q, want %q（须按用户 Owner 透传）", gotOrg, "org1")
+	}
 }
 
 // IsAdmin=true：合成为 admin/active；再次登录 Op=None（不重复改写角色）。
 func TestSyncMembershipOrgAdminBecomesAdmin(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
-	p.fetchUser = func(id string) (*casdoorsdk.User, error) {
-		return &casdoorsdk.User{Id: id, Name: "root", Owner: "org1", IsAdmin: true}, nil
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		return &casdoorsdk.User{Id: id, Name: "root", Owner: org, IsAdmin: true}, nil
 	}
 
-	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1"})
+	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org1"})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -255,11 +261,11 @@ func TestSyncMembershipOrgAdminBecomesAdmin(t *testing.T) {
 func TestSyncMembershipForbiddenUserErrors(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
-	p.fetchUser = func(id string) (*casdoorsdk.User, error) {
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
 		return &casdoorsdk.User{Id: id, Name: "banned", Owner: "org1", IsForbidden: true}, nil
 	}
 
-	if _, err := p.SyncMembership(&casdoorsdk.User{Id: "id1"}); err == nil {
+	if _, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org1"}); err == nil {
 		t.Fatal("IsForbidden 用户必须返回 error")
 	}
 	if len(store.recs) != 0 || store.applyN != 0 {
@@ -271,7 +277,7 @@ func TestSyncMembershipForbiddenUserErrors(t *testing.T) {
 func TestGetUserIdentityDisabledUserRejected(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
-	p.fetchUser = func(id string) (*casdoorsdk.User, error) {
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
 		return &casdoorsdk.User{Id: id, Name: "banned", Owner: "org1", IsForbidden: true}, nil
 	}
 
@@ -285,8 +291,11 @@ func TestGetUserIdentityDisabledUserRejected(t *testing.T) {
 func TestGetUserIdentityBidirectionalSync(t *testing.T) {
 	store := newFakeMembershipStore()
 	store.seed("casdoor", "id1", authdom.RoleAdmin, authdom.StatusActive)
+	store.recs[storeKey("casdoor", "id1")].TenantID = "org1"
 	p := newTestProvider(store)
-	p.fetchUser = func(id string) (*casdoorsdk.User, error) {
+	var gotOrg string
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		gotOrg = org
 		return &casdoorsdk.User{Id: id, Name: "alice", Owner: "org1", IsAdmin: false}, nil
 	}
 
@@ -304,15 +313,26 @@ func TestGetUserIdentityBidirectionalSync(t *testing.T) {
 	if rec.Role != "" || rec.Status != authdom.StatusPending {
 		t.Fatalf("rec = role %q status %q, want 空/pending（降级落库）", rec.Role, rec.Status)
 	}
+	if gotOrg != "org1" {
+		t.Fatalf("fetchUser 收到的 org = %q, want %q（应取本地记录的 TenantID）", gotOrg, "org1")
+	}
 }
 
-// CLI 身份查询：casdoor 侧查无此人 → (nil, false)。
+// CLI 身份查询：casdoor 侧查无此人 → (nil, false)。无本地记录时 fetchUser
+// 收到空串 org（走全局 client，保持存量行为）。
 func TestGetUserIdentityUnknownUser(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
-	p.fetchUser = func(string) (*casdoorsdk.User, error) { return nil, nil }
+	var gotOrg = "sentinel"
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		gotOrg = org
+		return nil, nil
+	}
 
 	if au, ok := p.GetUserIdentity("ghost"); ok || au != nil {
 		t.Fatalf("unknown user must be rejected, got %+v ok=%v", au, ok)
+	}
+	if gotOrg != "" {
+		t.Fatalf("无本地记录时 fetchUser org = %q, want 空串", gotOrg)
 	}
 }

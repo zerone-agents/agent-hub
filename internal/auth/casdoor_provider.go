@@ -20,9 +20,9 @@ type CasdoorProvider struct {
 	// parseToken 解析 access token 为 casdoor 用户（默认 GetUserInfo，
 	// 走 JWT 解析）。测试可注入假实现，避免构造真 JWT。
 	parseToken func(string) (*casdoorsdk.User, error)
-	// fetchUser 按 user Id 经 Admin API 拉取权威用户数据（默认
-	// GetClient().GetUserByUserId）。测试可注入假实现。
-	fetchUser func(string) (*casdoorsdk.User, error)
+	// fetchUser 按 user Id + 所属组织经 Admin API 拉取权威用户数据（默认
+	// defaultFetchUser，经 ClientForOrg(org) 解析 client）。测试可注入假实现。
+	fetchUser func(userID, org string) (*casdoorsdk.User, error)
 }
 
 // NewCasdoorProvider 构造 CasdoorProvider。store 为本地成员表句柄，
@@ -35,9 +35,11 @@ func NewCasdoorProvider(store MembershipStore) *CasdoorProvider {
 	}
 }
 
-// defaultFetchUser 走 Casdoor Admin API 按 user Id 拉取用户。
-func defaultFetchUser(userID string) (*casdoorsdk.User, error) {
-	c := GetClient()
+// defaultFetchUser 走 Casdoor Admin API 按 user Id 拉取用户。按用户所属组织
+// 解析 client（ClientForOrg，org 空串回落全局 client）：否则 SDK 的
+// GetUserByUserId 会把 owner 固定为全局组织，跨组织用户查不到。
+func defaultFetchUser(userID, org string) (*casdoorsdk.User, error) {
+	c := ClientForOrg(org)
 	if c == nil {
 		return nil, errors.New("casdoor client 未初始化")
 	}
@@ -128,7 +130,9 @@ func (p *CasdoorProvider) SyncMembership(u *casdoorsdk.User) (*AuthUser, error) 
 	if u == nil {
 		return nil, errors.New("casdoor user 为空")
 	}
-	fresh, err := p.fetchUser(u.Id)
+	// 按用户所属组织解析 client（否则 SDK 的 owner 参数固定为全局组织，
+	// 跨组织用户查不到）。
+	fresh, err := p.fetchUser(u.Id, u.Owner)
 	if err != nil {
 		return nil, fmt.Errorf("拉取 casdoor 用户失败: %w", err)
 	}
@@ -155,14 +159,25 @@ func (p *CasdoorProvider) SyncMembership(u *casdoorsdk.User) (*AuthUser, error) 
 // 合成结果有变更（Op≠OpNone）时落库——双向同步（casdoor 组织管理员任免
 // 反映到本地角色）在此生效。bool 为 false 表示用户未知、被禁用或查询失败。
 func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
-	u, err := p.fetchUser(userID)
+	// 先取本地记录，用其 TenantID 按组织解析 client（否则 SDK 的 owner 参数
+	// 固定为全局组织，跨组织用户查不到）；无记录时空串走全局 client，
+	// 保持存量行为。
+	rec, err := p.store.FindByExternalID("casdoor", userID)
+	if err != nil {
+		return nil, false
+	}
+	org := ""
+	if rec != nil {
+		org = rec.TenantID
+	}
+	u, err := p.fetchUser(userID, org)
 	if err != nil || u == nil {
 		return nil, false
 	}
 	if u.IsForbidden {
 		return nil, false
 	}
-	rec, err := p.store.FindByExternalID("casdoor", u.Id)
+	rec, err = p.store.FindByExternalID("casdoor", u.Id)
 	if err != nil {
 		return nil, false
 	}
