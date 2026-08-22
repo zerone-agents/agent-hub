@@ -142,10 +142,13 @@ func (r *ToolRepository) ReplaceAgentTools(agentID uint64, toolIDs []uint64) err
 	return tx.Commit().Error
 }
 
-func (r *ToolRepository) AddToolToAllAgents(toolID uint64) error {
+// AddToolToAllAgents 把工具绑定到租户内全部 agent。agents 无共享行，
+// Pluck 用 TenantOwned（仅本租户），确保绑定目标 agent 与工具同租户。
+func (r *ToolRepository) AddToolToAllAgents(tenantID string, toolID uint64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var agentIDs []uint64
-		if err := tx.Model(&agent.AgentConfig{}).Pluck("id", &agentIDs).Error; err != nil {
+		if err := TenantOwned(tx.Model(&agent.AgentConfig{}), tenantID).
+			Pluck("id", &agentIDs).Error; err != nil {
 			return err
 		}
 		for _, agentID := range agentIDs {
@@ -158,22 +161,29 @@ func (r *ToolRepository) AddToolToAllAgents(toolID uint64) error {
 	})
 }
 
-func (r *ToolRepository) GetDefaultToolIDs() ([]uint64, error) {
+// GetDefaultToolIDs 返回该租户可见的默认工具 ID（本租户 is_default 行 +
+// 共享 is_default 行，TenantWithShared）。
+func (r *ToolRepository) GetDefaultToolIDs(tenantID string) ([]uint64, error) {
 	var ids []uint64
-	err := r.db.Model(&agent.Tool{}).Where("is_default = ?", true).Pluck("id", &ids).Error
+	err := TenantWithShared(r.db.Model(&agent.Tool{}), tenantID).
+		Where("is_default = ?", true).Pluck("id", &ids).Error
 	return ids, err
 }
 
-func (r *ToolRepository) GetDefaultToolNames() ([]string, error) {
+// GetDefaultToolNames 返回该租户可见的默认工具名（本租户 + 共享行）。
+func (r *ToolRepository) GetDefaultToolNames(tenantID string) ([]string, error) {
 	var names []string
-	err := r.db.Model(&agent.Tool{}).Where("is_default = ?", true).Pluck("name", &names).Error
+	err := TenantWithShared(r.db.Model(&agent.Tool{}), tenantID).
+		Where("is_default = ?", true).Pluck("name", &names).Error
 	return names, err
 }
 
-func (r *ToolRepository) BindDefaultToolsToAgent(agentID uint64) error {
+// BindDefaultToolsToAgent 给 agent 绑定该租户可见的默认工具（本租户 + 共享行）。
+func (r *ToolRepository) BindDefaultToolsToAgent(tenantID string, agentID uint64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var toolIDs []uint64
-		if err := tx.Model(&agent.Tool{}).Where("is_default = ?", true).Pluck("id", &toolIDs).Error; err != nil {
+		if err := TenantWithShared(tx.Model(&agent.Tool{}), tenantID).
+			Where("is_default = ?", true).Pluck("id", &toolIDs).Error; err != nil {
 			return err
 		}
 		for _, toolID := range toolIDs {

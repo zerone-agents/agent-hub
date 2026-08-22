@@ -170,7 +170,7 @@ func (s *ToolService) Create(tenantID string, input *CreateToolInput) (*ToolDTO,
 	}
 
 	if input.IsDefault {
-		if err := s.repo.AddToolToAllAgents(t.ID); err != nil {
+		if err := s.repo.AddToolToAllAgents(tenantID, t.ID); err != nil {
 			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
 		}
 	}
@@ -192,7 +192,7 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 	}
 
 	if input.IsDefault != nil && *input.IsDefault && !t.IsDefault {
-		if err := s.repo.AddToolToAllAgents(t.ID); err != nil {
+		if err := s.repo.AddToolToAllAgents(tenantID, t.ID); err != nil {
 			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
 		}
 	}
@@ -229,7 +229,7 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 		return fmt.Errorf("Agent '%s' 不存在", agentName)
 	}
 
-	defaultToolNames, err := s.repo.GetDefaultToolNames()
+	defaultToolNames, err := s.repo.GetDefaultToolNames(tenantID)
 	if err != nil {
 		return fmt.Errorf("获取默认 Tool 失败: %w", err)
 	}

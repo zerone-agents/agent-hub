@@ -3,9 +3,9 @@ package aigc
 import "time"
 
 // Config is the per-tenant AIGC content-labeling configuration
-// (GB 45438-2025): one row per tenant plus a tenant_id=” shared default
-// row that any tenant without its own row falls back to. SigningKeyEncrypted
-// must never be exposed through any API response.
+// (GB 45438-2025): purely one row per tenant — no shared default row and
+// no fallback; a tenant without its own row is unconfigured.
+// SigningKeyEncrypted must never be exposed through any API response.
 type Config struct {
 	ID                  uint64    `json:"-" gorm:"primaryKey;autoIncrement"`
 	TenantID            string    `json:"-" gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tenant_id;index"`
