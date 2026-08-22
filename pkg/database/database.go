@@ -919,17 +919,23 @@ func migrateDropLegacyUkTenantName() error {
 	return nil
 }
 
-// migrateAigcConfigsTenantID 把 aigc_configs 从"id 恒为 1"的单行全局配置
-// 迁到 per-tenant + 共享回退。存量行的 tenant_id 置 ”（共享默认），保持
-// 升级前"全局一份"的行为逐字节等价：任何租户没有自己的行时都读到同一份。
+// migrateAigcConfigsTenantID 把 aigc_configs 的升级遗留 ” 行归属回填租户。
+// ” 行来源：从"id 恒为 1"的单行全局配置时代升级——列以 default:” 加出，
+// 存量全局行落为 ”。方案 A 语义：aigc 标识为纯 per-tenant 配置（无共享
+// 回退），遗留全局行归属回填租户（显式指定或 user_identities 推断出的
+// 唯一租户），与其他业务表的回填语义一致。
 //
-// 一次性置 ” 的幂等保证：列由 AutoMigrate 以 default:” 加出（对齐
-// Task 4/5 的共享哨兵约定），MySQL/SQLite 的 ADD COLUMN ... NOT NULL
-// DEFAULT ” 语义本身就一次性地把全部存量行填为 ”，且后续任何代码路径
-// 都不会再写出 ” 以外的默认值或 NULL。本函数因此只兜底归一异常中间态
-// （手工改库、中断的半迁移）产生的 NULL/不存在值——归一条件永不再命中，
-// 天然幂等。不能按 id=1 或 tenant_id='default' 之类条件 UPDATE：新库中
-// id=1 可能已是某租户自己的行，条件 UPDATE 会把租户行误改成共享行。
+// 碰撞处理：aigc_configs 有 uk_tenant_id 唯一索引，若回填租户已保存自有
+// 行（如 v2.0.0-preupgrade 演练库中租户已配置过标识）且又存在 ” 遗留行，
+// 直接 UPDATE 会撞唯一索引导致启动失败。此时删除 ” 遗留行、保留租户
+// 自有的较新行——遗留共享行是旧全局配置的快照，租户自有行代表其当前
+// 意愿，保留后者。
+//
+// 幂等：首次运行后不再有 ” 行，重跑 no-op。backfillTenantID 为空时交给
+// BackfillTenantID 统一兜底：无 ” 行放行（已迁移完成的正常重启），有 ”
+// 行返回指引性错误（配置一次 CASDOOR_ORGANIZATION 的逃生舱）。
+// NULL 归一为兜底：正常代码路径不会写出 NULL（列 NOT NULL DEFAULT ”），
+// 仅异常中间态（手工改库、中断的半迁移）可能产生，归一后走统一回填。
 func migrateAigcConfigsTenantID() error {
 	if DB == nil {
 		return nil
@@ -941,7 +947,24 @@ func migrateAigcConfigsTenantID() error {
 	if err := DB.Exec("UPDATE aigc_configs SET tenant_id = '' WHERE tenant_id IS NULL").Error; err != nil {
 		return fmt.Errorf("normalize aigc_configs tenant_id: %w", err)
 	}
-	return nil
+	if backfillTenantID != "" {
+		// 碰撞检查：回填租户已有自有行时，'' 遗留行归并会导致唯一索引冲突，
+		// 删除遗留行以保留租户自有配置。
+		var own int64
+		if err := DB.Raw("SELECT COUNT(*) FROM aigc_configs WHERE tenant_id = ?", backfillTenantID).Scan(&own).Error; err != nil {
+			return fmt.Errorf("count aigc_configs rows for backfill tenant %q: %w", backfillTenantID, err)
+		}
+		if own > 0 {
+			res := DB.Exec("DELETE FROM aigc_configs WHERE tenant_id = ''")
+			if res.Error != nil {
+				return fmt.Errorf("drop legacy shared aigc_configs rows: %w", res.Error)
+			}
+			if res.RowsAffected > 0 {
+				log.Printf("Deleted %d legacy shared aigc_configs rows (tenant %q already has its own config)", res.RowsAffected, backfillTenantID)
+			}
+		}
+	}
+	return BackfillTenantID(DB, "aigc_configs")
 }
 
 // BackfillTenantID 把存量行的空 tenant_id 回填为启动租户（幂等：只动空值）。
