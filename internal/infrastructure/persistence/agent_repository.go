@@ -315,10 +315,10 @@ func (r *AgentRepository) RemoveAgentMcpBinding(agentID, mcpServerID uint64) err
 		Delete(&mcp.AgentMcpServer{}).Error
 }
 
-// ListAllForReconcile 列出所有 agent 的 name/状态/runtime_port，供对账使用。
-// 后台对账任务无租户上下文，Kong 路由按 agent ID 全局唯一，显式全量。
+// ListAllForReconcile 列出所有 agent 的 tenant_id/name/状态/runtime_port，供对账使用。
+// 后台对账任务无租户上下文，Kong 实体按 DeployKey(TenantID, Name) 全局唯一，显式全量。
 func (r *AgentRepository) ListAllForReconcile() ([]agent.AgentConfig, error) {
 	var items []agent.AgentConfig
-	err := r.db.Select("id, name, deployment_status, runtime_port").Find(&items).Error
+	err := r.db.Select("id, tenant_id, name, deployment_status, runtime_port").Find(&items).Error
 	return items, err
 }

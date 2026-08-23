@@ -292,7 +292,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// (no-op if the agent was never registered) and avoids serving 502s while
 	// the container is being rebuilt.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name)
+		_ = s.kongSvc.Deregister(ctx, name, "")
 	}
 	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p, tools, skills, subagents, mcpServers)
 	if err != nil {
@@ -411,9 +411,12 @@ func (s *AgentDeployerService) registerWhenHealthy(name string, hostPort int) {
 	var hp int
 	var err error
 	if hp, err = s.WaitForHealthy(ctx, name, 120*time.Second); err == nil {
-		_ = s.kongSvc.Register(ctx, name, hp)
+		// TODO(Task 2): pass the tenant-scoped DeployKey/URLPath instead of
+		// the bare name; this bare-name form is a mechanical adaptation that
+		// preserves pre-Task-2 behavior.
+		_ = s.kongSvc.Register(ctx, name, "/"+name, "", hp)
 	} else if hostPort > 0 {
-		_ = s.kongSvc.Register(ctx, name, hostPort)
+		_ = s.kongSvc.Register(ctx, name, "/"+name, "", hostPort)
 	} else {
 		return
 	}
@@ -534,7 +537,7 @@ func (s *AgentDeployerService) Stop(tenantID, name string) error {
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name)
+		_ = s.kongSvc.Deregister(ctx, name, "")
 	}
 
 	return nil
@@ -551,7 +554,7 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 	ctx := context.Background()
 	// Deregister any existing Kong route before restarting.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name)
+		_ = s.kongSvc.Deregister(ctx, name, "")
 	}
 	if err := s.client.StartAgent(ctx, name); err != nil {
 		return nil, fmt.Errorf("start agent failed: %w", err)
@@ -603,7 +606,7 @@ func (s *AgentDeployerService) deleteWithPurge(tenantID, name string, purge bool
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name)
+		_ = s.kongSvc.Deregister(ctx, name, "")
 	}
 
 	// Update DB status. When archived we keep the record with status=archived so
