@@ -60,6 +60,7 @@ func TestRefreshToken_NeutralErrorMessage(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/auth/refresh", body))
 
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "刷新令牌无效")
 	require.NotContains(t, w.Body.String(), "127.0.0.1")
 	require.NotContains(t, w.Body.String(), "refresh token:")
 	require.NotContains(t, w.Body.String(), "failed to refresh")
