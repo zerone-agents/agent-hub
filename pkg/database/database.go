@@ -241,9 +241,11 @@ func migrateTenantDefaultKeySentinel() error {
 		return nil
 	}
 	if n > 1 {
+		// 子查询套派生表强制物化：MySQL 1093 禁止 UPDATE 的 WHERE 子查询直接
+		// FROM 目标表，派生表可绕过（sqlite 亦兼容，语义不变）。
 		if err := DB.Exec(`UPDATE tenant_oauth_clients SET default_key = NULL
 			WHERE default_key IS NOT NULL
-			AND org != (SELECT MIN(org) FROM tenant_oauth_clients WHERE default_key IS NOT NULL)`).Error; err != nil {
+			AND org != (SELECT min_org FROM (SELECT MIN(org) AS min_org FROM tenant_oauth_clients WHERE default_key IS NOT NULL) dt)`).Error; err != nil {
 			return err
 		}
 		log.Printf("[migrate] tenant_oauth_clients: 检测到 %d 行 default（历史竞态污染），已按 MIN(org) 保留一行", n)
