@@ -288,7 +288,31 @@ func (s *KongGatewayService) LegacyExists(ctx context.Context, bareName string) 
 		return false
 	}
 	_, found, err := s.client.GetService(ctx, svcName(bareName))
-	return err == nil && found
+	if err != nil {
+		s.logger.Printf("kong: legacy service probe for %s failed: %v", bareName, err)
+		return false
+	}
+	return found
+}
+
+// LegacyRouteExists reports whether the legacy compatibility route
+// (routeName(key)+"-legacy") for the given scoped deploy key exists in Kong.
+// It is the second legacy probe: after the first redeploy the bare-name
+// service is gone (the pre-clean deleted it), but the mounted "-legacy" route
+// survives as proof that this agent opted into compatibility, so the deploy
+// flow can keep re-mounting it on subsequent redeploys — until the route is
+// removed by hand.
+func (s *KongGatewayService) LegacyRouteExists(ctx context.Context, key string) bool {
+	if !s.enabled() || !agentNameRe.MatchString(key) {
+		return false
+	}
+	rn := routeName(key) + "-legacy"
+	_, found, err := s.client.GetRoute(ctx, rn)
+	if err != nil {
+		s.logger.Printf("kong: legacy route probe for %s failed: %v", rn, err)
+		return false
+	}
+	return found
 }
 
 // RegisterWithLegacy ensures the scoped service/route exist (delegating to

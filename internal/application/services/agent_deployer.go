@@ -304,14 +304,11 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, err
 	}
 
-	// D-1 legacy timing: record whether the pre-upgrade bare-name Kong service
-	// exists BEFORE the pre-clean Deregister below deletes it, so the later
-	// Register (in registerWhenHealthy) can still mount the "/<bare>"
-	// compatibility route.
-	legacyBare := ""
-	if s.kongSvc != nil && s.kongSvc.LegacyExists(ctx, name) {
-		legacyBare = name
-	}
+	// D-1 legacy timing: record whether a legacy compatibility entity exists
+	// BEFORE the pre-clean Deregister below deletes it, so the later Register
+	// (in registerWhenHealthy) can still mount the "/<bare>" compatibility
+	// route.
+	legacyBare := s.legacyBareFor(ctx, tenantID, name)
 
 	// Deregister any existing Kong route before recreating (scoped entities
 	// plus the old bare-name entities of this agent). This is idempotent
@@ -426,6 +423,28 @@ func generateRuntimeToken() (string, error) {
 		return "", fmt.Errorf("generate runtime token: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// legacyBareFor reports the bare agent name whose legacy compatibility route
+// should survive this deploy/start cycle, or "" when none applies. Two probes
+// count, both run BEFORE the pre-clean Deregister that deletes the entities:
+//
+//  1. the pre-upgrade bare-name Kong service still exists (fresh upgrade); or
+//  2. a "<scoped-key>-legacy" route is already mounted — after the first
+//     redeploy the bare service is gone, but that route proves the agent
+//     opted into compatibility, so it is re-mounted every redeploy until it
+//     is removed by hand (runbook step 3).
+func (s *AgentDeployerService) legacyBareFor(ctx context.Context, tenantID, name string) string {
+	if s.kongSvc == nil {
+		return ""
+	}
+	if s.kongSvc.LegacyExists(ctx, name) {
+		return name
+	}
+	if s.kongSvc.LegacyRouteExists(ctx, DeployKey(tenantID, name)) {
+		return name
+	}
+	return ""
 }
 
 // registerWhenHealthy waits for the agent to become healthy and then registers
@@ -594,12 +613,9 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 
 	ctx := context.Background()
 	key := DeployKey(tenantID, name)
-	// D-1: record any pre-upgrade bare-name Kong entity before the pre-clean
+	// D-1: record any legacy compatibility entity before the pre-clean
 	// Deregister deletes it, so the restart can re-mount the legacy route.
-	legacyBare := ""
-	if s.kongSvc != nil && s.kongSvc.LegacyExists(ctx, name) {
-		legacyBare = name
-	}
+	legacyBare := s.legacyBareFor(ctx, tenantID, name)
 	// Deregister any existing Kong route before restarting.
 	if s.kongSvc != nil {
 		_ = s.kongSvc.Deregister(ctx, key, name)

@@ -317,6 +317,35 @@ func TestLegacyExists(t *testing.T) {
 	}
 }
 
+// TestLegacyRouteExists covers the second legacy probe: after the first
+// redeploy the bare-name entities are gone, but the mounted "<key>-legacy"
+// route is the surviving proof that this agent opted into compatibility, so
+// the deploy flow can keep re-mounting it on subsequent redeploys.
+func TestLegacyRouteExists(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo(nil)
+	s := newKongService(fk, repo)
+
+	if s.LegacyRouteExists(context.Background(), "zerone-assistant") {
+		t.Error("expected LegacyRouteExists(zerone-assistant) = false before any registration")
+	}
+
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.LegacyRouteExists(context.Background(), "zerone-assistant") {
+		t.Error("expected LegacyRouteExists(zerone-assistant) = true after forced mount")
+	}
+	if s.LegacyRouteExists(context.Background(), "zerone-other") {
+		t.Error("expected LegacyRouteExists(zerone-other) = false")
+	}
+
+	disabled := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60)
+	if disabled.LegacyRouteExists(context.Background(), "zerone-assistant") {
+		t.Error("disabled service should report false")
+	}
+}
+
 // TestRegisterWithLegacy_MountsDespiteMissingBareService covers the D-1
 // timing: the deploy flow records legacy existence BEFORE its pre-clean
 // Deregister deletes the bare entities, so the forced mount must not depend on

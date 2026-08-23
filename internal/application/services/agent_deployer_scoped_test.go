@@ -386,6 +386,57 @@ func TestRegisterWhenHealthy_NoLegacyRouteWhenNotRecorded(t *testing.T) {
 	}
 }
 
+// TestLegacyBareFor_LegacyRouteOnly covers the redeploy scenario (I-1): after
+// the first redeploy the bare-name Kong entities no longer exist (the first
+// pre-clean deleted them), but the "<key>-legacy" route mounted by that
+// redeploy is still there. The deploy flow must still pass legacyBare so
+// registerWhenHealthy re-mounts the route and the old URL survives until it
+// is removed by hand.
+func TestLegacyBareFor_LegacyRouteOnly(t *testing.T) {
+	fk := newFakeKong()
+	fk.routes["agent-tenant-a-general-route-legacy"] = &kong.Route{
+		ID:    "legacy-route-id",
+		Name:  "agent-tenant-a-general-route-legacy",
+		Paths: []string{"/general"},
+	}
+	s := &AgentDeployerService{
+		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+
+	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "general" {
+		t.Fatalf("legacyBareFor = %q, want %q (legacy route present, bare service gone)", got, "general")
+	}
+}
+
+// TestLegacyBareFor_BareServiceStillThere covers the fresh-upgrade scenario:
+// the pre-upgrade bare-name service exists, so the first redeploy detects it
+// via the bare probe.
+func TestLegacyBareFor_BareServiceStillThere(t *testing.T) {
+	fk := newFakeKong()
+	fk.services["agent-general"] = &kong.Service{ID: "legacy-id", Name: "agent-general", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
+	s := &AgentDeployerService{
+		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+
+	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "general" {
+		t.Fatalf("legacyBareFor = %q, want %q (bare service present)", got, "general")
+	}
+}
+
+// TestLegacyBareFor_None asserts no legacy mount is requested when neither the
+// bare-name service nor a "-legacy" route exists (never opted in, or the
+// legacy route was already manually decommissioned).
+func TestLegacyBareFor_None(t *testing.T) {
+	fk := newFakeKong()
+	s := &AgentDeployerService{
+		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+
+	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "" {
+		t.Fatalf("legacyBareFor = %q, want empty (no legacy entity anywhere)", got)
+	}
+}
+
 // TestWaitForHealthy_UsesScopedKey is a smoke check that WaitForHealthy (used
 // by registerWhenHealthy with the scoped key) addresses the deployer with the
 // scoped key.
