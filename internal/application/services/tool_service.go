@@ -39,6 +39,15 @@ var presetToolSpecs = []presetToolSpec{
 	{agent.Tool{Name: "Edit", Title: "编辑文件", Description: "对文件执行精确的字符串替换，支持多行匹配", IsDefault: false}, false},
 	{agent.Tool{Name: "Glob", Title: "搜索文件", Description: "按 glob 模式匹配查找文件，支持递归搜索", IsDefault: false}, false},
 	{agent.Tool{Name: "Grep", Title: "搜索内容", Description: "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行", IsDefault: false}, false},
+	{agent.Tool{Name: "WebFetch", Title: "获取网页", Description: "从 URL 获取内容并返回文本。支持 HTML 页面、JSON API 和普通文本，自动去除 HTML 标签以便阅读。", IsDefault: false}, false},
+	{agent.Tool{Name: "WebSearch", Title: "网络搜索", Description: "使用 Exa AI 搜索实时网络信息，返回标题、URL 和摘要。适用于当前事件、最新数据或知识截止日期之后的信息。", IsDefault: false}, false},
+	{agent.Tool{Name: "AskUserQuestion", Title: "用户提问", Description: "向用户提出问题并要求选择答案，支持单选和多选，适用于需要用户做决策的场景。", IsDefault: false}, false},
+	{agent.Tool{Name: "CronCreate", Title: "创建定时任务", Description: "创建定时任务，支持周期性任务（cron 表达式）和一次性任务（延迟秒数）。", IsDefault: false}, false},
+	{agent.Tool{Name: "CronDelete", Title: "删除定时任务", Description: "删除一个已创建的定时任务。", IsDefault: false}, false},
+	{agent.Tool{Name: "CronList", Title: "列出定时任务", Description: "列出所有已创建的定时任务。", IsDefault: false}, false},
+	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", IsDefault: false}, false},
+	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", IsDefault: false}, false},
+	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", IsDefault: false}, false},
 }
 
 func init() {
