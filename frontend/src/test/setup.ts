@@ -1,6 +1,39 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { isReactTeardownFlake } from './reactTeardownFlake'
+
+// Deterministic backstop for the react-dom teardown flake — installed EARLY,
+// before anything else. The afterEach drain below remains the primary hygiene
+// mechanism; this listener wrapping covers the "late long timer" path the
+// drain cannot reach (a component's real timer, e.g. antd animation ~500ms,
+// firing after the drain and after vitest tore down the per-file jsdom env).
+//
+// Why removeAllListeners then re-add: vitest installs its own
+// uncaughtException/unhandledRejection listeners BEFORE this setup file runs.
+// To guarantee our forwarder sees the error FIRST (and can drop it without
+// vitest ever recording it), we must take over the head of the listener list:
+// remove all existing listeners, install ours, and re-attach the originals
+// behind it. Errors NOT matching the strict triple-condition predicate are
+// forwarded to the original listeners unchanged, so vitest's normal failure
+// collection is unaffected. Leak surface: only errors that are (a)
+// ReferenceError, (b) message exactly 'window is not defined', and (c) thrown
+// while `window` is already gone get swallowed — nothing else.
+function forwardFiltered(event: 'uncaughtException' | 'unhandledRejection') {
+  const existing = process.listeners(event)
+  process.removeAllListeners(event)
+  process.on(event, (err: unknown, payload?: unknown) => {
+    if (isReactTeardownFlake(err)) return
+    existing.forEach((h) => {
+      // Captured listeners are typed per-event (UncaughtExceptionOrigin vs
+      // Promise); forward through a generic signature since we mirror the
+      // runtime arguments verbatim.
+      ;(h as (...args: unknown[]) => void).call(process, err, payload)
+    })
+  })
+}
+forwardFiltered('uncaughtException')
+forwardFiltered('unhandledRejection')
 
 // Unmount React components after each test to avoid leaks, then drain React's
 // scheduled work before vitest tears down the per-file jsdom environment.
