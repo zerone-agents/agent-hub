@@ -2,16 +2,19 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"control-panel/internal/config"
 
@@ -265,69 +268,63 @@ type TokenResponse struct {
 	IdToken      string `json:"id_token"`
 }
 
+// tokenResponseFrom 把 oauth2.Token 折回既有 TokenResponse（对外 JSON 形状不变）。
+// expiresIn 从 Expiry 折算；id_token 经 Extra 透传。
+func tokenResponseFrom(tok *oauth2.Token) (*TokenResponse, error) {
+	if tok.AccessToken == "" {
+		return nil, errors.New("access token is empty in response")
+	}
+	expiresIn := 0
+	if d := time.Until(tok.Expiry); d > 0 {
+		expiresIn = int(d.Seconds())
+	}
+	resp := &TokenResponse{
+		AccessToken:  tok.AccessToken,
+		TokenType:    tok.TokenType,
+		ExpiresIn:    expiresIn,
+		RefreshToken: tok.RefreshToken,
+	}
+	if idToken, ok := tok.Extra("id_token").(string); ok {
+		resp.IdToken = idToken
+	}
+	return resp, nil
+}
+
+// casdoorFakeSuccessError 提取 Casdoor 伪成功（200 + access_token 字面
+// "error: xxx"）的真实错误信息。SDK auth.go:104 同款守卫——Casdoor 部分
+// 错误路径返回 200，body 的 access_token 字段是 "error: <描述>"。
+func casdoorFakeSuccessError(accessToken string) error {
+	if strings.HasPrefix(accessToken, "error:") {
+		return errors.New(strings.TrimSpace(strings.TrimPrefix(accessToken, "error:")))
+	}
+	return nil
+}
+
 // ExchangeCodeForToken exchanges an authorization code for tokens using the
-// OAuth client resolved for org.
+// OAuth client resolved for org（x/oauth2 迁移，issue #49）。
 func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error) {
 	creds, err := resolveClientCreds(org)
 	if err != nil {
 		return nil, err
 	}
-	callbackURL := GetCallbackURL()
-
-	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
-
-	data := map[string]string{
-		"grant_type":    "authorization_code",
-		"code":          code,
-		"client_id":     creds.ClientID,
-		"client_secret": creds.ClientSecret,
-		"callback_url":  callbackURL,
-	}
-
+	cfg := oauthConfig(creds, "") // 兑换不发 redirect_uri（见 oauthConfig 注释）
+	opts := []oauth2.AuthCodeOption{}
 	if codeVerifier != "" {
-		data["code_verifier"] = codeVerifier
+		opts = append(opts, oauth2.VerifierOption(codeVerifier))
 	}
-
-	jsonData, err := json.Marshal(data)
+	tok, err := cfg.Exchange(context.Background(), code, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	resp, err := http.Post(tokenURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
+		// *oauth2.RetrieveError 结构化携带 OAuth 标准错误体（issue #49 的核心收益）
+		var re *oauth2.RetrieveError
+		if errors.As(err, &re) {
+			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+		}
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if ferr := casdoorFakeSuccessError(tok.AccessToken); ferr != nil {
+		return nil, ferr
 	}
-
-	// 记录调试信息：不打印响应体原文（含 access/refresh token），只打状态码 + 长度
-	log.Printf("Token exchange response status: %d, body length: %d", resp.StatusCode, len(body))
-
-	if resp.StatusCode != http.StatusOK {
-		// 只提取非敏感的错误字段，避免完整响应体（可能含凭据）进入日志/错误消息
-		var errorResp map[string]interface{}
-		if err := json.Unmarshal(body, &errorResp); err == nil {
-			if msg, ok := errorResp["error"]; ok {
-				return nil, fmt.Errorf("casdoor error: %v", msg)
-			}
-		}
-		return nil, fmt.Errorf("token exchange failed with status %d (body length %d)", resp.StatusCode, len(body))
-	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
-	}
-
-	if tokenResp.AccessToken == "" {
-		return nil, fmt.Errorf("access token is empty in response")
-	}
-
-	return &tokenResp, nil
+	return tokenResponseFrom(tok)
 }
 
 // GetUserInfo extracts and validates user information from an access token.
