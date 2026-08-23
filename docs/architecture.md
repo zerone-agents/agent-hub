@@ -44,10 +44,10 @@ flowchart TB
     CLI -->|"cli token<br/>REST /api/v1/admin/*"| BE
 
     AgentHost -->|"SDK: pull manifest / provider / skill / MCP"| BE
-    AgentHost -->|"SDK: chat stream<br/>POST /v1/agents/{name}/runs"| Runtime
+    AgentHost -->|"SDK: chat stream<br/>POST /v1/agents/{org}-{name}/runs<br/>(tenant-scoped key; bare name for subagents)"| Runtime
     AgentHost -->|"sync session<br/>POST /api/v1/chat/push"| BE
 
-    BE -->|"Agent Chatbox proxy<br/>SSE /v1/agents/{name}/runs"| Runtime
+    BE -->|"Agent Chatbox proxy<br/>SSE /v1/agents/{org}-{name}/runs"| Runtime
     BE -->|"GORM SQL"| MySQL
     BE -->|"skill files / presigned URL"| CloudOSS
     BE -->|"OAuth 2.0 + PKCE"| Casdoor
@@ -78,6 +78,12 @@ flowchart TB
     style External fill:#f3f0ff,stroke:#9775fa,stroke-width:2px
     style Note fill:#fff9db,stroke:#ffd43b
 ```
+
+## Multi-Tenancy, Multi-Org Login & Ops API
+
+- **Tenant = Casdoor org** (casdoor mode) / `default` (builtin mode). Business tables carry a `tenant_id` column; roles are managed locally in `user_identities` (Casdoor only provides identity).
+- **Multi-org login**: a second and subsequent org can log in through its own Casdoor Application, registered via the Ops API (`/api/v1/ops/tenant-clients`, guarded by the `X-Ops-Key` header). See configuration.md for the runbook.
+- **Tenant-scoped deployment keys**: runtime URL `/<org>/<name>`, Kong/deployer key `<org>-<name>`; the hub chat proxy addresses runtimes by qualified name (`/v1/agents/<org>-<name>`, bare name → 404 except subagents). Upgrades from bare-name deployments automatically mount a `-legacy` compatibility route on Kong (see configuration.md).
 
 ## Recommended Configuration for Single-ECS Deployment
 
@@ -118,22 +124,27 @@ flowchart TB
 .
 ├── cmd/server/              # Entry point (route registration + DI + embedded SPA static assets)
 ├── internal/
-│   ├── domain/              # Domain models (tenant / agent / skill / provider / scene / chat)
+│   ├── domain/              # Domain models: agent / aigc / auth (user_identities, tenant_oauth_clients,
+│   │                        #   cli_tokens, invites, refresh_tokens, users) / chat / knowledge / mcp /
+│   │                        #   provider / scene / skill / tenant (context.go only)
 │   ├── application/services/ # Business services + input validators
 │   ├── infrastructure/
 │   │   ├── persistence/     # GORM Repository
 │   │   └── oss/             # OSS client wrapper
 │   ├── handler/             # Gin HTTP Handler + ServiceRouter reverse proxy
-│   ├── middleware/          # JWTAuth / RequireAdmin / Logger / Recovery / CORS
-│   ├── auth/                # Casdoor OAuth + PKCE
+│   ├── middleware/          # JWTAuth / RequireAdmin / RequireManager / tenant / role / ops_key / Logger / Recovery / CORS
+│   ├── auth/                # AuthProvider (builtin user system + Casdoor OAuth + PKCE), multi-org login,
+│   │                        #   local role management (user_identities)
 │   └── config/              # Viper configuration
 ├── pkg/
 │   ├── database/            # GORM initialization + AutoMigrate
 │   └── oss/                 # S3 / MinIO upload interface
 ├── frontend/                # React SPA (build artifacts embedded into the binary)
-├── docker-compose.yaml      # Local dependencies (MySQL / MinIO / Casdoor / App)
+├── quickstart/
+│   ├── docker-compose.yml   # Quick Start (MySQL + hub image, builtin auth mode)
+│   └── docker-compose.build.yml # Overlay for building the hub image from source
 ├── Dockerfile               # Multi-stage build
-└── .gitlab-ci.yml           # CI pipeline
+└── .github/workflows/       # GitHub Actions (ci.yml / release.yml / cli-publish.yml)
 ```
 
 ### DDD Layering Conventions

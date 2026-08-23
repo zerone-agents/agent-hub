@@ -44,6 +44,8 @@ cat docs/casdoor-login.css | pbcopy
 
 Then go to the "Form CSS" field: **Select all → Clear → Paste → Save**.
 
+> 多组织形态下，每个组织各自创建的 Casdoor Application 都需要分别粘贴同一份 Form CSS 与 Footer HTML（应用级配置不跨组织共享），否则该组织的登录页会退回默认样式。
+
 ### 3. Logo and Footer Images
 
 - **Panel Logo**: Application edit page → Basics Tab → "Logo" field, fill in the OSS URL (see table above)
