@@ -231,7 +231,7 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 //
 // The base URL is Kong-aware: when Kong gateway is enabled, deployerSvc.toDTO
 // has already populated RuntimeURL with the gateway route (e.g.
-// "https://agents.example.com/pharmaceutical"). The runtime client appends
+// "https://agents.example.com/zerone/pharmaceutical"). The runtime client appends
 // /v1/agents/{name}/runs to this base; Kong's StripPath strips the
 // agent-name prefix and forwards the canonical runtime API path to the
 // container. When Kong is not configured, RuntimeURL falls back to a

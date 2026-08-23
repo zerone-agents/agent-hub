@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"control-panel/internal/domain/agent"
@@ -47,6 +48,42 @@ const (
 )
 
 var agentNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// pathRe validates a public route path: at least two segments of the form
+// "/<org>/<name>" (extra segments allowed), each segment lowercase-alnum-led
+// and may contain hyphens — matching both agentNameRe and the defensive
+// orgSlug folding, which can produce hyphenated orgs for legacy tenant rows
+// (registration-side validation restricts new orgs further). Since Task 2
+// every caller passes URLPath(tenantID, name); single-segment bare-name paths
+// are rejected so no route can claim a cross-tenant bare path.
+var pathRe = regexp.MustCompile(`^/[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+$`)
+
+// orgSlugRe folds any run of non-alphanumeric characters into a single "-".
+var orgSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// orgSlug defensively normalizes a tenant/org identifier for use in entity
+// names and URL segments: lowercase, non-alphanumeric runs folded to "-",
+// leading/trailing "-" trimmed. Registration-side validation already restricts
+// orgs to ^[a-z][a-z0-9]{0,62}$ (Task 3); this is a safety net for legacy rows.
+func orgSlug(tenantID string) string {
+	s := strings.ToLower(tenantID)
+	s = orgSlugRe.ReplaceAllString(s, "-")
+	return strings.Trim(s, "-")
+}
+
+// DeployKey returns the tenant-scoped deployment key for an agent:
+// "<org>-<NormalizeAgentName(name)>". The key names Kong service/route
+// entities (via svcName/routeName) and deployer containers, decoupling them
+// from the DB bare name so same-name agents across tenants no longer collide.
+func DeployKey(tenantID, agentName string) string {
+	return orgSlug(tenantID) + "-" + NormalizeAgentName(agentName)
+}
+
+// URLPath returns the public URL path segment for an agent:
+// "/<org>/<NormalizeAgentName(name)>".
+func URLPath(tenantID, agentName string) string {
+	return "/" + orgSlug(tenantID) + "/" + NormalizeAgentName(agentName)
+}
 
 // kongAgentRepo is the minimal repository surface needed by KongGatewayService.
 // *repository.AgentRepository implements this interface.
@@ -116,13 +153,14 @@ func serviceFor(name, host string, port int, tags []string) *kong.Service {
 
 // routeFor builds a Kong Route for an agent runtime, disabling request and
 // response buffering so SSE streams flow through end-to-end without Kong
-// materializing the full body.
-func routeFor(agentName, routeHost string, svc *kong.ServiceRef, tags []string) *kong.Route {
+// materializing the full body. paths is the public path set (usually the
+// tenant-scoped URLPath).
+func routeFor(key, routeHost string, paths []string, svc *kong.ServiceRef, tags []string) *kong.Route {
 	falseRef := false
 	return &kong.Route{
-		Name:              routeName(agentName),
+		Name:              routeName(key),
 		Hosts:             []string{routeHost},
-		Paths:             []string{"/" + agentName},
+		Paths:             paths,
 		StripPath:         true,
 		RequestBuffering:  &falseRef,
 		ResponseBuffering: &falseRef,
@@ -131,29 +169,45 @@ func routeFor(agentName, routeHost string, svc *kong.ServiceRef, tags []string) 
 	}
 }
 
-// RouteURL returns the public URL for an agent's route, or empty if not configured.
-func (s *KongGatewayService) RouteURL(agentName string) string {
+// RouteURL returns the public URL for a route path segment, or empty if not
+// configured. publicPath is a full path segment (e.g. "/zerone/assistant");
+// a missing leading "/" is tolerated and auto-fixed.
+func (s *KongGatewayService) RouteURL(publicPath string) string {
 	if s == nil || s.routeHost == "" {
 		return ""
 	}
-	return fmt.Sprintf("https://%s/%s", s.routeHost, agentName)
+	if !strings.HasPrefix(publicPath, "/") {
+		publicPath = "/" + publicPath
+	}
+	return fmt.Sprintf("https://%s%s", s.routeHost, publicPath)
 }
 
-// Register ensures a Kong Service and Route exist for the agent, pointing to
-// the given upstream port. The operation is idempotent (upsert). Errors are
-// logged but not returned so that gateway failures do not block agent
-// deployment.
-func (s *KongGatewayService) Register(ctx context.Context, agentName string, hostPort int) error {
+// Register ensures a Kong Service and Route exist for the deployment key,
+// pointing to the given upstream port, with the route matching publicPath.
+// When legacyBare is non-empty and a pre-existing bare-name service
+// (svcName(legacyBare)) is found in Kong, an additional legacy route
+// (routeName(key)+"-legacy", Paths=["/"+legacyBare]) is attached to the new
+// service so old "/<bare>" URLs keep working until decommissioned. The
+// operation is idempotent (upsert). Errors are logged but not returned so
+// that gateway failures do not block agent deployment.
+func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, legacyBare string, hostPort int) error {
 	if !s.enabled() {
 		return nil
 	}
-	if !agentNameRe.MatchString(agentName) {
-		s.logger.Printf("kong: skip register, invalid agent name %q", agentName)
+	if !agentNameRe.MatchString(key) {
+		s.logger.Printf("kong: skip register, invalid deploy key %q", key)
+		return nil
+	}
+	if !strings.HasPrefix(publicPath, "/") {
+		publicPath = "/" + publicPath
+	}
+	if !pathRe.MatchString(publicPath) {
+		s.logger.Printf("kong: skip register %s, invalid public path %q", key, publicPath)
 		return nil
 	}
 
-	sn, rn := svcName(agentName), routeName(agentName)
-	tags := tagsFor(agentName)
+	sn, rn := svcName(key), routeName(key)
+	tags := tagsFor(key)
 	want := serviceFor(sn, s.serviceHost, hostPort, tags)
 
 	existing, found, err := s.client.GetService(ctx, sn)
@@ -176,7 +230,7 @@ func (s *KongGatewayService) Register(ctx context.Context, agentName string, hos
 		svcID = existing.ID
 	}
 
-	wantRoute := routeFor(agentName, s.routeHost, &kong.ServiceRef{ID: svcID}, tags)
+	wantRoute := routeFor(key, s.routeHost, []string{publicPath}, &kong.ServiceRef{ID: svcID}, tags)
 	if _, rFound, err := s.client.GetRoute(ctx, rn); err != nil {
 		s.logger.Printf("kong: get route %s failed: %v", rn, err)
 	} else if !rFound {
@@ -189,41 +243,155 @@ func (s *KongGatewayService) Register(ctx context.Context, agentName string, hos
 		}
 	}
 
+	// Legacy compatibility fallback: only mount the "/<bare>" route when the
+	// old bare-name service actually exists; otherwise we would be claiming a
+	// cross-tenant bare path that was never ours. Callers that recorded the
+	// legacy entity before deleting it (see RegisterWithLegacy) bypass this
+	// probe.
+	if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
+		if _, legacyFound, err := s.client.GetService(ctx, svcName(legacyBare)); err != nil {
+			s.logger.Printf("kong: get legacy service %s failed: %v", svcName(legacyBare), err)
+		} else if legacyFound {
+			s.ensureLegacyRoute(ctx, key, legacyBare, svcID, tags)
+		}
+	}
+
 	return nil
 }
 
-// UpdateUpstream updates the upstream host and port for an existing agent. This
-// is used when the agent's runtime host or port changes.
-func (s *KongGatewayService) UpdateUpstream(ctx context.Context, agentName string, hostPort int) error {
+// ensureLegacyRoute upserts the "/<bare>" legacy route (routeName(key)+"-legacy")
+// attached to the given scoped service. It is the shared mount path for both
+// Register's probe fallback and RegisterWithLegacy's forced mount.
+func (s *KongGatewayService) ensureLegacyRoute(ctx context.Context, key, legacyBare, svcID string, tags []string) {
+	legacyRouteName := routeName(key) + "-legacy"
+	wantLegacy := routeFor(key, s.routeHost, []string{"/" + legacyBare}, &kong.ServiceRef{ID: svcID}, tags)
+	wantLegacy.Name = legacyRouteName
+	if _, lFound, err := s.client.GetRoute(ctx, legacyRouteName); err != nil {
+		s.logger.Printf("kong: get legacy route %s failed: %v", legacyRouteName, err)
+	} else if !lFound {
+		if _, err := s.client.CreateRoute(ctx, wantLegacy); err != nil {
+			s.logger.Printf("kong: create legacy route %s failed: %v", legacyRouteName, err)
+		}
+	} else {
+		if _, err := s.client.UpdateRoute(ctx, legacyRouteName, wantLegacy); err != nil {
+			s.logger.Printf("kong: update legacy route %s failed: %v", legacyRouteName, err)
+		}
+	}
+}
+
+// LegacyExists reports whether an old bare-name service (svcName(bareName))
+// exists in Kong. The deploy flow records this BEFORE its pre-clean Deregister
+// (which deletes the bare entities), so registerWhenHealthy can still mount
+// the legacy compatibility route for pre-upgrade agents.
+func (s *KongGatewayService) LegacyExists(ctx context.Context, bareName string) bool {
+	if !s.enabled() || !agentNameRe.MatchString(bareName) {
+		return false
+	}
+	_, found, err := s.client.GetService(ctx, svcName(bareName))
+	if err != nil {
+		s.logger.Printf("kong: legacy service probe for %s failed: %v", bareName, err)
+		return false
+	}
+	return found
+}
+
+// LegacyRouteExists reports whether the legacy compatibility route
+// (routeName(key)+"-legacy") for the given scoped deploy key exists in Kong.
+// It is the second legacy probe: after the first redeploy the bare-name
+// service is gone (the pre-clean deleted it), but the mounted "-legacy" route
+// survives as proof that this agent opted into compatibility, so the deploy
+// flow can keep re-mounting it on subsequent redeploys — until the route is
+// removed by hand.
+func (s *KongGatewayService) LegacyRouteExists(ctx context.Context, key string) bool {
+	if !s.enabled() || !agentNameRe.MatchString(key) {
+		return false
+	}
+	rn := routeName(key) + "-legacy"
+	_, found, err := s.client.GetRoute(ctx, rn)
+	if err != nil {
+		s.logger.Printf("kong: legacy route probe for %s failed: %v", rn, err)
+		return false
+	}
+	return found
+}
+
+// RegisterWithLegacy ensures the scoped service/route exist (delegating to
+// Register) and then mounts the "/<legacyBare>" legacy route unconditionally.
+// It exists for the D-1 timing: by the time registerWhenHealthy runs after a
+// redeploy, the pre-clean Deregister has already deleted the bare entities, so
+// Register's internal probe would never fire; the caller passes legacyBare
+// only when it recorded the bare entity existing before the pre-clean.
+func (s *KongGatewayService) RegisterWithLegacy(ctx context.Context, key, publicPath, legacyBare string, hostPort int) error {
 	if !s.enabled() {
 		return nil
 	}
-	if !agentNameRe.MatchString(agentName) {
+	if err := s.Register(ctx, key, publicPath, "", hostPort); err != nil {
+		return err
+	}
+	if legacyBare == "" || !agentNameRe.MatchString(legacyBare) {
 		return nil
 	}
-	want := serviceFor(svcName(agentName), s.serviceHost, hostPort, tagsFor(agentName))
-	if _, err := s.client.UpdateService(ctx, svcName(agentName), want); err != nil {
-		s.logger.Printf("kong: update upstream for %s failed: %v", agentName, err)
+	svc, found, err := s.client.GetService(ctx, svcName(key))
+	if err != nil || !found {
+		return nil
+	}
+	s.ensureLegacyRoute(ctx, key, legacyBare, svc.ID, tagsFor(key))
+	return nil
+}
+
+// UpdateUpstream updates the upstream host and port for an existing deployment
+// key. This is used when the agent's runtime host or port changes.
+func (s *KongGatewayService) UpdateUpstream(ctx context.Context, key string, hostPort int) error {
+	if !s.enabled() {
+		return nil
+	}
+	if !agentNameRe.MatchString(key) {
+		return nil
+	}
+	want := serviceFor(svcName(key), s.serviceHost, hostPort, tagsFor(key))
+	if _, err := s.client.UpdateService(ctx, svcName(key), want); err != nil {
+		s.logger.Printf("kong: update upstream for %s failed: %v", key, err)
 	}
 	return nil
 }
 
-// Deregister idempotently removes the Kong Route and Service for an agent.
-// The route is deleted first to avoid foreign-key violations on Kong backends
-// that do not cascade service deletes to attached routes.
-func (s *KongGatewayService) Deregister(ctx context.Context, agentName string) error {
+// Deregister idempotently removes the Kong Route and Service for a deployment
+// key. The route is deleted first to avoid foreign-key violations on Kong
+// backends that do not cascade service deletes to attached routes. When
+// legacyBare is non-empty and its old bare-name entities still exist, they are
+// removed as well.
+func (s *KongGatewayService) Deregister(ctx context.Context, key, legacyBare string) error {
 	if !s.enabled() {
 		return nil
 	}
-	if !agentNameRe.MatchString(agentName) {
+	if !agentNameRe.MatchString(key) {
 		return nil
 	}
-	sn, rn := svcName(agentName), routeName(agentName)
+	sn, rn := svcName(key), routeName(key)
+	// Delete the scoped legacy route explicitly (Kong usually cascades
+	// service deletes to routes, but being explicit keeps this idempotent
+	// on backends that do not).
+	if err := s.client.DeleteRoute(ctx, rn+"-legacy"); err != nil {
+		s.logger.Printf("kong: delete legacy route %s failed: %v", rn+"-legacy", err)
+	}
 	if err := s.client.DeleteRoute(ctx, rn); err != nil {
 		s.logger.Printf("kong: delete route %s failed: %v", rn, err)
 	}
 	if err := s.client.DeleteService(ctx, sn); err != nil {
-		s.logger.Printf("kong: deregister %s failed: %v", agentName, err)
+		s.logger.Printf("kong: deregister %s failed: %v", key, err)
+	}
+	if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
+		if _, found, err := s.client.GetService(ctx, svcName(legacyBare)); err != nil {
+			s.logger.Printf("kong: get legacy service %s failed: %v", svcName(legacyBare), err)
+		} else if found {
+			legacySn, legacyRn := svcName(legacyBare), routeName(legacyBare)
+			if err := s.client.DeleteRoute(ctx, legacyRn); err != nil {
+				s.logger.Printf("kong: delete legacy route %s failed: %v", legacyRn, err)
+			}
+			if err := s.client.DeleteService(ctx, legacySn); err != nil {
+				s.logger.Printf("kong: delete legacy service %s failed: %v", legacySn, err)
+			}
+		}
 	}
 	return nil
 }
@@ -243,8 +411,11 @@ func agentNameFromService(svcName string) string {
 	return svcName
 }
 
-// Reconcile aligns Kong state with DB state. It returns the number of fixes
-// applied.
+// Reconcile aligns Kong state with DB state. Agents are keyed by their
+// tenant-scoped deploy key (DeployKey(TenantID, Name)); Kong-side entities are
+// matched back via the "agent:<key>" service tags (parsing entity names back
+// into (tenant, name) is unreliable, so the DB-side full key set is the source
+// of truth for the diff). It returns the number of fixes applied.
 func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 	if !s.enabled() {
 		return 0, nil
@@ -254,12 +425,19 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("list agents: %w", err)
 	}
 
-	byName := make(map[string]agent.AgentConfig, len(agents))
+	type agentRef struct {
+		key        string
+		publicPath string
+		cfg        agent.AgentConfig
+	}
+	byKey := make(map[string]agentRef, len(agents))
 	fixes := 0
 	for i := range agents {
 		a := agents[i]
-		byName[a.Name] = a
-		sn := svcName(a.Name)
+		key := DeployKey(a.TenantID, a.Name)
+		publicPath := URLPath(a.TenantID, a.Name)
+		byKey[key] = agentRef{key: key, publicPath: publicPath, cfg: a}
+		sn := svcName(key)
 		svc, found, err := s.client.GetService(ctx, sn)
 		if err != nil {
 			s.logger.Printf("kong reconcile: get service %s failed: %v", sn, err)
@@ -267,24 +445,25 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 		}
 		if isServiceable(a) {
 			if !found {
-				if err := s.Register(ctx, a.Name, a.RuntimePort); err == nil {
+				if err := s.Register(ctx, key, publicPath, a.Name, a.RuntimePort); err == nil {
 					fixes++
 				}
 			} else {
 				if svc.Host != s.serviceHost || svc.Port != a.RuntimePort {
-					_ = s.UpdateUpstream(ctx, a.Name, a.RuntimePort)
+					_ = s.UpdateUpstream(ctx, key, a.RuntimePort)
 					fixes++
 				}
-				rn := routeName(a.Name)
+				rn := routeName(key)
 				route, rFound, err := s.client.GetRoute(ctx, rn)
 				if err != nil {
 					s.logger.Printf("kong reconcile: get route %s failed: %v", rn, err)
 				} else if !rFound {
-					if err := s.Register(ctx, a.Name, a.RuntimePort); err == nil {
+					if err := s.Register(ctx, key, publicPath, a.Name, a.RuntimePort); err == nil {
 						fixes++
 					}
-				} else if len(route.Hosts) != 1 || route.Hosts[0] != s.routeHost {
-					wantRoute := routeFor(a.Name, s.routeHost, route.Service, tagsFor(a.Name))
+				} else if len(route.Hosts) != 1 || route.Hosts[0] != s.routeHost ||
+					len(route.Paths) != 1 || route.Paths[0] != publicPath {
+					wantRoute := routeFor(key, s.routeHost, []string{publicPath}, route.Service, tagsFor(key))
 					if _, err := s.client.UpdateRoute(ctx, rn, wantRoute); err != nil {
 						s.logger.Printf("kong reconcile: update route %s failed: %v", rn, err)
 					} else {
@@ -294,7 +473,7 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 			}
 		} else {
 			if found {
-				_ = s.Deregister(ctx, a.Name)
+				_ = s.Deregister(ctx, key, a.Name)
 				fixes++
 			}
 		}
@@ -311,10 +490,21 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 		if !slices.Contains(svc.Tags, kongManagedTag) {
 			continue
 		}
-		name := agentNameFromService(svc.Name)
-		a, ok := byName[name]
-		if !ok || !isServiceable(a) {
-			_ = s.Deregister(ctx, name)
+		// The managed key is "agent:<key>" (tagsFor). Fall back to parsing
+		// the service name for Kong backends that drop tags.
+		key := ""
+		for _, tag := range svc.Tags {
+			if rest, ok := strings.CutPrefix(tag, "agent:"); ok {
+				key = rest
+				break
+			}
+		}
+		if key == "" {
+			key = agentNameFromService(svc.Name)
+		}
+		ref, ok := byKey[key]
+		if !ok || !isServiceable(ref.cfg) {
+			_ = s.Deregister(ctx, key, "")
 			fixes++
 		}
 	}

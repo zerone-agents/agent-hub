@@ -126,6 +126,8 @@ curl -X POST https://<hub>/api/v1/ops/tenant-clients \
 
 字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文）；`isDefault` 可选。
 
+**org 命名约束**：组织名必须匹配 `^[a-z][a-z0-9]{0,62}$`（小写字母开头，仅小写字母和数字，不超过 63 字符），**不允许连字符、大写、下划线等**，不合法返回 400。原因：组织名用于拼接部署键 `<org>-<agent>` 与 runtime URL 路径段 `/<org>/<agent>`（见下文「部署键与 runtime URL」），而 agent 名本身允许连字符——若 org 也允许连字符，`(org "a", agent "b-c")` 与 `(org "a-b", agent "c")` 会拼出同一个部署键，产生跨租户覆盖/误删的歧义。已登记的存量组织（`zerone` / `ayu` / `zhengxin` 等）天然合规，无需迁移。
+
 default tenant 语义（不变式：**有且唯一**）：
 
 - **首行自动成为 default**：登记的第一条记录自动 `isDefault=true`。
@@ -147,6 +149,20 @@ default tenant 语义（不变式：**有且唯一**）：
 
 - **显式 org 未注册 → 404，绝不回落**：`?org=xxx` 指定了不存在/未登记的组织，登录预检就地报错，不会回退到 default。
 - **留空 / 无参数 → default 行 → env 全局**：default 行不存在（表空）时回落 env `CASDOOR_CLIENT_ID`（存量单组织部署零改动）。
+
+### 部署键与 runtime URL
+
+agent 的部署标识自本版本起按**租户限定**（tenant-scoped）：
+
+- **runtime URL** 形态为 `https://<gateway>/<org>/<agent>`（如 `https://hub.example.com/acme/general`）。builtin 模式（default 租户）同样限定，URL 为 `/default/<agent>`。
+- **Kong 实体名与 deployer 容器键**使用 `<org>-<agent>` 拼接（Kong service/route 实体带 `agent-` 前缀，如 `agent-acme-general`）；容器键同理。
+- **数据库仍存裸名**（`agents.name` 等），租户归属由 `tenant_id` 列表达，部署键仅在部署/网关层拼接。
+
+**存量 agent 迁移**（升级前以裸名 `/<agent>` 部署的 agent）分三步：
+
+1. **升级后逐个重新部署**：重新部署即落位新部署键 `<org>-<agent>` 与新 URL `/<org>/<agent>`。重新部署前面板显示「未部署」属预期（面板按新部署键查询，尚无对应容器），**外部旧 URL 不受影响**（升级重启后 Reconcile 已挂 `-legacy` 兼容路由），完成重新部署后面板与聊天即恢复。
+2. **`-legacy` 兼容路由自动挂载**：重新部署时自动检测升级前的旧裸名 Kong 实体，或上一次部署已挂载的 `-legacy` 路由（兼容窗口从升级重启起算、持续到手动删除该路由为止，**期间含多次重新部署**：每次重新部署前探测到任一存在，清理后都会由新容器重挂兼容路由）；命中则挂载兼容路由 `agent-<org>-<name>-route-legacy`，旧 URL `/<agent>` 继续可用（指向新容器），下游调用方无感。
+3. **择机下线旧路由**：确认所有调用方已切换到新 URL 后，经 Kong admin API 删除 `agent-<org>-<name>-route-legacy` 路由（或联系平台方处理）。删除后下次重新部署不再重挂（两种探测均不命中），旧 URL 正式下线。
 
 ## OSS (S3 / MinIO)
 
