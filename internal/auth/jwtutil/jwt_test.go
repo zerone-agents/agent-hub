@@ -195,6 +195,69 @@ func TestFetchUserIdentityParallelSafety(t *testing.T) {
 	assert.LessOrEqual(t, atomic.LoadInt32(&calls), int32(20))
 }
 
+// --- org_id propagation (mirrors tenant_id; org_id kept for backward compat) ---
+
+func TestJWTPathSetsOrgIDFromTenantID(t *testing.T) {
+	p := &fakeProvider{
+		user: &auth.AuthUser{ID: "abc", Username: "u", Roles: []string{"admin"}, TenantID: "tenant-acme"},
+	}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(nil, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"org": c.GetString("org_id")})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code)
+	if !strings.Contains(w.Body.String(), `"org":"tenant-acme"`) {
+		t.Fatalf("org_id must equal user.TenantID on the access-token path: %s", w.Body.String())
+	}
+}
+
+func TestJWTPathBuiltinOrgIDDefaults(t *testing.T) {
+	p := &fakeProvider{
+		user: &auth.AuthUser{ID: "1", Username: "u", Roles: []string{"member"}, TenantID: "default"},
+	}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(nil, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"org": c.GetString("org_id")})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code)
+	if !strings.Contains(w.Body.String(), `"org":"default"`) {
+		t.Fatalf("builtin mode org_id must be \"default\": %s", w.Body.String())
+	}
+}
+
+func TestCLITokenPathSetsOrgIDFromIdentityTenantID(t *testing.T) {
+	resetIdentityCache()
+	db := setupTestDB(t)
+	svc := services.NewCLITokenService(db)
+	issued, err := svc.Issue("42", "laptop", 30)
+	require.NoError(t, err)
+
+	p := &fakeProvider{user: &auth.AuthUser{ID: "42", Roles: []string{"admin"}, TenantID: "tenant-acme"}, ok: true}
+	router := gin.New()
+	router.Use(AuthMiddlewareWithCLI(svc, p))
+	router.GET("/x", func(c *gin.Context) {
+		c.JSON(200, gin.H{"org": c.GetString("org_id")})
+	})
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+issued.Token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code)
+	if !strings.Contains(w.Body.String(), `"org":"tenant-acme"`) {
+		t.Fatalf("org_id must equal identity.TenantID on the CLI path: %s", w.Body.String())
+	}
+}
+
 // --- tenant_id propagation ---
 
 func TestMiddlewareSetsTenantID(t *testing.T) {
