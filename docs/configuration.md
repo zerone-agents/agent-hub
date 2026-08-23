@@ -111,7 +111,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 
 1. 创建组织 `acme`（组织即租户，业务数据按组织隔离）。
 2. 在该组织下创建一个 Casdoor Application，回调（redirect URL）配置为 hub 全局回调 `CASDOOR_CALLBACK_URL`（无需 per-org 回调），记录其 Client ID / Client Secret。
-3. 在该组织内创建 `agent-hub-admin` / `agent-hub-maintainer` / `agent-hub-member` 三角色（可选，供 Casdoor 侧管理使用；agent-hub 的角色以本地成员表为准，并将 **Casdoor 组织管理员自动同步为本地 admin**）。
+3. 无需创建 `agent-hub-admin` / `agent-hub-maintainer` / `agent-hub-member` 角色——agent-hub 的角色以本地成员表（`user_identities`）为准，Casdoor 侧角色不被消费（Casdoor 仅提供用户身份，**Casdoor 组织管理员自动同步为本地 admin**）。旧版本若在 Casdoor 侧创建过这些角色，可手动删除。
 
 #### Step 2：通过 Ops API 登记租户 client
 
@@ -135,7 +135,7 @@ default tenant 语义（不变式：**有且唯一**）：
 - **切换 default**：给新行显式传 `"isDefault":true`（原子切换，旧 default 自动降级）。
 - **降级保护**：把当前 default 降级（新增非 default 行时）且表内还有其他行 → 409；**删除 default 行**且表内还有其他行 → 409（响应含迁移指引：先把 default 切给其他组织再删）。删 default 是最后一行时允许；删除不存在的 org 幂等返回 204。
 
-管理查询：`GET /api/v1/ops/tenant-clients`（返回 org / clientId / isDefault / hasCert / 时间，**不返回 secret**）。
+管理查询：`GET /api/v1/ops/tenant-clients`（返回 org / clientId / isDefault / hasCert / 时间，**不返回 secret**）；删除登记：`DELETE /api/v1/ops/tenant-clients/<org>`（default 行且表内还有其他行 → 409；删除不存在的 org 幂等返回 204，语义见上文「降级保护」）。
 
 #### Step 3：分发组织专属登录链接
 
@@ -157,6 +157,7 @@ agent 的部署标识自本版本起按**租户限定**（tenant-scoped）：
 - **runtime URL** 形态为 `https://<gateway>/<org>/<agent>`（如 `https://hub.example.com/acme/general`）。builtin 模式（default 租户）同样限定，URL 为 `/default/<agent>`。
 - **Kong 实体名与 deployer 容器键**使用 `<org>-<agent>` 拼接（Kong service/route 实体带 `agent-` 前缀，如 `agent-acme-general`）；容器键同理。
 - **数据库仍存裸名**（`agents.name` 等），租户归属由 `tenant_id` 列表达，部署键仅在部署/网关层拼接。
+- **hub 代理按限定名寻址**：hub 的聊天代理（chatbox proxy / agent 详情等）经 `/v1/agents/<org>-<name>` 限定名访问 runtime，**裸名 404**；subagent 例外——子 agent 不独立部署，名保持裸名。
 
 **存量 agent 迁移**（升级前以裸名 `/<agent>` 部署的 agent）分三步：
 
@@ -168,11 +169,11 @@ agent 的部署标识自本版本起按**租户限定**（tenant-scoped）：
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `OSS_ENDPOINT` | ✅ | — | S3 / MinIO Endpoint |
+| `OSS_ENDPOINT` | No | — | S3 / MinIO Endpoint. **留空 = 整体禁用 OSS**（`InitOSS` 返回 nil，服务正常启动，仅文件上传/下载功能降级） |
 | `OSS_REGION` | No | `us-east-1` | S3 Region |
-| `OSS_BUCKET` | ✅ | — | Bucket name |
-| `OSS_ACCESS_KEY` | ✅ | — | S3 Access Key |
-| `OSS_SECRET_KEY` | ✅ | — | S3 Secret Key |
+| `OSS_BUCKET` | 若启用 OSS 则必填 | — | Bucket name（`OSS_ENDPOINT` 非空时缺失会启动报错） |
+| `OSS_ACCESS_KEY` | 若启用 OSS 则必填 | — | S3 Access Key |
+| `OSS_SECRET_KEY` | 若启用 OSS 则必填 | — | S3 Secret Key |
 | `OSS_FORCE_PATH_STYLE` | No | `false` | Must be set to `true` for MinIO |
 | `OSS_CDN_HOST` | No | — | Domain prefix for skill file downloads. **When set**: the `/skills` list and `/skills/:name/download` endpoints return permanent CDN URLs; **when unset**: the list URL field is empty, and the download endpoint falls back to a 1-hour valid OSS presigned URL |
 
