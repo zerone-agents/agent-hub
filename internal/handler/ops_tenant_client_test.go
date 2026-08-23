@@ -176,6 +176,30 @@ func TestOpsTenantClient_OrgNameFormatValidation(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, opsDo(t, r, http.MethodDelete, "/ops/tenant-clients/orga", nil).Code)
 }
 
+func TestOpsTenantClient_CertPEMValidation(t *testing.T) {
+	r := setupOpsTenantClientRouter(t)
+
+	// 三类坏值 → 400：非 PEM 文本；PEM 但非 CERTIFICATE 类型；PEM 框架但 body 非法 base64。
+	for _, bad := range []string{
+		"not a pem at all",
+		"-----BEGIN PRIVATE KEY-----\nAAECAw==\n-----END PRIVATE KEY-----\n",
+		"-----BEGIN CERTIFICATE-----\n!!!not-base64!!!\n-----END CERTIFICATE-----\n",
+	} {
+		w := opsDo(t, r, http.MethodPost, "/ops/tenant-clients", gin.H{
+			"org": "orga", "clientId": "cid", "clientSecret": "sec", "cert": bad,
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, "cert=%q 应被拒绝", bad)
+		require.Contains(t, w.Body.String(), "PEM")
+	}
+
+	// 结构合法的 PEM（pem.Decode 不校验 DER 语义）→ 200。
+	w := opsDo(t, r, http.MethodPost, "/ops/tenant-clients", gin.H{
+		"org": "orga", "clientId": "cid", "clientSecret": "sec",
+		"cert": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestOpsTenantClient_CertOptionalStoredEncrypted(t *testing.T) {
 	r := setupOpsTenantClientRouter(t)
 	pem := "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"

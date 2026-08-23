@@ -320,8 +320,9 @@ func main() {
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 		} else {
 			orgCheckHandler := handler.NewOrgCheckHandler(tenantOAuthRepo)
-			authGroup.GET("/mode", orgCheckHandler.CasdoorMode)
-			authGroup.GET("/org-check", orgCheckHandler.OrgCheck)
+			rl := middleware.IPRateLimit(10, time.Minute)
+			authGroup.GET("/mode", rl, orgCheckHandler.CasdoorMode)
+			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", handler.Login)
 			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)

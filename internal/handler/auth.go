@@ -75,9 +75,11 @@ func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 
 		tokenResp, err := auth.ExchangeCodeForToken(session.Org, code, codeVerifier)
 		if err != nil {
+			// 细节进日志（可能含 casdoor 原始响应/内部地址），客户端只见中性文案。
+			log.Printf("[Callback] token exchange failed (org=%s): %v", session.Org, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
-				"error":   "Token 交换失败: " + err.Error(),
+				"error":   "登录回调处理失败，请重试",
 			})
 			return
 		}

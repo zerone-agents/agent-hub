@@ -215,8 +215,43 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to drop vendor_presets: %w", err)
 	}
 
+	if err := migrateTenantDefaultKeySentinel(); err != nil {
+		return fmt.Errorf("migrate tenant default_key sentinel: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
+}
+
+// migrateTenantDefaultKeySentinel 把 default_key 列存量值归一为哨兵常量
+// （authdomain.DefaultKeySentinel）。历史版本写入 org 名，不同 org 互不碰撞，
+// uk_default_key 唯一索引无法兜底「最多一行 default」；归一为常量后索引
+// 恢复兜底。若存量已被并发竞态污染出多行 default，先按 MIN(org) 确定性
+// 保留一行、其余置 NULL（自愈），再统一改写哨兵值。幂等可重复执行。
+func migrateTenantDefaultKeySentinel() error {
+	if !DB.Migrator().HasTable(&authdomain.TenantOAuthClient{}) {
+		return nil
+	}
+	var n int64
+	if err := DB.Model(&authdomain.TenantOAuthClient{}).
+		Where("default_key IS NOT NULL").Count(&n).Error; err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	if n > 1 {
+		// 子查询套派生表强制物化：MySQL 1093 禁止 UPDATE 的 WHERE 子查询直接
+		// FROM 目标表，派生表可绕过（sqlite 亦兼容，语义不变）。
+		if err := DB.Exec(`UPDATE tenant_oauth_clients SET default_key = NULL
+			WHERE default_key IS NOT NULL
+			AND org != (SELECT min_org FROM (SELECT MIN(org) AS min_org FROM tenant_oauth_clients WHERE default_key IS NOT NULL) dt)`).Error; err != nil {
+			return err
+		}
+		log.Printf("[migrate] tenant_oauth_clients: 检测到 %d 行 default（历史竞态污染），已按 MIN(org) 保留一行", n)
+	}
+	return DB.Exec("UPDATE tenant_oauth_clients SET default_key = ? WHERE default_key IS NOT NULL AND default_key != ?",
+		authdomain.DefaultKeySentinel, authdomain.DefaultKeySentinel).Error
 }
 
 // migrateProviderSplit copies rows from the legacy vendor_presets backup

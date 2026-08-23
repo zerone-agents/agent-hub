@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"regexp"
@@ -59,17 +60,18 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 		return
 	}
 
-	// 首行自动 default 守卫：isDefault 缺省且表空 → 提升为 default，
-	// 保证「表非空 ⇒ 恰好一个 default」不变式从第一行起成立。
-	isDefault := req.IsDefault
-	if !isDefault {
-		if n, err := h.repo.Count(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+	// cert 为可选，但非空时必须是结构合法的 PEM CERTIFICATE 块：
+	// 坏值在此暴露（400），而非 deferred 到运行时验签才炸（issue #54）。
+	if req.Cert != "" {
+		block, _ := pem.Decode([]byte(req.Cert))
+		if block == nil || block.Type != "CERTIFICATE" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "cert 必须是合法的 PEM 格式证书（-----BEGIN CERTIFICATE----- 开头）"})
 			return
-		} else if n == 0 {
-			isDefault = true
 		}
 	}
+
+	// 首行自动 default 判定已移入 repo.Upsert 事务内（收窄并发窗口）。
+	isDefault := req.IsDefault
 
 	secretEnc, err := providerdom.Encrypt(req.ClientSecret, h.encryptionKey)
 	if err != nil {
@@ -86,8 +88,8 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 	}
 
 	if err := h.repo.Upsert(req.Org, req.ClientID, secretEnc, certEnc, isDefault); err != nil {
-		if errors.Is(err, repository.ErrDefaultRequired) {
-			c.JSON(http.StatusConflict, gin.H{"success": false, "error": repository.ErrDefaultRequired.Error()})
+		if errors.Is(err, repository.ErrDefaultRequired) || errors.Is(err, repository.ErrDefaultConflict) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
