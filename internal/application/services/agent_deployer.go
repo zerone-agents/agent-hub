@@ -87,7 +87,7 @@ type AgentDeployerService struct {
 	kongSvc       *KongGatewayService
 	aigcSvc       aigcConfigProvider
 	healthProbe   func(ctx context.Context, publicHost string, port int) bool
-	gatewayHealth *sync.Map // agent name -> *gatewayHealthEntry
+	gatewayHealth *sync.Map // deploy key (DeployKey) -> *gatewayHealthEntry
 }
 
 // gatewayHealthEntry caches the result of a gateway health probe for an agent.
@@ -115,57 +115,69 @@ func probeURL(ctx context.Context, url string, timeout time.Duration) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// storeGatewayHealth records the gateway health for an agent.
-func (s *AgentDeployerService) storeGatewayHealth(name string, healthy bool) {
+// storeGatewayHealth records the gateway health for an agent (keyed by its
+// tenant-scoped deploy key).
+func (s *AgentDeployerService) storeGatewayHealth(key string, healthy bool) {
 	if s == nil || s.gatewayHealth == nil {
 		return
 	}
-	s.gatewayHealth.Store(name, &gatewayHealthEntry{healthy: healthy, probedAt: time.Now()})
+	s.gatewayHealth.Store(key, &gatewayHealthEntry{healthy: healthy, probedAt: time.Now()})
 }
 
-// gatewayHealthy returns the cached gateway health for an agent, or nil if there
+// gatewayHealthy returns the cached gateway health for an agent (keyed by its
+// tenant-scoped deploy key), or nil if there
 // is no recent (< TTL) cached entry. It evicts stale entries on read.
-func (s *AgentDeployerService) gatewayHealthy(name string) *bool {
+func (s *AgentDeployerService) gatewayHealthy(key string) *bool {
 	if s == nil || s.gatewayHealth == nil {
 		return nil
 	}
-	raw, ok := s.gatewayHealth.Load(name)
+	raw, ok := s.gatewayHealth.Load(key)
 	if !ok {
 		return nil
 	}
 	entry, ok := raw.(*gatewayHealthEntry)
 	if !ok {
-		s.gatewayHealth.Delete(name)
+		s.gatewayHealth.Delete(key)
 		return nil
 	}
 	if time.Since(entry.probedAt) > gatewayHealthTTL {
-		s.gatewayHealth.Delete(name)
+		s.gatewayHealth.Delete(key)
 		return nil
 	}
 	return &entry.healthy
 }
 
-// refreshGatewayHealth probes the Kong route for an agent and caches the result.
-func (s *AgentDeployerService) refreshGatewayHealth(name string) {
+// gatewayHealthCacheKey returns the cache key for gateway health entries: the
+// tenant-scoped deploy key, so same-name agents in different tenants never
+// share cache state.
+func gatewayHealthCacheKey(tenantID, name string) string {
+	return DeployKey(tenantID, name)
+}
+
+// gatewayURL returns the public gateway URL (with tenant-scoped /<org>/<name>
+// path) for an agent, or "" when Kong is disabled.
+func (s *AgentDeployerService) gatewayURL(tenantID, name string) string {
 	if s == nil || s.kongSvc == nil || !s.kongSvc.enabled() {
-		return
+		return ""
 	}
-	gatewayURL := s.kongSvc.RouteURL(name)
+	return s.kongSvc.RouteURL(URLPath(tenantID, name))
+}
+
+// refreshGatewayHealth probes the Kong route for an agent and caches the result.
+func (s *AgentDeployerService) refreshGatewayHealth(tenantID, name string) {
+	gatewayURL := s.gatewayURL(tenantID, name)
 	if gatewayURL == "" {
 		return
 	}
 	ctx := context.Background()
 	healthy := probeURL(ctx, gatewayURL+"/health", 3*time.Second)
-	s.storeGatewayHealth(name, healthy)
+	s.storeGatewayHealth(gatewayHealthCacheKey(tenantID, name), healthy)
 }
 
 // probeGatewayHealthy probes the Kong route for an agent and reports whether it
 // is reachable. Unlike refreshGatewayHealth, it does not cache the result.
-func (s *AgentDeployerService) probeGatewayHealthy(name string) bool {
-	if s == nil || s.kongSvc == nil || !s.kongSvc.enabled() {
-		return false
-	}
-	gatewayURL := s.kongSvc.RouteURL(name)
+func (s *AgentDeployerService) probeGatewayHealthy(tenantID, name string) bool {
+	gatewayURL := s.gatewayURL(tenantID, name)
 	if gatewayURL == "" {
 		return false
 	}
@@ -280,19 +292,33 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// Build create request
 	ctx := context.Background()
 
+	// All deployer calls address the container by the tenant-scoped deploy key
+	// (<org>-<name>); only DB lookups use the bare name.
+	key := DeployKey(tenantID, name)
+
 	// Decide the runtime token before building the request. control-panel is
 	// the sole generator and keeper of runtime tokens; the deployer only
 	// injects the value it is given as ZERONE_AGENT_HTTP_API_KEY.
-	token, err := s.resolveRuntimeToken(ctx, name, agentCfg, force, rotateKey)
+	token, err := s.resolveRuntimeToken(ctx, key, agentCfg, force, rotateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Deregister any existing Kong route before recreating. This is idempotent
+	// D-1 legacy timing: record whether the pre-upgrade bare-name Kong service
+	// exists BEFORE the pre-clean Deregister below deletes it, so the later
+	// Register (in registerWhenHealthy) can still mount the "/<bare>"
+	// compatibility route.
+	legacyBare := ""
+	if s.kongSvc != nil && s.kongSvc.LegacyExists(ctx, name) {
+		legacyBare = name
+	}
+
+	// Deregister any existing Kong route before recreating (scoped entities
+	// plus the old bare-name entities of this agent). This is idempotent
 	// (no-op if the agent was never registered) and avoids serving 502s while
 	// the container is being rebuilt.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name, "")
+		_ = s.kongSvc.Deregister(ctx, key, name)
 	}
 	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p, tools, skills, subagents, mcpServers)
 	if err != nil {
@@ -305,7 +331,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	resp, err := s.client.CreateAgent(ctx, req, force)
 	if err != nil {
 		// Clean up failed container
-		_ = s.client.DeleteAgent(ctx, name, false)
+		_ = s.client.DeleteAgent(ctx, key, false)
 		_ = s.updateStatus(tenantID, agentCfg, "error", 0, nil)
 		return nil, fmt.Errorf("deploy agent failed: %w", err)
 	}
@@ -323,12 +349,12 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, fmt.Errorf("update deployment status failed: %w", err)
 	}
 
-	dto := s.toDTO(name, resp.Status, "", resp.ContainerName, resp.HostPort, &deployedAt, "")
+	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.HostPort, &deployedAt, "")
 	if resp.Status == "running" && resp.HostPort > 0 {
 		dto.APIKey = token
 		// Register Kong route asynchronously once the runtime reports healthy.
 		if s.kongSvc != nil {
-			go s.registerWhenHealthy(name, resp.HostPort)
+			go s.registerWhenHealthy(tenantID, name, legacyBare, resp.HostPort)
 		}
 	}
 	return dto, nil
@@ -346,7 +372,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 //     already has a container for this agent and we are not rebuilding it.
 //     That container holds an unrecoverable token, so we refuse and ask the
 //     caller to force-redeploy, letting both sides converge on a fresh token.
-func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, name string, cfg *agent.AgentConfig, force, rotateKey bool) (string, error) {
+func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, key string, cfg *agent.AgentConfig, force, rotateKey bool) (string, error) {
 	stored := ""
 	if cfg.RuntimeToken != "" {
 		// A decrypt failure (e.g. rotated ENCRYPTION_KEY) is treated as
@@ -359,8 +385,8 @@ func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, name str
 	}
 
 	if !force && stored == "" {
-		if _, err := s.client.GetAgent(ctx, name); err == nil {
-			return "", fmt.Errorf("agent %s 在 deployer 上已存在容器，但本地无 Runtime Token 记录（可能因加密密钥变更或数据丢失），无法恢复；请强制重新部署，将生成新的 API Key", name)
+		if _, err := s.client.GetAgent(ctx, key); err == nil {
+			return "", fmt.Errorf("agent %s 在 deployer 上已存在容器，但本地无 Runtime Token 记录（可能因加密密钥变更或数据丢失），无法恢复；请强制重新部署，将生成新的 API Key", key)
 		}
 	}
 
@@ -403,42 +429,55 @@ func generateRuntimeToken() (string, error) {
 }
 
 // registerWhenHealthy waits for the agent to become healthy and then registers
-// its Kong route. After registration it probes the gateway route with retries
-// so route propagation delay is accounted for. Errors are logged, not returned.
-func (s *AgentDeployerService) registerWhenHealthy(name string, hostPort int) {
+// its Kong route under the tenant-scoped key/path. legacyBare is non-empty only
+// when the deploy flow recorded a pre-existing bare-name Kong service before
+// its pre-clean Deregister (D-1); in that case the "/<bare>" compatibility
+// route is force-mounted on the scoped service. After registration it probes
+// the gateway route with retries so route propagation delay is accounted for.
+// Errors are logged, not returned.
+func (s *AgentDeployerService) registerWhenHealthy(tenantID, name, legacyBare string, hostPort int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
+	key := DeployKey(tenantID, name)
+	publicPath := URLPath(tenantID, name)
+	register := func(port int) {
+		if legacyBare != "" {
+			// The bare entities were already deleted by the pre-clean
+			// Deregister, so Register's internal probe would never fire;
+			// force-mount from the recorded flag.
+			_ = s.kongSvc.RegisterWithLegacy(ctx, key, publicPath, legacyBare, port)
+			return
+		}
+		_ = s.kongSvc.Register(ctx, key, publicPath, "", port)
+	}
 	var hp int
 	var err error
-	if hp, err = s.WaitForHealthy(ctx, name, 120*time.Second); err == nil {
-		// TODO(Task 2): pass the tenant-scoped DeployKey/URLPath instead of
-		// the bare name; this bare-name form is a mechanical adaptation that
-		// preserves pre-Task-2 behavior.
-		_ = s.kongSvc.Register(ctx, name, "/"+name, "", hp)
+	if hp, err = s.WaitForHealthy(ctx, key, 120*time.Second); err == nil {
+		register(hp)
 	} else if hostPort > 0 {
-		_ = s.kongSvc.Register(ctx, name, "/"+name, "", hostPort)
+		register(hostPort)
 	} else {
 		return
 	}
 	if s.kongSvc == nil || !s.kongSvc.enabled() {
 		return
 	}
-	gatewayURL := s.kongSvc.RouteURL(name)
+	gatewayURL := s.kongSvc.RouteURL(publicPath)
 	if gatewayURL == "" {
 		return
 	}
 	healthURL := gatewayURL + "/health"
 	for i := 0; i < 3; i++ {
 		if probeURL(ctx, healthURL, 3*time.Second) {
-			s.storeGatewayHealth(name, true)
+			s.storeGatewayHealth(key, true)
 			return
 		}
 		if i < 2 {
 			time.Sleep(3 * time.Second)
 		}
 	}
-	log.Printf("gateway health check failed for agent %s: %s", name, gatewayURL)
-	s.storeGatewayHealth(name, false)
+	log.Printf("gateway health check failed for agent %s: %s", key, gatewayURL)
+	s.storeGatewayHealth(key, false)
 }
 
 // GetStatus queries the deployer for the current status of an agent container.
@@ -450,28 +489,30 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
 
+	// Deployer calls use the tenant-scoped deploy key.
+	key := DeployKey(tenantID, name)
 	ctx := context.Background()
-	statusResp, err := s.client.GetAgent(ctx, name)
+	statusResp, err := s.client.GetAgent(ctx, key)
 	if err != nil {
 		// If deployer says not found, return not_found status
-		return s.toDTO(name, "not_found", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		return s.toDTO(tenantID, name, "not_found", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
 	}
 
 	// If status is running, also query health
 	health := ""
 	if statusResp.Status == "running" {
-		if healthResp, err := s.client.GetStatus(ctx, name); err == nil {
+		if healthResp, err := s.client.GetStatus(ctx, key); err == nil {
 			health = healthResp.Health
 			statusResp.HostPort = healthResp.HostPort
 		} else {
-			log.Printf("GetStatus: health query failed for agent %s: %v", name, err)
+			log.Printf("GetStatus: health query failed for agent %s: %v", key, err)
 		}
 	}
 
 	// When Kong is enabled and the container is running+healthy, also factor in gateway health.
 	var gatewayMessage string
 	if s.kongSvc != nil && s.kongSvc.enabled() && statusResp.Status == "running" && health == "healthy" {
-		if cached := s.gatewayHealthy(name); cached != nil {
+		if cached := s.gatewayHealthy(key); cached != nil {
 			if !*cached {
 				health = "unhealthy"
 				gatewayMessage = "Kong 网关路由不可达"
@@ -481,8 +522,8 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 			// healthy while the Kong route is still propagating or broken.
 			// Only store successful results; failures during propagation are
 			// transient and should render as 'starting', not 'unhealthy'.
-			if s.probeGatewayHealthy(name) {
-				s.storeGatewayHealth(name, true)
+			if s.probeGatewayHealthy(tenantID, name) {
+				s.storeGatewayHealth(key, true)
 			} else {
 				health = "starting"
 				gatewayMessage = "Kong 网关路由检测中"
@@ -505,7 +546,7 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 		}
 	}
 
-	dto := s.toDTO(name, statusResp.Status, health, statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, gatewayMessage)
+	dto := s.toDTO(tenantID, name, statusResp.Status, health, statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, gatewayMessage)
 	if statusResp.Status == "running" && statusResp.HostPort > 0 {
 		apiKey := ""
 		if agentCfg.RuntimeToken != "" {
@@ -526,7 +567,7 @@ func (s *AgentDeployerService) Stop(tenantID, name string) error {
 	}
 
 	ctx := context.Background()
-	if err := s.client.StopAgent(ctx, name); err != nil {
+	if err := s.client.StopAgent(ctx, DeployKey(tenantID, name)); err != nil {
 		return fmt.Errorf("stop agent failed: %w", err)
 	}
 
@@ -537,7 +578,7 @@ func (s *AgentDeployerService) Stop(tenantID, name string) error {
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name, "")
+		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name), name)
 	}
 
 	return nil
@@ -552,16 +593,23 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 	}
 
 	ctx := context.Background()
+	key := DeployKey(tenantID, name)
+	// D-1: record any pre-upgrade bare-name Kong entity before the pre-clean
+	// Deregister deletes it, so the restart can re-mount the legacy route.
+	legacyBare := ""
+	if s.kongSvc != nil && s.kongSvc.LegacyExists(ctx, name) {
+		legacyBare = name
+	}
 	// Deregister any existing Kong route before restarting.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name, "")
+		_ = s.kongSvc.Deregister(ctx, key, name)
 	}
-	if err := s.client.StartAgent(ctx, name); err != nil {
+	if err := s.client.StartAgent(ctx, key); err != nil {
 		return nil, fmt.Errorf("start agent failed: %w", err)
 	}
 
 	// Query the deployer for updated status/port
-	statusResp, err := s.client.GetAgent(ctx, name)
+	statusResp, err := s.client.GetAgent(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("get status after start failed: %w", err)
 	}
@@ -570,12 +618,12 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 		return nil, fmt.Errorf("update status failed: %w", err)
 	}
 
-	dto := s.toDTO(name, statusResp.Status, "", statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, "")
+	dto := s.toDTO(tenantID, name, statusResp.Status, "", statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, "")
 	if statusResp.Status == "running" && statusResp.HostPort > 0 && agentCfg.RuntimeToken != "" {
 		dto.APIKey, _ = providerdomain.Decrypt(agentCfg.RuntimeToken, s.encryptionKey)
 		// Register Kong route asynchronously once the runtime reports healthy.
 		if s.kongSvc != nil {
-			go s.registerWhenHealthy(name, statusResp.HostPort)
+			go s.registerWhenHealthy(tenantID, name, legacyBare, statusResp.HostPort)
 		}
 	}
 	return dto, nil
@@ -601,12 +649,12 @@ func (s *AgentDeployerService) deleteWithPurge(tenantID, name string, purge bool
 	}
 
 	ctx := context.Background()
-	if err := s.client.DeleteAgent(ctx, name, purge); err != nil {
+	if err := s.client.DeleteAgent(ctx, DeployKey(tenantID, name), purge); err != nil {
 		return fmt.Errorf("delete agent failed: %w", err)
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, name, "")
+		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name), name)
 	}
 
 	// Update DB status. When archived we keep the record with status=archived so
@@ -769,7 +817,11 @@ func (s *AgentDeployerService) buildCreateRequest(
 	// so external clients can still override when needed.
 	req := &deployer.CreateAgentRequest{
 		Agent: deployer.AgentDefinition{
-			Name:            cfg.Name,
+			// The deployer container key is the tenant-scoped deploy key
+			// (<org>-<name>) so same-name agents across tenants never collide;
+			// subagent definitions above keep bare names (runtime-internal
+			// logic names).
+			Name:            DeployKey(tenantID, cfg.Name),
 			Description:     firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
 			Model:           cfg.ModelID,
 			SystemPrompt:    cfg.SystemPrompt,
@@ -847,8 +899,9 @@ func isStableDeploymentStatus(status string) bool {
 	return false
 }
 
-// toDTO converts deployment information into a DeploymentDTO.
-func (s *AgentDeployerService) toDTO(agentName, status, health, containerName string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
+// toDTO converts deployment information into a DeploymentDTO. The RuntimeURL
+// reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled.
+func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, containerName string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
 	var deployedAtStr string
 	if deployedAt != nil {
 		deployedAtStr = deployedAt.UTC().Format(time.RFC3339)
@@ -856,7 +909,7 @@ func (s *AgentDeployerService) toDTO(agentName, status, health, containerName st
 
 	url := s.runtimeURL(port)
 	if s.kongSvc != nil && s.kongSvc.enabled() {
-		if kongURL := s.kongSvc.RouteURL(agentName); kongURL != "" {
+		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
 			url = kongURL
 		}
 	}

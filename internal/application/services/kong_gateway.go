@@ -49,11 +49,14 @@ const (
 
 var agentNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
-// pathRe validates a public route path: "/" followed by one or more
-// lowercase-alnum-led segments ("(/<seg>)+", single-segment paths are accepted
-// so pre-Task-2 bare-name callers keep working; Task 2 makes every path
-// two-segment "/<org>/<name>").
-var pathRe = regexp.MustCompile(`^/[a-z][a-z0-9]*(?:/[a-z][a-z0-9-]*)*$`)
+// pathRe validates a public route path: at least two segments of the form
+// "/<org>/<name>" (extra segments allowed), each segment lowercase-alnum-led
+// and may contain hyphens — matching both agentNameRe and the defensive
+// orgSlug folding, which can produce hyphenated orgs for legacy tenant rows
+// (registration-side validation restricts new orgs further). Since Task 2
+// every caller passes URLPath(tenantID, name); single-segment bare-name paths
+// are rejected so no route can claim a cross-tenant bare path.
+var pathRe = regexp.MustCompile(`^/[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+$`)
 
 // orgSlugRe folds any run of non-alphanumeric characters into a single "-".
 var orgSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -240,30 +243,75 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, lega
 		}
 	}
 
-	// Legacy compatibility: only mount the "/<bare>" route when the old
-	// bare-name service actually exists; otherwise we would be claiming a
-	// cross-tenant bare path that was never ours.
+	// Legacy compatibility fallback: only mount the "/<bare>" route when the
+	// old bare-name service actually exists; otherwise we would be claiming a
+	// cross-tenant bare path that was never ours. Callers that recorded the
+	// legacy entity before deleting it (see RegisterWithLegacy) bypass this
+	// probe.
 	if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
 		if _, legacyFound, err := s.client.GetService(ctx, svcName(legacyBare)); err != nil {
 			s.logger.Printf("kong: get legacy service %s failed: %v", svcName(legacyBare), err)
 		} else if legacyFound {
-			legacyRouteName := rn + "-legacy"
-			wantLegacy := routeFor(key, s.routeHost, []string{"/" + legacyBare}, &kong.ServiceRef{ID: svcID}, tags)
-			wantLegacy.Name = legacyRouteName
-			if _, lFound, err := s.client.GetRoute(ctx, legacyRouteName); err != nil {
-				s.logger.Printf("kong: get legacy route %s failed: %v", legacyRouteName, err)
-			} else if !lFound {
-				if _, err := s.client.CreateRoute(ctx, wantLegacy); err != nil {
-					s.logger.Printf("kong: create legacy route %s failed: %v", legacyRouteName, err)
-				}
-			} else {
-				if _, err := s.client.UpdateRoute(ctx, legacyRouteName, wantLegacy); err != nil {
-					s.logger.Printf("kong: update legacy route %s failed: %v", legacyRouteName, err)
-				}
-			}
+			s.ensureLegacyRoute(ctx, key, legacyBare, svcID, tags)
 		}
 	}
 
+	return nil
+}
+
+// ensureLegacyRoute upserts the "/<bare>" legacy route (routeName(key)+"-legacy")
+// attached to the given scoped service. It is the shared mount path for both
+// Register's probe fallback and RegisterWithLegacy's forced mount.
+func (s *KongGatewayService) ensureLegacyRoute(ctx context.Context, key, legacyBare, svcID string, tags []string) {
+	legacyRouteName := routeName(key) + "-legacy"
+	wantLegacy := routeFor(key, s.routeHost, []string{"/" + legacyBare}, &kong.ServiceRef{ID: svcID}, tags)
+	wantLegacy.Name = legacyRouteName
+	if _, lFound, err := s.client.GetRoute(ctx, legacyRouteName); err != nil {
+		s.logger.Printf("kong: get legacy route %s failed: %v", legacyRouteName, err)
+	} else if !lFound {
+		if _, err := s.client.CreateRoute(ctx, wantLegacy); err != nil {
+			s.logger.Printf("kong: create legacy route %s failed: %v", legacyRouteName, err)
+		}
+	} else {
+		if _, err := s.client.UpdateRoute(ctx, legacyRouteName, wantLegacy); err != nil {
+			s.logger.Printf("kong: update legacy route %s failed: %v", legacyRouteName, err)
+		}
+	}
+}
+
+// LegacyExists reports whether an old bare-name service (svcName(bareName))
+// exists in Kong. The deploy flow records this BEFORE its pre-clean Deregister
+// (which deletes the bare entities), so registerWhenHealthy can still mount
+// the legacy compatibility route for pre-upgrade agents.
+func (s *KongGatewayService) LegacyExists(ctx context.Context, bareName string) bool {
+	if !s.enabled() || !agentNameRe.MatchString(bareName) {
+		return false
+	}
+	_, found, err := s.client.GetService(ctx, svcName(bareName))
+	return err == nil && found
+}
+
+// RegisterWithLegacy ensures the scoped service/route exist (delegating to
+// Register) and then mounts the "/<legacyBare>" legacy route unconditionally.
+// It exists for the D-1 timing: by the time registerWhenHealthy runs after a
+// redeploy, the pre-clean Deregister has already deleted the bare entities, so
+// Register's internal probe would never fire; the caller passes legacyBare
+// only when it recorded the bare entity existing before the pre-clean.
+func (s *KongGatewayService) RegisterWithLegacy(ctx context.Context, key, publicPath, legacyBare string, hostPort int) error {
+	if !s.enabled() {
+		return nil
+	}
+	if err := s.Register(ctx, key, publicPath, "", hostPort); err != nil {
+		return err
+	}
+	if legacyBare == "" || !agentNameRe.MatchString(legacyBare) {
+		return nil
+	}
+	svc, found, err := s.client.GetService(ctx, svcName(key))
+	if err != nil || !found {
+		return nil
+	}
+	s.ensureLegacyRoute(ctx, key, legacyBare, svc.ID, tagsFor(key))
 	return nil
 }
 

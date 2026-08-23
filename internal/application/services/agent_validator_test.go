@@ -154,13 +154,15 @@ func TestAgentDeployerService_NormalizesNameOnBoundary(t *testing.T) {
 
 			tt.run(svc)
 
-			// Every deployer route uses /api/v1/agents/<name>...; the captured
-			// path must contain the sanitised name "my-agent", never the
-			// original "My.Agent" (which would contain a literal dot in the URL).
+			// Every deployer route uses /api/v1/agents/<deployKey>...; the
+			// captured path must contain the tenant-scoped sanitised key
+			// "tenant-a-my-agent" (DeployKey("tenant-a", "My.Agent")), never
+			// the original "My.Agent" (which would contain a literal dot in
+			// the URL).
 			if captured == "" {
 				t.Fatalf("no request captured for %s", tt.entry)
 			}
-			const wantSegment = "/api/v1/agents/my-agent"
+			const wantSegment = "/api/v1/agents/tenant-a-my-agent"
 			if !strings.Contains(captured, wantSegment) {
 				t.Errorf("%s: deployer saw %q, want it to contain %q (original \"My.Agent\" should be sanitised)",
 					tt.entry, captured, wantSegment)

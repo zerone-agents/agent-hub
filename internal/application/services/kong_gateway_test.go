@@ -184,21 +184,18 @@ func TestRegister_CreatesServiceAndRoute(t *testing.T) {
 	}
 }
 
-func TestRegister_SingleSegmentLegacyPath_StillAccepted(t *testing.T) {
-	// Mechanical-adaptation compatibility: callers passing "/"+bareName
-	// (single-segment path) must keep working until Task 2 lands.
+func TestRegister_SingleSegmentPath_Rejected(t *testing.T) {
+	// pathRe requires at least two segments (/<org>/<name>): the pre-Task-2
+	// single-segment "/"+bareName form must now be rejected so no route can
+	// claim a cross-tenant bare path.
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
 	if err := s.Register(context.Background(), "general", "/general", "", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	r := fk.routes["agent-general-route"]
-	if r == nil {
-		t.Fatal("expected route agent-general-route to be created")
-	}
-	if len(r.Paths) != 1 || r.Paths[0] != "/general" {
-		t.Fatalf("unexpected route paths: %v", r.Paths)
+	if len(fk.services) != 0 || len(fk.routes) != 0 {
+		t.Fatalf("expected no resources for single-segment path, got %d services / %d routes", len(fk.services), len(fk.routes))
 	}
 }
 
@@ -206,10 +203,10 @@ func TestRegister_IsIdempotent_SecondCallNoDup(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "general", "/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/t/general", "", 3000); err != nil {
 		t.Fatalf("first register failed: %v", err)
 	}
-	if err := s.Register(context.Background(), "general", "/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/t/general", "", 3000); err != nil {
 		t.Fatalf("second register failed: %v", err)
 	}
 	if len(fk.services) != 1 {
@@ -299,11 +296,67 @@ func TestRegister_LegacyRouteIdempotent(t *testing.T) {
 	}
 }
 
+func TestLegacyExists(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo(nil)
+	s := newKongService(fk, repo)
+	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
+
+	if !s.LegacyExists(context.Background(), "assistant") {
+		t.Error("expected LegacyExists(assistant) = true")
+	}
+	if s.LegacyExists(context.Background(), "other") {
+		t.Error("expected LegacyExists(other) = false")
+	}
+	if s.LegacyExists(context.Background(), "Bad Name") {
+		t.Error("invalid bare name should report false")
+	}
+	disabled := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60)
+	if disabled.LegacyExists(context.Background(), "assistant") {
+		t.Error("disabled service should report false")
+	}
+}
+
+// TestRegisterWithLegacy_MountsDespiteMissingBareService covers the D-1
+// timing: the deploy flow records legacy existence BEFORE its pre-clean
+// Deregister deletes the bare entities, so the forced mount must not depend on
+// the bare service still being present in Kong.
+func TestRegisterWithLegacy_MountsDespiteMissingBareService(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo(nil)
+	s := newKongService(fk, repo)
+
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lr := fk.routes["agent-zerone-assistant-route-legacy"]
+	if lr == nil {
+		t.Fatal("expected legacy route despite missing bare service")
+	}
+	if len(lr.Paths) != 1 || lr.Paths[0] != "/assistant" {
+		t.Fatalf("legacy route paths = %v, want [/assistant]", lr.Paths)
+	}
+	if lr.Service == nil || lr.Service.ID != fk.services["agent-zerone-assistant"].ID {
+		t.Fatal("expected legacy route to reference the scoped service")
+	}
+	if fk.routes["agent-zerone-assistant-route"] == nil {
+		t.Fatal("expected main scoped route to be registered too")
+	}
+
+	// Idempotent: a second forced mount must not duplicate anything.
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+	if len(fk.routes) != 2 {
+		t.Fatalf("expected 2 routes (main + legacy), got %d", len(fk.routes))
+	}
+}
+
 func TestDeregister_RemovesServiceAndIsIdempotent(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "general", "/general", "", 3000)
+	_ = s.Register(context.Background(), "general", "/t/general", "", 3000)
 
 	if err := s.Deregister(context.Background(), "general", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -370,7 +423,7 @@ func TestUpdateUpstream_UpdatesPort(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "general", "/general", "", 3000)
+	_ = s.Register(context.Background(), "general", "/t/general", "", 3000)
 	if err := s.UpdateUpstream(context.Background(), "general", 4000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
