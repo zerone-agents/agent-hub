@@ -810,6 +810,20 @@ func migrateProvidersTenantID() error {
 // 换成复合索引 uk_tenant_name (tenant_id, name)——加列和建新索引由
 // AutoMigrate 完成，这里只负责回填 + 删旧索引。
 //
+// 触发判据是双判据（OR 关系）：
+//  1. 旧全局唯一索引 uk_name 仍存在于任一四表（常规升级形态：AutoMigrate
+//     已建 uk_tenant_name，本函数删掉 uk_name 后重跑即为纯 no-op）；
+//  2. backfillTenantID 非空且四表中存在“遗留未回填行”（tenant_id=” 的
+//     行中，排除本就合法的共享行）——覆盖生产实锤的 legacy 形态：库的
+//     schema 本就无 uk_name（从未走过旧索引版本），判据 1 永不命中，
+//     回填被静默跳过，全部行停留共享域造成跨租户泄漏。
+//
+// 遗留行判定的表间差异：skills/scenes 无共享语义，任何 tenant_id=” 行
+// 都是无歧义的遗留信号；tools/mcps 的 ” 行可能是合法共享模板（预设/
+// 内置行），需分别排除 PresetToolNames 名单与 is_builtin=1 的行。
+// 迁移块尾的内置行归零 UPDATE 保证幂等：跑完后判据 2 的条件全部为假，
+// 重启不再触发。
+//
 // 内置行处理（决策 1A）：tools/mcps 的内置行（is_builtin=true，及
 // tools SeedIfEmpty 的预设行）是全平台模板，回填后统一改回共享语义
 // tenant_id=”；scenes 有 agent_id 归属列，优先按 agents 主表回填，
@@ -828,18 +842,21 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 		"scenes":      &scene.Scene{},
 	}
 
-	// 幂等守卫：回填 + 归零 + 删旧索引只在真正执行迁移的那一次跑——判据
-	// 是旧全局唯一索引 uk_name 仍存在（AutoMigrate 已建 uk_tenant_name，
-	// 本函数删掉 uk_name 后重跑即为纯 no-op）。归零 UPDATE 绝不能每次启动
-	// 都跑：租户可与共享预设行同名（('org-a','Skill') 与 ('','Skill') 合法
-	// 共存），无条件按名单归零会把租户私有行劫持进共享域，甚至撞
-	// uk_tenant_name 唯一索引导致启动失败。
+	// 幂等守卫：回填 + 归零 + 删旧索引只在真正执行迁移的那一次跑。判据
+	// 之一是旧全局唯一索引 uk_name 仍存在；判据之二是四表存在遗留未回填
+	// 行（见函数头注释）。归零 UPDATE 绝不能每次启动都跑：租户可与共享
+	// 预设行同名（('org-a','Skill') 与 ('','Skill') 合法共存），无条件按
+	// 名单归零会把租户私有行劫持进共享域，甚至撞 uk_tenant_name 唯一索引
+	// 导致启动失败。
 	needsMigration := false
 	for _, model := range legacyModels {
 		if m.HasIndex(model, "uk_name") {
 			needsMigration = true
 			break
 		}
+	}
+	if !needsMigration && backfillTenantID != "" && hasLegacyUnbackfilledRows() {
+		needsMigration = true
 	}
 
 	if needsMigration {
@@ -889,6 +906,43 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 		}
 	}
 	return nil
+}
+
+// hasLegacyUnbackfilledRows 判定四表是否存在“遗留未回填行”（tenant_id=”
+// 且不属于合法共享模板的行），作为无 uk_name 旧索引的 legacy 库触发回填的
+// 第二判据：tools 排除 PresetToolNames 预设行（预设本就是共享 ”）、
+// mcp_servers 排除 is_builtin=1 的内置行；skills/scenes 无共享语义，任何
+// ” 行都是遗留信号。迁移块尾的归零 UPDATE 保证本判据跑完后为假（幂等）。
+func hasLegacyUnbackfilledRows() bool {
+	placeholders := make([]string, len(agent.PresetToolNames))
+	args := make([]interface{}, len(agent.PresetToolNames))
+	for i, name := range agent.PresetToolNames {
+		placeholders[i] = "?"
+		args[i] = name
+	}
+	type legacyQuery struct {
+		sql  string
+		args []interface{}
+	}
+	queries := []legacyQuery{
+		{fmt.Sprintf("SELECT COUNT(*) FROM `tools` WHERE tenant_id = '' AND name NOT IN (%s)", strings.Join(placeholders, ",")), args},
+		{"SELECT COUNT(*) FROM `mcp_servers` WHERE tenant_id = '' AND is_builtin = 0", nil},
+		{"SELECT COUNT(*) FROM `skills` WHERE tenant_id = ''", nil},
+		{"SELECT COUNT(*) FROM `scenes` WHERE tenant_id = ''", nil},
+	}
+	for _, q := range queries {
+		var n int64
+		if err := DB.Raw(q.sql, q.args...).Scan(&n).Error; err != nil {
+			// 计数失败按“未触发”处理，让后续 BackfillTenantID/HasColumn
+			// 路径暴露真正的错误，而非在这里猜测原因。
+			log.Printf("legacy backfill detection query failed (%v), skipping criterion: %v", q.sql, err)
+			continue
+		}
+		if n > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // migrateDropLegacyUkTenantName 清理索引改名残留：复合唯一索引原名
