@@ -124,7 +124,7 @@ curl -X POST https://<hub>/api/v1/ops/tenant-clients \
   -d '{"org":"acme","clientId":"...","clientSecret":"..."}'
 ```
 
-字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文）；`isDefault` 可选。
+字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文；非空时必须为合法 PEM 证书（`-----BEGIN CERTIFICATE-----` 开头），否则 400）；`isDefault` 可选。
 
 **org 命名约束**：组织名必须匹配 `^[a-z][a-z0-9]{0,62}$`（小写字母开头，仅小写字母和数字，不超过 63 字符），**不允许连字符、大写、下划线等**，不合法返回 400。原因：组织名用于拼接部署键 `<org>-<agent>` 与 runtime URL 路径段 `/<org>/<agent>`（见下文「部署键与 runtime URL」），而 agent 名本身允许连字符——若 org 也允许连字符，`(org "a", agent "b-c")` 与 `(org "a-b", agent "c")` 会拼出同一个部署键，产生跨租户覆盖/误删的歧义。已登记的存量组织（`zerone` / `ayu` / `zhengxin` 等）天然合规，无需迁移。
 
