@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 
 	authdom "control-panel/internal/domain/auth"
 	"control-panel/pkg/database"
@@ -12,6 +13,18 @@ import (
 // ErrDefaultRequired 表示操作会破坏「表非空 ⇒ 恰好一个 default」的不变式：
 // 把 default 行降级、或删除仍有其他行的 default 行。handler 映射 409。
 var ErrDefaultRequired = errors.New("default tenant must exist and be unique: reassign default first")
+
+// ErrDefaultConflict 表示并发写入撞上 default_key 唯一约束（哨兵值兜底生效），
+// 映射 409，客户端重试即可。
+var ErrDefaultConflict = errors.New("并发 default 冲突，请重试")
+
+// isDefaultKeyConflict 判定错误链是否为 default_key 唯一索引冲突。
+// sqlite: "UNIQUE constraint failed: tenant_oauth_clients.default_key"；
+// MySQL: "Duplicate entry 'default' for key '...uk_default_key'"。
+// 两种驱动消息都含 "default_key"；主键（org）冲突消息不含该串，可精确区分。
+func isDefaultKeyConflict(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "default_key")
+}
 
 // TenantOAuthClientRepository 存取 tenant_oauth_clients（组织 → Casdoor
 // Application 凭证映射）。加解密在 handler/service 层做，这里只存取密文。
@@ -24,11 +37,26 @@ func NewTenantOAuthClientRepository() *TenantOAuthClientRepository {
 }
 
 // Upsert 插入或更新（主键 org）。事务性 default 语义：
+//   - 空表 + isDefault=false → 事务内自动提升为 default（首行守卫，原 handler
+//     层事务外判定移入，收窄并发窗口）；
 //   - isDefault=true：先清旧 default 的 default_key，再设本行为 default；
 //   - isDefault=false 且目标是当前 default 且表内还有其他行 → ErrDefaultRequired
 //     （唯一行保持 default 不变，允许更新非 default 字段）。
+//     跨事务的残余竞态由 default_key 哨兵唯一索引兜底，撞索引 → ErrDefaultConflict。
 func (r *TenantOAuthClientRepository) Upsert(org, clientID, secretEnc, certEnc string, isDefault bool) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 首行自动 default：Count 在事务内做（原 handler 层事务外判定移入，
+		// 收窄并发窗口；跨事务残余竞态由 default_key 哨兵唯一索引兜底）。
+		if !isDefault {
+			var n int64
+			if err := tx.Model(&authdom.TenantOAuthClient{}).Count(&n).Error; err != nil {
+				return err
+			}
+			if n == 0 {
+				isDefault = true
+			}
+		}
+
 		var existing authdom.TenantOAuthClient
 		err := tx.Where("org = ?", org).First(&existing).Error
 		isCurrentDefault := false
@@ -67,7 +95,7 @@ func (r *TenantOAuthClientRepository) Upsert(org, clientID, secretEnc, certEnc s
 			CertEnc:         certEnc,
 		}
 		if isDefault {
-			key := org
+			key := authdom.DefaultKeySentinel // 哨兵值（原为 org 名，见常量注释）
 			row.DefaultKey = &key
 		} else {
 			row.DefaultKey = nil
@@ -79,6 +107,13 @@ func (r *TenantOAuthClientRepository) Upsert(org, clientID, secretEnc, certEnc s
 		}
 		return tx.Save(&row).Error
 	})
+	if err != nil {
+		if isDefaultKeyConflict(err) {
+			return ErrDefaultConflict
+		}
+		return err
+	}
+	return nil
 }
 
 // Find 返回指定 org 的行；未注册返回 (nil, nil)。

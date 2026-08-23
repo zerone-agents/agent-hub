@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -47,8 +48,8 @@ func TestTenantOAuthClientUpsertAndFind(t *testing.T) {
 	if row.ClientID != "client-1" || row.ClientSecretEnc != "secret-enc-1" || row.CertEnc != "cert-enc-1" {
 		t.Fatalf("unexpected row: %+v", row)
 	}
-	if row.DefaultKey == nil || *row.DefaultKey != "org-a" {
-		t.Fatalf("org-a should be default: %+v", row.DefaultKey)
+	if row.DefaultKey == nil || *row.DefaultKey != authdom.DefaultKeySentinel {
+		t.Fatalf("org-a should be default (sentinel): %+v", row.DefaultKey)
 	}
 	firstCreatedAt := row.CreatedAt
 	if firstCreatedAt.IsZero() {
@@ -76,6 +77,46 @@ func TestTenantOAuthClientUpsertAndFind(t *testing.T) {
 	// org-a 仍是 default（isDefault=false 不应摘掉 default 标记，因它是唯一行）
 	if d, _ := repo.FindDefault(); d == nil || d.Org != "org-a" {
 		t.Fatalf("FindDefault after re-upsert: got %+v, want org-a", d)
+	}
+}
+
+func TestTenantOAuthClientUpsertFirstRowAutoDefault(t *testing.T) {
+	setupTenantOAuthClientDB(t)
+	repo := NewTenantOAuthClientRepository()
+
+	// 空表 + isDefault=false → 事务内自动提升为 default（原 handler 层逻辑移入）。
+	if err := repo.Upsert("org-a", "cid", "sec", "", false); err != nil {
+		t.Fatal(err)
+	}
+	d, err := repo.FindDefault()
+	if err != nil || d == nil || d.Org != "org-a" {
+		t.Fatalf("FindDefault: got (%v, %v), want org-a", d, err)
+	}
+	// default_key 的值必须是哨兵常量，不是 org 名（唯一索引兜底的前提）。
+	row, _ := repo.Find("org-a")
+	if row.DefaultKey == nil || *row.DefaultKey != authdom.DefaultKeySentinel {
+		t.Fatalf("default_key should be sentinel %q, got %v", authdom.DefaultKeySentinel, row.DefaultKey)
+	}
+}
+
+func TestIsDefaultKeyConflict(t *testing.T) {
+	cases := map[string]bool{
+		// sqlite（glebarez）格式
+		"UNIQUE constraint failed: tenant_oauth_clients.default_key": true,
+		// MySQL 格式（错误链文本含索引名）
+		"Error 1062: Duplicate entry 'default' for key 'tenant_oauth_clients.uk_default_key'": true,
+		// 主键（org）冲突不含 "default_key"，不得误判
+		"UNIQUE constraint failed: tenant_oauth_clients.org":                        false,
+		"Error 1062: Duplicate entry 'orga' for key 'tenant_oauth_clients.PRIMARY'": false,
+		"some other error": false,
+	}
+	for msg, want := range cases {
+		if got := isDefaultKeyConflict(errors.New(msg)); got != want {
+			t.Fatalf("isDefaultKeyConflict(%q) = %v, want %v", msg, got, want)
+		}
+	}
+	if isDefaultKeyConflict(nil) {
+		t.Fatal("nil error should not match")
 	}
 }
 

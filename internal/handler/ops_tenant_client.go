@@ -59,17 +59,8 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 		return
 	}
 
-	// 首行自动 default 守卫：isDefault 缺省且表空 → 提升为 default，
-	// 保证「表非空 ⇒ 恰好一个 default」不变式从第一行起成立。
+	// 首行自动 default 判定已移入 repo.Upsert 事务内（收窄并发窗口）。
 	isDefault := req.IsDefault
-	if !isDefault {
-		if n, err := h.repo.Count(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-			return
-		} else if n == 0 {
-			isDefault = true
-		}
-	}
 
 	secretEnc, err := providerdom.Encrypt(req.ClientSecret, h.encryptionKey)
 	if err != nil {
@@ -86,8 +77,8 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 	}
 
 	if err := h.repo.Upsert(req.Org, req.ClientID, secretEnc, certEnc, isDefault); err != nil {
-		if errors.Is(err, repository.ErrDefaultRequired) {
-			c.JSON(http.StatusConflict, gin.H{"success": false, "error": repository.ErrDefaultRequired.Error()})
+		if errors.Is(err, repository.ErrDefaultRequired) || errors.Is(err, repository.ErrDefaultConflict) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
