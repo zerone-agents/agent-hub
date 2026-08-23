@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,4 +44,23 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	// 原始错误细节（endpoint / exchange 失败原文）不得外泄给客户端。
 	require.NotContains(t, w.Body.String(), "127.0.0.1")
 	require.NotContains(t, w.Body.String(), "exchange")
+}
+
+func TestRefreshToken_NeutralErrorMessage(t *testing.T) {
+	// 指向不可达端口 → 确定性失败；响应不得外泄内部细节（原实现拼接 err.Error()，RED）
+	require.NoError(t, auth.InitCasdoor(&config.CasdoorConfig{
+		Endpoint: "http://127.0.0.1:1", ClientID: "cid", ClientSecret: "sec", Organization: "orga",
+	}))
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/auth/refresh", RefreshToken)
+
+	w := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"refresh_token":"fake-header.eyJvd25lciI6Im9yZ2EifQ.fake"}`)
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/auth/refresh", body))
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.NotContains(t, w.Body.String(), "127.0.0.1")
+	require.NotContains(t, w.Body.String(), "refresh token:")
+	require.NotContains(t, w.Body.String(), "failed to refresh")
 }

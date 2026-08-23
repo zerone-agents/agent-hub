@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -396,43 +395,26 @@ func refreshCreds(refreshToken string) *TenantClientCreds {
 
 // RefreshAccessToken exchanges a refresh token for a new access token.
 // 多组织部署下按 token 的 owner 自解析凭证（见 refreshCreds），签名不变。
+// x/oauth2 TokenSource 迁移（issue #49）：非 2xx / 错误体现返回 error
+// （原实现无状态码检查，错误响应被当成功返回空 token——latent bug 一并修复）。
 func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 	if refreshToken == "" {
-		return nil, fmt.Errorf("refresh token is empty")
+		return nil, errors.New("refresh token is empty")
 	}
-
 	creds := refreshCreds(refreshToken)
-	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
-
-	data := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-		"client_id":     creds.ClientID,
-		"client_secret": creds.ClientSecret,
-	}
-
-	jsonData, err := json.Marshal(data)
+	cfg := oauthConfig(creds, "")
+	tok, err := cfg.TokenSource(context.Background(), &oauth2.Token{RefreshToken: refreshToken}).Token()
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal refresh request: %w", err)
-	}
-
-	resp, err := http.Post(tokenURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
+		var re *oauth2.RetrieveError
+		if errors.As(err, &re) {
+			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+		}
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if ferr := casdoorFakeSuccessError(tok.AccessToken); ferr != nil {
+		return nil, ferr
 	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
-	}
-
-	return &tokenResp, nil
+	return tokenResponseFrom(tok)
 }
 
 // RevokeToken revokes an access or refresh token.

@@ -98,6 +98,51 @@ func TestExchangeCodeForToken_CasdoorErrorBody(t *testing.T) {
 	require.Contains(t, err.Error(), "code expired")
 }
 
+// fakeRefreshToken 造一个 payload 带 owner 的 JWT 形状串（tokenOwner 不验签，
+// 只 base64 解 payload 读 owner，用于 refreshCreds 选 per-org 凭证）。
+func fakeRefreshToken(owner string) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"owner":"` + owner + `"}`))
+	return "fake-header." + payload + ".fake-signature"
+}
+
+func TestRefreshAccessToken_FormParamsAndPerOrgCreds(t *testing.T) {
+	var gotForm url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		gotForm = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"access_token":"at-2","refresh_token":"rt-2","token_type":"Bearer","expires_in":7200}`)
+	}))
+	t.Cleanup(srv.Close)
+	setupOAuthTest(t, srv.URL)
+
+	tok, err := RefreshAccessToken(fakeRefreshToken("orga"))
+	require.NoError(t, err)
+	require.Equal(t, "at-2", tok.AccessToken)
+
+	require.Equal(t, "refresh_token", gotForm.Get("grant_type"))
+	require.NotEmpty(t, gotForm.Get("refresh_token"))
+	// tokenOwner 命中 lookup → 用 orga 的 per-org 凭证（原实现即有，迁移不得丢）
+	require.Equal(t, "cid-org", gotForm.Get("client_id"))
+	require.Equal(t, "sec-org", gotForm.Get("client_secret"))
+}
+
+func TestRefreshAccessToken_CasdoorError(t *testing.T) {
+	// 原实现无状态码/错误体检查：错误响应被当成功返回空 token（latent bug，RED）
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, `{"error":"invalid_grant","error_description":"refresh token expired"}`)
+	}))
+	t.Cleanup(srv.Close)
+	setupOAuthTest(t, srv.URL)
+
+	tok, err := RefreshAccessToken(fakeRefreshToken("orga"))
+	require.Error(t, err)
+	require.Nil(t, tok)
+	require.Contains(t, err.Error(), "refresh token expired")
+}
+
 func TestExchangeCodeForToken_ErrorPrefixFakeSuccess(t *testing.T) {
 	// Casdoor 已知怪癖：200 + access_token 字面 "error: xxx" 的伪成功
 	// （SDK auth.go:104 有同款守卫，原实现缺失——本测试构成 RED）
