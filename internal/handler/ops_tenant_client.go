@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"regexp"
@@ -57,6 +58,16 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 	if !opsOrgNameRe.MatchString(req.Org) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "组织名只能包含小写字母和数字，以字母开头，不超过 63 字符——组织名用于生成部署键与 URL 路径段，不允许连字符等特殊字符"})
 		return
+	}
+
+	// cert 为可选，但非空时必须是结构合法的 PEM CERTIFICATE 块：
+	// 坏值在此暴露（400），而非 deferred 到运行时验签才炸（issue #54）。
+	if req.Cert != "" {
+		block, _ := pem.Decode([]byte(req.Cert))
+		if block == nil || block.Type != "CERTIFICATE" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "cert 必须是合法的 PEM 格式证书（-----BEGIN CERTIFICATE----- 开头）"})
+			return
+		}
 	}
 
 	// 首行自动 default 判定已移入 repo.Upsert 事务内（收窄并发窗口）。
