@@ -10,13 +10,13 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 
 	"control-panel/internal/config"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	"golang.org/x/oauth2"
 )
 
 var client *casdoorsdk.Client
@@ -197,6 +197,25 @@ func tokenOwner(token string) string {
 	return claims.Owner
 }
 
+// oauthConfig 由租户凭证现构 x/oauth2 配置（凭证 per-org，无全局单例）。
+// AuthURL 保持既有前端路由 /login/oauth/authorize（SDK 用 /api/... 变体，
+// 两者等价，不改变现有行为）。redirectURL 非空时写入 Config.RedirectURL：
+// 授权 URL 需要它；token 兑换传空——SDK 先例（auth.go RedirectURL 被注释），
+// Casdoor 兑换端点不校验 redirect_uri，不发最稳。AuthStyleInParams =
+// client_id/client_secret 放请求体（与原 JSON body 行为一致）。
+func oauthConfig(creds *TenantClientCreds, redirectURL string) *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     creds.ClientID,
+		ClientSecret: creds.ClientSecret,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   fmt.Sprintf("%s/login/oauth/authorize", casdoorConfig.Endpoint),
+			TokenURL:  fmt.Sprintf("%s/api/login/oauth/access_token", casdoorConfig.Endpoint),
+			AuthStyle: oauth2.AuthStyleInParams,
+		},
+		RedirectURL: redirectURL,
+	}
+}
+
 // GetLoginURL builds the Casdoor authorization URL for the given org and
 // stores the OAuth session (with Org) for the callback.
 func GetLoginURL(org, state, codeVerifier string) (string, error) {
@@ -206,19 +225,15 @@ func GetLoginURL(org, state, codeVerifier string) (string, error) {
 	}
 	callbackURL := GetCallbackURL()
 
-	params := url.Values{}
-	params.Set("client_id", creds.ClientID)
-	params.Set("response_type", "code")
-	params.Set("redirect_uri", callbackURL)
-	params.Set("scope", "read")
-	params.Set("state", state)
-
+	cfg := oauthConfig(creds, callbackURL)
+	cfg.Scopes = []string{"read"}
+	// 注：x/oauth2 v0.36.0 的 option 类型名为 AuthCodeOption（AuthCodeURLOption
+	// 是更新版本引入的别名），升级依赖时无需改动此处语义。
+	opts := []oauth2.AuthCodeOption{}
 	if codeVerifier != "" {
-		params.Set("code_challenge", GenerateCodeChallenge(codeVerifier))
-		params.Set("code_challenge_method", "S256")
+		opts = append(opts, oauth2.S256ChallengeOption(codeVerifier))
 	}
-
-	loginURL := fmt.Sprintf("%s/login/oauth/authorize?%s", casdoorConfig.Endpoint, params.Encode())
+	loginURL := cfg.AuthCodeURL(state, opts...)
 
 	oauthSessionsMu.Lock()
 	oauthSessions[state] = &OAuthSession{
