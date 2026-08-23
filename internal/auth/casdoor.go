@@ -2,21 +2,22 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"control-panel/internal/config"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	"golang.org/x/oauth2"
 )
 
 var client *casdoorsdk.Client
@@ -120,11 +121,6 @@ func GenerateCodeVerifier() (string, error) {
 	return generateRandomString(32)
 }
 
-// GenerateCodeChallenge creates a PKCE S256 code challenge from the verifier.
-func GenerateCodeChallenge(verifier string) string {
-	return generateCodeChallenge(verifier)
-}
-
 // resolveClientCreds 按 org 解析 OAuth 凭证（多组织登录入口解析链）：
 //   - org != ""：查注入的 lookup，未命中返回错误（调用方转 404 统一文案，
 //     绝不回落全局，避免把请求发给错误组织的 application）；
@@ -197,6 +193,25 @@ func tokenOwner(token string) string {
 	return claims.Owner
 }
 
+// oauthConfig 由租户凭证现构 x/oauth2 配置（凭证 per-org，无全局单例）。
+// AuthURL 保持既有前端路由 /login/oauth/authorize（SDK 用 /api/... 变体，
+// 两者等价，不改变现有行为）。redirectURL 非空时写入 Config.RedirectURL：
+// 授权 URL 需要它；token 兑换传空——SDK 先例（auth.go RedirectURL 被注释），
+// Casdoor 兑换端点不校验 redirect_uri，不发最稳。AuthStyleInParams =
+// client_id/client_secret 放请求体（与原 JSON body 行为一致）。
+func oauthConfig(creds *TenantClientCreds, redirectURL string) *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     creds.ClientID,
+		ClientSecret: creds.ClientSecret,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   fmt.Sprintf("%s/login/oauth/authorize", casdoorConfig.Endpoint),
+			TokenURL:  fmt.Sprintf("%s/api/login/oauth/access_token", casdoorConfig.Endpoint),
+			AuthStyle: oauth2.AuthStyleInParams,
+		},
+		RedirectURL: redirectURL,
+	}
+}
+
 // GetLoginURL builds the Casdoor authorization URL for the given org and
 // stores the OAuth session (with Org) for the callback.
 func GetLoginURL(org, state, codeVerifier string) (string, error) {
@@ -206,19 +221,15 @@ func GetLoginURL(org, state, codeVerifier string) (string, error) {
 	}
 	callbackURL := GetCallbackURL()
 
-	params := url.Values{}
-	params.Set("client_id", creds.ClientID)
-	params.Set("response_type", "code")
-	params.Set("redirect_uri", callbackURL)
-	params.Set("scope", "read")
-	params.Set("state", state)
-
+	cfg := oauthConfig(creds, callbackURL)
+	cfg.Scopes = []string{"read"}
+	// 注：x/oauth2 v0.36.0 的 option 类型名为 AuthCodeOption（AuthCodeURLOption
+	// 是更新版本引入的别名），升级依赖时无需改动此处语义。
+	opts := []oauth2.AuthCodeOption{}
 	if codeVerifier != "" {
-		params.Set("code_challenge", GenerateCodeChallenge(codeVerifier))
-		params.Set("code_challenge_method", "S256")
+		opts = append(opts, oauth2.S256ChallengeOption(codeVerifier))
 	}
-
-	loginURL := fmt.Sprintf("%s/login/oauth/authorize?%s", casdoorConfig.Endpoint, params.Encode())
+	loginURL := cfg.AuthCodeURL(state, opts...)
 
 	oauthSessionsMu.Lock()
 	oauthSessions[state] = &OAuthSession{
@@ -250,69 +261,63 @@ type TokenResponse struct {
 	IdToken      string `json:"id_token"`
 }
 
+// tokenResponseFrom 把 oauth2.Token 折回既有 TokenResponse（对外 JSON 形状不变）。
+// expiresIn 从 Expiry 折算；id_token 经 Extra 透传。
+func tokenResponseFrom(tok *oauth2.Token) (*TokenResponse, error) {
+	if tok.AccessToken == "" {
+		return nil, errors.New("access token is empty in response")
+	}
+	expiresIn := 0
+	if d := time.Until(tok.Expiry); d > 0 {
+		expiresIn = int(d.Seconds())
+	}
+	resp := &TokenResponse{
+		AccessToken:  tok.AccessToken,
+		TokenType:    tok.TokenType,
+		ExpiresIn:    expiresIn,
+		RefreshToken: tok.RefreshToken,
+	}
+	if idToken, ok := tok.Extra("id_token").(string); ok {
+		resp.IdToken = idToken
+	}
+	return resp, nil
+}
+
+// casdoorFakeSuccessError 提取 Casdoor 伪成功（200 + access_token 字面
+// "error: xxx"）的真实错误信息。SDK auth.go:104 同款守卫——Casdoor 部分
+// 错误路径返回 200，body 的 access_token 字段是 "error: <描述>"。
+func casdoorFakeSuccessError(accessToken string) error {
+	if strings.HasPrefix(accessToken, "error:") {
+		return errors.New(strings.TrimSpace(strings.TrimPrefix(accessToken, "error:")))
+	}
+	return nil
+}
+
 // ExchangeCodeForToken exchanges an authorization code for tokens using the
-// OAuth client resolved for org.
+// OAuth client resolved for org（x/oauth2 迁移，issue #49）。
 func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error) {
 	creds, err := resolveClientCreds(org)
 	if err != nil {
 		return nil, err
 	}
-	callbackURL := GetCallbackURL()
-
-	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
-
-	data := map[string]string{
-		"grant_type":    "authorization_code",
-		"code":          code,
-		"client_id":     creds.ClientID,
-		"client_secret": creds.ClientSecret,
-		"callback_url":  callbackURL,
-	}
-
+	cfg := oauthConfig(creds, "") // 兑换不发 redirect_uri（见 oauthConfig 注释）
+	opts := []oauth2.AuthCodeOption{}
 	if codeVerifier != "" {
-		data["code_verifier"] = codeVerifier
+		opts = append(opts, oauth2.VerifierOption(codeVerifier))
 	}
-
-	jsonData, err := json.Marshal(data)
+	tok, err := cfg.Exchange(context.Background(), code, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	resp, err := http.Post(tokenURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
+		// *oauth2.RetrieveError 结构化携带 OAuth 标准错误体（issue #49 的核心收益）
+		var re *oauth2.RetrieveError
+		if errors.As(err, &re) {
+			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+		}
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if ferr := casdoorFakeSuccessError(tok.AccessToken); ferr != nil {
+		return nil, ferr
 	}
-
-	// 记录调试信息：不打印响应体原文（含 access/refresh token），只打状态码 + 长度
-	log.Printf("Token exchange response status: %d, body length: %d", resp.StatusCode, len(body))
-
-	if resp.StatusCode != http.StatusOK {
-		// 只提取非敏感的错误字段，避免完整响应体（可能含凭据）进入日志/错误消息
-		var errorResp map[string]interface{}
-		if err := json.Unmarshal(body, &errorResp); err == nil {
-			if msg, ok := errorResp["error"]; ok {
-				return nil, fmt.Errorf("casdoor error: %v", msg)
-			}
-		}
-		return nil, fmt.Errorf("token exchange failed with status %d (body length %d)", resp.StatusCode, len(body))
-	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
-	}
-
-	if tokenResp.AccessToken == "" {
-		return nil, fmt.Errorf("access token is empty in response")
-	}
-
-	return &tokenResp, nil
+	return tokenResponseFrom(tok)
 }
 
 // GetUserInfo extracts and validates user information from an access token.
@@ -344,11 +349,6 @@ func generateRandomString(length int) (string, error) {
 		return "", fmt.Errorf("生成随机字符串失败: %w", err)
 	}
 	return base64.URLEncoding.EncodeToString(b)[:length], nil
-}
-
-func generateCodeChallenge(verifier string) string {
-	hash := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
 // GetSession retrieves and removes an OAuth session by state.
@@ -384,43 +384,26 @@ func refreshCreds(refreshToken string) *TenantClientCreds {
 
 // RefreshAccessToken exchanges a refresh token for a new access token.
 // 多组织部署下按 token 的 owner 自解析凭证（见 refreshCreds），签名不变。
+// x/oauth2 TokenSource 迁移（issue #49）：非 2xx / 错误体现返回 error
+// （原实现无状态码检查，错误响应被当成功返回空 token——latent bug 一并修复）。
 func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 	if refreshToken == "" {
-		return nil, fmt.Errorf("refresh token is empty")
+		return nil, errors.New("refresh token is empty")
 	}
-
 	creds := refreshCreds(refreshToken)
-	tokenURL := fmt.Sprintf("%s/api/login/oauth/access_token", client.Endpoint)
-
-	data := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-		"client_id":     creds.ClientID,
-		"client_secret": creds.ClientSecret,
-	}
-
-	jsonData, err := json.Marshal(data)
+	cfg := oauthConfig(creds, "")
+	tok, err := cfg.TokenSource(context.Background(), &oauth2.Token{RefreshToken: refreshToken}).Token()
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal refresh request: %w", err)
-	}
-
-	resp, err := http.Post(tokenURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
+		var re *oauth2.RetrieveError
+		if errors.As(err, &re) {
+			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+		}
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+	if ferr := casdoorFakeSuccessError(tok.AccessToken); ferr != nil {
+		return nil, ferr
 	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
-	}
-
-	return &tokenResp, nil
+	return tokenResponseFrom(tok)
 }
 
 // RevokeToken revokes an access or refresh token.

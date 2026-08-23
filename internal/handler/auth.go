@@ -147,9 +147,12 @@ func RefreshToken(c *gin.Context) {
 
 	tokenResp, err := auth.RefreshAccessToken(request.RefreshToken)
 	if err != nil {
+		// 中性文案：内部细节（endpoint/网络错误原文）只进日志，不外泄给客户端
+		// （镜像 PR #65 Callback 的处理模式）。
+		log.Printf("[RefreshToken] refresh failed: %v", err)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"error":   "failed to refresh token: " + err.Error(),
+			"error":   "刷新令牌无效或已过期，请重新登录",
 		})
 		return
 	}

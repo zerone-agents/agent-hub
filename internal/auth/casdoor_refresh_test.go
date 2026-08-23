@@ -18,15 +18,15 @@ func fakeJWT(owner string) string {
 }
 
 // newRefreshTestServer 启动假的 casdoor token 端点，记录收到的 client_id。
+// x/oauth2 TokenSource 迁移后请求为标准 form 编码（原实现是 JSON body）。
 func newRefreshTestServer(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
 	var mu sync.Mutex
 	var gotClientIDs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = r.ParseForm()
 		mu.Lock()
-		gotClientIDs = append(gotClientIDs, body["client_id"])
+		gotClientIDs = append(gotClientIDs, r.PostForm.Get("client_id"))
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
