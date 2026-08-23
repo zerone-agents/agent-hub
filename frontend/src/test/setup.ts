@@ -25,7 +25,10 @@ function forwardFiltered(event: 'uncaughtException' | 'unhandledRejection') {
   process.on(event, (err: unknown, payload?: unknown) => {
     if (isReactTeardownFlake(err)) return
     existing.forEach((h) => {
-      h.call(process, err, payload)
+      // Captured listeners are typed per-event (UncaughtExceptionOrigin vs
+      // Promise); forward through a generic signature since we mirror the
+      // runtime arguments verbatim.
+      ;(h as (...args: unknown[]) => void).call(process, err, payload)
     })
   })
 }
