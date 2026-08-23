@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -120,11 +119,6 @@ func GenerateState() (string, error) {
 // GenerateCodeVerifier generates a random PKCE code verifier.
 func GenerateCodeVerifier() (string, error) {
 	return generateRandomString(32)
-}
-
-// GenerateCodeChallenge creates a PKCE S256 code challenge from the verifier.
-func GenerateCodeChallenge(verifier string) string {
-	return generateCodeChallenge(verifier)
 }
 
 // resolveClientCreds 按 org 解析 OAuth 凭证（多组织登录入口解析链）：
@@ -355,11 +349,6 @@ func generateRandomString(length int) (string, error) {
 		return "", fmt.Errorf("生成随机字符串失败: %w", err)
 	}
 	return base64.URLEncoding.EncodeToString(b)[:length], nil
-}
-
-func generateCodeChallenge(verifier string) string {
-	hash := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
 // GetSession retrieves and removes an OAuth session by state.
