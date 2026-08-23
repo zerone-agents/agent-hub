@@ -21,7 +21,9 @@ import (
 //
 // Context keys set (unchanged names from the legacy Casdoor middleware):
 //
-//	user_id, user_name, email, display_name, org_id, avatar,
+//	user_id, user_name, email, display_name,
+//	org_id (the TenantID: casdoor organization name, or "default" for builtin),
+//	avatar,
 //	roles ([]string, normalized to admin|maintainer|member),
 //	tenant_id (via tenant.SetTenantID; "default" for builtin mode),
 //	permissions, auth_method ("builtin" | "casdoor" | "cli").
@@ -62,7 +64,7 @@ func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gi
 			c.Set("user_name", "")
 			c.Set("email", "")
 			c.Set("display_name", "")
-			c.Set("org_id", "")
+			c.Set("org_id", identity.TenantID)
 			c.Set("avatar", "")
 			c.Set("roles", identity.Roles)
 			tenant.SetTenantID(c, tenantOrDefault(identity.TenantID))
@@ -87,7 +89,7 @@ func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gi
 		c.Set("user_name", user.Username)
 		c.Set("email", user.Email)
 		c.Set("display_name", user.DisplayName)
-		c.Set("org_id", "")
+		c.Set("org_id", user.TenantID)
 		c.Set("avatar", user.Avatar)
 		c.Set("roles", user.Roles)
 		tenant.SetTenantID(c, tenantOrDefault(user.TenantID))

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"control-panel/internal/auth"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -100,6 +101,8 @@ func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 }
 
 // UserInfo returns the authenticated user's profile information.
+// tenant_id 是权威字段（取自中间件经 tenant.SetTenantID 注入的租户上下文）；
+// org_id 为向后兼容保留的同源值（builtin 模式下均为 "default"）。
 func UserInfo(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	userName, _ := c.Get("user_name")
@@ -117,7 +120,7 @@ func UserInfo(c *gin.Context) {
 			"username":     userName,
 			"email":        email,
 			"display_name": displayName,
-			"tenant_id":    "",
+			"tenant_id":    tenant.GetTenantID(c),
 			"org_id":       orgID,
 			"avatar":       avatar,
 			"roles":        roles,
