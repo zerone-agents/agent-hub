@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 
@@ -14,7 +15,7 @@ import (
 // ChatPushAuth 是 /api/v1/chat/push 专用的双通道鉴权中间件：
 //
 //  1. 请求带 X-Chat-Push-Key（非空）→ push-key 通道：与 CHAT_PUSH_API_KEY
-//     常量时间比对。服务端未配置或比对失败均 401（显式选择该通道即明确
+//     经 SHA-256 摘要做常量时间比对（规避长度时序泄漏）。服务端未配置或比对失败均 401（显式选择该通道即明确
 //     报错，不静默回落 JWT）。通过后仅标记 auth_method="chat_push_key"，
 //     不注入任何用户身份（user_id/roles/tenant 缺失，归属由请求 body 的
 //     user_name/org 决定）。
@@ -28,7 +29,9 @@ func ChatPushAuth(pushKey string, cliSvc *services.CLITokenService, p auth.Provi
 	return func(c *gin.Context) {
 		got := c.GetHeader("X-Chat-Push-Key")
 		if got != "" {
-			if pushKey == "" || subtle.ConstantTimeCompare([]byte(got), []byte(pushKey)) != 1 {
+			gotHash := sha256.Sum256([]byte(got))
+			wantHash := sha256.Sum256([]byte(pushKey))
+			if pushKey == "" || subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) != 1 {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 					"success": false,
 					"error":   "invalid chat push key",

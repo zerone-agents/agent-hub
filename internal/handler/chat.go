@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -36,7 +37,8 @@ func (h *ChatHandler) Push(c *gin.Context) {
 				respondError(c, http.StatusBadRequest, err.Error())
 				return
 			}
-			respondError(c, http.StatusInternalServerError, err.Error())
+			log.Printf("[ChatPush] push-key push failed: %v", err)
+			respondError(c, http.StatusInternalServerError, "internal error")
 			return
 		}
 		c.JSON(http.StatusOK, resp)

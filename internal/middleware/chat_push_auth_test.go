@@ -32,7 +32,8 @@ func newChatPushRouter(pushKey string, p auth.Provider) *gin.Engine {
 	r.POST("/push", ChatPushAuth(pushKey, nil, p), func(c *gin.Context) {
 		am, _ := c.Get("auth_method")
 		s, _ := am.(string)
-		c.JSON(http.StatusOK, gin.H{"auth_method": s})
+		_, hasUserID := c.Get("user_id")
+		c.JSON(http.StatusOK, gin.H{"auth_method": s, "has_user_id": hasUserID})
 	})
 	return r
 }
@@ -106,4 +107,22 @@ func TestChatPushAuth_NoHeader_PendingUser_BlockedBeforeHandler(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.False(t, handlerCalled)
 	require.Contains(t, w.Body.String(), "PENDING_APPROVAL")
+}
+
+// 终审建议：双 header 同时存在时 push-key 通道胜出（token 身份不注入）。
+func TestChatPushAuth_BothHeaders_PushKeyWins(t *testing.T) {
+	p := &stubProvider{
+		user: &auth.AuthUser{ID: "1", Username: "alice", Roles: []string{"member"}, TenantID: "default"},
+		mode: "builtin",
+	}
+	r := newChatPushRouter("secret", p)
+	req := httptest.NewRequest(http.MethodPost, "/push", nil)
+	req.Header.Set("X-Chat-Push-Key", "secret")
+	req.Header.Set("Authorization", "Bearer valid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), "chat_push_key")
+	require.Contains(t, w.Body.String(), `"has_user_id":false`)
 }
