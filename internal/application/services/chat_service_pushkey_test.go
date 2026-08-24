@@ -39,12 +39,14 @@ func pushKeySession(id, userName, org string) SessionInput {
 
 func TestPushWithSessionIdentity_AssignsPerSessionIdentity(t *testing.T) {
 	setupPushKeyTestDB(t)
-	s := NewChatService()
+	// casdoor 模式：显式 org 直用；缺省 org 经 resolver 解析（模拟
+	// tenant_oauth_clients default 行，值 "ops-org"）
+	s := NewChatService("casdoor", func() (string, bool) { return "ops-org", true })
 
 	resp, err := s.PushWithSessionIdentity(&PushRequest{
 		Sessions: []SessionInput{
 			pushKeySession("s-a", "alice", "zerone"),
-			pushKeySession("s-b", "bob", ""), // org 缺省 → default
+			pushKeySession("s-b", "bob", ""), // org 缺省 → resolver 解析
 		},
 	})
 	require.NoError(t, err)
@@ -62,7 +64,7 @@ func TestPushWithSessionIdentity_AssignsPerSessionIdentity(t *testing.T) {
 	var sb chat.Session
 	require.NoError(t, database.DB.Where("id = ?", "s-b").First(&sb).Error)
 	require.Equal(t, "bob", sb.UserID)
-	require.Equal(t, "default", sb.TenantID)
+	require.Equal(t, "ops-org", sb.TenantID)
 
 	// 消息的 UserID 跟随分组 user 盖章
 	var msg chat.Message
@@ -71,9 +73,43 @@ func TestPushWithSessionIdentity_AssignsPerSessionIdentity(t *testing.T) {
 	require.Equal(t, "zerone", msg.TenantID)
 }
 
+func TestPushWithSessionIdentity_BuiltinIgnoresOrg(t *testing.T) {
+	setupPushKeyTestDB(t)
+	// builtin 单租户模式：org 字段被忽略，恒落 "default"
+	s := NewChatService("builtin", nil)
+
+	resp, err := s.PushWithSessionIdentity(&PushRequest{
+		Sessions: []SessionInput{pushKeySession("s-bi", "alice", "zerone")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, resp.SyncedSessions)
+
+	var sess chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-bi").First(&sess).Error)
+	require.Equal(t, "default", sess.TenantID)
+}
+
+func TestPushWithSessionIdentity_CasdoorEmptyOrg_NoDefaultTenant(t *testing.T) {
+	setupPushKeyTestDB(t)
+	// casdoor 模式 + org 缺省 + 未登记 default 租户 → 400 硬错误（零写入）
+	s := NewChatService("casdoor", func() (string, bool) { return "", false })
+
+	resp, err := s.PushWithSessionIdentity(&PushRequest{
+		Sessions: []SessionInput{pushKeySession("s-ok", "alice", "zerone"), pushKeySession("s-noorg", "bob", "")},
+	})
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, ErrPushValidation)
+	require.Contains(t, err.Error(), "session[1]")
+	require.Contains(t, err.Error(), "org is required")
+
+	var count int64
+	require.NoError(t, database.DB.Model(&chat.Session{}).Count(&count).Error)
+	require.Equal(t, int64(0), count)
+}
+
 func TestPushWithSessionIdentity_MissingUserName(t *testing.T) {
 	setupPushKeyTestDB(t)
-	s := NewChatService()
+	s := NewChatService("casdoor", nil)
 
 	noName := pushKeySession("s-x", "someone", "")
 	noName.UserName = ""
@@ -93,7 +129,7 @@ func TestPushWithSessionIdentity_MissingUserName(t *testing.T) {
 
 func TestPushWithSessionIdentity_TooManySessions(t *testing.T) {
 	setupPushKeyTestDB(t)
-	s := NewChatService()
+	s := NewChatService("builtin", nil)
 
 	sessions := make([]SessionInput, 51)
 	for i := range sessions {
@@ -107,7 +143,7 @@ func TestPushWithSessionIdentity_TooManySessions(t *testing.T) {
 
 func TestPushWithSessionIdentity_EmptyRequest(t *testing.T) {
 	setupPushKeyTestDB(t)
-	s := NewChatService()
+	s := NewChatService("builtin", nil)
 
 	resp, err := s.PushWithSessionIdentity(&PushRequest{})
 	require.NoError(t, err)

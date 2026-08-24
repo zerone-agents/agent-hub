@@ -70,7 +70,7 @@ Plaintext key reveal is admin/maintainer only: `POST /api/v1/admin/providers/:id
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/chat/push` | Push sessions/messages (up to 50 sessions per request, conflict detection via `updated_at`). Auth: JWT/CLI token (default) **or** `X-Chat-Push-Key: <CHAT_PUSH_API_KEY>` — in key mode, per-session `user_name` (required) becomes `user_id`/`display_name`, `org` (default `"default"`) becomes tenant |
+| POST | `/api/v1/chat/push` | Push sessions/messages (up to 50 sessions per request, conflict detection via `updated_at`). Auth: JWT/CLI token (default) **or** `X-Chat-Push-Key: <CHAT_PUSH_API_KEY>` — in key mode, per-session `user_name` (required) becomes `user_id`/`display_name`; tenant from `org`: builtin mode ignores `org` (always `"default"`); casdoor mode uses explicit `org`, or when omitted resolves to the registered default tenant org (400 if none registered) |
 
 ## Admin Endpoints (`/api/v1/admin/*`)
 

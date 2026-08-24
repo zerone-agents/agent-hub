@@ -48,7 +48,7 @@ func newChatContext(w *httptest.ResponseRecorder, roles []string, userID string)
 
 func TestChatListSessions_MemberSeesOnlyOwn(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	w := httptest.NewRecorder()
 	c := newChatContext(w, []string{"member"}, "u1")
@@ -69,7 +69,7 @@ func TestChatListSessions_MemberSeesOnlyOwn(t *testing.T) {
 
 func TestChatListSessions_AdminSeesAll(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	w := httptest.NewRecorder()
 	c := newChatContext(w, []string{"admin"}, "u0")
@@ -87,7 +87,7 @@ func TestChatListSessions_AdminSeesAll(t *testing.T) {
 
 func TestChatGetSession_MemberOthersReturns404(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	w := httptest.NewRecorder()
 	c := newChatContext(w, []string{"member"}, "u1")
@@ -104,7 +104,7 @@ func TestChatGetSession_MemberOthersReturns404(t *testing.T) {
 
 func TestChatListMessages_MemberOthersReturns404(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	w := httptest.NewRecorder()
 	c := newChatContext(w, []string{"member"}, "u1")
@@ -121,7 +121,7 @@ func TestChatListMessages_MemberOthersReturns404(t *testing.T) {
 
 func TestChatDeleteSession_MemberOwnOnly(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	// 删他人会话 → 404，且数据仍在
 	w := httptest.NewRecorder()
@@ -145,7 +145,7 @@ func TestChatDeleteSession_MemberOwnOnly(t *testing.T) {
 
 func TestChatDeleteSession_AdminDeletesAny(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	w := httptest.NewRecorder()
 	c := newChatContext(w, []string{"maintainer"}, "u0")
@@ -167,7 +167,9 @@ func newPushKeyPushContext(w *httptest.ResponseRecorder, body string) *gin.Conte
 
 func TestChatPush_PushKeyMode_AssignsBodyIdentity(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	// casdoor 模式：显式 org 直用；缺省 org 解析为 tenant_oauth_clients
+	// default 行组织（这里用注入的 resolver 模拟，值 "ops-org"）
+	h := NewChatHandler("casdoor", func() (string, bool) { return "ops-org", true })
 
 	body := `{"sessions":[` +
 		`{"id":"s-k1","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z","user_name":"alice","org":"zerone","messages":[{"id":"m-k1","role":"user","content":"hi","created_at":"2026-08-24T10:00:01Z"}]},` +
@@ -187,12 +189,12 @@ func TestChatPush_PushKeyMode_AssignsBodyIdentity(t *testing.T) {
 	var s2 chat.Session
 	require.NoError(t, database.DB.Where("id = ?", "s-k2").First(&s2).Error)
 	require.Equal(t, "bob", s2.UserID)
-	require.Equal(t, "default", s2.TenantID)
+	require.Equal(t, "ops-org", s2.TenantID)
 }
 
 func TestChatPush_PushKeyMode_MissingUserNameReturns400(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	body := `{"sessions":[{"id":"s-bad","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z"}]}`
 	w := httptest.NewRecorder()
@@ -205,7 +207,7 @@ func TestChatPush_PushKeyMode_MissingUserNameReturns400(t *testing.T) {
 // 防伪造回归：token 通道下 body 的 user_name/org 必须被忽略。
 func TestChatPush_TokenMode_IgnoresBodyIdentity(t *testing.T) {
 	setupChatHandlerTestDB(t)
-	h := NewChatHandler()
+	h := NewChatHandler("builtin", nil)
 
 	body := `{"sessions":[{"id":"s-evil","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z","user_name":"attacker","org":"evil-org"}]}`
 	w := httptest.NewRecorder()

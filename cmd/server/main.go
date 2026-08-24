@@ -202,7 +202,15 @@ func main() {
 	sceneService := services.NewSceneService()
 	sceneHandler := handler.NewSceneHandler(sceneService)
 
-	chatHandler := handler.NewChatHandler()
+	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
+	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
+	chatHandler := handler.NewChatHandler(cfg.Auth.Mode, func() (string, bool) {
+		row, err := repository.NewTenantOAuthClientRepository().FindDefault()
+		if err != nil || row == nil {
+			return "", false
+		}
+		return row.Org, true
+	})
 
 	// MultiRAG sync client: only construct when both base URL and API key
 	// are configured. When nil, the sync-multirag endpoint returns 503 and
