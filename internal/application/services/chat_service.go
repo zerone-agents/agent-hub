@@ -25,11 +25,20 @@ var timeFormats = []string{
 
 type ChatService struct {
 	repo *repository.ChatRepository
+	// authMode 决定 push-key 通道的租户语义：builtin（单租户）忽略 org 字段，
+	// 恒 "default"；casdoor 下 org 缺省时经 resolveDefaultOrg 解析为
+	// tenant_oauth_clients 的 default 行组织。
+	authMode string
+	// resolveDefaultOrg 解析 casdoor 默认租户组织（ops 登记的 default 行）；
+	// 返回 (org, true)，查不到/出错返回 ("", false)。builtin 模式可为 nil。
+	resolveDefaultOrg func() (string, bool)
 }
 
-func NewChatService() *ChatService {
+func NewChatService(authMode string, resolveDefaultOrg func() (string, bool)) *ChatService {
 	return &ChatService{
-		repo: repository.NewChatRepository(),
+		repo:              repository.NewChatRepository(),
+		authMode:          authMode,
+		resolveDefaultOrg: resolveDefaultOrg,
 	}
 }
 
@@ -60,7 +69,10 @@ type SessionInput struct {
 	ExtraDirectories  string `json:"extra_directories"`
 	IsUserBound       bool   `json:"is_user_bound"`
 	// UserName / Org 仅在 chat_push_key 鉴权通道（X-Chat-Push-Key）下生效：
-	// user_name 必填且直接作为 user_id/display_name；org 缺省 "default"。
+	// UserName / Org 仅在 chat_push_key 鉴权通道（X-Chat-Push-Key）下生效：
+	// user_name 必填且直接作为 user_id/display_name。org 语义按部署模式分：
+	// builtin（单租户）忽略该字段，恒落 "default"；casdoor 缺省时解析为
+	// tenant_oauth_clients 的 default 行组织（未登记则 400）。
 	// JWT/CLI 通道下服务端忽略这两个字段（归属强制取 token 身份）。
 	UserName string         `json:"user_name"`
 	Org      string         `json:"org"`
@@ -145,10 +157,12 @@ func (s *ChatService) Push(tenantID, userID string, userName string, displayName
 var ErrPushValidation = errors.New("push validation failed")
 
 // PushWithSessionIdentity 处理 X-Chat-Push-Key 通道的 push：归属完全由 body
-// 决定——user_name 直接作为 user_id/user_name/display_name，org 缺省
-// "default"。按 (tenant, user) 二元组分组逐组写库（repo.PushSessions 会把
-// 同一 userID 盖到该次调用的全部 session 上，故必须按组调用）；任一组失败
-// 整体失败（与现有单租户失败语义一致）。不校验用户/租户存在性。
+// 决定——user_name 直接作为 user_id/user_name/display_name；租户按部署模式
+// 解析（见 resolveTenant：builtin 忽略 org 恒 "default"，casdoor 缺省 org
+// 解析为 tenant_oauth_clients default 行组织）。按 (tenant, user) 二元组
+// 分组逐组写库（repo.PushSessions 会把同一 userID 盖到该次调用的全部
+// session 上，故必须按组调用）；任一组失败整体失败（与现有单租户失败语义
+// 一致）。casdoor 显式 org 不校验租户存在性。
 func (s *ChatService) PushWithSessionIdentity(req *PushRequest) (*PushResponse, error) {
 	if len(req.Sessions) == 0 {
 		return &PushResponse{Success: true}, nil
@@ -174,9 +188,9 @@ func (s *ChatService) PushWithSessionIdentity(req *PushRequest) (*PushResponse, 
 		}
 		sess.UserName = si.UserName
 		sess.DisplayName = si.UserName
-		tenant := si.Org
-		if tenant == "" {
-			tenant = "default"
+		tenant, err := s.resolveTenant(si.Org, i)
+		if err != nil {
+			return nil, err
 		}
 		groups[groupKey{tenant: tenant, user: si.UserName}] = append(
 			groups[groupKey{tenant: tenant, user: si.UserName}],
@@ -216,6 +230,27 @@ func (s *ChatService) PushWithSessionIdentity(req *PushRequest) (*PushResponse, 
 		}
 	}
 	return resp, nil
+}
+
+// resolveTenant 解析 push-key 通道的 session 租户归属：
+//   - builtin（单租户，不支持多租户）：忽略 org 字段，恒 "default"
+//   - casdoor + 显式 org：直接用所传值（不校验租户存在性）
+//   - casdoor + 缺省 org：解析为 tenant_oauth_clients 的 default 行组织；
+//     未登记 default 行（或 resolver 未注入）→ ErrPushValidation（400）——
+//     配置缺失是硬错误，不静默写无人可见的幽灵租户
+func (s *ChatService) resolveTenant(org string, sessionIdx int) (string, error) {
+	if s.authMode == "builtin" {
+		return "default", nil
+	}
+	if org != "" {
+		return org, nil
+	}
+	if s.resolveDefaultOrg != nil {
+		if defOrg, ok := s.resolveDefaultOrg(); ok && defOrg != "" {
+			return defOrg, nil
+		}
+	}
+	return "", fmt.Errorf("%w: session[%d]: org is required (no default tenant client registered)", ErrPushValidation, sessionIdx)
 }
 
 type ListResponse struct {

@@ -16,9 +16,9 @@ type ChatHandler struct {
 	service *services.ChatService
 }
 
-func NewChatHandler() *ChatHandler {
+func NewChatHandler(authMode string, resolveDefaultOrg func() (string, bool)) *ChatHandler {
 	return &ChatHandler{
-		service: services.NewChatService(),
+		service: services.NewChatService(authMode, resolveDefaultOrg),
 	}
 }
 
