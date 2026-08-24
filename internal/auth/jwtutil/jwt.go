@@ -29,74 +29,84 @@ import (
 //	permissions, auth_method ("builtin" | "casdoor" | "cli").
 func AuthMiddlewareWithCLI(cliSvc *services.CLITokenService, p auth.Provider) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			unauthorized(c, "authorization header not found")
-			return
-		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			unauthorized(c, "invalid authorization header format")
-			return
-		}
-
-		// CLI token branch: opaque strings of the form cli_<hex>.
-		if isCLIToken(tokenString) {
-			if cliSvc == nil || p == nil {
-				unauthorized(c, "cli token support is disabled")
-				return
-			}
-			record, err := cliSvc.Verify(tokenString)
-			if err != nil {
-				unauthorized(c, "invalid cli token: "+err.Error())
-				return
-			}
-			// CLI tokens identify the user but carry no profile/role data, so
-			// the identity is looked up fresh via the provider (cached briefly).
-			// If the user no longer exists or is disabled, reject the token.
-			identity, ok := fetchUserIdentity(p, record.UserID)
-			if !ok {
-				unauthorized(c, "cli token user not found")
-				return
-			}
-			c.Set("user_id", record.UserID)
-			c.Set("user_name", "")
-			c.Set("email", "")
-			c.Set("display_name", "")
-			c.Set("org_id", identity.TenantID)
-			c.Set("avatar", "")
-			c.Set("roles", identity.Roles)
-			tenant.SetTenantID(c, tenantOrDefault(identity.TenantID))
-			c.Set("permissions", []string{})
-			c.Set("auth_method", "cli")
+		Authenticate(c, cliSvc, p)
+		if !c.IsAborted() {
 			c.Next()
-			return
 		}
-
-		if p == nil {
-			unauthorized(c, "auth provider not configured")
-			return
-		}
-
-		user, err := p.ValidateAccessToken(tokenString)
-		if err != nil {
-			unauthorized(c, "invalid token: "+err.Error())
-			return
-		}
-
-		c.Set("user_id", user.ID)
-		c.Set("user_name", user.Username)
-		c.Set("email", user.Email)
-		c.Set("display_name", user.DisplayName)
-		c.Set("org_id", user.TenantID)
-		c.Set("avatar", user.Avatar)
-		c.Set("roles", user.Roles)
-		tenant.SetTenantID(c, tenantOrDefault(user.TenantID))
-		c.Set("permissions", []string{})
-		c.Set("auth_method", p.Mode())
-		c.Next()
 	}
+}
+
+// Authenticate 执行 CLI/JWT 鉴权并注入身份 context keys（字段清单见
+// AuthMiddlewareWithCLI 注释）。失败时 abort 请求；成功时不推进 handler 链
+// （调用方自行决定后续：AuthMiddlewareWithCLI 包装为成功后 c.Next()，
+// middleware.ChatPushAuth 则继续接 PendingApprovalGuard）。
+// 提取自 AuthMiddlewareWithCLI，逻辑逐行一致，行为零变化。
+func Authenticate(c *gin.Context, cliSvc *services.CLITokenService, p auth.Provider) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		unauthorized(c, "authorization header not found")
+		return
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenString == authHeader {
+		unauthorized(c, "invalid authorization header format")
+		return
+	}
+
+	// CLI token branch: opaque strings of the form cli_<hex>.
+	if isCLIToken(tokenString) {
+		if cliSvc == nil || p == nil {
+			unauthorized(c, "cli token support is disabled")
+			return
+		}
+		record, err := cliSvc.Verify(tokenString)
+		if err != nil {
+			unauthorized(c, "invalid cli token: "+err.Error())
+			return
+		}
+		// CLI tokens identify the user but carry no profile/role data, so
+		// the identity is looked up fresh via the provider (cached briefly).
+		// If the user no longer exists or is disabled, reject the token.
+		identity, ok := fetchUserIdentity(p, record.UserID)
+		if !ok {
+			unauthorized(c, "cli token user not found")
+			return
+		}
+		c.Set("user_id", record.UserID)
+		c.Set("user_name", "")
+		c.Set("email", "")
+		c.Set("display_name", "")
+		c.Set("org_id", identity.TenantID)
+		c.Set("avatar", "")
+		c.Set("roles", identity.Roles)
+		tenant.SetTenantID(c, tenantOrDefault(identity.TenantID))
+		c.Set("permissions", []string{})
+		c.Set("auth_method", "cli")
+		return
+	}
+
+	if p == nil {
+		unauthorized(c, "auth provider not configured")
+		return
+	}
+
+	user, err := p.ValidateAccessToken(tokenString)
+	if err != nil {
+		unauthorized(c, "invalid token: "+err.Error())
+		return
+	}
+
+	c.Set("user_id", user.ID)
+	c.Set("user_name", user.Username)
+	c.Set("email", user.Email)
+	c.Set("display_name", user.DisplayName)
+	c.Set("org_id", user.TenantID)
+	c.Set("avatar", user.Avatar)
+	c.Set("roles", user.Roles)
+	tenant.SetTenantID(c, tenantOrDefault(user.TenantID))
+	c.Set("permissions", []string{})
+	c.Set("auth_method", p.Mode())
 }
 
 // isCLIToken returns true iff s has the cli_<hex> prefix. Length is checked to
