@@ -1,7 +1,9 @@
 package services
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"control-panel/internal/domain/chat"
@@ -42,22 +44,27 @@ type MessageInput struct {
 }
 
 type SessionInput struct {
-	ID                string         `json:"id" binding:"required"`
-	Title             string         `json:"title"`
-	CreatedAt         string         `json:"created_at" binding:"required"`
-	UpdatedAt         string         `json:"updated_at" binding:"required"`
-	Model             string         `json:"model"`
-	ModelSelectionID  string         `json:"model_selection_id"`
-	SystemPrompt      string         `json:"system_prompt"`
-	Status            string         `json:"status"`
-	Mode              string         `json:"mode"`
-	ProviderID        string         `json:"provider_id"`
-	AgentID           string         `json:"agent_id"`
-	PermissionProfile string         `json:"permission_profile"`
-	Hidden            bool           `json:"hidden"`
-	ExtraDirectories  string         `json:"extra_directories"`
-	IsUserBound       bool           `json:"is_user_bound"`
-	Messages          []MessageInput `json:"messages"`
+	ID                string `json:"id" binding:"required"`
+	Title             string `json:"title"`
+	CreatedAt         string `json:"created_at" binding:"required"`
+	UpdatedAt         string `json:"updated_at" binding:"required"`
+	Model             string `json:"model"`
+	ModelSelectionID  string `json:"model_selection_id"`
+	SystemPrompt      string `json:"system_prompt"`
+	Status            string `json:"status"`
+	Mode              string `json:"mode"`
+	ProviderID        string `json:"provider_id"`
+	AgentID           string `json:"agent_id"`
+	PermissionProfile string `json:"permission_profile"`
+	Hidden            bool   `json:"hidden"`
+	ExtraDirectories  string `json:"extra_directories"`
+	IsUserBound       bool   `json:"is_user_bound"`
+	// UserName / Org 仅在 chat_push_key 鉴权通道（X-Chat-Push-Key）下生效：
+	// user_name 必填且直接作为 user_id/display_name；org 缺省 "default"。
+	// JWT/CLI 通道下服务端忽略这两个字段（归属强制取 token 身份）。
+	UserName string         `json:"user_name"`
+	Org      string         `json:"org"`
+	Messages []MessageInput `json:"messages"`
 }
 
 type PushRequest struct {
@@ -131,6 +138,83 @@ func (s *ChatService) Push(tenantID, userID string, userName string, displayName
 		}
 	}
 
+	return resp, nil
+}
+
+// ErrPushValidation 标记 push 请求体校验错误（handler 映射 400）。
+var ErrPushValidation = errors.New("push validation failed")
+
+// PushWithSessionIdentity 处理 X-Chat-Push-Key 通道的 push：归属完全由 body
+// 决定——user_name 直接作为 user_id/user_name/display_name，org 缺省
+// "default"。按 (tenant, user) 二元组分组逐组写库（repo.PushSessions 会把
+// 同一 userID 盖到该次调用的全部 session 上，故必须按组调用）；任一组失败
+// 整体失败（与现有单租户失败语义一致）。不校验用户/租户存在性。
+func (s *ChatService) PushWithSessionIdentity(req *PushRequest) (*PushResponse, error) {
+	if len(req.Sessions) == 0 {
+		return &PushResponse{Success: true}, nil
+	}
+	if len(req.Sessions) > maxSessionsPerPush {
+		return nil, fmt.Errorf("too many sessions in single push: %d (max %d)", len(req.Sessions), maxSessionsPerPush)
+	}
+
+	type groupKey struct{ tenant, user string }
+	type entry struct {
+		session  *chat.Session
+		messages []*chat.Message
+	}
+	groups := make(map[groupKey][]entry)
+
+	for i, si := range req.Sessions {
+		if si.UserName == "" {
+			return nil, fmt.Errorf("%w: session[%d]: user_name is required (chat push key mode)", ErrPushValidation, i)
+		}
+		sess, err := convertSession(si)
+		if err != nil {
+			return nil, fmt.Errorf("%w: session[%d]: %v", ErrPushValidation, i, err)
+		}
+		sess.UserName = si.UserName
+		sess.DisplayName = si.UserName
+		tenant := si.Org
+		if tenant == "" {
+			tenant = "default"
+		}
+		groups[groupKey{tenant: tenant, user: si.UserName}] = append(
+			groups[groupKey{tenant: tenant, user: si.UserName}],
+			entry{session: sess, messages: convertMessages(si.Messages)},
+		)
+	}
+
+	// 排序保证写库与聚合顺序确定（测试可断言）。
+	keys := make([]groupKey, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].tenant != keys[j].tenant {
+			return keys[i].tenant < keys[j].tenant
+		}
+		return keys[i].user < keys[j].user
+	})
+
+	resp := &PushResponse{Success: true}
+	for _, k := range keys {
+		sessions := make([]*chat.Session, len(groups[k]))
+		msgs := make([][]*chat.Message, len(groups[k]))
+		for i, e := range groups[k] {
+			sessions[i] = e.session
+			msgs[i] = e.messages
+		}
+		result, err := s.repo.PushSessions(k.tenant, k.user, sessions, msgs)
+		if err != nil {
+			return nil, fmt.Errorf("push failed (tenant=%s user=%s): %w", k.tenant, k.user, err)
+		}
+		resp.SyncedSessions += result.SyncedSessions
+		resp.SkippedSessions += result.SkippedSessions
+		resp.SyncedMessages += result.SyncedMessages
+		for _, c := range result.Conflicts {
+			resp.Conflicts = append(resp.Conflicts, ConflictOutput(c))
+		}
+	}
 	return resp, nil
 }
 
