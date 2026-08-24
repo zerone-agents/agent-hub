@@ -70,7 +70,7 @@ Plaintext key reveal is admin/maintainer only: `POST /api/v1/admin/providers/:id
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/chat/push` | Push sessions/messages (up to 50 sessions per request, conflict detection via `updated_at`) |
+| POST | `/api/v1/chat/push` | Push sessions/messages (up to 50 sessions per request, conflict detection via `updated_at`). Auth: JWT/CLI token (default) **or** `X-Chat-Push-Key: <CHAT_PUSH_API_KEY>` — in key mode, per-session `user_name` (required) becomes `user_id`/`display_name`, `org` (default `"default"`) becomes tenant |
 
 ## Admin Endpoints (`/api/v1/admin/*`)
 
