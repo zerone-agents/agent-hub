@@ -4,14 +4,17 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 
 	"control-panel/internal/config"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
 
 func setupOAuthTest(t *testing.T, endpoint string) {
@@ -50,15 +53,25 @@ func TestGetLoginURL_Params(t *testing.T) {
 	require.Equal(t, base64.RawURLEncoding.EncodeToString(sum[:]), q.Get("code_challenge"))
 	require.Equal(t, "S256", q.Get("code_challenge_method"))
 
+	// key 集合精确锁定：防 x/oauth2 升级悄悄引入多余参数
+	require.ElementsMatch(t, []string{
+		"client_id", "response_type", "redirect_uri", "scope",
+		"state", "code_challenge", "code_challenge_method",
+	}, slices.Collect(maps.Keys(q)))
+
 	// 副作用：session 已存（迁移不得丢失）
 	require.NotNil(t, GetSession(state))
 }
 
 func TestExchangeCodeForToken_FormParams(t *testing.T) {
+	// handler 跑在非测试 goroutine：require.*（FailNow）不能在里面调，
+	// 只捕获值，断言全部移到主 goroutine（请求返回后）。
 	var gotForm url.Values
+	var gotPath string
+	var formErr error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/login/oauth/access_token", r.URL.Path)
-		require.NoError(t, r.ParseForm())
+		gotPath = r.URL.Path
+		formErr = r.ParseForm()
 		gotForm = r.PostForm
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
@@ -72,6 +85,9 @@ func TestExchangeCodeForToken_FormParams(t *testing.T) {
 	require.Equal(t, "rt-1", tok.RefreshToken)
 	require.Equal(t, "Bearer", tok.TokenType)
 	require.InDelta(t, 3600, tok.ExpiresIn, 5) // 从 Expiry 折算，容许执行耗时
+
+	require.NoError(t, formErr)
+	require.Equal(t, "/api/login/oauth/access_token", gotPath)
 
 	// x/oauth2 标准 form 编码（原实现是 JSON body——本组断言构成 RED）
 	require.Equal(t, "authorization_code", gotForm.Get("grant_type"))
@@ -106,9 +122,11 @@ func fakeRefreshToken(owner string) string {
 }
 
 func TestRefreshAccessToken_FormParamsAndPerOrgCreds(t *testing.T) {
+	// 同上：handler 内只捕获，断言移到主 goroutine
 	var gotForm url.Values
+	var formErr error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
+		formErr = r.ParseForm()
 		gotForm = r.PostForm
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"access_token":"at-2","refresh_token":"rt-2","token_type":"Bearer","expires_in":7200}`)
@@ -117,6 +135,7 @@ func TestRefreshAccessToken_FormParamsAndPerOrgCreds(t *testing.T) {
 	setupOAuthTest(t, srv.URL)
 
 	tok, err := RefreshAccessToken(fakeRefreshToken("orga"))
+	require.NoError(t, formErr)
 	require.NoError(t, err)
 	require.Equal(t, "at-2", tok.AccessToken)
 
@@ -157,4 +176,25 @@ func TestExchangeCodeForToken_ErrorPrefixFakeSuccess(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, tok)
 	require.Contains(t, err.Error(), "the code is invalid")
+}
+
+func TestCasdoorTokenError(t *testing.T) {
+	mk := func(code, desc string, status int) *oauth2.RetrieveError {
+		return &oauth2.RetrieveError{
+			ErrorCode:        code,
+			ErrorDescription: desc,
+			Response:         &http.Response{StatusCode: status},
+		}
+	}
+	// 两字段齐全：状态码 + 消息
+	err := casdoorTokenError(mk("invalid_grant", "code expired", 400))
+	require.Contains(t, err.Error(), "invalid_grant")
+	require.Contains(t, err.Error(), "code expired")
+	require.Contains(t, err.Error(), "400")
+	// description 空：不产生尾随/双空格
+	err = casdoorTokenError(mk("invalid_grant", "", 400))
+	require.Equal(t, "casdoor token error: http 400: invalid_grant", err.Error())
+	// 两字段全空：回退纯状态码（Response 恒非 nil，来自 x/oauth2 doTokenRoundTrip）
+	err = casdoorTokenError(mk("", "", 502))
+	require.Equal(t, "casdoor token error: http 502", err.Error())
 }
