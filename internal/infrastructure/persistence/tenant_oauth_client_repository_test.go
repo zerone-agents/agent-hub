@@ -133,13 +133,13 @@ func TestTenantOAuthClientDefaultGuards(t *testing.T) {
 
 	// 两个 org 存在时，把 default 行降级 → ErrDefaultRequired
 	err := repo.Upsert("org-a", "c-a2", "s", "", false)
-	if err == nil || !strings.Contains(err.Error(), "default tenant must exist") {
+	if err == nil || !strings.Contains(err.Error(), "default 租户必须存在且唯一") {
 		t.Fatalf("demoting default with other rows should fail, got: %v", err)
 	}
 
 	// 删除 default 行且删后仍有其他行 → ErrDefaultRequired
 	err = repo.Delete("org-a")
-	if err == nil || !strings.Contains(err.Error(), "default tenant must exist") {
+	if err == nil || !strings.Contains(err.Error(), "default 租户必须存在且唯一") {
 		t.Fatalf("deleting default with other rows should fail, got: %v", err)
 	}
 	if n, _ := repo.Count(); n != 2 {

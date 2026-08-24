@@ -12,7 +12,7 @@ import (
 
 // ErrDefaultRequired 表示操作会破坏「表非空 ⇒ 恰好一个 default」的不变式：
 // 把 default 行降级、或删除仍有其他行的 default 行。handler 映射 409。
-var ErrDefaultRequired = errors.New("default tenant must exist and be unique: reassign default first")
+var ErrDefaultRequired = errors.New("default 租户必须存在且唯一：请先转移 default 再操作")
 
 // ErrDefaultConflict 表示并发写入撞上 default_key 唯一约束（哨兵值兜底生效），
 // 映射 409，客户端重试即可。

@@ -11,7 +11,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "postinstall": "node -e \"const fs=require('node:fs');for(const d of ['golang','php','python'])fs.rmSync('node_modules/flatted/'+d,{recursive:true,force:true})\""
   },
   "dependencies": {
     "@lobehub/fluent-emoji": "^4.1.0",

@@ -323,11 +323,11 @@ func main() {
 			rl := middleware.IPRateLimit(10, time.Minute)
 			authGroup.GET("/mode", rl, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
-			authGroup.GET("/login", handler.Login)
+			authGroup.GET("/login", rl, handler.Login)
 			authGroup.GET("/callback", handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
-			authGroup.POST("/refresh", handler.RefreshToken)
+			authGroup.POST("/refresh", rl, handler.RefreshToken)
 		}
 	}
 
