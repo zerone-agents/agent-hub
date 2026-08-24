@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -21,6 +23,28 @@ func NewChatHandler() *ChatHandler {
 }
 
 func (h *ChatHandler) Push(c *gin.Context) {
+	// X-Chat-Push-Key 通道：归属由 body 的 user_name/org 决定
+	// （中间件已保证此分支不可能携带 token 身份）。
+	if am, _ := c.Get("auth_method"); am == "chat_push_key" {
+		var req services.PushRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		resp, err := h.service.PushWithSessionIdentity(&req)
+		if err != nil {
+			if errors.Is(err, services.ErrPushValidation) {
+				respondError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			log.Printf("[ChatPush] push-key push failed: %v", err)
+			respondError(c, http.StatusInternalServerError, "internal error")
+			return
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		respondError(c, http.StatusUnauthorized, "user not authenticated")

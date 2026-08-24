@@ -100,6 +100,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `OPS_API_KEY` | No | — | 运维 API 鉴权密钥。**空（默认）= 运维端点不挂载**，请求 `/api/v1/ops/*` 等效 404；配置后所有请求需携带请求头 `X-Ops-Key: <OPS_API_KEY>`，匹配放行，否则拒绝。仅在需要接入新组织时配置。 |
+| `CHAT_PUSH_API_KEY` | No | — | `/api/v1/chat/push` 专用推送密钥。**空（默认）= X-Chat-Push-Key 通道禁用**，push 仅走 JWT/CLI 鉴权；配置后携带请求头 `X-Chat-Push-Key: <CHAT_PUSH_API_KEY>` 的请求可走该通道（会话归属由请求 body 的 per-session `user_name`/`org` 决定，`user_name` 必填、`org` 缺省 `default`）。独立于 `OPS_API_KEY`，泄漏互不影响。建议使用 ≥32 字节高熵随机值，入 secret manager 管理。 |
 
 ### 多组织接入 runbook（仅 casdoor 模式）
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"control-panel/internal/domain/chat"
@@ -151,4 +152,76 @@ func TestChatDeleteSession_AdminDeletesAny(t *testing.T) {
 	c.Params = gin.Params{{Key: "id", Value: "s-other"}}
 	h.DeleteSession(c)
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// --- Push: X-Chat-Push-Key 通道（中间件已由 Task 1 锁定，这里直调 handler，
+// 通过 auth_method context key 模拟中间件标记） ---
+
+func newPushKeyPushContext(w *httptest.ResponseRecorder, body string) *gin.Context {
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/push", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("auth_method", "chat_push_key")
+	return c
+}
+
+func TestChatPush_PushKeyMode_AssignsBodyIdentity(t *testing.T) {
+	setupChatHandlerTestDB(t)
+	h := NewChatHandler()
+
+	body := `{"sessions":[` +
+		`{"id":"s-k1","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z","user_name":"alice","org":"zerone","messages":[{"id":"m-k1","role":"user","content":"hi","created_at":"2026-08-24T10:00:01Z"}]},` +
+		`{"id":"s-k2","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z","user_name":"bob"}]}`
+	w := httptest.NewRecorder()
+	h.Push(newPushKeyPushContext(w, body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var s1 chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-k1").First(&s1).Error)
+	require.Equal(t, "alice", s1.UserID)
+	require.Equal(t, "alice", s1.UserName)
+	require.Equal(t, "alice", s1.DisplayName)
+	require.Equal(t, "zerone", s1.TenantID)
+
+	var s2 chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-k2").First(&s2).Error)
+	require.Equal(t, "bob", s2.UserID)
+	require.Equal(t, "default", s2.TenantID)
+}
+
+func TestChatPush_PushKeyMode_MissingUserNameReturns400(t *testing.T) {
+	setupChatHandlerTestDB(t)
+	h := NewChatHandler()
+
+	body := `{"sessions":[{"id":"s-bad","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z"}]}`
+	w := httptest.NewRecorder()
+	h.Push(newPushKeyPushContext(w, body))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "user_name is required")
+}
+
+// 防伪造回归：token 通道下 body 的 user_name/org 必须被忽略。
+func TestChatPush_TokenMode_IgnoresBodyIdentity(t *testing.T) {
+	setupChatHandlerTestDB(t)
+	h := NewChatHandler()
+
+	body := `{"sessions":[{"id":"s-evil","created_at":"2026-08-24T10:00:00Z","updated_at":"2026-08-24T10:00:00Z","user_name":"attacker","org":"evil-org"}]}`
+	w := httptest.NewRecorder()
+	c := newChatContext(w, []string{"member"}, "u1")
+	// token 通道依赖的 context 身份（真实链路由 JWT 中间件注入）
+	c.Set("user_name", "u1-name")
+	c.Set("display_name", "U1")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/push", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Push(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var s chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-evil").First(&s).Error)
+	require.Equal(t, "u1", s.UserID)
+	require.Equal(t, chatTestTenant, s.TenantID)
+	require.Equal(t, "u1-name", s.UserName)
 }

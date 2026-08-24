@@ -34,11 +34,19 @@ type Config struct {
 	Knowledge KnowledgeConfig `mapstructure:"knowledge"`
 	Kong      KongConfig      `mapstructure:"kong"`
 	Ops       OpsConfig       `mapstructure:"ops"`
+	ChatPush  ChatPushConfig  `mapstructure:"chat_push"`
 }
 
 // OpsConfig 是运维端点（/api/v1/ops/*）配置。APIKey 可选：为空时 ops 端点
 // 不挂载（等效 404）；非空时要求 X-Ops-Key 头常量时间匹配。
 type OpsConfig struct {
+	APIKey string `mapstructure:"api_key"`
+}
+
+// ChatPushConfig 是 /api/v1/chat/push 的 X-Chat-Push-Key 通道配置。APIKey
+// 可选：为空时该通道禁用（push 仅走 JWT/CLI）；非空时要求 X-Chat-Push-Key
+// 头常量时间匹配。独立于 OPS_API_KEY，二者泄漏互不影响。
+type ChatPushConfig struct {
 	APIKey string `mapstructure:"api_key"`
 }
 
@@ -161,6 +169,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("kong.admin_url", "KONG_ADMIN_URL")
 	viper.BindEnv("kong.reconcile_sec", "KONG_RECONCILE_SEC")
 	viper.BindEnv("ops.api_key", "OPS_API_KEY")
+	viper.BindEnv("chat_push.api_key", "CHAT_PUSH_API_KEY")
 
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)
