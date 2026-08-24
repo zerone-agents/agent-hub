@@ -294,6 +294,22 @@ func casdoorFakeSuccessError(accessToken string) error {
 }
 
 // ExchangeCodeForToken exchanges an authorization code for tokens using the
+// casdoorTokenError 统一格式化 token 端点的 *oauth2.RetrieveError。
+// 两字段任一为空时 TrimSpace 避免尾随/双空格；状态码始终附带（排障定位
+// Casdoor 返回形态）；Response 理论恒非 nil（x/oauth2 doTokenRoundTrip 构造），
+// 防御性判空兜底。
+func casdoorTokenError(re *oauth2.RetrieveError) error {
+	msg := strings.TrimSpace(re.ErrorCode + " " + re.ErrorDescription)
+	status := 0
+	if re.Response != nil {
+		status = re.Response.StatusCode
+	}
+	if msg == "" {
+		return fmt.Errorf("casdoor token error: http %d", status)
+	}
+	return fmt.Errorf("casdoor token error: http %d: %s", status, msg)
+}
+
 // OAuth client resolved for org（x/oauth2 迁移，issue #49）。
 func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error) {
 	creds, err := resolveClientCreds(org)
@@ -310,7 +326,7 @@ func ExchangeCodeForToken(org, code, codeVerifier string) (*TokenResponse, error
 		// *oauth2.RetrieveError 结构化携带 OAuth 标准错误体（issue #49 的核心收益）
 		var re *oauth2.RetrieveError
 		if errors.As(err, &re) {
-			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+			return nil, casdoorTokenError(re)
 		}
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -396,7 +412,7 @@ func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 	if err != nil {
 		var re *oauth2.RetrieveError
 		if errors.As(err, &re) {
-			return nil, fmt.Errorf("casdoor token error: %s %s", re.ErrorCode, re.ErrorDescription)
+			return nil, casdoorTokenError(re)
 		}
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
