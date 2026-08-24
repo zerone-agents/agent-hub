@@ -469,10 +469,11 @@ func main() {
 	handler.RegisterKnowledgeRoutes(adminWrite, adminRead, knowledgeHandler)
 
 	// ---------- Chat 领域 ----------
-	chatGroup := v1group.Group("/chat")
-	{
-		chatGroup.POST("/push", chatHandler.Push)
-	}
+	// chat/push 双通道鉴权（X-Chat-Push-Key 或 JWT/CLI），必须挂在 v1group
+	// 之外：v1group 的组级 JWT 中间件会先于路由拒绝无 Authorization 的
+	// push-key 请求。URL 不变：POST /api/v1/chat/push。
+	chatPushGroup := r.Group("/api/v1/chat", middleware.ChatPushAuth(cfg.ChatPush.APIKey, cliTokenSvc, authProvider))
+	chatPushGroup.POST("/push", chatHandler.Push)
 
 	// 聊天历史：GET 会话/消息 → read 组（member 只读）；DELETE 也在 read 组（handler 层归属校验）
 	adminChatReadGroup := adminRead.Group("/chat")
