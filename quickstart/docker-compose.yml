@@ -1,9 +1,10 @@
 # agent-hub Quick Start (builtin auth mode)
 #
-# Brings up MySQL 8 + the agent-hub server (backend + embedded frontend) in
-# the built-in user-system mode (username/password, admin-invite). No external
-# identity provider required — first visit shows a setup screen to create the
-# initial `admin` account.
+# Brings up MySQL 8 + the agent-hub server (backend + embedded frontend) +
+# agent-deployer (runtime container lifecycle manager) in the built-in
+# user-system mode (username/password, admin-invite). No external identity
+# provider required — first visit shows a setup screen to create the initial
+# `admin` account.
 #
 # Usage:
 #   cp .env.example .env   # then edit .env (set AUTH_JWT_SECRET etc.)
@@ -54,13 +55,43 @@ services:
       # --- Optional integrations (leave empty to disable) ---
       # Provider API-key encryption key (set for managing model providers):
       PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}
-      AGENT_DEPLOYER_URL: ${AGENT_DEPLOYER_URL:-}
+      # agent-deployer integration (the deployer service is part of this stack):
+      AGENT_DEPLOYER_URL: ${AGENT_DEPLOYER_URL:-http://deployer:8080}
       AGENT_DEPLOYER_API_KEY: ${AGENT_DEPLOYER_API_KEY:-}
+      # Host used to reach runtime containers' dynamic ports (browser + health
+      # probes). localhost for local runs; the server's public IP/domain when
+      # deployed on a remote host.
+      AGENT_DEPLOYER_PUBLIC_HOST: ${AGENT_DEPLOYER_PUBLIC_HOST:-localhost}
       KONG_ADMIN_URL: ${KONG_ADMIN_URL:-}
       MULTIRAG_BASE_URL: ${MULTIRAG_BASE_URL:-}
       MULTIRAG_API_KEY: ${MULTIRAG_API_KEY:-}
     ports:
       - "${HUB_PORT:-8081}:${HUB_PORT:-8081}"
+
+  deployer:
+    # Manages agent-runtime containers on the host Docker daemon.
+    image: ${DEPLOYER_IMAGE:-zeroneai/agent-deployer}:latest
+    restart: unless-stopped
+    ports:
+      # Localhost-only: the hub reaches it over the compose network.
+      - "127.0.0.1:${DEPLOYER_HOST_PORT:-8080}:8080"
+    environment:
+      # IMPORTANT: this must be an absolute path on the DOCKER HOST. The same
+      # path is bind-mounted into the deployer and into every runtime container
+      # it creates, so host path == container path on both sides.
+      - AGENT_DEPLOYER_DATA_DIR=${DEPLOYER_DATA_DIR:?Set DEPLOYER_DATA_DIR in .env to an absolute host path, e.g. /var/lib/agent-deployer}
+      - AGENT_DEPLOYER_PORT=8080
+      - AGENT_DEPLOYER_RUNTIME_IMAGE=${RUNTIME_IMAGE:-zeroneai/agent-runtime}:latest
+      # Empty = auth disabled (local dev only; always set this in production).
+      - AGENT_DEPLOYER_API_KEY=${AGENT_DEPLOYER_API_KEY:-}
+      # Per-container resource limits (defaults: 2 CPU cores, 2048 MB memory)
+      # - AGENT_DEPLOYER_CONTAINER_CPUS=2
+      # - AGENT_DEPLOYER_CONTAINER_MEMORY=2048
+    volumes:
+      # Control the host Docker daemon from inside the deployer.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Host path must equal AGENT_DEPLOYER_DATA_DIR (see above).
+      - ${DEPLOYER_DATA_DIR:?}:${DEPLOYER_DATA_DIR:?}
 
 volumes:
   mysql_data:

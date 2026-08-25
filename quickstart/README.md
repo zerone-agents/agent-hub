@@ -2,7 +2,7 @@
 
 Fastest way to run Zerone Agent Hub locally with the **built-in user system** (username/password, admin-invite — no external identity provider).
 
-The stack: **MySQL 8** + **agent-hub server** (one image that compiles the frontend and embeds it; served at `/static/` alongside the API).
+The stack: **MySQL 8** + **agent-hub server** (one image that compiles the frontend and embeds it; served at `/static/` alongside the API) + **agent-deployer** (manages agent-runtime containers on the host Docker daemon, so you can deploy and chat with agents end to end).
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ The stack: **MySQL 8** + **agent-hub server** (one image that compiles the front
 
 ## Run
 
-The default stack pulls the prebuilt image from Docker Hub — no source build needed.
+The default stack pulls the prebuilt images from Docker Hub — no source build needed.
 
 ```bash
 # 1. Clone the repository
@@ -27,12 +27,31 @@ cp .env.example .env
 #    or edit .env manually.
 #    The value must be at least 32 bytes.
 
-# 4. Start (pulls zeroneai/agent-hub:latest)
+# 4. Set DEPLOYER_DATA_DIR in .env (required) — an ABSOLUTE path on the Docker
+#    host holding agent configs/sessions/skills. The same path is bind-mounted
+#    into the deployer and every runtime container it creates, so it must be
+#    identical on both sides. Examples:
+#      Linux:  DEPLOYER_DATA_DIR=/var/lib/agent-deployer
+#      macOS:  DEPLOYER_DATA_DIR=/Users/<you>/agent-hub-data/deployer
+
+# 5. (Recommended) Set AGENT_DEPLOYER_API_KEY in .env — generate one with
+#    `openssl rand -hex 32`. Empty disables deployer auth (local dev only).
+
+# 6. Start (pulls zeroneai/agent-hub + zeroneai/agent-deployer)
 docker compose up -d
 
-# 5. Open the app
+# 7. Open the app
 open http://localhost:8081/static/
 ```
+
+> **China networks:** if Docker Hub pulls fail, switch to the Huawei Cloud SWR
+> mirrors in `.env` (`DEPLOYER_IMAGE` / `RUNTIME_IMAGE`, see `.env.example`),
+> and configure a registry mirror for the daemon.
+
+> **Remote server deployments:** set `AGENT_DEPLOYER_PUBLIC_HOST` to the
+> server's public IP/domain. Browsers and the hub's health probes reach runtime
+> containers at `<public-host>:<dynamic-port>`, so the firewall / cloud
+> security group must allow the Docker ephemeral port range (32768-60999).
 
 ### Build from source
 
@@ -64,7 +83,7 @@ Login afterwards: http://localhost:8081/static/login — username `admin` + the 
 
 ## Configuration
 
-See [.env.example](.env.example) for all options. Optional integrations (model providers, deployer, Kong, knowledge base) are disabled by default — uncomment and fill in to enable.
+See [.env.example](.env.example) for all options. Optional integrations (model providers, Kong, knowledge base) are disabled by default — uncomment and fill in to enable. The agent-deployer integration is wired up in-stack by default (`AGENT_DEPLOYER_URL=http://deployer:8080`); set `AGENT_DEPLOYER_API_KEY` so the hub and deployer authenticate with each other.
 
 > **Switching to Casdoor SSO:** this quickstart uses the built-in auth. For the hosted SaaS / enterprise deployments that delegate to Casdoor, set `AUTH_MODE=casdoor` and provide the `CASDOOR_*` variables instead (see `docs/configuration.md`).
 
@@ -72,8 +91,9 @@ See [.env.example](.env.example) for all options. Optional integrations (model p
 
 ```bash
 docker compose logs -f hub        # follow server logs
-docker compose down               # stop (keeps the MySQL volume)
-docker compose down -v            # stop and wipe the database
+docker compose logs -f deployer   # follow deployer logs
+docker compose down               # stop (keeps the MySQL volume + deployer data)
+docker compose down -v            # stop and wipe the database (deployer data stays on the host path)
 ```
 
 ## Production Deployment
