@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"control-panel/internal/domain/chat"
 	"control-panel/pkg/database"
@@ -86,6 +87,7 @@ func (r *ChatRepository) PushSessions(tenantID, userID string, sessions []*chat.
 				msg.TenantID = tenantID
 				msg.SessionID = sess.ID
 			}
+			normalizeMessageOrder(sessionMessages)
 			if len(sessionMessages) > 0 {
 				if err := tx.CreateInBatches(sessionMessages, 100).Error; err != nil {
 					return fmt.Errorf("failed to insert messages for session %s: %w", sess.ID, err)
@@ -106,6 +108,20 @@ func (r *ChatRepository) PushSessions(tenantID, userID string, sessions []*chat.
 		tenantID, userID, result.SyncedSessions, result.SkippedSessions, result.SyncedMessages, len(result.Conflicts))
 
 	return result, nil
+}
+
+// normalizeMessageOrder 保证消息 created_at 严格递增。push 调用方（如
+// agent-runtime 的快照推送）可能给同一会话的所有消息相同的 created_at
+// （transcript 无逐条时间戳），而读路径按 created_at ASC 排序——相同
+// 时间戳下数据库返回顺序未定义（生产曾出现 assistant 排在 user 之前）。
+// 这里以数组顺序为时序真源，必要时把时间戳顶到前一条 +1ms；重放同一
+// 载荷（幂等重推）产生相同结果。
+func normalizeMessageOrder(msgs []*chat.Message) {
+	for i := 1; i < len(msgs); i++ {
+		if !msgs[i].CreatedAt.After(msgs[i-1].CreatedAt) {
+			msgs[i].CreatedAt = msgs[i-1].CreatedAt.Add(time.Millisecond)
+		}
+	}
 }
 
 func (r *ChatRepository) ListSessions(tenantID string, page, pageSize int) ([]*chat.Session, int64, error) {

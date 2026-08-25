@@ -65,3 +65,28 @@ describe('MessageBubble Raw mode AIGC display', () => {
     expect(pre!.textContent).not.toContain('—— AIGC Label ——')
   })
 })
+
+describe('MessageBubble token_usage display', () => {
+  it('formats agent-runtime pushback JSON usage into a human-readable string', () => {
+    const msg = makeMessage({
+      token_usage: JSON.stringify({ total_input: 2085, total_output: 55, total_tokens: 2140 })
+    })
+    renderWith(<MessageBubble message={msg} />)
+
+    expect(screen.getByText('↑2085 ↓55 · 2140 tokens')).toBeTruthy()
+  })
+
+  it('renders plain-text usage strings verbatim', () => {
+    const msg = makeMessage({ token_usage: '50 tokens' })
+    renderWith(<MessageBubble message={msg} />)
+
+    expect(screen.getByText('50 tokens')).toBeTruthy()
+  })
+
+  it('renders non-usage JSON strings verbatim', () => {
+    const msg = makeMessage({ token_usage: '{"foo":1}' })
+    renderWith(<MessageBubble message={msg} />)
+
+    expect(screen.getByText('{"foo":1}')).toBeTruthy()
+  })
+})

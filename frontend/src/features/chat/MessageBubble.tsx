@@ -66,6 +66,27 @@ const ROLE_LABELS: Record<string, string> = {
   user: '用户', assistant: '助手', system: '系统', tool: '工具'
 }
 
+/**
+ * token_usage 是自由文本展示字段，但 agent-runtime 的回传推送发的是
+ * {"total_input","total_output","total_tokens"} JSON 字符串——原样渲染
+ * 生硬。识别该形状时格式化为人类可读，其余（如 "50 tokens"）原样显示。
+ */
+function formatTokenUsage(raw: string): string {
+  try {
+    // JSON.parse("null") 运行时返回 null，类型须显式可空
+    const v = JSON.parse(raw) as Record<string, unknown> | null
+    if (v && typeof v === 'object' && typeof v.total_tokens === 'number') {
+      const parts: string[] = []
+      if (typeof v.total_input === 'number') parts.push(`↑${v.total_input}`)
+      if (typeof v.total_output === 'number') parts.push(`↓${v.total_output}`)
+      if (parts.length > 0) return `${parts.join(' ')} · ${v.total_tokens} tokens`
+    }
+  } catch {
+    // 非 JSON（调用方自带的展示字符串），原样返回
+  }
+  return raw
+}
+
 const AVATAR_STYLES: Record<string, string> = {
   user: 'avatarUser',
   assistant: 'avatarAssistant',
@@ -123,7 +144,7 @@ function MessageBubbleInner({ message: msg, enableStream }: MessageBubbleProps) 
         <div className={`${styles.footer} ${isUser ? styles.footerUser : ''}`}>
           <span>{formatTime(msg.created_at)}</span>
           {msg.hidden && <span className={styles.hiddenTag}>已隐藏</span>}
-          {msg.token_usage && <span>{msg.token_usage}</span>}
+          {msg.token_usage && <span>{formatTokenUsage(msg.token_usage)}</span>}
           <button type="button" className={styles.rawToggle} onClick={() => { setRaw(!raw); }}>
             {raw ? 'Markdown' : 'Raw'}
           </button>
