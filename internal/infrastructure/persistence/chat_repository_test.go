@@ -207,6 +207,44 @@ func TestChatRepository_PushSessions_StampsTenant(t *testing.T) {
 	require.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 }
 
+func TestChatRepository_PushSessions_NormalizesMessageOrder(t *testing.T) {
+	db := setupChatRepoTestDB(t)
+	repo := NewChatRepository()
+
+	// 模拟 agent-runtime 快照推送：同一会话所有消息共用 session 级时间戳
+	//（transcript 无逐条时间），数组顺序 = 时序真源（user 在前）
+	ts := time.Now().UTC().Truncate(time.Second)
+	sess := &chat.Session{ID: "s-order", Title: "order", CreatedAt: ts, UpdatedAt: ts}
+	msgs := []*chat.Message{
+		{ID: "m-user", Role: "user", Content: "question", CreatedAt: ts},
+		{ID: "m-asst", Role: "assistant", Content: "answer", CreatedAt: ts},
+		{ID: "m-asst2", Role: "assistant", Content: "answer2", CreatedAt: ts},
+	}
+
+	result, err := repo.PushSessions("org-a", "u-a", []*chat.Session{sess}, [][]*chat.Message{msgs})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SyncedSessions)
+	require.Equal(t, 3, result.SyncedMessages)
+
+	// 读路径（created_at ASC）必须保持数组顺序：相同时间戳被顶成严格递增
+	list, total, err := repo.ListMessages("org-a", "s-order", 1, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), total)
+	require.Equal(t, []string{"m-user", "m-asst", "m-asst2"}, []string{list[0].ID, list[1].ID, list[2].ID})
+	for i := 1; i < len(list); i++ {
+		require.True(t, list[i].CreatedAt.After(list[i-1].CreatedAt), "msg[%d] must be after msg[%d]", i, i-1)
+	}
+
+	// 幂等：重推同一载荷顺序不变
+	_, err = repo.PushSessions("org-a", "u-a", []*chat.Session{sess}, [][]*chat.Message{msgs})
+	require.NoError(t, err)
+	list2, _, err := repo.ListMessages("org-a", "s-order", 1, 10)
+	require.NoError(t, err)
+	require.Equal(t, []string{"m-user", "m-asst", "m-asst2"}, []string{list2[0].ID, list2[1].ID, list2[2].ID})
+
+	_ = db
+}
+
 func TestChatRepository_ListSessionsByAgentAndUser_TenantIsolation(t *testing.T) {
 	db := setupChatRepoTestDB(t)
 	require.NoError(t, db.Create(&chat.Session{
