@@ -45,6 +45,10 @@ export function useDashboardStats(): DashboardStats {
   const knowledge = useKnowledgeList({ page: 1, page_size: 1000 })
   const chat = useChatSessions()
 
+  // The knowledge base is an optional module: when MultiRAG is not configured
+  // the API returns 503, and a KB outage must not take down the whole
+  // dashboard. Exclude it from the fatal loading/error gates so the page
+  // degrades to zero knowledge stats instead of failing entirely.
   const isLoading =
     agents.isLoading ||
     tools.isLoading ||
@@ -52,7 +56,6 @@ export function useDashboardStats(): DashboardStats {
     scenes.isLoading ||
     providers.isLoading ||
     mcps.isLoading ||
-    knowledge.isLoading ||
     chat.isLoading
   const isError =
     agents.isError ||
@@ -61,11 +64,10 @@ export function useDashboardStats(): DashboardStats {
     scenes.isError ||
     providers.isError ||
     mcps.isError ||
-    knowledge.isError ||
     chat.isError
 
   const refetch = async () => {
-    await Promise.all([
+    await Promise.allSettled([
       agents.refetch(),
       tools.refetch(),
       skills.refetch(),
