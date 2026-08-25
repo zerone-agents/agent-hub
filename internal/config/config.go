@@ -46,8 +46,13 @@ type OpsConfig struct {
 // ChatPushConfig 是 /api/v1/chat/push 的 X-Chat-Push-Key 通道配置。APIKey
 // 可选：为空时该通道禁用（push 仅走 JWT/CLI）；非空时要求 X-Chat-Push-Key
 // 头常量时间匹配。独立于 OPS_API_KEY，二者泄漏互不影响。
+// PublicURL 是 hub 自身对外可达的 base URL（如 https://console.example.com，
+// 裸 base 不带路径）：APIKey + PublicURL 同时配置时，部署 agent 会把回传
+// 配置（agents.yaml hub 段）经 deployer 下发给 runtime，供外部调用者直连
+// runtime 时的聊天记录回传；hub 自身代理的聊天不回传（hub 自记录）。
 type ChatPushConfig struct {
-	APIKey string `mapstructure:"api_key"`
+	APIKey    string `mapstructure:"api_key"`
+	PublicURL string `mapstructure:"public_url"`
 }
 
 // AuthConfig selects the authentication backend. Mode "builtin" (default) uses
@@ -170,6 +175,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("kong.reconcile_sec", "KONG_RECONCILE_SEC")
 	viper.BindEnv("ops.api_key", "OPS_API_KEY")
 	viper.BindEnv("chat_push.api_key", "CHAT_PUSH_API_KEY")
+	viper.BindEnv("chat_push.public_url", "CHAT_PUSH_PUBLIC_URL")
 
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)

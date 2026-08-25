@@ -86,8 +86,12 @@ type AgentDeployerService struct {
 	knowledgeSvc  knowledgeService
 	kongSvc       *KongGatewayService
 	aigcSvc       aigcConfigProvider
-	healthProbe   func(ctx context.Context, publicHost string, port int) bool
-	gatewayHealth *sync.Map // deploy key (DeployKey) -> *gatewayHealthEntry
+	// chatPushAPIKey / chatPushPublicURL 同时非空时，部署请求注入 hub 段
+	// （runtime 聊天记录回传配置）；任一为空则不注入 = 回传关闭。
+	chatPushAPIKey    string
+	chatPushPublicURL string
+	healthProbe       func(ctx context.Context, publicHost string, port int) bool
+	gatewayHealth     *sync.Map // deploy key (DeployKey) -> *gatewayHealthEntry
 }
 
 // gatewayHealthEntry caches the result of a gateway health probe for an agent.
@@ -203,22 +207,26 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // NewAgentDeployerService creates a new AgentDeployerService.
 // cdnHost is the public CDN base URL used to turn stored OSS keys into
 // fetchable http(s) URLs when sending skills to the deployer.
-func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService) *AgentDeployerService {
+// chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
+// CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
+func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
 	s := &AgentDeployerService{
-		client:        client,
-		publicHost:    publicHost,
-		cdnHost:       cdnHost,
-		encryptionKey: encryptionKey,
-		runtimeAPIKey: runtimeAPIKey,
-		agentRepo:     repository.NewAgentRepository(),
-		toolRepo:      repository.NewToolRepository(),
-		skillRepo:     repository.NewSkillRepository(),
-		providerSvc:   NewProviderService(encryptionKey),
-		mcpSvc:        NewMcpService(encryptionKey),
-		knowledgeSvc:  knowledgeSvc,
-		kongSvc:       kongSvc,
-		healthProbe:   defaultHealthProbe,
-		gatewayHealth: &sync.Map{},
+		client:            client,
+		publicHost:        publicHost,
+		cdnHost:           cdnHost,
+		encryptionKey:     encryptionKey,
+		runtimeAPIKey:     runtimeAPIKey,
+		agentRepo:         repository.NewAgentRepository(),
+		toolRepo:          repository.NewToolRepository(),
+		skillRepo:         repository.NewSkillRepository(),
+		providerSvc:       NewProviderService(encryptionKey),
+		mcpSvc:            NewMcpService(encryptionKey),
+		knowledgeSvc:      knowledgeSvc,
+		kongSvc:           kongSvc,
+		chatPushAPIKey:    chatPushAPIKey,
+		chatPushPublicURL: chatPushPublicURL,
+		healthProbe:       defaultHealthProbe,
+		gatewayHealth:     &sync.Map{},
 	}
 	if aigcSvc != nil {
 		s.aigcSvc = aigcSvc
@@ -857,7 +865,24 @@ func (s *AgentDeployerService) buildCreateRequest(
 		return nil, err
 	}
 
+	s.applyHub(req)
+
 	return req, nil
+}
+
+// applyHub injects the runtime chat-record pushback config (agents.yaml hub
+// section via the deployer) when both the push key and this hub's public URL
+// are configured. Either one missing leaves the section omitted (= pushback
+// disabled, backwards compatible).
+func (s *AgentDeployerService) applyHub(req *deployer.CreateAgentRequest) {
+	if s.chatPushAPIKey == "" || s.chatPushPublicURL == "" {
+		return
+	}
+	req.Hub = &deployer.HubConfig{
+		Enabled:     true,
+		BaseURL:     s.chatPushPublicURL,
+		ChatPushKey: s.chatPushAPIKey,
+	}
 }
 
 // applyAigc injects the GB 45438-2025 labeling config when configured.
