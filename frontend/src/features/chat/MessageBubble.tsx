@@ -73,7 +73,8 @@ const ROLE_LABELS: Record<string, string> = {
  */
 function formatTokenUsage(raw: string): string {
   try {
-    const v = JSON.parse(raw) as Record<string, unknown>
+    // JSON.parse("null") 运行时返回 null，类型须显式可空
+    const v = JSON.parse(raw) as Record<string, unknown> | null
     if (v && typeof v === 'object' && typeof v.total_tokens === 'number') {
       const parts: string[] = []
       if (typeof v.total_input === 'number') parts.push(`↑${v.total_input}`)
