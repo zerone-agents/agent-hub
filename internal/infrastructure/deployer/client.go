@@ -93,6 +93,23 @@ type AigcConfig struct {
 	ModelCodes      map[string]string `json:"modelCodes,omitempty"`
 }
 
+// HubConfig carries the runtime's chat-record pushback configuration: the
+// runtime (agent-runtime ≥ v2.1.1 channel support) pushes completed sessions
+// to this hub via POST {baseUrl}/api/v1/chat/push with X-Chat-Push-Key.
+// Schema mirrors the deployer's HubConfig validation (absolute http(s) baseUrl
+// + non-blank chatPushKey when enabled) and the runtime's agents.yaml `hub`
+// section. When nil the section is omitted = pushback disabled.
+//
+// Only external callers that reach the runtime directly (with their own
+// X-User-Name/X-Org identity headers) benefit from pushback: hub-proxied
+// chats are recorded by hub itself and deliberately carry no identity
+// headers, so the runtime skips pushing them (issue #73, closed by design).
+type HubConfig struct {
+	Enabled     bool   `json:"enabled"`
+	BaseURL     string `json:"baseUrl"`
+	ChatPushKey string `json:"chatPushKey,omitempty"`
+}
+
 // CreateAgentRequest is the request body for creating an agent.
 type CreateAgentRequest struct {
 	Agent    AgentDefinition `json:"agent"`
@@ -103,6 +120,7 @@ type CreateAgentRequest struct {
 	RuntimeToken string      `json:"runtime_token"`
 	Force        bool        `json:"force,omitempty"`
 	Aigc         *AigcConfig `json:"aigc,omitempty"`
+	Hub          *HubConfig  `json:"hub,omitempty"`
 }
 
 // createAgentBody wraps CreateAgentRequest with a separate force field to avoid

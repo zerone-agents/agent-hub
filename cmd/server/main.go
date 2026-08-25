@@ -174,7 +174,7 @@ func main() {
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
-	deployerService := services.NewAgentDeployerService(deployerClient, cfg.Deployer.PublicHost, cfg.OSS.CDNHost, cfg.Provider.EncryptionKey, cfg.Deployer.RuntimeAPIKey, knowledgeService, kongService, aigcConfigSvc)
+	deployerService := services.NewAgentDeployerService(deployerClient, cfg.Deployer.PublicHost, cfg.OSS.CDNHost, cfg.Provider.EncryptionKey, cfg.Deployer.RuntimeAPIKey, knowledgeService, kongService, aigcConfigSvc, cfg.ChatPush.APIKey, cfg.ChatPush.PublicURL)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)

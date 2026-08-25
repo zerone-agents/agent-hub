@@ -107,6 +107,7 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		"",          // encryptionKey: RuntimeToken stays plaintext
 		"",          // runtimeAPIKey
 		nil, nil, nil,
+		"", "", // chat push key / public URL: 未配置 = 不下发回传段
 	)
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),
