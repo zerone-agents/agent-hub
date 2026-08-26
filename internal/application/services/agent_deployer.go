@@ -865,7 +865,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 		return nil, err
 	}
 
-	s.applyHub(req)
+	s.applyHub(req, tenantID)
 
 	return req, nil
 }
@@ -874,7 +874,11 @@ func (s *AgentDeployerService) buildCreateRequest(
 // section via the deployer) when both the push key and this hub's public URL
 // are configured. Either one missing leaves the section omitted (= pushback
 // disabled, backwards compatible).
-func (s *AgentDeployerService) applyHub(req *deployer.CreateAgentRequest) {
+//
+// tenantID 是该 agent 的部署租户（builtin 恒 "default"，casdoor 为部署时的
+// org），作为可信 org 下发（issue #78）：runtime 以此为回传会话盖章租户，
+// 不再采信调用方伪造的 X-Org 头。
+func (s *AgentDeployerService) applyHub(req *deployer.CreateAgentRequest, tenantID string) {
 	if s.chatPushAPIKey == "" || s.chatPushPublicURL == "" {
 		return
 	}
@@ -882,6 +886,7 @@ func (s *AgentDeployerService) applyHub(req *deployer.CreateAgentRequest) {
 		Enabled:     true,
 		BaseURL:     s.chatPushPublicURL,
 		ChatPushKey: s.chatPushAPIKey,
+		Org:         tenantID,
 	}
 }
 

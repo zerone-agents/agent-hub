@@ -13,12 +13,28 @@ func TestApplyHub_InjectsWhenConfigured(t *testing.T) {
 	s := &AgentDeployerService{chatPushAPIKey: "k-123", chatPushPublicURL: "https://hub.example.com"}
 	req := &deployer.CreateAgentRequest{}
 
-	s.applyHub(req)
+	s.applyHub(req, "acme")
 
 	require.NotNil(t, req.Hub)
 	require.True(t, req.Hub.Enabled)
 	require.Equal(t, "https://hub.example.com", req.Hub.BaseURL)
 	require.Equal(t, "k-123", req.Hub.ChatPushKey)
+	// 部署租户作为可信 org 下发（issue #78）
+	require.Equal(t, "acme", req.Hub.Org)
+}
+
+// 双租户隔离（issue #78 验收项）：同名 agent 部署在两个租户，各自回传
+// 只落入自己的租户——org 来自部署上下文而非调用方声明。
+func TestApplyHub_DeploymentTenantIsolation(t *testing.T) {
+	s := &AgentDeployerService{chatPushAPIKey: "k-123", chatPushPublicURL: "https://hub.example.com"}
+
+	reqA := &deployer.CreateAgentRequest{}
+	s.applyHub(reqA, "acme")
+	reqB := &deployer.CreateAgentRequest{}
+	s.applyHub(reqB, "globex")
+
+	require.Equal(t, "acme", reqA.Hub.Org)
+	require.Equal(t, "globex", reqB.Hub.Org)
 }
 
 func TestApplyHub_OmittedWhenNotConfigured(t *testing.T) {
@@ -34,7 +50,7 @@ func TestApplyHub_OmittedWhenNotConfigured(t *testing.T) {
 			s := &AgentDeployerService{chatPushAPIKey: tc.key, chatPushPublicURL: tc.url}
 			req := &deployer.CreateAgentRequest{}
 
-			s.applyHub(req)
+			s.applyHub(req, "acme")
 
 			require.Nil(t, req.Hub)
 		})
@@ -46,15 +62,15 @@ func TestApplyHub_OmittedWhenNotConfigured(t *testing.T) {
 func TestApplyHub_JSONShape(t *testing.T) {
 	s := &AgentDeployerService{chatPushAPIKey: "k-123", chatPushPublicURL: "https://hub.example.com"}
 	req := &deployer.CreateAgentRequest{}
-	s.applyHub(req)
+	s.applyHub(req, "acme")
 
 	b, err := json.Marshal(req)
 	require.NoError(t, err)
-	require.Contains(t, string(b), `"hub":{"enabled":true,"baseUrl":"https://hub.example.com","chatPushKey":"k-123"}`)
+	require.Contains(t, string(b), `"hub":{"enabled":true,"baseUrl":"https://hub.example.com","chatPushKey":"k-123","org":"acme"}`)
 
 	req2 := &deployer.CreateAgentRequest{}
 	s2 := &AgentDeployerService{}
-	s2.applyHub(req2)
+	s2.applyHub(req2, "acme")
 	b2, err := json.Marshal(req2)
 	require.NoError(t, err)
 	require.NotContains(t, string(b2), `"hub"`)

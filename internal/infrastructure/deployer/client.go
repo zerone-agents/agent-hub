@@ -100,14 +100,17 @@ type AigcConfig struct {
 // + non-blank chatPushKey when enabled) and the runtime's agents.yaml `hub`
 // section. When nil the section is omitted = pushback disabled.
 //
-// Only external callers that reach the runtime directly (with their own
-// X-User-Name/X-Org identity headers) benefit from pushback: hub-proxied
-// chats are recorded by hub itself and deliberately carry no identity
-// headers, so the runtime skips pushing them (issue #73, closed by design).
+// Org is the agent's **trusted deployment tenant** (issue #78): builtin mode
+// is always "default"; casdoor mode is the tenant the agent was deployed
+// under. The runtime stamps pushback sessions with this org instead of any
+// caller-supplied X-Org header, so pushback tenant affinity cannot be forged.
+// Forward-compatible: older deployer/runtime silently ignore the field
+// (Go json / zod strip unknown keys).
 type HubConfig struct {
 	Enabled     bool   `json:"enabled"`
 	BaseURL     string `json:"baseUrl"`
 	ChatPushKey string `json:"chatPushKey,omitempty"`
+	Org         string `json:"org,omitempty"`
 }
 
 // CreateAgentRequest is the request body for creating an agent.
