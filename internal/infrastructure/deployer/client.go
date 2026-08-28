@@ -102,14 +102,14 @@ type AigcConfig struct {
 //
 // Org is the agent's **trusted deployment tenant** (issue #78): builtin mode
 // is always "default"; casdoor mode is the tenant the agent was deployed
-// under. The runtime stamps pushback sessions with this org instead of any
-// caller-supplied X-Org header, so pushback tenant affinity cannot be forged.
-//
-// 注意：旧 deployer/runtime 会静默忽略该字段（Go json / zod strip 未知键，
-// 不报错），但**忽略 ≠ 语义正确**——org 丢失时回传落点回退旧语义（调用方
-// X-Org / hub 默认租户解析），多租户 casdoor 部署可能错归。须按
-// docs/configuration.md 的版本矩阵顺序完成 deployer#7 → runtime#28 →
-// 存量 agent 重部署后，调用方才可停止发送 X-Org。
+// under. The runtime stamps pushback sessions with this org — the X-Org
+// header has been removed from agent-runtime (≥ 2.2.0, agent-runtime#28), so
+// pushback tenant affinity cannot be forged. Requires agent-deployer ≥
+// v2.2.0 (HubConfig.org support) and agent-runtime ≥ 2.2.0 on the deploy
+// path; older components silently drop the field (no error), but then
+// pushback falls back to legacy semantics (default-tenant resolution), which
+// can misattribute tenants in multi-tenant casdoor deployments — upgrade the
+// chain and redeploy existing agents (see docs/configuration.md).
 type HubConfig struct {
 	Enabled     bool   `json:"enabled"`
 	BaseURL     string `json:"baseUrl"`
