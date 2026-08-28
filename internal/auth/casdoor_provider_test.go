@@ -2,7 +2,6 @@ package auth
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -227,9 +226,7 @@ func TestSyncMembershipOrgAdminBecomesAdmin(t *testing.T) {
 	store := newFakeMembershipStore()
 	p := newTestProvider(store)
 	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
-		// 真实 fetchUser 查 Admin API 返回用户权威字段（组织取自服务端记录，
-		// 不回显 org 参数）——issue #78 后空 Owner 身份在 toAuthUser 被拒。
-		return &casdoorsdk.User{Id: id, Name: "root", Owner: "org1", IsAdmin: true}, nil
+		return &casdoorsdk.User{Id: id, Name: "root", Owner: org, IsAdmin: true}, nil
 	}
 
 	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org1"})
@@ -337,59 +334,5 @@ func TestGetUserIdentityUnknownUser(t *testing.T) {
 	}
 	if gotOrg != "" {
 		t.Fatalf("无本地记录时 fetchUser org = %q, want 空串", gotOrg)
-	}
-}
-
-// issue #78 回归：空 Owner 的 casdoor 身份不得回退 "default" 租户——
-// 在可信身份边界直接拒绝（此前会把缺组织用户静默归入 builtin 租户，
-// 该租户还会作为可信 org 下发到 runtime 回传配置）。三条路径都要拒绝。
-func TestValidateAccessTokenEmptyOwnerRejected(t *testing.T) {
-	store := newFakeMembershipStore()
-	store.seed("casdoor", "id-noorg", authdom.RoleMember, authdom.StatusActive)
-	p := newTestProvider(store)
-	p.parseToken = func(string) (*casdoorsdk.User, error) {
-		return &casdoorsdk.User{Id: "id-noorg", Name: "noorg"}, nil // 无 Owner
-	}
-
-	au, err := p.ValidateAccessToken("fake-token")
-	if err == nil {
-		t.Fatal("空 Owner 必须拒绝")
-	}
-	if au != nil {
-		t.Fatalf("空 Owner 不得返回身份: %+v", au)
-	}
-	if !strings.Contains(err.Error(), "no owner") {
-		t.Fatalf("err = %v, want 含 no owner 提示", err)
-	}
-	if store.applyN != 0 {
-		t.Fatalf("拒绝路径不得写成员表, applyN = %d", store.applyN)
-	}
-}
-
-func TestGetUserIdentityEmptyOwnerRejected(t *testing.T) {
-	store := newFakeMembershipStore()
-	store.seed("casdoor", "id-noorg", authdom.RoleMember, authdom.StatusActive)
-	p := newTestProvider(store)
-	p.fetchUser = func(string, string) (*casdoorsdk.User, error) {
-		return &casdoorsdk.User{Id: "id-noorg", Name: "noorg"}, nil // 无 Owner
-	}
-
-	if au, ok := p.GetUserIdentity("id-noorg"); ok || au != nil {
-		t.Fatalf("空 Owner 必须 (nil,false), got (%v,%v)", au, ok)
-	}
-}
-
-func TestSyncMembershipEmptyOwnerRejected(t *testing.T) {
-	store := newFakeMembershipStore()
-	p := newTestProvider(store)
-	p.fetchUser = func(string, string) (*casdoorsdk.User, error) {
-		return &casdoorsdk.User{Id: "id-noorg", Name: "noorg"}, nil // 无 Owner
-	}
-
-	if au, err := p.SyncMembership(&casdoorsdk.User{Id: "id-noorg"}); err == nil || au != nil {
-		t.Fatalf("空 Owner 必须拒绝, got (%v, %v)", au, err)
-	}
-	if len(store.recs) != 0 {
-		t.Fatalf("拒绝路径不得建记录: %d", len(store.recs))
 	}
 }

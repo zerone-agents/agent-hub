@@ -49,14 +49,12 @@ func defaultFetchUser(userID, org string) (*casdoorsdk.User, error) {
 // Mode identifies this provider.
 func (p *CasdoorProvider) Mode() string { return "casdoor" }
 
-// toAuthUser 纯字段映射：casdoor User → AuthUser。TenantID 取 Owner；
-// **空 Owner 直接拒绝**（issue #78：此前回退 "default"，会把缺组织的
-// casdoor 用户静默归入 builtin 租户，该租户还会作为可信 org 下发到回传
-// 配置——可信身份边界不允许由坏身份数据推导租户）。roles 由调用方按
-// 本地成员表/合成结果填入。
-func toAuthUser(u *casdoorsdk.User, roles []string) (*AuthUser, error) {
-	if u.Owner == "" {
-		return nil, fmt.Errorf("casdoor user %s has no owner (organization)", u.Id)
+// toAuthUser 纯字段映射：casdoor User → AuthUser。TenantID 取 Owner
+// （空 → "default"）；roles 由调用方按本地成员表/合成结果填入。
+func toAuthUser(u *casdoorsdk.User, roles []string) *AuthUser {
+	tenantID := u.Owner
+	if tenantID == "" {
+		tenantID = "default"
 	}
 	return &AuthUser{
 		ID:          u.Id,
@@ -65,8 +63,8 @@ func toAuthUser(u *casdoorsdk.User, roles []string) (*AuthUser, error) {
 		DisplayName: u.DisplayName,
 		Avatar:      u.Avatar,
 		Roles:       roles,
-		TenantID:    u.Owner,
-	}, nil
+		TenantID:    tenantID,
+	}
 }
 
 // rolesFromRecord 从本地成员记录取角色（只读路径用）。无记录或 Role 为
@@ -98,11 +96,7 @@ func (p *CasdoorProvider) ValidateAccessToken(token string) (*AuthUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	au, err := toAuthUser(u, rolesFromRecord(rec))
-	if err != nil {
-		return nil, err
-	}
-	return au, nil
+	return toAuthUser(u, rolesFromRecord(rec)), nil
 }
 
 // RefreshToken exchanges a Casdoor refresh token for a fresh token pair.
@@ -153,10 +147,7 @@ func (p *CasdoorProvider) SyncMembership(u *casdoorsdk.User) (*AuthUser, error) 
 		return nil, err
 	}
 	d := SynthesizeMembership(fresh.IsAdmin, rec)
-	au, err := toAuthUser(fresh, rolesFromDecision(d))
-	if err != nil {
-		return nil, err
-	}
+	au := toAuthUser(fresh, rolesFromDecision(d))
 	if err := p.store.ApplyDecision("casdoor", au, d); err != nil {
 		return nil, err
 	}
@@ -191,10 +182,7 @@ func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
 		return nil, false
 	}
 	d := SynthesizeMembership(u.IsAdmin, rec)
-	au, err := toAuthUser(u, rolesFromDecision(d))
-	if err != nil {
-		return nil, false
-	}
+	au := toAuthUser(u, rolesFromDecision(d))
 	if d.Op != OpNone {
 		if err := p.store.ApplyDecision("casdoor", au, d); err != nil {
 			return nil, false

@@ -100,21 +100,14 @@ type AigcConfig struct {
 // + non-blank chatPushKey when enabled) and the runtime's agents.yaml `hub`
 // section. When nil the section is omitted = pushback disabled.
 //
-// Org is the agent's **trusted deployment tenant** (issue #78): builtin mode
-// is always "default"; casdoor mode is the tenant the agent was deployed
-// under. The runtime stamps pushback sessions with this org instead of any
-// caller-supplied X-Org header, so pushback tenant affinity cannot be forged.
-//
-// 注意：旧 deployer/runtime 会静默忽略该字段（Go json / zod strip 未知键，
-// 不报错），但**忽略 ≠ 语义正确**——org 丢失时回传落点回退旧语义（调用方
-// X-Org / hub 默认租户解析），多租户 casdoor 部署可能错归。须按
-// docs/configuration.md 的版本矩阵顺序完成 deployer#7 → runtime#28 →
-// 存量 agent 重部署后，调用方才可停止发送 X-Org。
+// Only external callers that reach the runtime directly (with their own
+// X-User-Name/X-Org identity headers) benefit from pushback: hub-proxied
+// chats are recorded by hub itself and deliberately carry no identity
+// headers, so the runtime skips pushing them (issue #73, closed by design).
 type HubConfig struct {
 	Enabled     bool   `json:"enabled"`
 	BaseURL     string `json:"baseUrl"`
 	ChatPushKey string `json:"chatPushKey,omitempty"`
-	Org         string `json:"org,omitempty"`
 }
 
 // CreateAgentRequest is the request body for creating an agent.
