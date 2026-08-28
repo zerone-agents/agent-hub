@@ -29,7 +29,8 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AUTH_MODE` | No | `builtin` | Auth backend: `builtin` or `casdoor` |
-| `AUTH_JWT_SECRET` | No | auto-generated | JWT signing secret for builtin mode; when set explicitly must be ≥32 bytes (`openssl rand -hex 32`). When empty, an ephemeral random secret is generated at startup — all sessions invalidate on restart, so set it in production. Ignored in casdoor mode. |
+| `AUTH_JWT_SECRET` | No | auto-generated | JWT signing secret for builtin mode; when set explicitly must be ≥32 bytes (`openssl rand -hex 32`). When empty, a random secret is generated at first start and persisted to `AUTH_JWT_SECRET_FILE` (restarts keep sessions valid); if the file is not writable an ephemeral in-memory secret is used with a warning. Ignored in casdoor mode. Multi-replica deployments must set a shared secret explicitly. |
+| `AUTH_JWT_SECRET_FILE` | No | `/data/.jwt-secret` | Path for persisting the auto-generated JWT secret (written with 0600). The quickstart compose maps a named volume to `/data` so the secret survives container recreation. |
 
 ### Casdoor (only when `AUTH_MODE=casdoor`)
 

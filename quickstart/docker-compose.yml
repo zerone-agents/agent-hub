@@ -69,6 +69,10 @@ services:
       MULTIRAG_API_KEY: ${MULTIRAG_API_KEY:-}
     ports:
       - "${HUB_PORT:-8081}:${HUB_PORT:-8081}"
+    volumes:
+      # Persists the auto-generated JWT secret (/data/.jwt-secret) across
+      # container recreation when AUTH_JWT_SECRET is not set.
+      - hub_data:/data
 
   deployer:
     # Manages agent-runtime containers on the host Docker daemon.
@@ -97,3 +101,4 @@ services:
 
 volumes:
   mysql_data:
+  hub_data:

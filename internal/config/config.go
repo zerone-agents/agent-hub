@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -65,6 +66,10 @@ type ChatPushConfig struct {
 type AuthConfig struct {
 	Mode      string `mapstructure:"mode"`
 	JWTSecret string `mapstructure:"jwt_secret"`
+	// JWTSecretFile 是自动生成 secret 的持久化路径：builtin 模式未显式配置
+	// JWTSecret 时，优先从该文件读取；不存在则生成随机 secret 并写入（0600）。
+	// 文件不可读写时降级为进程内临时 secret（重启后登录态失效）。
+	JWTSecretFile string `mapstructure:"jwt_secret_file"`
 }
 
 // IsBuiltin reports whether the builtin auth backend is active.
@@ -93,6 +98,40 @@ func (c *Config) ValidateAuth() error {
 		return fmt.Errorf("auth.mode 必须是 builtin 或 casdoor，当前: %q", c.Auth.Mode)
 	}
 	return nil
+}
+
+// loadOrCreateJWTSecret reads a persisted JWT secret from path, or generates
+// a new random 32-byte secret and writes it (0600) when the file is missing.
+// An existing file whose content is shorter than 32 bytes is rejected so a
+// truncated/corrupt file cannot silently weaken token signing.
+func loadOrCreateJWTSecret(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("jwt secret file path is empty")
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		secret := strings.TrimSpace(string(data))
+		if len(secret) < 32 {
+			return "", fmt.Errorf("persisted JWT secret in %s is too short (%d bytes)", path, len(secret))
+		}
+		return secret, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate JWT secret: %w", err)
+	}
+	secret := hex.EncodeToString(buf)
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", fmt.Errorf("create dir for JWT secret file: %w", err)
+		}
+	}
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		return "", fmt.Errorf("write JWT secret file: %w", err)
+	}
+	return secret, nil
 }
 
 type DeployerConfig struct {
@@ -161,7 +200,7 @@ func LoadConfig() (*Config, error) {
 		"database.url", "database.max_idle", "database.max_open", "database.max_lifetime",
 		"casdoor.endpoint", "casdoor.client_id", "casdoor.client_secret", "casdoor.certificate",
 		"casdoor.organization", "casdoor.callback_url",
-		"auth.mode", "auth.jwt_secret",
+		"auth.mode", "auth.jwt_secret", "auth.jwt_secret_file",
 		"oss.endpoint", "oss.region", "oss.bucket", "oss.access_key", "oss.secret_key", "oss.force_path_style", "oss.cdn_host",
 		"provider.encryption_key",
 	}
@@ -185,6 +224,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)
 	viper.SetDefault("auth.mode", "builtin")
+	viper.SetDefault("auth.jwt_secret_file", "/data/.jwt-secret")
 	viper.SetDefault("database.max_idle", 10)
 	viper.SetDefault("database.max_open", 100)
 	viper.SetDefault("database.max_lifetime", 3600)
@@ -226,16 +266,23 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Builtin 模式下未显式配置 JWT secret 时自动生成一个随机 secret，
-	// 降低 quickstart/本地体验门槛。注意：该 secret 仅存在于当前进程，
-	// 重启后所有已签发 token 失效（用户需重新登录）；多副本部署必须显式
-	// 配置共享 secret。生产环境请始终显式设置 AUTH_JWT_SECRET。
+	// 并持久化到 JWTSecretFile（默认 /data/.jwt-secret，容器内由 named
+	// volume 承载），重启后从文件读回，登录态不受影响。文件不可读写时
+	// 降级为进程内临时 secret（重启后所有 token 失效）。生产环境建议
+	// 始终显式配置 AUTH_JWT_SECRET；多副本部署必须显式配置共享 secret。
 	if cfg.Auth.Mode == "builtin" && cfg.Auth.JWTSecret == "" {
-		buf := make([]byte, 32)
-		if _, err := rand.Read(buf); err != nil {
-			return nil, fmt.Errorf("failed to generate JWT secret: %w", err)
+		secret, err := loadOrCreateJWTSecret(cfg.Auth.JWTSecretFile)
+		if err != nil {
+			buf := make([]byte, 32)
+			if _, rerr := rand.Read(buf); rerr != nil {
+				return nil, fmt.Errorf("failed to generate JWT secret: %w", rerr)
+			}
+			secret = hex.EncodeToString(buf)
+			log.Printf("[config] WARNING: AUTH_JWT_SECRET 未配置且无法持久化到 %s（%v），已生成进程内临时 secret；重启后所有登录态失效，生产环境请显式配置", cfg.Auth.JWTSecretFile, err)
+		} else {
+			log.Printf("[config] AUTH_JWT_SECRET 未配置，使用持久化 secret 文件 %s", cfg.Auth.JWTSecretFile)
 		}
-		cfg.Auth.JWTSecret = hex.EncodeToString(buf)
-		log.Printf("[config] WARNING: AUTH_JWT_SECRET 未配置，已生成随机临时 secret；重启后所有登录态失效，生产环境请显式配置")
+		cfg.Auth.JWTSecret = secret
 	}
 
 	SetGlobalConfig(&cfg)
