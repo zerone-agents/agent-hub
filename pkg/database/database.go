@@ -17,6 +17,7 @@ import (
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
+	"control-panel/internal/domain/systemsetting"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -139,6 +140,7 @@ func AutoMigrate(backfillTenant string) error {
 		&authdomain.RefreshToken{},
 		&authdomain.UserIdentity{},
 		&authdomain.TenantOAuthClient{},
+		&systemsetting.SystemSetting{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

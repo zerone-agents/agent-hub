@@ -18,6 +18,7 @@ import (
 	authdom "control-panel/internal/domain/auth"
 	knowledgedomain "control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
+	"control-panel/internal/domain/systemsetting"
 	"control-panel/internal/handler"
 	"control-panel/internal/infrastructure/deployer"
 	knowledgeinfra "control-panel/internal/infrastructure/knowledge"
@@ -77,6 +78,18 @@ func main() {
 	// role 恒为 ""），builtin 模式下 user_identities 表无数据、执行无副作用。
 	if err := auth.NormalizePendingRoles(database.GetDB()); err != nil {
 		log.Fatalf("Failed to normalize pending roles: %v", err)
+	}
+
+	// builtin 模式下未显式配置 AUTH_JWT_SECRET 时，自动生成随机 secret 并
+	// 持久化到数据库（system_settings 表）：重启、容器重建、镜像升级均
+	// 不丢失，登录态保持。显式配置时原样使用（不写库）。
+	if cfg.Auth.IsBuiltin() && cfg.Auth.JWTSecret == "" {
+		secret, err := systemsetting.EnsureJWTSecret(database.GetDB(), cfg.Auth.JWTSecret)
+		if err != nil {
+			log.Fatalf("Failed to provision JWT secret: %v", err)
+		}
+		cfg.Auth.JWTSecret = secret
+		log.Println("Auth: JWT secret auto-provisioned and persisted in the database (set AUTH_JWT_SECRET explicitly to override)")
 	}
 
 	if err := cfg.ValidateAuth(); err != nil {

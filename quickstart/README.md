@@ -22,8 +22,8 @@ cd agent-hub/quickstart
 cp .env.example .env
 
 # 3. (Optional) Set AUTH_JWT_SECRET — when empty, the server generates a
-#    random secret on first start and persists it in the hub_data volume
-#    (/data/.jwt-secret), so restarts keep sessions valid. To pin your own:
+#    random secret on first start and persists it in MySQL, so restarts and
+#    upgrades keep sessions valid. To pin your own:
 #      sed -i.bak "s/AUTH_JWT_SECRET=.*/AUTH_JWT_SECRET=$(openssl rand -hex 32)/" .env
 
 # 4. Set DEPLOYER_DATA_DIR in .env (required) — an ABSOLUTE path on the Docker
