@@ -29,7 +29,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AUTH_MODE` | No | `builtin` | Auth backend: `builtin` or `casdoor` |
-| `AUTH_JWT_SECRET` | ✅ (builtin) | — | JWT signing secret for builtin mode; ≥32 bytes. Generate with `openssl rand -hex 32`. Ignored in casdoor mode. |
+| `AUTH_JWT_SECRET` | No | auto-generated | JWT signing secret for builtin mode; when set explicitly must be ≥32 bytes (`openssl rand -hex 32`). When empty, a random secret is generated on first start and persisted in the MySQL `system_settings` table — restarts, container recreation and image upgrades all keep sessions valid. Ignored in casdoor mode. Multi-replica deployments must set a shared secret explicitly. |
 
 ### Casdoor (only when `AUTH_MODE=casdoor`)
 

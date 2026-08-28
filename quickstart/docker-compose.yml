@@ -45,7 +45,9 @@ services:
     environment:
       # --- Auth (builtin mode) ---
       AUTH_MODE: builtin
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required (run openssl rand -hex 32)}
+      # Optional: when empty the server generates an ephemeral random secret
+      # (all sessions invalidate on restart). Set it in production.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
       # --- Database ---
       DATABASE_URL: root:${MYSQL_ROOT_PASSWORD:-root}@tcp(mysql:3306)/${MYSQL_DATABASE:-agent_hub}?charset=utf8mb4&parseTime=True
       DATABASE_MAX_OPEN: ${DATABASE_MAX_OPEN:-50}

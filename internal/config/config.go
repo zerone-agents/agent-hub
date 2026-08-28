@@ -57,8 +57,10 @@ type ChatPushConfig struct {
 
 // AuthConfig selects the authentication backend. Mode "builtin" (default) uses
 // the built-in username/password user system; "casdoor" delegates to the
-// existing Casdoor OAuth integration. JWTSecret is required for builtin mode
-// and must be at least 32 bytes.
+// existing Casdoor OAuth integration. In builtin mode, an explicitly provided
+// JWTSecret must be at least 32 bytes; when left empty, the server provisions
+// a random secret at startup and persists it in the database (see
+// systemsetting.EnsureJWTSecret), so sessions survive restarts.
 type AuthConfig struct {
 	Mode      string `mapstructure:"mode"`
 	JWTSecret string `mapstructure:"jwt_secret"`
@@ -71,7 +73,8 @@ func (a *AuthConfig) IsBuiltin() bool { return a.Mode == "builtin" }
 func (a *AuthConfig) IsCasdoor() bool { return a.Mode == "casdoor" }
 
 // ValidateAuth enforces auth config invariants: Mode must be one of the
-// supported values, and builtin mode requires a JWTSecret of at least 32 bytes.
+// supported values, and builtin mode requires a JWTSecret of at least 32 bytes
+// (main.go resolves an unset secret from the database before calling this).
 func (c *Config) ValidateAuth() error {
 	switch c.Auth.Mode {
 	case "builtin":

@@ -21,11 +21,10 @@ cd agent-hub/quickstart
 # 2. Copy environment template
 cp .env.example .env
 
-# 3. Set the JWT secret (required) — generate a random one:
-#    On macOS/Linux:
+# 3. (Optional) Set AUTH_JWT_SECRET — when empty, the server generates a
+#    random secret on first start and persists it in MySQL, so restarts and
+#    upgrades keep sessions valid. To pin your own:
 #      sed -i.bak "s/AUTH_JWT_SECRET=.*/AUTH_JWT_SECRET=$(openssl rand -hex 32)/" .env
-#    or edit .env manually.
-#    The value must be at least 32 bytes.
 
 # 4. Set DEPLOYER_DATA_DIR in .env (required) — an ABSOLUTE path on the Docker
 #    host holding agent configs/sessions/skills. The same path is bind-mounted

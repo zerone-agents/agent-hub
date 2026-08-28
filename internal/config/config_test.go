@@ -20,6 +20,23 @@ func TestAuthConfigDefaults(t *testing.T) {
 	}
 }
 
+// 显式配置的 secret 原样加载（生成/持久化逻辑在 main.go 经
+// systemsetting.EnsureJWTSecret 完成，LoadConfig 不做任何改写）。
+func TestLoadConfigKeepsExplicitJWTSecret(t *testing.T) {
+	t.Setenv("AUTH_MODE", "")
+	t.Setenv("AUTH_JWT_SECRET", "my-secret")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Auth.JWTSecret != "my-secret" {
+		t.Fatalf("explicit secret overwritten: %q", cfg.Auth.JWTSecret)
+	}
+	if err := cfg.ValidateAuth(); err == nil {
+		t.Fatal("want validation error for explicit short secret")
+	}
+}
+
 func TestValidateAuthBuiltinRequiresSecret(t *testing.T) {
 	cfg := &Config{Auth: AuthConfig{Mode: "builtin", JWTSecret: ""}}
 	if err := cfg.ValidateAuth(); err == nil {
