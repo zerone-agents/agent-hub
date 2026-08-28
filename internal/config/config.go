@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/url"
@@ -57,8 +59,9 @@ type ChatPushConfig struct {
 
 // AuthConfig selects the authentication backend. Mode "builtin" (default) uses
 // the built-in username/password user system; "casdoor" delegates to the
-// existing Casdoor OAuth integration. JWTSecret is required for builtin mode
-// and must be at least 32 bytes.
+// existing Casdoor OAuth integration. In builtin mode, an explicitly provided
+// JWTSecret must be at least 32 bytes; when left empty, LoadConfig generates
+// an ephemeral random secret (sessions invalidate on restart).
 type AuthConfig struct {
 	Mode      string `mapstructure:"mode"`
 	JWTSecret string `mapstructure:"jwt_secret"`
@@ -71,7 +74,9 @@ func (a *AuthConfig) IsBuiltin() bool { return a.Mode == "builtin" }
 func (a *AuthConfig) IsCasdoor() bool { return a.Mode == "casdoor" }
 
 // ValidateAuth enforces auth config invariants: Mode must be one of the
-// supported values, and builtin mode requires a JWTSecret of at least 32 bytes.
+// supported values, and builtin mode requires a JWTSecret of at least 32 bytes
+// (LoadConfig auto-generates one when unset, so this only rejects explicitly
+// provided short secrets).
 func (c *Config) ValidateAuth() error {
 	switch c.Auth.Mode {
 	case "builtin":
@@ -218,6 +223,19 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.Deployer.UpstreamHost == "" && cfg.Deployer.PublicHost != "" {
 		cfg.Deployer.UpstreamHost = cfg.Deployer.PublicHost
+	}
+
+	// Builtin 模式下未显式配置 JWT secret 时自动生成一个随机 secret，
+	// 降低 quickstart/本地体验门槛。注意：该 secret 仅存在于当前进程，
+	// 重启后所有已签发 token 失效（用户需重新登录）；多副本部署必须显式
+	// 配置共享 secret。生产环境请始终显式设置 AUTH_JWT_SECRET。
+	if cfg.Auth.Mode == "builtin" && cfg.Auth.JWTSecret == "" {
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			return nil, fmt.Errorf("failed to generate JWT secret: %w", err)
+		}
+		cfg.Auth.JWTSecret = hex.EncodeToString(buf)
+		log.Printf("[config] WARNING: AUTH_JWT_SECRET 未配置，已生成随机临时 secret；重启后所有登录态失效，生产环境请显式配置")
 	}
 
 	SetGlobalConfig(&cfg)
