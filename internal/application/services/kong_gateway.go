@@ -526,6 +526,7 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 		a := agents[i]
 		key := DeployKey(a.TenantID, a.Name)
 		publicPath := URLPath(a.TenantID, a.Name)
+		wantPaths := routePaths(publicPath)
 		byKey[key] = agentRef{key: key, publicPath: publicPath, cfg: a}
 		sn := svcName(key)
 		svc, found, err := s.client.GetService(ctx, sn)
@@ -552,14 +553,26 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 						fixes++
 					}
 				} else if len(route.Hosts) != 1 || route.Hosts[0] != s.routeHost ||
-					len(route.Paths) != 1 || route.Paths[0] != publicPath {
-					wantRoute := routeFor(key, s.routeHost, []string{publicPath}, route.Service, tagsFor(key))
+					!slices.Equal(route.Paths, wantPaths) {
+					wantRoute := routeFor(key, s.routeHost, wantPaths, route.Service, tagsFor(key))
 					if _, err := s.client.UpdateRoute(ctx, rn, wantRoute); err != nil {
 						s.logger.Printf("kong reconcile: update route %s failed: %v", rn, err)
 					} else {
 						fixes++
 					}
 				}
+			}
+			// default 租户：恒挂裸路径后，残留 "-legacy" 与其他托管实体对
+			// 裸路径的声明都会造成歧义匹配，对账时一并清理。
+			if len(wantPaths) > 1 {
+				if _, lFound, err := s.client.GetRoute(ctx, routeName(key)+"-legacy"); err == nil && lFound {
+					if derr := s.client.DeleteRoute(ctx, routeName(key)+"-legacy"); derr == nil {
+						fixes++
+					} else {
+						s.logger.Printf("kong reconcile: delete orphaned legacy route %s failed: %v", routeName(key)+"-legacy", derr)
+					}
+				}
+				s.supersedeBarePathConflicts(ctx, wantPaths[1], map[string]bool{routeName(key): true})
 			}
 		} else {
 			if found {

@@ -437,6 +437,25 @@ func TestLegacyBareFor_None(t *testing.T) {
 	}
 }
 
+// v2：default 租户仅保留 bare-service 探测（供 pre-clean 显式删除升级前
+// 旧裸名实体），跳过 -legacy 路由探测（被裸路径 supersede）。
+func TestLegacyBareFor_DefaultTenantKeepsBareServiceProbeOnly(t *testing.T) {
+	fk := newFakeKong()
+	s := &AgentDeployerService{
+		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+	// 仅 -legacy 路由存在：default 跳过该探测 → 空
+	fk.routes["agent-default-general-route-legacy"] = &kong.Route{Name: "agent-default-general-route-legacy"}
+	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "" {
+		t.Fatalf("legacyBareFor(default, -legacy only) = %q, want empty", got)
+	}
+	// bare service 存在：保留探测（供 pre-clean 删除旧实体）
+	fk.services["agent-general"] = &kong.Service{Name: "agent-general"}
+	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "general" {
+		t.Fatalf("legacyBareFor(default, bare service) = %q, want general", got)
+	}
+}
+
 // TestWaitForHealthy_UsesScopedKey is a smoke check that WaitForHealthy (used
 // by registerWhenHealthy with the scoped key) addresses the deployer with the
 // scoped key.

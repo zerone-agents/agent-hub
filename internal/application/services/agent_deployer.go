@@ -446,6 +446,15 @@ func (s *AgentDeployerService) legacyBareFor(ctx context.Context, tenantID, name
 	if s.kongSvc == nil {
 		return ""
 	}
+	// default 租户：裸路径恒挂主 route（双路径），-legacy 探测被取代；但
+	// 保留 bare-service 探测，让部署 pre-clean 的 Deregister 显式删除
+	// 升级前的旧裸名实体。挂载侧由 RegisterWithLegacy 退化语义兜底。
+	if orgSlug(tenantID) == defaultTenantSlug {
+		if s.kongSvc.LegacyExists(ctx, name) {
+			return name
+		}
+		return ""
+	}
 	if s.kongSvc.LegacyExists(ctx, name) {
 		return name
 	}

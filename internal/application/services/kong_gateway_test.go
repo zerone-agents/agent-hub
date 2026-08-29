@@ -906,3 +906,60 @@ func TestRegisterWithLegacy_DefaultTenantDegradesToRegister(t *testing.T) {
 		t.Fatal("-legacy must not be force-mounted for default tenant")
 	}
 }
+
+func TestReconcile_DefaultTenantDualPaths(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
+		t.Fatalf("expected dual paths for default tenant, got %+v", r)
+	}
+}
+
+func TestReconcile_DefaultTenantDriftHealedAndOrphanLegacyDeleted(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	// 预置漂移：单路径 route + 孤儿 -legacy route
+	fk.services["agent-default-assistant"] = &kong.Service{Name: "agent-default-assistant", Host: "agent-runtime", Port: 3000, Tags: tagsFor("default-assistant")}
+	fk.routes["agent-default-assistant-route"] = &kong.Route{Name: "agent-default-assistant-route", Paths: []string{"/default/assistant"}, Tags: tagsFor("default-assistant")}
+	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{Name: "agent-default-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("default-assistant")}
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 {
+		t.Fatalf("expected drift healed to dual paths, got %+v", r)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("expected orphaned -legacy route to be deleted")
+	}
+}
+
+func TestReconcile_DefaultTenantCleansBarePathConflicts(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
+		Name: "agent-zerone-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("zerone-assistant"),
+	}
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("reconcile must clean foreign bare-path claims for default tenant")
+	}
+}
