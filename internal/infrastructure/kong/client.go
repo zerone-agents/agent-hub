@@ -118,6 +118,17 @@ func (c *Client) ListServicesByTag(ctx context.Context, tag string) ([]Service, 
 	return wrap.Data, nil
 }
 
+// ListRoutesByTag returns all routes carrying the given tag.
+func (c *Client) ListRoutesByTag(ctx context.Context, tag string) ([]Route, error) {
+	var wrap struct {
+		Data []Route `json:"data"`
+	}
+	if err := c.getRaw(ctx, "/routes?tags="+url.QueryEscape(tag), &wrap); err != nil {
+		return nil, err
+	}
+	return wrap.Data, nil
+}
+
 // GetRoute returns (route, found, err) with the same 404 semantics as
 // GetService.
 func (c *Client) GetRoute(ctx context.Context, name string) (*Route, bool, error) {

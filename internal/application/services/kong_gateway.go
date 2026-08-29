@@ -27,6 +27,7 @@ type kongClient interface {
 	UpdateRoute(ctx context.Context, name string, r *kong.Route) (*kong.Route, error)
 	DeleteRoute(ctx context.Context, name string) error
 	ListServicesByTag(ctx context.Context, tag string) ([]kong.Service, error)
+	ListRoutesByTag(ctx context.Context, tag string) ([]kong.Route, error)
 }
 
 const kongManagedTag = "managed-by:control-panel"
@@ -291,6 +292,8 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, lega
 				s.logger.Printf("kong: delete superseded legacy route %s failed: %v", rn+"-legacy", err)
 			}
 		}
+		// 裸路径命名空间归 default：清理其他托管实体对同一路径的声明
+		s.supersedeBarePathConflicts(ctx, paths[1], map[string]bool{rn: true})
 	} else if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
 		// Legacy compatibility fallback (non-default tenants): only mount the
 		// "/<bare>" route when the old bare-name service actually exists;
@@ -323,6 +326,40 @@ func (s *KongGatewayService) ensureLegacyRoute(ctx context.Context, key, legacyB
 	} else {
 		if _, err := s.client.UpdateRoute(ctx, legacyRouteName, wantLegacy); err != nil {
 			s.logger.Printf("kong: update legacy route %s failed: %v", legacyRouteName, err)
+		}
+	}
+}
+
+// supersedeBarePathConflicts enforces bare-path namespace ownership: the
+// default tenant owns "/<agent>". Any OTHER managed route claiming the same
+// bare path — another tenant's "-legacy" compatibility route, or a stale
+// pre-upgrade bare route — is deleted. Foreign routes without our managed
+// tag are never listed by ListRoutesByTag and thus never touched (ops
+// runbook). Errors are logged, not returned.
+func (s *KongGatewayService) supersedeBarePathConflicts(ctx context.Context, barePath string, keep map[string]bool) {
+	routes, err := s.client.ListRoutesByTag(ctx, kongManagedTag)
+	if err != nil {
+		s.logger.Printf("kong: list routes by tag for bare-path conflicts failed: %v", err)
+		return
+	}
+	for _, r := range routes {
+		if keep[r.Name] {
+			continue
+		}
+		conflict := false
+		for _, p := range r.Paths {
+			if p == barePath {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			continue
+		}
+		if err := s.client.DeleteRoute(ctx, r.Name); err != nil {
+			s.logger.Printf("kong: delete bare-path conflict route %s failed: %v", r.Name, err)
+		} else {
+			s.logger.Printf("kong: deleted bare-path conflict route %s (claimed %s)", r.Name, barePath)
 		}
 	}
 }

@@ -337,3 +337,60 @@ func TestDeleteRoute_ServerError_ReturnsError(t *testing.T) {
 		t.Fatalf("expected error from 500, got nil")
 	}
 }
+
+func TestListRoutesByTag_ParsesDataArray(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/routes"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"},"tags":["managed-by-cp"]},{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"next":null}`))
+	})
+	routes, err := c.ListRoutesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].ID != "r-1" || routes[0].Name != "agent-x-route" {
+		t.Fatalf("unexpected first route: %+v", routes[0])
+	}
+	if len(routes[0].Paths) != 1 || routes[0].Paths[0] != "/x" {
+		t.Fatalf("unexpected first route paths: %+v", routes[0].Paths)
+	}
+	if !routes[0].StripPath {
+		t.Fatalf("expected strip_path=true on first route")
+	}
+	if routes[0].Service == nil || routes[0].Service.ID != "svc-1" {
+		t.Fatalf("unexpected first route service ref: %+v", routes[0].Service)
+	}
+	if len(routes[0].Tags) != 1 || routes[0].Tags[0] != "managed-by-cp" {
+		t.Fatalf("unexpected first route tags: %+v", routes[0].Tags)
+	}
+	if routes[1].ID != "r-2" || routes[1].Name != "agent-y-route" {
+		t.Fatalf("unexpected second route: %+v", routes[1])
+	}
+	if len(routes[1].Hosts) != 1 || routes[1].Hosts[0] != "a.example.com" {
+		t.Fatalf("unexpected second route hosts: %+v", routes[1].Hosts)
+	}
+	if routes[1].StripPath {
+		t.Fatalf("expected strip_path=false on second route")
+	}
+}
+
+func TestListRoutesByTag_ServerError_ReturnsError(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		io.WriteString(w, "upstream down")
+	})
+	if _, err := c.ListRoutesByTag(context.Background(), "x"); err == nil {
+		t.Fatalf("expected error from 502, got nil")
+	}
+}

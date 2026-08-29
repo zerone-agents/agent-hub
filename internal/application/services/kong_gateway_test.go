@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"control-panel/internal/domain/agent"
@@ -113,6 +114,16 @@ func (f *fakeKong) ListServicesByTag(ctx context.Context, tag string) ([]kong.Se
 				out = append(out, *s)
 				break
 			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeKong) ListRoutesByTag(ctx context.Context, tag string) ([]kong.Route, error) {
+	var out []kong.Route
+	for _, r := range f.routes {
+		if slices.Contains(r.Tags, tag) {
+			out = append(out, *r)
 		}
 	}
 	return out, nil
@@ -822,6 +833,40 @@ func TestRegister_DefaultTenantSupersedesLegacyRoute(t *testing.T) {
 	}
 	if fk.routes["agent-default-assistant-route-legacy"] != nil {
 		t.Fatal("expected superseded -legacy route to be deleted for default tenant")
+	}
+}
+
+// v2：裸路径命名空间归 default——其他托管实体对同一路径的声明被清理；
+// zerone 的 scoped 主路由不受影响；无托管 tag 的外部实体永不动。
+func TestRegister_DefaultTenantSupersedesForeignBarePathClaims(t *testing.T) {
+	fk := newFakeKong()
+	// 租户 zerone 的 -legacy 兼容路由声明了 /assistant（升级前裸名）
+	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
+		Name:  "agent-zerone-assistant-route-legacy",
+		Paths: []string{"/assistant"},
+		Tags:  tagsFor("zerone-assistant"),
+	}
+	// zerone 的主路由不受影响
+	fk.routes["agent-zerone-assistant-route"] = &kong.Route{
+		Name:  "agent-zerone-assistant-route",
+		Paths: []string{"/zerone/assistant"},
+		Tags:  tagsFor("zerone-assistant"),
+	}
+	// 无托管 tag 的外部路由：不可见，绝不动
+	fk.routes["foreign-route"] = &kong.Route{Name: "foreign-route", Paths: []string{"/assistant"}}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("expected foreign -legacy claim on /assistant to be deleted")
+	}
+	if fk.routes["agent-zerone-assistant-route"] == nil {
+		t.Fatal("zerone's scoped main route must be untouched")
+	}
+	if fk.routes["foreign-route"] == nil {
+		t.Fatal("foreign (untagged) route must never be touched")
 	}
 }
 
