@@ -214,6 +214,71 @@ func TestListServicesByTag_ServerError_ReturnsError(t *testing.T) {
 	}
 }
 
+// Kong paginates list endpoints via the offset cursor: a response carrying a
+// non-empty "offset" has more pages; the last page omits it. The client must
+// follow the cursor and aggregate records across pages.
+func TestListServicesByTag_FollowsPaginationOffset(t *testing.T) {
+	page2Requested := false
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/services"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("offset") == "" {
+			if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+				t.Errorf("expected query %s, got %s", want, got)
+			}
+			w.Write([]byte(`{"data":[{"id":"svc-1","name":"a"},{"id":"svc-2","name":"b"}],"offset":"cursor-1","next":"/services?tags=managed-by-cp&offset=cursor-1"}`))
+			return
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp&offset=cursor-1"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		page2Requested = true
+		w.Write([]byte(`{"data":[{"id":"svc-3","name":"c"}],"next":null}`))
+	})
+	svcs, err := c.ListServicesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !page2Requested {
+		t.Fatal("expected a second request carrying the offset cursor")
+	}
+	if len(svcs) != 3 {
+		t.Fatalf("expected 3 services across both pages, got %d: %+v", len(svcs), svcs)
+	}
+	if svcs[0].ID != "svc-1" || svcs[1].ID != "svc-2" || svcs[2].ID != "svc-3" {
+		t.Fatalf("unexpected aggregated services: %+v", svcs)
+	}
+}
+
+// A server that keeps returning non-empty data with the SAME offset cursor
+// (A→A, or a longer A→B→A cycle) would spin the pagination loop forever under
+// a long-lived reconcile context: the empty-page defense never triggers. The
+// client must detect the repeated cursor and return an error. The handler
+// caps the number of requests it will serve so a regression to an unguarded
+// loop fails this test fast instead of hanging it.
+func TestListServicesByTag_RepeatedCursorCycleReturnsError(t *testing.T) {
+	const maxRequests = 8
+	served := 0
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		served++
+		if served > maxRequests {
+			t.Errorf("pagination loop is spinning: served %d requests, cap %d", served, maxRequests)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"svc-1","name":"a"}],"offset":"cursor-1","next":"/services?tags=managed-by-cp&offset=cursor-1"}`))
+	})
+	if _, err := c.ListServicesByTag(context.Background(), "managed-by-cp"); err == nil {
+		t.Fatal("expected error on repeated pagination cursor, got nil")
+	}
+}
+
 // --- Route CRUD ----------------------------------------------------------
 
 func TestGetRoute_NotFound_ReturnsFoundFalse(t *testing.T) {
@@ -335,5 +400,129 @@ func TestDeleteRoute_ServerError_ReturnsError(t *testing.T) {
 	})
 	if err := c.DeleteRoute(context.Background(), "agent-x"); err == nil {
 		t.Fatalf("expected error from 500, got nil")
+	}
+}
+
+func TestListRoutesByTag_ParsesDataArray(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/routes"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"},"tags":["managed-by-cp"]},{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"next":null}`))
+	})
+	routes, err := c.ListRoutesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].ID != "r-1" || routes[0].Name != "agent-x-route" {
+		t.Fatalf("unexpected first route: %+v", routes[0])
+	}
+	if len(routes[0].Paths) != 1 || routes[0].Paths[0] != "/x" {
+		t.Fatalf("unexpected first route paths: %+v", routes[0].Paths)
+	}
+	if !routes[0].StripPath {
+		t.Fatalf("expected strip_path=true on first route")
+	}
+	if routes[0].Service == nil || routes[0].Service.ID != "svc-1" {
+		t.Fatalf("unexpected first route service ref: %+v", routes[0].Service)
+	}
+	if len(routes[0].Tags) != 1 || routes[0].Tags[0] != "managed-by-cp" {
+		t.Fatalf("unexpected first route tags: %+v", routes[0].Tags)
+	}
+	if routes[1].ID != "r-2" || routes[1].Name != "agent-y-route" {
+		t.Fatalf("unexpected second route: %+v", routes[1])
+	}
+	if len(routes[1].Hosts) != 1 || routes[1].Hosts[0] != "a.example.com" {
+		t.Fatalf("unexpected second route hosts: %+v", routes[1].Hosts)
+	}
+	if routes[1].StripPath {
+		t.Fatalf("expected strip_path=false on second route")
+	}
+}
+
+func TestListRoutesByTag_ServerError_ReturnsError(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		io.WriteString(w, "upstream down")
+	})
+	if _, err := c.ListRoutesByTag(context.Background(), "x"); err == nil {
+		t.Fatalf("expected error from 502, got nil")
+	}
+}
+
+// Same pagination contract as services: follow the offset cursor until the
+// response omits it, aggregating routes from every page.
+func TestListRoutesByTag_FollowsPaginationOffset(t *testing.T) {
+	page2Requested := false
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/routes"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("offset") == "" {
+			if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+				t.Errorf("expected query %s, got %s", want, got)
+			}
+			w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"},"tags":["managed-by-cp"]}],"offset":"cursor-1","next":"/routes?tags=managed-by-cp&offset=cursor-1"}`))
+			return
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp&offset=cursor-1"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		page2Requested = true
+		w.Write([]byte(`{"data":[{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"next":null}`))
+	})
+	routes, err := c.ListRoutesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !page2Requested {
+		t.Fatal("expected a second request carrying the offset cursor")
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes across both pages, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].ID != "r-1" || routes[0].Name != "agent-x-route" {
+		t.Fatalf("unexpected first route: %+v", routes[0])
+	}
+	if routes[1].ID != "r-2" || routes[1].Name != "agent-y-route" {
+		t.Fatalf("unexpected second route: %+v", routes[1])
+	}
+	if len(routes[1].Paths) != 1 || routes[1].Paths[0] != "/y" {
+		t.Fatalf("unexpected second route paths: %+v", routes[1].Paths)
+	}
+}
+
+// Same contract as the services variant: a server that repeats a non-empty
+// offset cursor alongside non-empty data must produce an error, not an
+// infinite loop. The request cap keeps a regression fail-fast.
+func TestListRoutesByTag_RepeatedCursorCycleReturnsError(t *testing.T) {
+	const maxRequests = 8
+	served := 0
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		served++
+		if served > maxRequests {
+			t.Errorf("pagination loop is spinning: served %d requests, cap %d", served, maxRequests)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"}},{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"offset":"cursor-1","next":"/routes?tags=managed-by-cp&offset=cursor-1"}`))
+	})
+	if _, err := c.ListRoutesByTag(context.Background(), "managed-by-cp"); err == nil {
+		t.Fatal("expected error on repeated pagination cursor, got nil")
 	}
 }

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"control-panel/internal/domain/agent"
@@ -113,6 +114,16 @@ func (f *fakeKong) ListServicesByTag(ctx context.Context, tag string) ([]kong.Se
 				out = append(out, *s)
 				break
 			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeKong) ListRoutesByTag(ctx context.Context, tag string) ([]kong.Route, error) {
+	var out []kong.Route
+	for _, r := range f.routes {
+		if slices.Contains(r.Tags, tag) {
+			out = append(out, *r)
 		}
 	}
 	return out, nil
@@ -378,6 +389,43 @@ func TestRegisterWithLegacy_MountsDespiteMissingBareService(t *testing.T) {
 	}
 	if len(fk.routes) != 2 {
 		t.Fatalf("expected 2 routes (main + legacy), got %d", len(fk.routes))
+	}
+}
+
+// P1 回归：default 先注册拥有裸路径后，非 default 的 legacy 重挂让位；
+// default 主路由不受影响。
+func TestRegisterWithLegacy_NonDefaultYieldsToDefaultBarePathOwner(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	// default 先注册（拥有 /assistant）
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("register default: %v", err)
+	}
+	// 非 default 重部署：bare service 存在使 legacyBare 生效
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("register legacy: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("legacy mount must yield when default owns the bare path")
+	}
+	if fk.routes["agent-default-assistant-route"] == nil {
+		t.Fatal("default's main route must be untouched")
+	}
+}
+
+// P1 反向：default 主路由不存在时 legacy 照常挂载（升级兼容语义不变）。
+func TestRegisterWithLegacy_StillMountsWhenDefaultAbsent(t *testing.T) {
+	fk := newFakeKong()
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("register legacy: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] == nil {
+		t.Fatal("legacy route must still mount when default tenant has no claim")
 	}
 }
 
@@ -755,5 +803,200 @@ func TestURLPath(t *testing.T) {
 		if got := URLPath(c.tenant, c.name); got != c.want {
 			t.Fatalf("URLPath(%q,%q) = %q, want %q", c.tenant, c.name, got, c.want)
 		}
+	}
+}
+
+// --- default 租户裸路径（dual-path）---
+
+func TestBarePath(t *testing.T) {
+	cases := []struct {
+		tenant, agent, want string
+	}{
+		{"default", "assistant", "/assistant"}, // default 租户 → 裸路径
+		{"Default", "assistant", "/assistant"}, // orgSlug 归一化大小写
+		{"zerone", "assistant", ""},            // 非 default 租户 → 空
+		{"default", "Bad Name", "/bad-name"},   // NormalizeAgentName 归一为合法名
+		{"defaults", "assistant", ""},          // 字面相等而非前缀匹配
+	}
+	for _, c := range cases {
+		if got := BarePath(c.tenant, c.agent); got != c.want {
+			t.Errorf("BarePath(%q, %q) = %q, want %q", c.tenant, c.agent, got, c.want)
+		}
+	}
+}
+
+func TestRoutePaths(t *testing.T) {
+	if got := routePaths("/default/foo"); len(got) != 2 || got[0] != "/default/foo" || got[1] != "/foo" {
+		t.Errorf("routePaths(/default/foo) = %v, want [/default/foo /foo]", got)
+	}
+	if got := routePaths("/zerone/foo"); len(got) != 1 || got[0] != "/zerone/foo" {
+		t.Errorf("routePaths(/zerone/foo) = %v, want [/zerone/foo]", got)
+	}
+	// 拒绝分支（v2 补）：裸段非法 / 段数不对 → 恒返回单 scoped 路径
+	if got := routePaths("/default/Bad!"); len(got) != 1 || got[0] != "/default/Bad!" {
+		t.Errorf("routePaths(/default/Bad!) = %v, want single scoped path", got)
+	}
+	if got := routePaths("/default"); len(got) != 1 || got[0] != "/default" {
+		t.Errorf("routePaths(/default) = %v, want single scoped path", got)
+	}
+}
+
+func TestRegister_DefaultTenantDualPaths(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil {
+		t.Fatal("expected route to be created")
+	}
+	if len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
+		t.Fatalf("expected dual paths [/default/assistant /assistant], got %v", r.Paths)
+	}
+}
+
+func TestRegister_DefaultTenantSupersedesLegacyRoute(t *testing.T) {
+	fk := newFakeKong()
+	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{
+		Name:  "agent-default-assistant-route-legacy",
+		Paths: []string{"/assistant"},
+	}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("expected superseded -legacy route to be deleted for default tenant")
+	}
+}
+
+// v2：裸路径命名空间归 default——其他托管实体对同一路径的声明被清理；
+// zerone 的 scoped 主路由不受影响；无托管 tag 的外部实体永不动。
+func TestRegister_DefaultTenantSupersedesForeignBarePathClaims(t *testing.T) {
+	fk := newFakeKong()
+	// 租户 zerone 的 -legacy 兼容路由声明了 /assistant（升级前裸名）
+	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
+		Name:  "agent-zerone-assistant-route-legacy",
+		Paths: []string{"/assistant"},
+		Tags:  tagsFor("zerone-assistant"),
+	}
+	// zerone 的主路由不受影响
+	fk.routes["agent-zerone-assistant-route"] = &kong.Route{
+		Name:  "agent-zerone-assistant-route",
+		Paths: []string{"/zerone/assistant"},
+		Tags:  tagsFor("zerone-assistant"),
+	}
+	// 无托管 tag 的外部路由：不可见，绝不动
+	fk.routes["foreign-route"] = &kong.Route{Name: "foreign-route", Paths: []string{"/assistant"}}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("expected foreign -legacy claim on /assistant to be deleted")
+	}
+	if fk.routes["agent-zerone-assistant-route"] == nil {
+		t.Fatal("zerone's scoped main route must be untouched")
+	}
+	if fk.routes["foreign-route"] == nil {
+		t.Fatal("foreign (untagged) route must never be touched")
+	}
+}
+
+func TestRegister_NonDefaultTenantSinglePathUnchanged(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-zerone-assistant-route"]
+	if r == nil || len(r.Paths) != 1 || r.Paths[0] != "/zerone/assistant" {
+		t.Fatalf("expected single path /zerone/assistant, got %+v", r)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("legacy route must not be mounted for non-default tenant without legacy entity")
+	}
+}
+
+// v2：RegisterWithLegacy 在 default 双路径场景退化为普通 Register，
+// 绝不强制挂 -legacy（否则与主 route 裸路径歧义匹配）。
+func TestRegisterWithLegacy_DefaultTenantDegradesToRegister(t *testing.T) {
+	fk := newFakeKong()
+	// 预置旧裸名 service（default 的 legacyBareFor 会因它返回 name，
+	// registerWhenHealthy 随之调用 RegisterWithLegacy）
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.RegisterWithLegacy(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 {
+		t.Fatalf("expected dual paths via degraded Register, got %+v", r)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("-legacy must not be force-mounted for default tenant")
+	}
+}
+
+func TestReconcile_DefaultTenantDualPaths(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
+		t.Fatalf("expected dual paths for default tenant, got %+v", r)
+	}
+}
+
+func TestReconcile_DefaultTenantDriftHealedAndOrphanLegacyDeleted(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	// 预置漂移：单路径 route + 孤儿 -legacy route
+	fk.services["agent-default-assistant"] = &kong.Service{Name: "agent-default-assistant", Host: "agent-runtime", Port: 3000, Tags: tagsFor("default-assistant")}
+	fk.routes["agent-default-assistant-route"] = &kong.Route{Name: "agent-default-assistant-route", Paths: []string{"/default/assistant"}, Tags: tagsFor("default-assistant")}
+	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{Name: "agent-default-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("default-assistant")}
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 {
+		t.Fatalf("expected drift healed to dual paths, got %+v", r)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("expected orphaned -legacy route to be deleted")
+	}
+}
+
+func TestReconcile_DefaultTenantCleansBarePathConflicts(t *testing.T) {
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
+		Name: "agent-zerone-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("zerone-assistant"),
+	}
+	s := newKongService(fk, repo)
+
+	if _, err := s.Reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("reconcile must clean foreign bare-path claims for default tenant")
 	}
 }

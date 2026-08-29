@@ -21,14 +21,17 @@ import (
 
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
-	Status        string `json:"status"`
-	Health        string `json:"health"`
-	RuntimeURL    string `json:"runtimeUrl"`
-	ContainerName string `json:"containerName"`
-	DeployedAt    string `json:"deployedAt"`
-	Message       string `json:"message"`
-	HostPort      int    `json:"hostPort"`
-	APIKey        string `json:"apiKey"`
+	Status     string `json:"status"`
+	Health     string `json:"health"`
+	RuntimeURL string `json:"runtimeUrl"`
+	// BareRuntimeURL 是 default 租户的裸路径 URL（"/<agent>"），仅 Kong
+	// 启用且 orgSlug(tenantID)=="default" 时非空；其他情况省略。
+	BareRuntimeURL string `json:"bareRuntimeUrl,omitempty"`
+	ContainerName  string `json:"containerName"`
+	DeployedAt     string `json:"deployedAt"`
+	Message        string `json:"message"`
+	HostPort       int    `json:"hostPort"`
+	APIKey         string `json:"apiKey"`
 }
 
 // agentRepository defines the methods needed from the agent repository.
@@ -444,6 +447,15 @@ func generateRuntimeToken() (string, error) {
 //     is removed by hand (runbook step 3).
 func (s *AgentDeployerService) legacyBareFor(ctx context.Context, tenantID, name string) string {
 	if s.kongSvc == nil {
+		return ""
+	}
+	// default 租户：裸路径恒挂主 route（双路径），-legacy 探测被取代；但
+	// 保留 bare-service 探测，让部署 pre-clean 的 Deregister 显式删除
+	// 升级前的旧裸名实体。挂载侧由 RegisterWithLegacy 退化语义兜底。
+	if orgSlug(tenantID) == defaultTenantSlug {
+		if s.kongSvc.LegacyExists(ctx, name) {
+			return name
+		}
 		return ""
 	}
 	if s.kongSvc.LegacyExists(ctx, name) {
@@ -954,20 +966,25 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	url := s.runtimeURL(port)
+	var bareURL string
 	if s.kongSvc != nil && s.kongSvc.enabled() {
 		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
 			url = kongURL
 		}
+		if bare := BarePath(tenantID, agentName); bare != "" {
+			bareURL = s.kongSvc.RouteURL(bare)
+		}
 	}
 
 	return &DeploymentDTO{
-		Status:        status,
-		Health:        health,
-		RuntimeURL:    url,
-		ContainerName: containerName,
-		DeployedAt:    deployedAtStr,
-		Message:       message,
-		HostPort:      port,
+		Status:         status,
+		Health:         health,
+		RuntimeURL:     url,
+		BareRuntimeURL: bareURL,
+		ContainerName:  containerName,
+		DeployedAt:     deployedAtStr,
+		Message:        message,
+		HostPort:       port,
 	}
 }
 

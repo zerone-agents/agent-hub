@@ -31,6 +31,8 @@ export interface DeploymentStatus {
   health?: 'starting' | 'healthy' | 'unhealthy' | 'none'
   hostPort?: number
   runtimeUrl?: string
+  /** default 租户的裸路径 URL（"/<agent>"），仅 Kong 模式返回 */
+  bareRuntimeUrl?: string
   containerName?: string
   deployedAt?: string
   message?: string

@@ -294,6 +294,34 @@ func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 	}
 }
 
+// v2：default 租户 + Kong 启用时返回裸路径 URL；非 default 租户与未启用
+// Kong 时为空。
+func TestToDTO_BareRuntimeURL(t *testing.T) {
+	withKong := &AgentDeployerService{
+		publicHost: "10.0.0.1",
+		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+
+	dto := withKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "https://deploy.example.com/assistant" {
+		t.Errorf("BareRuntimeURL = %q, want https://deploy.example.com/assistant", dto.BareRuntimeURL)
+	}
+	if dto.RuntimeURL != "https://deploy.example.com/default/assistant" {
+		t.Errorf("RuntimeURL = %q, want scoped path", dto.RuntimeURL)
+	}
+
+	dto = withKong.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "" {
+		t.Errorf("BareRuntimeURL for non-default tenant = %q, want empty", dto.BareRuntimeURL)
+	}
+
+	noKong := &AgentDeployerService{publicHost: "10.0.0.1"}
+	dto = noKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "" {
+		t.Errorf("BareRuntimeURL without kong = %q, want empty", dto.BareRuntimeURL)
+	}
+}
+
 // TestDeploy_PreCleanRemovesLegacyBareEntities asserts Deploy's pre-clean
 // Deregister removes the old bare-name Kong entities (using the scoped key for
 // the new entities and the bare name as legacyBare).
@@ -434,6 +462,25 @@ func TestLegacyBareFor_None(t *testing.T) {
 
 	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "" {
 		t.Fatalf("legacyBareFor = %q, want empty (no legacy entity anywhere)", got)
+	}
+}
+
+// v2：default 租户仅保留 bare-service 探测（供 pre-clean 显式删除升级前
+// 旧裸名实体），跳过 -legacy 路由探测（被裸路径 supersede）。
+func TestLegacyBareFor_DefaultTenantKeepsBareServiceProbeOnly(t *testing.T) {
+	fk := newFakeKong()
+	s := &AgentDeployerService{
+		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+	// 仅 -legacy 路由存在：default 跳过该探测 → 空
+	fk.routes["agent-default-general-route-legacy"] = &kong.Route{Name: "agent-default-general-route-legacy"}
+	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "" {
+		t.Fatalf("legacyBareFor(default, -legacy only) = %q, want empty", got)
+	}
+	// bare service 存在：保留探测（供 pre-clean 删除旧实体）
+	fk.services["agent-general"] = &kong.Service{Name: "agent-general"}
+	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "general" {
+		t.Fatalf("legacyBareFor(default, bare service) = %q, want general", got)
 	}
 }
 
