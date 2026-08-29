@@ -112,6 +112,7 @@ func (c *Client) DeleteService(ctx context.Context, name string) error {
 func (c *Client) ListServicesByTag(ctx context.Context, tag string) ([]Service, error) {
 	var out []Service
 	offset := ""
+	seen := map[string]bool{}
 	for {
 		path := "/services?tags=" + url.QueryEscape(tag)
 		if offset != "" {
@@ -131,6 +132,10 @@ func (c *Client) ListServicesByTag(ctx context.Context, tag string) ([]Service, 
 		if wrap.Offset == "" {
 			break
 		}
+		if seen[wrap.Offset] {
+			return nil, fmt.Errorf("kong: pagination cursor cycle detected at offset %q", wrap.Offset)
+		}
+		seen[wrap.Offset] = true
 		offset = wrap.Offset
 	}
 	return out, nil
@@ -141,6 +146,7 @@ func (c *Client) ListServicesByTag(ctx context.Context, tag string) ([]Service, 
 func (c *Client) ListRoutesByTag(ctx context.Context, tag string) ([]Route, error) {
 	var out []Route
 	offset := ""
+	seen := map[string]bool{}
 	for {
 		path := "/routes?tags=" + url.QueryEscape(tag)
 		if offset != "" {
@@ -160,6 +166,10 @@ func (c *Client) ListRoutesByTag(ctx context.Context, tag string) ([]Route, erro
 		if wrap.Offset == "" {
 			break
 		}
+		if seen[wrap.Offset] {
+			return nil, fmt.Errorf("kong: pagination cursor cycle detected at offset %q", wrap.Offset)
+		}
+		seen[wrap.Offset] = true
 		offset = wrap.Offset
 	}
 	return out, nil

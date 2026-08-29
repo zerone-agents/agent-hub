@@ -255,6 +255,30 @@ func TestListServicesByTag_FollowsPaginationOffset(t *testing.T) {
 	}
 }
 
+// A server that keeps returning non-empty data with the SAME offset cursor
+// (A→A, or a longer A→B→A cycle) would spin the pagination loop forever under
+// a long-lived reconcile context: the empty-page defense never triggers. The
+// client must detect the repeated cursor and return an error. The handler
+// caps the number of requests it will serve so a regression to an unguarded
+// loop fails this test fast instead of hanging it.
+func TestListServicesByTag_RepeatedCursorCycleReturnsError(t *testing.T) {
+	const maxRequests = 8
+	served := 0
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		served++
+		if served > maxRequests {
+			t.Errorf("pagination loop is spinning: served %d requests, cap %d", served, maxRequests)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"svc-1","name":"a"}],"offset":"cursor-1","next":"/services?tags=managed-by-cp&offset=cursor-1"}`))
+	})
+	if _, err := c.ListServicesByTag(context.Background(), "managed-by-cp"); err == nil {
+		t.Fatal("expected error on repeated pagination cursor, got nil")
+	}
+}
+
 // --- Route CRUD ----------------------------------------------------------
 
 func TestGetRoute_NotFound_ReturnsFoundFalse(t *testing.T) {
@@ -479,5 +503,26 @@ func TestListRoutesByTag_FollowsPaginationOffset(t *testing.T) {
 	}
 	if len(routes[1].Paths) != 1 || routes[1].Paths[0] != "/y" {
 		t.Fatalf("unexpected second route paths: %+v", routes[1].Paths)
+	}
+}
+
+// Same contract as the services variant: a server that repeats a non-empty
+// offset cursor alongside non-empty data must produce an error, not an
+// infinite loop. The request cap keeps a regression fail-fast.
+func TestListRoutesByTag_RepeatedCursorCycleReturnsError(t *testing.T) {
+	const maxRequests = 8
+	served := 0
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		served++
+		if served > maxRequests {
+			t.Errorf("pagination loop is spinning: served %d requests, cap %d", served, maxRequests)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"}},{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"offset":"cursor-1","next":"/routes?tags=managed-by-cp&offset=cursor-1"}`))
+	})
+	if _, err := c.ListRoutesByTag(context.Background(), "managed-by-cp"); err == nil {
+		t.Fatal("expected error on repeated pagination cursor, got nil")
 	}
 }
