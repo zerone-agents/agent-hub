@@ -294,6 +294,34 @@ func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 	}
 }
 
+// v2：default 租户 + Kong 启用时返回裸路径 URL；非 default 租户与未启用
+// Kong 时为空。
+func TestToDTO_BareRuntimeURL(t *testing.T) {
+	withKong := &AgentDeployerService{
+		publicHost: "10.0.0.1",
+		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+	}
+
+	dto := withKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "https://deploy.example.com/assistant" {
+		t.Errorf("BareRuntimeURL = %q, want https://deploy.example.com/assistant", dto.BareRuntimeURL)
+	}
+	if dto.RuntimeURL != "https://deploy.example.com/default/assistant" {
+		t.Errorf("RuntimeURL = %q, want scoped path", dto.RuntimeURL)
+	}
+
+	dto = withKong.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "" {
+		t.Errorf("BareRuntimeURL for non-default tenant = %q, want empty", dto.BareRuntimeURL)
+	}
+
+	noKong := &AgentDeployerService{publicHost: "10.0.0.1"}
+	dto = noKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
+	if dto.BareRuntimeURL != "" {
+		t.Errorf("BareRuntimeURL without kong = %q, want empty", dto.BareRuntimeURL)
+	}
+}
+
 // TestDeploy_PreCleanRemovesLegacyBareEntities asserts Deploy's pre-clean
 // Deregister removes the old bare-name Kong entities (using the scoped key for
 // the new entities and the bare name as legacyBare).

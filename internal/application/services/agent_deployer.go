@@ -21,14 +21,17 @@ import (
 
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
-	Status        string `json:"status"`
-	Health        string `json:"health"`
-	RuntimeURL    string `json:"runtimeUrl"`
-	ContainerName string `json:"containerName"`
-	DeployedAt    string `json:"deployedAt"`
-	Message       string `json:"message"`
-	HostPort      int    `json:"hostPort"`
-	APIKey        string `json:"apiKey"`
+	Status     string `json:"status"`
+	Health     string `json:"health"`
+	RuntimeURL string `json:"runtimeUrl"`
+	// BareRuntimeURL 是 default 租户的裸路径 URL（"/<agent>"），仅 Kong
+	// 启用且 orgSlug(tenantID)=="default" 时非空；其他情况省略。
+	BareRuntimeURL string `json:"bareRuntimeUrl,omitempty"`
+	ContainerName  string `json:"containerName"`
+	DeployedAt     string `json:"deployedAt"`
+	Message        string `json:"message"`
+	HostPort       int    `json:"hostPort"`
+	APIKey         string `json:"apiKey"`
 }
 
 // agentRepository defines the methods needed from the agent repository.
@@ -963,20 +966,25 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	url := s.runtimeURL(port)
+	var bareURL string
 	if s.kongSvc != nil && s.kongSvc.enabled() {
 		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
 			url = kongURL
 		}
+		if bare := BarePath(tenantID, agentName); bare != "" {
+			bareURL = s.kongSvc.RouteURL(bare)
+		}
 	}
 
 	return &DeploymentDTO{
-		Status:        status,
-		Health:        health,
-		RuntimeURL:    url,
-		ContainerName: containerName,
-		DeployedAt:    deployedAtStr,
-		Message:       message,
-		HostPort:      port,
+		Status:         status,
+		Health:         health,
+		RuntimeURL:     url,
+		BareRuntimeURL: bareURL,
+		ContainerName:  containerName,
+		DeployedAt:     deployedAtStr,
+		Message:        message,
+		HostPort:       port,
 	}
 }
 
