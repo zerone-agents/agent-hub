@@ -159,8 +159,9 @@ const useStyles = createStyles(({ css }) => ({
   `,
   apiLabel: css`
     color: ${t.textMuted};
-    width: 56px;
+    width: 72px;
     flex-shrink: 0;
+    white-space: nowrap;
     font-weight: 500;
   `,
   apiValue: css`
@@ -543,7 +544,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       onCancel={onClose}
       footer={null}
       closable={false}
-      width={600}
+      width={640}
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <RocketIcon size={20} weight="duotone" />
