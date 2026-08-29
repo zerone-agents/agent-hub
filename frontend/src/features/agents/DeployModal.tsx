@@ -268,7 +268,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
-  const [copied, setCopied] = useState<'url' | 'key' | null>(null)
+  const [copied, setCopied] = useState<'url' | 'bareUrl' | 'key' | null>(null)
   const [rotateKey, setRotateKey] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -513,7 +513,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     </div>
   )
 
-  const handleCopy = async (which: 'url' | 'key', text: string) => {
+  const handleCopy = async (which: 'url' | 'bareUrl' | 'key', text: string) => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: clipboard API may be undefined in non-HTTPS / older browsers despite TS lib typing it as required
       if (navigator.clipboard && window.isSecureContext) {
@@ -674,6 +674,24 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 {copied === 'url' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
               </button>
             </div>
+            {/* Guards deliberately mirror the card-level condition (isRunning + status?) so this
+                row stays safe if reordered outside the runtimeUrl block; TS narrowing inside the
+                outer && makes them look redundant to the type-aware rule. */}
+            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
+            {isRunning && status?.bareRuntimeUrl && (
+              <div className={styles.apiRow}>
+                <span className={styles.apiLabel}>短路径 URL</span>
+                <span className={styles.apiValue}>{status.bareRuntimeUrl}</span>
+                <button
+                  type="button"
+                  className={styles.apiAction}
+                  title="复制 URL"
+                  onClick={() => handleCopy('bareUrl', status.bareRuntimeUrl ?? '')}
+                >
+                  {copied === 'bareUrl' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
+                </button>
+              </div>
+            )}
             <div className={styles.apiRow}>
               <span className={styles.apiLabel}>API Key</span>
               <span className={styles.apiValue}>

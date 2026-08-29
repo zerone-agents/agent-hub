@@ -121,6 +121,48 @@ describe('DeployModal', () => {
     })
   })
 
+  it('shows bare-path URL row when bareRuntimeUrl is present', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(
+        makeStatus({
+          status: 'running',
+          health: 'healthy',
+          hostPort: 8080,
+          runtimeUrl: 'https://gw.example.com/default/assistant',
+          bareRuntimeUrl: 'https://gw.example.com/assistant',
+        })
+      ) as never
+    )
+
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/gw\.example\.com\/default\/assistant/)).toBeInTheDocument()
+      expect(screen.getByText('短路径 URL')).toBeInTheDocument()
+      expect(screen.getByText(/gw\.example\.com\/assistant/)).toBeInTheDocument()
+    })
+  })
+
+  it('hides bare-path URL row when bareRuntimeUrl is absent', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(
+        makeStatus({
+          status: 'running',
+          health: 'healthy',
+          hostPort: 8080,
+          runtimeUrl: 'https://gw.example.com/default/assistant',
+        })
+      ) as never
+    )
+
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/gw\.example\.com\/default\/assistant/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText('短路径 URL')).not.toBeInTheDocument()
+  })
+
   it('member: 操作按钮全部 disabled，聊天按钮可用', async () => {
     setAuthRole('member')
     vi.mocked(agentApi.getDeployment).mockResolvedValue(
