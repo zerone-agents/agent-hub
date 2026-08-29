@@ -111,7 +111,9 @@ func BarePath(tenantID, agentName string) string {
 // routePaths returns the desired Route paths for a scoped publicPath:
 // ["/default/<agent>", "/<agent>"] for the default tenant, [publicPath]
 // otherwise. Both paths strip to "/" at the runtime (StripPath strips the
-// matched prefix), so no runtime-side change is needed.
+// matched prefix), so no runtime-side change is needed. Input contract:
+// publicPath must be a URLPath output (normalized "/<org>/<agent>" slug),
+// not arbitrary caller input.
 func routePaths(publicPath string) []string {
 	if bare := bareFromPath(publicPath); bare != "" {
 		return []string{publicPath, bare}
@@ -264,7 +266,8 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, lega
 		svcID = existing.ID
 	}
 
-	wantRoute := routeFor(key, s.routeHost, []string{publicPath}, &kong.ServiceRef{ID: svcID}, tags)
+	paths := routePaths(publicPath)
+	wantRoute := routeFor(key, s.routeHost, paths, &kong.ServiceRef{ID: svcID}, tags)
 	if _, rFound, err := s.client.GetRoute(ctx, rn); err != nil {
 		s.logger.Printf("kong: get route %s failed: %v", rn, err)
 	} else if !rFound {
@@ -277,12 +280,23 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, lega
 		}
 	}
 
-	// Legacy compatibility fallback: only mount the "/<bare>" route when the
-	// old bare-name service actually exists; otherwise we would be claiming a
-	// cross-tenant bare path that was never ours. Callers that recorded the
-	// legacy entity before deleting it (see RegisterWithLegacy) bypass this
-	// probe.
-	if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
+	// Default-tenant bare path supersedes the legacy compatibility route: both
+	// claim "/<agent>", so an existing "-legacy" route must be deleted to
+	// avoid ambiguous Kong matching, and the legacy probe fallback is skipped.
+	if len(paths) > 1 {
+		if _, lFound, err := s.client.GetRoute(ctx, rn+"-legacy"); err != nil {
+			s.logger.Printf("kong: get legacy route %s failed: %v", rn+"-legacy", err)
+		} else if lFound {
+			if err := s.client.DeleteRoute(ctx, rn+"-legacy"); err != nil {
+				s.logger.Printf("kong: delete superseded legacy route %s failed: %v", rn+"-legacy", err)
+			}
+		}
+	} else if legacyBare != "" && agentNameRe.MatchString(legacyBare) {
+		// Legacy compatibility fallback (non-default tenants): only mount the
+		// "/<bare>" route when the old bare-name service actually exists;
+		// otherwise we would be claiming a cross-tenant bare path that was
+		// never ours. Callers that recorded the legacy entity before deleting
+		// it (see RegisterWithLegacy) bypass this probe.
 		if _, legacyFound, err := s.client.GetService(ctx, svcName(legacyBare)); err != nil {
 			s.logger.Printf("kong: get legacy service %s failed: %v", svcName(legacyBare), err)
 		} else if legacyFound {
@@ -358,6 +372,11 @@ func (s *KongGatewayService) LegacyRouteExists(ctx context.Context, key string) 
 func (s *KongGatewayService) RegisterWithLegacy(ctx context.Context, key, publicPath, legacyBare string, hostPort int) error {
 	if !s.enabled() {
 		return nil
+	}
+	// default 租户：主 route 已含裸路径（双路径），强制挂 "-legacy" 会与其
+	// 歧义匹配——退化为普通 Register（其 supersede 逻辑会清理残留）。
+	if len(routePaths(publicPath)) > 1 {
+		return s.Register(ctx, key, publicPath, "", hostPort)
 	}
 	if err := s.Register(ctx, key, publicPath, "", hostPort); err != nil {
 		return err

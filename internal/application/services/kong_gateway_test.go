@@ -792,3 +792,72 @@ func TestRoutePaths(t *testing.T) {
 		t.Errorf("routePaths(/default) = %v, want single scoped path", got)
 	}
 }
+
+func TestRegister_DefaultTenantDualPaths(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil {
+		t.Fatal("expected route to be created")
+	}
+	if len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
+		t.Fatalf("expected dual paths [/default/assistant /assistant], got %v", r.Paths)
+	}
+}
+
+func TestRegister_DefaultTenantSupersedesLegacyRoute(t *testing.T) {
+	fk := newFakeKong()
+	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{
+		Name:  "agent-default-assistant-route-legacy",
+		Paths: []string{"/assistant"},
+	}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("expected superseded -legacy route to be deleted for default tenant")
+	}
+}
+
+func TestRegister_NonDefaultTenantSinglePathUnchanged(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-zerone-assistant-route"]
+	if r == nil || len(r.Paths) != 1 || r.Paths[0] != "/zerone/assistant" {
+		t.Fatalf("expected single path /zerone/assistant, got %+v", r)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("legacy route must not be mounted for non-default tenant without legacy entity")
+	}
+}
+
+// v2：RegisterWithLegacy 在 default 双路径场景退化为普通 Register，
+// 绝不强制挂 -legacy（否则与主 route 裸路径歧义匹配）。
+func TestRegisterWithLegacy_DefaultTenantDegradesToRegister(t *testing.T) {
+	fk := newFakeKong()
+	// 预置旧裸名 service（default 的 legacyBareFor 会因它返回 name，
+	// registerWhenHealthy 随之调用 RegisterWithLegacy）
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.RegisterWithLegacy(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-assistant-route"]
+	if r == nil || len(r.Paths) != 2 {
+		t.Fatalf("expected dual paths via degraded Register, got %+v", r)
+	}
+	if fk.routes["agent-default-assistant-route-legacy"] != nil {
+		t.Fatal("-legacy must not be force-mounted for default tenant")
+	}
+}
