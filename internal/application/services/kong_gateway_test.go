@@ -392,6 +392,43 @@ func TestRegisterWithLegacy_MountsDespiteMissingBareService(t *testing.T) {
 	}
 }
 
+// P1 回归：default 先注册拥有裸路径后，非 default 的 legacy 重挂让位；
+// default 主路由不受影响。
+func TestRegisterWithLegacy_NonDefaultYieldsToDefaultBarePathOwner(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+
+	// default 先注册（拥有 /assistant）
+	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+		t.Fatalf("register default: %v", err)
+	}
+	// 非 default 重部署：bare service 存在使 legacyBare 生效
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("register legacy: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+		t.Fatal("legacy mount must yield when default owns the bare path")
+	}
+	if fk.routes["agent-default-assistant-route"] == nil {
+		t.Fatal("default's main route must be untouched")
+	}
+}
+
+// P1 反向：default 主路由不存在时 legacy 照常挂载（升级兼容语义不变）。
+func TestRegisterWithLegacy_StillMountsWhenDefaultAbsent(t *testing.T) {
+	fk := newFakeKong()
+	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
+	s := newKongService(fk, newMemRepo(nil))
+
+	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
+		t.Fatalf("register legacy: %v", err)
+	}
+	if fk.routes["agent-zerone-assistant-route-legacy"] == nil {
+		t.Fatal("legacy route must still mount when default tenant has no claim")
+	}
+}
+
 func TestDeregister_RemovesServiceAndIsIdempotent(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)

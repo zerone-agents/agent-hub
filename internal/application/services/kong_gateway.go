@@ -314,6 +314,19 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath, lega
 // attached to the given scoped service. It is the shared mount path for both
 // Register's probe fallback and RegisterWithLegacy's forced mount.
 func (s *KongGatewayService) ensureLegacyRoute(ctx context.Context, key, legacyBare, svcID string, tags []string) {
+	// 裸路径命名空间归 default：default 主 Route 已声明该裸路径时，legacy
+	// 兼容路由让位（不挂载），否则会与其歧义匹配。default 尚未注册的场景
+	// 仍照常挂载（由 default 侧 Register 的 supersede 在其注册时清理，
+	// 最终一致）。
+	defaultOwner := routeName(DeployKey(defaultTenantSlug, legacyBare))
+	if r, found, err := s.client.GetRoute(ctx, defaultOwner); err == nil && found {
+		for _, p := range r.Paths {
+			if p == "/"+legacyBare {
+				s.logger.Printf("kong: skip legacy route %s, bare path /%s owned by default tenant", routeName(key)+"-legacy", legacyBare)
+				return
+			}
+		}
+	}
 	legacyRouteName := routeName(key) + "-legacy"
 	wantLegacy := routeFor(key, s.routeHost, []string{"/" + legacyBare}, &kong.ServiceRef{ID: svcID}, tags)
 	wantLegacy.Name = legacyRouteName
