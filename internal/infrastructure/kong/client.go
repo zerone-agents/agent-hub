@@ -107,26 +107,62 @@ func (c *Client) DeleteService(ctx context.Context, name string) error {
 }
 
 // ListServicesByTag lists Services tagged with the given tag, used for
-// reconciliation of managed gateway objects.
+// reconciliation of managed gateway objects. Kong paginates list endpoints
+// via the offset cursor; the loop follows it until the response omits one.
 func (c *Client) ListServicesByTag(ctx context.Context, tag string) ([]Service, error) {
-	var wrap struct {
-		Data []Service `json:"data"`
+	var out []Service
+	offset := ""
+	for {
+		path := "/services?tags=" + url.QueryEscape(tag)
+		if offset != "" {
+			path += "&offset=" + url.QueryEscape(offset)
+		}
+		var wrap struct {
+			Data   []Service `json:"data"`
+			Offset string    `json:"offset"`
+		}
+		if err := c.getRaw(ctx, path, &wrap); err != nil {
+			return nil, err
+		}
+		if len(wrap.Data) == 0 && offset != "" {
+			break // 防御：服务端异常回环时终止
+		}
+		out = append(out, wrap.Data...)
+		if wrap.Offset == "" {
+			break
+		}
+		offset = wrap.Offset
 	}
-	if err := c.getRaw(ctx, "/services?tags="+url.QueryEscape(tag), &wrap); err != nil {
-		return nil, err
-	}
-	return wrap.Data, nil
+	return out, nil
 }
 
-// ListRoutesByTag returns all routes carrying the given tag.
+// ListRoutesByTag returns all routes carrying the given tag, following the
+// offset pagination cursor to the last page.
 func (c *Client) ListRoutesByTag(ctx context.Context, tag string) ([]Route, error) {
-	var wrap struct {
-		Data []Route `json:"data"`
+	var out []Route
+	offset := ""
+	for {
+		path := "/routes?tags=" + url.QueryEscape(tag)
+		if offset != "" {
+			path += "&offset=" + url.QueryEscape(offset)
+		}
+		var wrap struct {
+			Data   []Route `json:"data"`
+			Offset string  `json:"offset"`
+		}
+		if err := c.getRaw(ctx, path, &wrap); err != nil {
+			return nil, err
+		}
+		if len(wrap.Data) == 0 && offset != "" {
+			break // 防御：服务端异常回环时终止
+		}
+		out = append(out, wrap.Data...)
+		if wrap.Offset == "" {
+			break
+		}
+		offset = wrap.Offset
 	}
-	if err := c.getRaw(ctx, "/routes?tags="+url.QueryEscape(tag), &wrap); err != nil {
-		return nil, err
-	}
-	return wrap.Data, nil
+	return out, nil
 }
 
 // GetRoute returns (route, found, err) with the same 404 semantics as

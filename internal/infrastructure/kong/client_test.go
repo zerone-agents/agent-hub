@@ -214,6 +214,47 @@ func TestListServicesByTag_ServerError_ReturnsError(t *testing.T) {
 	}
 }
 
+// Kong paginates list endpoints via the offset cursor: a response carrying a
+// non-empty "offset" has more pages; the last page omits it. The client must
+// follow the cursor and aggregate records across pages.
+func TestListServicesByTag_FollowsPaginationOffset(t *testing.T) {
+	page2Requested := false
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/services"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("offset") == "" {
+			if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+				t.Errorf("expected query %s, got %s", want, got)
+			}
+			w.Write([]byte(`{"data":[{"id":"svc-1","name":"a"},{"id":"svc-2","name":"b"}],"offset":"cursor-1","next":"/services?tags=managed-by-cp&offset=cursor-1"}`))
+			return
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp&offset=cursor-1"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		page2Requested = true
+		w.Write([]byte(`{"data":[{"id":"svc-3","name":"c"}],"next":null}`))
+	})
+	svcs, err := c.ListServicesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !page2Requested {
+		t.Fatal("expected a second request carrying the offset cursor")
+	}
+	if len(svcs) != 3 {
+		t.Fatalf("expected 3 services across both pages, got %d: %+v", len(svcs), svcs)
+	}
+	if svcs[0].ID != "svc-1" || svcs[1].ID != "svc-2" || svcs[2].ID != "svc-3" {
+		t.Fatalf("unexpected aggregated services: %+v", svcs)
+	}
+}
+
 // --- Route CRUD ----------------------------------------------------------
 
 func TestGetRoute_NotFound_ReturnsFoundFalse(t *testing.T) {
@@ -392,5 +433,51 @@ func TestListRoutesByTag_ServerError_ReturnsError(t *testing.T) {
 	})
 	if _, err := c.ListRoutesByTag(context.Background(), "x"); err == nil {
 		t.Fatalf("expected error from 502, got nil")
+	}
+}
+
+// Same pagination contract as services: follow the offset cursor until the
+// response omits it, aggregating routes from every page.
+func TestListRoutesByTag_FollowsPaginationOffset(t *testing.T) {
+	page2Requested := false
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got, want := r.URL.Path, "/routes"; got != want {
+			t.Errorf("expected path %s, got %s", want, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("offset") == "" {
+			if got, want := r.URL.RawQuery, "tags=managed-by-cp"; got != want {
+				t.Errorf("expected query %s, got %s", want, got)
+			}
+			w.Write([]byte(`{"data":[{"id":"r-1","name":"agent-x-route","paths":["/x"],"strip_path":true,"service":{"id":"svc-1"},"tags":["managed-by-cp"]}],"offset":"cursor-1","next":"/routes?tags=managed-by-cp&offset=cursor-1"}`))
+			return
+		}
+		if got, want := r.URL.RawQuery, "tags=managed-by-cp&offset=cursor-1"; got != want {
+			t.Errorf("expected query %s, got %s", want, got)
+		}
+		page2Requested = true
+		w.Write([]byte(`{"data":[{"id":"r-2","name":"agent-y-route","hosts":["a.example.com"],"paths":["/y"],"strip_path":false}],"next":null}`))
+	})
+	routes, err := c.ListRoutesByTag(context.Background(), "managed-by-cp")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !page2Requested {
+		t.Fatal("expected a second request carrying the offset cursor")
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes across both pages, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].ID != "r-1" || routes[0].Name != "agent-x-route" {
+		t.Fatalf("unexpected first route: %+v", routes[0])
+	}
+	if routes[1].ID != "r-2" || routes[1].Name != "agent-y-route" {
+		t.Fatalf("unexpected second route: %+v", routes[1])
+	}
+	if len(routes[1].Paths) != 1 || routes[1].Paths[0] != "/y" {
+		t.Fatalf("unexpected second route paths: %+v", routes[1].Paths)
 	}
 }
