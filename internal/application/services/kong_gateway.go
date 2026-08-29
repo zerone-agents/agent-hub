@@ -85,6 +85,40 @@ func URLPath(tenantID, agentName string) string {
 	return "/" + orgSlug(tenantID) + "/" + NormalizeAgentName(agentName)
 }
 
+// defaultTenantSlug 是享有裸路径的租户：其 agent 主 Route 额外挂载
+// "/<agent>"（与 "/default/<agent>" 同一条 Route，双路径）。判定按
+// orgSlug 归一化后的字面相等。
+const defaultTenantSlug = "default"
+
+// bareFromPath reports the default-tenant bare path ("/<agent>") for a
+// scoped publicPath, or "" when the org segment is not "default" or the
+// agent segment fails agentNameRe. It is the single source of truth shared
+// by BarePath and routePaths.
+func bareFromPath(publicPath string) string {
+	segs := strings.Split(strings.Trim(publicPath, "/"), "/")
+	if len(segs) != 2 || segs[0] != defaultTenantSlug || !agentNameRe.MatchString(segs[1]) {
+		return ""
+	}
+	return "/" + segs[1]
+}
+
+// BarePath returns the default-tenant bare public path for an agent:
+// "/<NormalizeAgentName(name)>" when orgSlug(tenantID) == "default", else "".
+func BarePath(tenantID, agentName string) string {
+	return bareFromPath(URLPath(tenantID, agentName))
+}
+
+// routePaths returns the desired Route paths for a scoped publicPath:
+// ["/default/<agent>", "/<agent>"] for the default tenant, [publicPath]
+// otherwise. Both paths strip to "/" at the runtime (StripPath strips the
+// matched prefix), so no runtime-side change is needed.
+func routePaths(publicPath string) []string {
+	if bare := bareFromPath(publicPath); bare != "" {
+		return []string{publicPath, bare}
+	}
+	return []string{publicPath}
+}
+
 // kongAgentRepo is the minimal repository surface needed by KongGatewayService.
 // *repository.AgentRepository implements this interface.
 type kongAgentRepo interface {

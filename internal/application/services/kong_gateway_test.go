@@ -757,3 +757,38 @@ func TestURLPath(t *testing.T) {
 		}
 	}
 }
+
+// --- default 租户裸路径（dual-path）---
+
+func TestBarePath(t *testing.T) {
+	cases := []struct {
+		tenant, agent, want string
+	}{
+		{"default", "assistant", "/assistant"}, // default 租户 → 裸路径
+		{"Default", "assistant", "/assistant"}, // orgSlug 归一化大小写
+		{"zerone", "assistant", ""},            // 非 default 租户 → 空
+		{"default", "Bad Name", "/bad-name"},   // NormalizeAgentName 归一为合法名
+		{"defaults", "assistant", ""},          // 字面相等而非前缀匹配
+	}
+	for _, c := range cases {
+		if got := BarePath(c.tenant, c.agent); got != c.want {
+			t.Errorf("BarePath(%q, %q) = %q, want %q", c.tenant, c.agent, got, c.want)
+		}
+	}
+}
+
+func TestRoutePaths(t *testing.T) {
+	if got := routePaths("/default/foo"); len(got) != 2 || got[0] != "/default/foo" || got[1] != "/foo" {
+		t.Errorf("routePaths(/default/foo) = %v, want [/default/foo /foo]", got)
+	}
+	if got := routePaths("/zerone/foo"); len(got) != 1 || got[0] != "/zerone/foo" {
+		t.Errorf("routePaths(/zerone/foo) = %v, want [/zerone/foo]", got)
+	}
+	// 拒绝分支（v2 补）：裸段非法 / 段数不对 → 恒返回单 scoped 路径
+	if got := routePaths("/default/Bad!"); len(got) != 1 || got[0] != "/default/Bad!" {
+		t.Errorf("routePaths(/default/Bad!) = %v, want single scoped path", got)
+	}
+	if got := routePaths("/default"); len(got) != 1 || got[0] != "/default" {
+		t.Errorf("routePaths(/default) = %v, want single scoped path", got)
+	}
+}
