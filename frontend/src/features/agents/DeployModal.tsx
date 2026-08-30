@@ -24,6 +24,14 @@ import { tokens as t } from '@/styles/tokens'
 
 const { Text } = Typography
 
+/**
+ * No-Kong mode returns a hub-relative runtime path (e.g. /runtime/default/test);
+ * resolve it against the current origin for display and clipboard. Kong-mode
+ * absolute URLs pass through unchanged.
+ */
+const absoluteRuntimeUrl = (url: string): string =>
+  url.startsWith('/') ? `${window.location.origin}${url}` : url
+
 interface DeployModalProps {
   agent: Agent
   providers: Provider[]
@@ -665,12 +673,12 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             <div className={styles.capabilityTitle}>API 信息</div>
             <div className={styles.apiRow}>
               <span className={styles.apiLabel}>URL</span>
-              <span className={styles.apiValue}>{status.runtimeUrl}</span>
+              <span className={styles.apiValue}>{absoluteRuntimeUrl(status.runtimeUrl)}</span>
               <button
                 type="button"
                 className={styles.apiAction}
                 title="复制 URL"
-                onClick={() => handleCopy('url', status.runtimeUrl ?? '')}
+                onClick={() => handleCopy('url', absoluteRuntimeUrl(status.runtimeUrl ?? ''))}
               >
                 {copied === 'url' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
               </button>
