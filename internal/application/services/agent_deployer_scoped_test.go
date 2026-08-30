@@ -493,7 +493,7 @@ func TestWaitForHealthy_UsesScopedKey(t *testing.T) {
 	defer srv.Close()
 
 	client := deployer.NewClient(srv.URL, "test-key")
-	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool { return false }}
+	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", upstreamHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool { return false }}
 
 	if _, err := s.WaitForHealthy(context.Background(), "tenant-a-general", 5*time.Second); err != nil {
 		t.Fatalf("unexpected error: %v", err)

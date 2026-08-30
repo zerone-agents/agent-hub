@@ -187,7 +187,19 @@ func main() {
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
-	deployerService := services.NewAgentDeployerService(deployerClient, cfg.Deployer.PublicHost, cfg.OSS.CDNHost, cfg.Provider.EncryptionKey, cfg.Deployer.RuntimeAPIKey, knowledgeService, kongService, aigcConfigSvc, cfg.ChatPush.APIKey, cfg.ChatPush.PublicURL)
+	deployerService := services.NewAgentDeployerService(
+		deployerClient,
+		cfg.Deployer.PublicHost,
+		cfg.Deployer.DeployerURLHost,
+		cfg.OSS.CDNHost,
+		cfg.Provider.EncryptionKey,
+		cfg.Deployer.RuntimeAPIKey,
+		knowledgeService,
+		kongService,
+		aigcConfigSvc,
+		cfg.ChatPush.APIKey,
+		cfg.ChatPush.PublicURL,
+	)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)
@@ -201,6 +213,7 @@ func main() {
 		runtimeClient,
 		cfg.Deployer.PublicHost,
 		cfg.Deployer.RuntimeAPIKey,
+		cfg.Deployer.DeployerURLHost,
 	)
 	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)

@@ -3,6 +3,8 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"control-panel/internal/domain/agent"
@@ -41,6 +43,7 @@ type AgentChatService struct {
 	runtimeClient *runtime.Client
 	publicHost    string
 	runtimeKey    string
+	upstreamHost  string // cfg.Deployer.DeployerURLHost; "" = fail closed (no-Kong upstream)
 }
 
 // NewAgentChatService constructs an AgentChatService.
@@ -49,7 +52,7 @@ func NewAgentChatService(
 	agentRepo agentRepoForChat,
 	deployerSvc *AgentDeployerService,
 	rtClient *runtime.Client,
-	publicHost, runtimeKey string,
+	publicHost, runtimeKey, upstreamHost string,
 ) *AgentChatService {
 	return &AgentChatService{
 		chatRepo:      chatRepo,
@@ -58,6 +61,7 @@ func NewAgentChatService(
 		runtimeClient: rtClient,
 		publicHost:    publicHost,
 		runtimeKey:    runtimeKey,
+		upstreamHost:  upstreamHost,
 	}
 }
 
@@ -225,6 +229,16 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 	return s.chatRepo.UpdateSessionTitle(tenantID, sessionID, title)
 }
 
+// noKongUpstream builds the internal upstream base URL for the no-Kong mode:
+// hostname(AGENT_DEPLOYER_URL) + published port. Empty upstream host fails
+// closed — DB may retain running state from before a config change.
+func (s *AgentChatService) noKongUpstream(port int) (string, error) {
+	if s.upstreamHost == "" {
+		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+	}
+	return "http://" + net.JoinHostPort(s.upstreamHost, strconv.Itoa(port)), nil
+}
+
 // ResolveRuntime verifies the agent is deployed and running, and returns
 // the runtime base URL and the per-agent runtime API key (decrypted from
 // the agents table).
@@ -234,8 +248,10 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 // "https://agents.example.com/zerone/pharmaceutical"). The runtime client appends
 // /v1/agents/{name}/runs to this base; Kong's StripPath strips the
 // agent-name prefix and forwards the canonical runtime API path to the
-// container. When Kong is not configured, RuntimeURL falls back to a
-// direct http://{publicHost}:{hostPort} URL.
+// container. When Kong is not configured, RuntimeURL falls back to the
+// internal upstream URL http://{DeployerURLHost}:{hostPort} so hub→runtime
+// traffic stays on the deployer network instead of hairpinning via the
+// public host.
 func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
@@ -249,7 +265,11 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 	}
 	baseURL := status.RuntimeURL
 	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", s.publicHost, status.HostPort)
+		fallback, err := s.noKongUpstream(status.HostPort)
+		if err != nil {
+			return "", "", err
+		}
+		baseURL = fallback
 	}
 	return baseURL, status.APIKey, nil
 }

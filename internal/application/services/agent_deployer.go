@@ -78,6 +78,7 @@ type aigcConfigProvider interface {
 type AgentDeployerService struct {
 	client        *deployer.Client
 	publicHost    string
+	upstreamHost  string // cfg.Deployer.DeployerURLHost; strict, no PublicHost fallback
 	cdnHost       string
 	encryptionKey string
 	runtimeAPIKey string
@@ -212,10 +213,11 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
+func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
 	s := &AgentDeployerService{
 		client:            client,
 		publicHost:        publicHost,
+		upstreamHost:      upstreamHost,
 		cdnHost:           cdnHost,
 		encryptionKey:     encryptionKey,
 		runtimeAPIKey:     runtimeAPIKey,
@@ -237,9 +239,31 @@ func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encry
 	return s
 }
 
+// kongEnabled mirrors kong_gateway.go's nil-safe check.
+func (s *AgentDeployerService) kongEnabled() bool {
+	return s.kongSvc != nil && s.kongSvc.enabled()
+}
+
+// probeHost selects the health-probe target per mode (spec D1): Kong mode
+// deliberately probes the public path — a deployment public-reachability
+// signal; no-Kong mode probes the internal deployer hostname (no hairpin).
+func (s *AgentDeployerService) probeHost() (string, error) {
+	if s.kongEnabled() {
+		return s.publicHost, nil
+	}
+	if s.upstreamHost == "" {
+		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+	}
+	return s.upstreamHost, nil
+}
+
 // WaitForHealthy polls the deployer and actively probes /health until the agent
 // is ready or timeout is reached. It returns the current host port.
 func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, timeout time.Duration) (int, error) {
+	probeHost, err := s.probeHost()
+	if err != nil {
+		return 0, err // fail closed: never dial without a valid probe host
+	}
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -250,7 +274,7 @@ func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, 
 			if st.Health == "healthy" {
 				return st.HostPort, nil
 			}
-			if st.HostPort > 0 && s.healthProbe(ctx, s.publicHost, st.HostPort) {
+			if st.HostPort > 0 && s.healthProbe(ctx, probeHost, st.HostPort) {
 				return st.HostPort, nil
 			}
 		}

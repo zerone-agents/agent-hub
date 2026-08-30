@@ -102,7 +102,8 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 
 	deployerSvc := services.NewAgentDeployerService(
 		deployer.NewClient(deployerSrv.URL, ""),
-		"127.0.0.1", // publicHost: runtime base URL host
+		"127.0.0.1", // publicHost
+		"127.0.0.1", // upstreamHost: no-Kong fallback host (fake runtime)
 		"",          // cdnHost
 		"",          // encryptionKey: RuntimeToken stays plaintext
 		"",          // runtimeAPIKey
@@ -115,6 +116,7 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		deployerSvc,
 		runtime.NewClient(),
 		"127.0.0.1", "",
+		"127.0.0.1", // upstreamHost: no-Kong fallback must hit the fake runtime
 	)
 	return NewAgentChatHandler(chatSvc)
 }
