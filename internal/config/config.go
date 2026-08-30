@@ -99,6 +99,10 @@ type DeployerConfig struct {
 	PublicHost    string `mapstructure:"public_host"`
 	UpstreamHost  string `mapstructure:"upstream_host"`
 	RuntimeAPIKey string `mapstructure:"runtime_api_key"`
+	// DeployerURLHost is derived strictly from a valid AGENT_DEPLOYER_URL in
+	// LoadConfig. mapstructure:"-" makes it impossible to set from config
+	// keys; it never falls back to PublicHost (issue #77 upstream contract).
+	DeployerURLHost string `mapstructure:"-"`
 }
 
 type KongConfig struct {
@@ -223,10 +227,29 @@ func LoadConfig() (*Config, error) {
 		cfg.Deployer.UpstreamHost = cfg.Deployer.PublicHost
 	}
 
+	// Strict upstream host for the no-Kong runtime proxy, chat resolver and
+	// internal probes: only ever derived from a valid deployer URL. No
+	// explicit config, no PublicHost fallback (spec 3.5).
+	cfg.Deployer.DeployerURLHost = deriveDeployerURLHost(cfg.Deployer.URL)
+
 	SetGlobalConfig(&cfg)
 	return &cfg, nil
 }
 
 func (c *Config) GetServerAddr() string {
 	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+}
+
+// deriveDeployerURLHost returns the hostname of a valid deployer URL, or ""
+// for empty/malformed input. It is the single derivation point for the
+// runtime proxy's upstream host and never falls back to PublicHost.
+func deriveDeployerURLHost(deployerURL string) string {
+	if deployerURL == "" {
+		return ""
+	}
+	u, err := url.Parse(deployerURL)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return u.Hostname()
 }
