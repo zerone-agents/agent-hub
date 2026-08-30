@@ -58,16 +58,16 @@ function renderAgent(agent: Agent, output: string) {
 }
 
 // no-Kong 模式下 runtimeUrl 是 hub 相对路径（/runtime/{org}/{agent}），直接
-// 打印对终端用户不可用——人类可读输出需按 profile serverUrl 解析为绝对 URL
-// （new URL 自动处理尾部斜杠拼接）；绝对 URL 原样返回；serverUrl 缺失/非法
-// 时同样原样返回，避免误报。
+// 打印对终端用户不可用——人类可读输出需按 profile serverUrl 解析为绝对 URL。
+// 拼接语义必须与 API client 自身一致（base.ts 是字符串拼接 `${serverUrl}${path}`，
+// API 流量实际打到 {serverUrl}/api/...）：WHATWG new URL 对根相对路径会整体
+// 替换 base 的 path（profile https://example.com/hub 会丢掉 /hub），故此处
+// 同样用字符串拼接——剥掉 serverUrl 尾部斜杠后直接连接；绝对 URL 原样返回；
+// serverUrl 缺失时同样原样返回，避免误报。
 export function resolveRuntimeUrl(runtimeUrl: string, serverUrl: string): string {
   if (/^https?:\/\//i.test(runtimeUrl)) return runtimeUrl;
-  try {
-    return new URL(runtimeUrl, serverUrl).toString();
-  } catch {
-    return runtimeUrl;
-  }
+  if (!serverUrl) return runtimeUrl;
+  return serverUrl.replace(/\/+$/, "") + runtimeUrl;
 }
 
 async function renderDeployment(d: DeploymentInfo, output: string) {

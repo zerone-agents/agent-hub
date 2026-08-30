@@ -250,7 +250,8 @@ func (s *AgentChatService) kongEnabledForChat() bool {
 //
 //	① Kong 启用 → 信任 toDTO 已填充的网关 RuntimeURL；空 URL 的预注册边缘
 //	   （Kong enabled 但路由尚未注册完成）保持本 PR 合入前的 main 行为：
-//	   http://{publicHost}:{hostPort} 公网地址，绝不回落到 deployer 内网回源。
+//	   http://{publicHost}:{hostPort} 公网地址，绝不回落到 deployer 内网回源
+//	   （构造方式改 net.JoinHostPort，IPv6 安全；仅构造方式变更，语义不动）。
 //	② 无 Kong → 公开地址（hairpin 绝对 URL 或相对路径）永远不是内部拨号
 //	   目标，一律走 deployer hostname 内网回源（issue #77 验收 #8）。
 func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, hostPort int) (string, error) {
@@ -258,7 +259,7 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 		return s.noKongUpstream(hostPort)
 	}
 	if runtimeURL == "" {
-		return fmt.Sprintf("http://%s:%d", s.publicHost, hostPort), nil
+		return "http://" + net.JoinHostPort(s.publicHost, strconv.Itoa(hostPort)), nil
 	}
 	return runtimeURL, nil
 }

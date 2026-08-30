@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -19,13 +20,14 @@ import (
 
 // fakeRuntime 记录收到的请求并按路由返回可断言的响应。
 type fakeRuntime struct {
-	srv        *httptest.Server
-	lastMethod string
-	lastPath   string
-	lastQuery  string
-	lastHeader http.Header
-	body       chan string // SSE chunk 管道
-	gotCancel  chan struct{}
+	srv           *httptest.Server
+	lastMethod    string
+	lastPath      string
+	lastQuery     string
+	lastHeader    http.Header
+	lastFileRange string      // /v1/files/content 收到的 Range 头
+	body          chan string // SSE chunk 管道
+	gotCancel     chan struct{}
 }
 
 func newFakeRuntime(t *testing.T) *fakeRuntime {
@@ -36,6 +38,18 @@ func newFakeRuntime(t *testing.T) *fakeRuntime {
 		w.Header().Set("Content-Disposition", "attachment; filename=\"a b.txt\"")
 		w.Header().Set("Last-Modified", "Mon, 02 Jan 2006 15:04:05 GMT")
 		w.Header().Set("Server", "nginx") // 应被删除
+		// Range 往返（专家二轮 3a）：记录请求 Range，按请求区间回 206 并回显
+		// Content-Range（total = len("file-bytes") = 10）+ Accept-Ranges。
+		if rng := r.Header.Get("Range"); rng != "" {
+			f.lastFileRange = rng
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Range", "bytes "+strings.TrimPrefix(rng, "bytes=")+"/10")
+			w.WriteHeader(http.StatusPartialContent)
+			if r.Method != http.MethodHead {
+				_, _ = io.WriteString(w, "file")
+			}
+			return
+		}
 		if r.Method == http.MethodHead {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -46,13 +60,18 @@ func newFakeRuntime(t *testing.T) *fakeRuntime {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		flusher := w.(http.Flusher)
-		_, _ = io.WriteString(w, <-f.body)
-		flusher.Flush()
-		// 阻塞等客户端断开 → upstream 请求被取消
-		<-r.Context().Done()
-		select {
-		case f.gotCancel <- struct{}{}:
-		default:
+		for {
+			select {
+			case chunk := <-f.body:
+				_, _ = io.WriteString(w, chunk)
+				flusher.Flush()
+			case <-r.Context().Done(): // 客户端断开 → upstream 请求被取消
+				select {
+				case f.gotCancel <- struct{}{}:
+				default:
+				}
+				return
+			}
 		}
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -150,36 +169,122 @@ func TestProxyFileHeadersAndLastModified(t *testing.T) {
 	}
 }
 
-func TestProxySSEFlushesPerChunk(t *testing.T) {
+// Range 往返（专家二轮 3a）：请求 Range 原样到达 upstream，206 / Content-Range /
+// Accept-Ranges 原样回到客户端——断点续传经 proxy 不降级。
+func TestProxyRangeRoundTrip(t *testing.T) {
 	f := newFakeRuntime(t)
 	r := newProxyEngine(portOf(f.srv.URL))
-	f.body <- "event: system\ndata: {\"a\":1}\n\n"
 	w := httptest.NewRecorder()
-	// SSE 路由 timeout=0，handler 不包 WithTimeout；请求必须自带可取消 ctx——
-	// 否则 ReverseProxy（Go 1.26，reverseproxy.go:421）会退回 CloseNotifier，
-	// gin 包装层对 recorder 硬断言直接 panic（生产请求恒带取消信号，不受影响）。
-	// fake upstream 阻塞至客户端断开，ServeHTTP 放 goroutine，断言在 <-done 后
-	// 无竞争执行（同 TestProxyClientDisconnectCancelsUpstream 的 sleep 习语）。
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodPost, "/runtime/default/test/v1/agents/my-agent/runs", nil).WithContext(ctx)
-	done := make(chan struct{})
-	go func() {
-		r.ServeHTTP(w, req)
-		close(done)
-	}()
-	time.Sleep(200 * time.Millisecond) // 等 chunk 经 FlushInterval=-1 到达 recorder
-	cancel()                           // 结束 SSE 流，ServeHTTP 返回
-	<-done
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d", w.Code)
+	req := httptest.NewRequest(http.MethodGet, "/runtime/default/test/v1/files/content", nil)
+	req.Header.Set("Range", "bytes=0-3")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", w.Code)
 	}
-	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+	if f.lastFileRange != "bytes=0-3" {
+		t.Fatalf("upstream Range = %q, want bytes=0-3", f.lastFileRange)
+	}
+	if got := w.Header().Get("Content-Range"); got != "bytes 0-3/10" {
+		t.Fatalf("Content-Range = %q, want bytes 0-3/10", got)
+	}
+	if got := w.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("Accept-Ranges = %q, want bytes", got)
+	}
+}
+
+// SSE 实时逐 chunk flush（专家二轮 3b）：gin engine 挂真实 httptest.Server，
+// 客户端带可取消 ctx 流式读 body。chunk 2 在 chunk 1 被客户端完整读到之后才
+// 进管道，且 upstream 在客户端断开前永不结束——若 proxy 缓冲整个响应而非每个
+// write 后 flush（FlushInterval=-1），限时读必在 deadline 超时；因此任何一次
+// 成功的限时读出都只可能来自 mid-stream flush。
+func TestProxySSEFlushesPerChunk(t *testing.T) {
+	f := newFakeRuntime(t)
+	proxySrv := httptest.NewServer(newProxyEngine(portOf(f.srv.URL)))
+	t.Cleanup(proxySrv.Close)
+
+	const chunk1 = "event: system\ndata: {\"a\":1}\n\n"
+	const chunk2 = "data: {\"b\":2}\n\n"
+
+	// chunk 1 先入管道：upstream WriteHeader 后阻塞在 channel 读，客户端要等
+	// 首个 write+flush 才能拿到响应头，Do 须限时防护（防回归时整个测试挂死）。
+	f.body <- chunk1
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		proxySrv.URL+"/runtime/default/test/v1/agents/my-agent/runs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type doResult struct {
+		resp *http.Response
+		err  error
+	}
+	doDone := make(chan doResult, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		doDone <- doResult{resp, err}
+	}()
+	var resp *http.Response
+	select {
+	case dr := <-doDone:
+		if dr.err != nil {
+			t.Fatal(dr.err)
+		}
+		resp = dr.resp
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for response headers — headers only reach the client with the first flushed chunk")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
 		t.Fatalf("content-type = %q", ct)
 	}
-	// httptest recorder 收全量；真实流式由 FlushInterval=-1 保证，此处断言 body 到达
-	if !strings.Contains(w.Body.String(), "event: system") {
-		t.Fatal("SSE chunk missing")
+
+	// 限时读单个 SSE 事件（空行结束）。deadline 到点即失败：此刻后续 chunk 尚
+	// 未生产、upstream 也永不返回，读到只能是实时 flush 的结果。
+	br := bufio.NewReader(resp.Body)
+	readEvent := func(want string) {
+		t.Helper()
+		type evResult struct {
+			event string
+			err   error
+		}
+		done := make(chan evResult, 1)
+		go func() {
+			var sb strings.Builder
+			for {
+				line, err := br.ReadString('\n')
+				if err != nil {
+					done <- evResult{err: err}
+					return
+				}
+				sb.WriteString(line)
+				if line == "\n" { // SSE 事件以空行结束
+					done <- evResult{event: sb.String()}
+					return
+				}
+			}
+		}()
+		select {
+		case r := <-done:
+			if r.err != nil {
+				t.Fatalf("read SSE event: %v", r.err)
+			}
+			if r.event != want {
+				t.Fatalf("event = %q, want %q", r.event, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for SSE event %q — response not flushed mid-stream", want)
+		}
 	}
+
+	readEvent(chunk1) // 此刻 chunk 2 尚不存在：读到即 mid-stream flush 的直接证据
+	f.body <- chunk2
+	readEvent(chunk2)
+	cancel() // 结束流；断开→upstream 取消传播由 TestProxyClientDisconnectCancelsUpstream 覆盖
 }
 
 func TestProxyClientDisconnectCancelsUpstream(t *testing.T) {

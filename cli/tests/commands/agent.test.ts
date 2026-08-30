@@ -843,6 +843,24 @@ describe("resolveRuntimeUrl", () => {
     );
   });
 
+  // 专家二轮 P1：base-path serverUrl 必须保留 path——API client 是字符串拼接
+  // （base.ts `${serverUrl}${path}`，流量实际打到 {serverUrl}/api/...），
+  // WHATWG new URL 会把 /hub 整体丢掉，拼接语义必须与 client 一致。
+  test("相对路径 + 带 path 的 serverUrl → 保留 base path（与 API client 拼接语义一致）", () => {
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+  });
+
+  test("相对路径 + 带 path 且尾部多斜杠的 serverUrl → 同样单斜杠拼接", () => {
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub/")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub///")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+  });
+
   test("绝对 http/https URL 原样返回（Kong 模式）", () => {
     expect(resolveRuntimeUrl("http://203.0.113.10:32100", "http://localhost:8081")).toBe(
       "http://203.0.113.10:32100",

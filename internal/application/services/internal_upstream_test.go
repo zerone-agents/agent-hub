@@ -96,6 +96,12 @@ func TestResolveBaseURLStrictModeBranching(t *testing.T) {
 	if got != "http://203.0.113.10:32100" {
 		t.Fatalf("kong+empty = %q, want http://203.0.113.10:32100 (publicHost form, not deployer upstream)", got)
 	}
+	// IPv6 publicHost（专家二轮）：仅构造方式换 JoinHostPort，上面 203.0.113.10
+	// 断言保持不变；方括号形式为新增回归。
+	s6 := &AgentChatService{publicHost: "2001:db8::1", upstreamHost: "agent-deployer"}
+	if got, err := s6.resolveBaseURL(true, "", 32100); err != nil || got != "http://[2001:db8::1]:32100" {
+		t.Fatalf("kong+empty IPv6 = %q, %v; want http://[2001:db8::1]:32100", got, err)
+	}
 	// Kong + 网关 URL → 原样透传
 	if got, _ := s.resolveBaseURL(true, "https://kong.example.com/zerone/agent", 32100); got != "https://kong.example.com/zerone/agent" {
 		t.Fatalf("kong+url = %q, want verbatim gateway URL", got)
