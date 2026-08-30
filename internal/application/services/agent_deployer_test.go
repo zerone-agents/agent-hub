@@ -28,7 +28,7 @@ func TestWaitForHealthy_DockerHealthyPath(t *testing.T) {
 	defer srv.Close()
 
 	client := deployer.NewClient(srv.URL, "test-key")
-	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1"}
+	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", upstreamHost: "10.0.0.1"}
 
 	port, err := s.WaitForHealthy(context.Background(), "general", 5*time.Second)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestWaitForHealthy_ActiveProbePath(t *testing.T) {
 	defer deployerSrv.Close()
 
 	client := deployer.NewClient(deployerSrv.URL, "test-key")
-	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool {
+	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", upstreamHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool {
 		return host == "10.0.0.1" && port == 3000
 	}}
 
@@ -72,7 +72,7 @@ func TestWaitForHealthy_Timeout(t *testing.T) {
 	defer deployerSrv.Close()
 
 	client := deployer.NewClient(deployerSrv.URL, "test-key")
-	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool { return false }}
+	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", upstreamHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool { return false }}
 
 	start := time.Now()
 	_, err := s.WaitForHealthy(context.Background(), "general", 500*time.Millisecond)

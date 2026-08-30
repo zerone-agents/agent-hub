@@ -9,6 +9,7 @@ import { join } from "node:path";
 // - For dynamic re-imports after mock setup, use ?t=${Date.now()} cache-busting
 
 import * as realConfig from "../../src/config";
+import { resolveRuntimeUrl } from "../../src/commands/agent";
 
 // Real backend response shapes (verified against
 // internal/application/services/agent_service.go + internal/handler/agent.go):
@@ -674,6 +675,39 @@ describe("agent deploy command", () => {
     const forceCalls = fetchMock.mock.calls as any[][];
     expect(forceCalls[0][1].query).toEqual({ force: "true" });
   });
+
+  test("deploy resolves relative runtimeUrl (no-Kong) against profile serverUrl", async () => {
+    const fakeDeploy = {
+      status: "running",
+      runtimeUrl: "/runtime/default/coder",
+      hostPort: 4001,
+    };
+    mock.module("ofetch", () => ({
+      ofetch: mock(() => Promise.resolve({ success: true, data: fakeDeploy })),
+      FetchError: class FetchError extends Error {},
+    }));
+
+    const { AgentDeployCommand } = await import(
+      `../../src/commands/agent.ts?t=${Date.now()}`
+    );
+    const cmd = new AgentDeployCommand();
+    (cmd as any).name = "coder";
+    (cmd as any).force = false;
+    (cmd as any).output = "text";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    // 人类可读输出必须打印解析后的绝对 URL，而非原样相对路径
+    expect(logs.join("\n")).toContain("https://test.local/runtime/default/coder");
+  });
 });
 
 // ── Status ────────────────────────────────────────────────────
@@ -789,5 +823,54 @@ describe("agent undeploy command", () => {
     }
 
     expect(logs.join("\n")).toContain("彻底删除");
+  });
+});
+
+// ── resolveRuntimeUrl helper（issue #77：no-Kong 相对 runtimeUrl 解析）───────
+// renderDeployment 的人类可读输出用它把 /runtime/{org}/{agent} 解析成绝对 URL；
+// JSON 输出字段原样镜像 API payload，不走此 helper。
+
+describe("resolveRuntimeUrl", () => {
+  test("相对路径 + 无尾部斜杠 serverUrl → 绝对 URL", () => {
+    expect(resolveRuntimeUrl("/runtime/default/test", "http://localhost:8081")).toBe(
+      "http://localhost:8081/runtime/default/test",
+    );
+  });
+
+  test("相对路径 + 尾部斜杠 serverUrl → 单斜杠拼接", () => {
+    expect(resolveRuntimeUrl("/runtime/zerone/agent-1", "http://hub.example.com/")).toBe(
+      "http://hub.example.com/runtime/zerone/agent-1",
+    );
+  });
+
+  // 专家二轮 P1：base-path serverUrl 必须保留 path——API client 是字符串拼接
+  // （base.ts `${serverUrl}${path}`，流量实际打到 {serverUrl}/api/...），
+  // WHATWG new URL 会把 /hub 整体丢掉，拼接语义必须与 client 一致。
+  test("相对路径 + 带 path 的 serverUrl → 保留 base path（与 API client 拼接语义一致）", () => {
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+  });
+
+  test("相对路径 + 带 path 且尾部多斜杠的 serverUrl → 同样单斜杠拼接", () => {
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub/")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+    expect(resolveRuntimeUrl("/runtime/default/coder", "https://example.com/hub///")).toBe(
+      "https://example.com/hub/runtime/default/coder",
+    );
+  });
+
+  test("绝对 http/https URL 原样返回（Kong 模式）", () => {
+    expect(resolveRuntimeUrl("http://203.0.113.10:32100", "http://localhost:8081")).toBe(
+      "http://203.0.113.10:32100",
+    );
+    expect(
+      resolveRuntimeUrl("https://kong.example.com/zerone/agent", "http://localhost:8081"),
+    ).toBe("https://kong.example.com/zerone/agent");
+  });
+
+  test("serverUrl 缺失 → 相对路径原样返回（不误报）", () => {
+    expect(resolveRuntimeUrl("/runtime/default/test", "")).toBe("/runtime/default/test");
   });
 });

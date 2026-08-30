@@ -3,6 +3,8 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"control-panel/internal/domain/agent"
@@ -41,6 +43,7 @@ type AgentChatService struct {
 	runtimeClient *runtime.Client
 	publicHost    string
 	runtimeKey    string
+	upstreamHost  string // cfg.Deployer.DeployerURLHost; "" = fail closed (no-Kong upstream)
 }
 
 // NewAgentChatService constructs an AgentChatService.
@@ -49,7 +52,7 @@ func NewAgentChatService(
 	agentRepo agentRepoForChat,
 	deployerSvc *AgentDeployerService,
 	rtClient *runtime.Client,
-	publicHost, runtimeKey string,
+	publicHost, runtimeKey, upstreamHost string,
 ) *AgentChatService {
 	return &AgentChatService{
 		chatRepo:      chatRepo,
@@ -58,6 +61,7 @@ func NewAgentChatService(
 		runtimeClient: rtClient,
 		publicHost:    publicHost,
 		runtimeKey:    runtimeKey,
+		upstreamHost:  upstreamHost,
 	}
 }
 
@@ -225,6 +229,41 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 	return s.chatRepo.UpdateSessionTitle(tenantID, sessionID, title)
 }
 
+// noKongUpstream builds the internal upstream base URL for the no-Kong mode:
+// hostname(AGENT_DEPLOYER_URL) + published port. Empty upstream host fails
+// closed — DB may retain running state from before a config change.
+func (s *AgentChatService) noKongUpstream(port int) (string, error) {
+	if s.upstreamHost == "" {
+		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+	}
+	return "http://" + net.JoinHostPort(s.upstreamHost, strconv.Itoa(port)), nil
+}
+
+// kongEnabledForChat reports whether the Kong gateway chain is active. A nil
+// deployerSvc is treated as no-Kong (lean toward the internal upstream).
+func (s *AgentChatService) kongEnabledForChat() bool {
+	return s.deployerSvc != nil && s.deployerSvc.kongEnabled()
+}
+
+// resolveBaseURL 按网关模式严格分支选取拨号目标（issue #77 验收 #10：Kong
+// 链路零变化）：
+//
+//	① Kong 启用 → 信任 toDTO 已填充的网关 RuntimeURL；空 URL 的预注册边缘
+//	   （Kong enabled 但路由尚未注册完成）保持本 PR 合入前的 main 行为：
+//	   http://{publicHost}:{hostPort} 公网地址，绝不回落到 deployer 内网回源
+//	   （构造方式改 net.JoinHostPort，IPv6 安全；仅构造方式变更，语义不动）。
+//	② 无 Kong → 公开地址（hairpin 绝对 URL 或相对路径）永远不是内部拨号
+//	   目标，一律走 deployer hostname 内网回源（issue #77 验收 #8）。
+func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, hostPort int) (string, error) {
+	if !kongEnabled {
+		return s.noKongUpstream(hostPort)
+	}
+	if runtimeURL == "" {
+		return "http://" + net.JoinHostPort(s.publicHost, strconv.Itoa(hostPort)), nil
+	}
+	return runtimeURL, nil
+}
+
 // ResolveRuntime verifies the agent is deployed and running, and returns
 // the runtime base URL and the per-agent runtime API key (decrypted from
 // the agents table).
@@ -234,8 +273,10 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 // "https://agents.example.com/zerone/pharmaceutical"). The runtime client appends
 // /v1/agents/{name}/runs to this base; Kong's StripPath strips the
 // agent-name prefix and forwards the canonical runtime API path to the
-// container. When Kong is not configured, RuntimeURL falls back to a
-// direct http://{publicHost}:{hostPort} URL.
+// container. When Kong is not configured, the public RuntimeURL (absolute
+// hairpin URL or hub-relative path) is never an internal dial target — the
+// internal upstream URL http://{DeployerURLHost}:{hostPort} is used instead
+// so hub→runtime traffic stays on the deployer network.
 func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
@@ -247,9 +288,9 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 	if status.HostPort == 0 {
 		return "", "", fmt.Errorf("agent running but no host port")
 	}
-	baseURL := status.RuntimeURL
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", s.publicHost, status.HostPort)
+	baseURL, err := s.resolveBaseURL(s.kongEnabledForChat(), status.RuntimeURL, status.HostPort)
+	if err != nil {
+		return "", "", err
 	}
 	return baseURL, status.APIKey, nil
 }

@@ -187,7 +187,19 @@ func main() {
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
-	deployerService := services.NewAgentDeployerService(deployerClient, cfg.Deployer.PublicHost, cfg.OSS.CDNHost, cfg.Provider.EncryptionKey, cfg.Deployer.RuntimeAPIKey, knowledgeService, kongService, aigcConfigSvc, cfg.ChatPush.APIKey, cfg.ChatPush.PublicURL)
+	deployerService := services.NewAgentDeployerService(
+		deployerClient,
+		cfg.Deployer.PublicHost,
+		cfg.Deployer.DeployerURLHost,
+		cfg.OSS.CDNHost,
+		cfg.Provider.EncryptionKey,
+		cfg.Deployer.RuntimeAPIKey,
+		knowledgeService,
+		kongService,
+		aigcConfigSvc,
+		cfg.ChatPush.APIKey,
+		cfg.ChatPush.PublicURL,
+	)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)
@@ -201,6 +213,7 @@ func main() {
 		runtimeClient,
 		cfg.Deployer.PublicHost,
 		cfg.Deployer.RuntimeAPIKey,
+		cfg.Deployer.DeployerURLHost,
 	)
 	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
@@ -576,6 +589,14 @@ func main() {
 		cliGroup.POST("/issue-token", cliTokenHandler.Issue)
 		cliGroup.GET("/tokens", cliTokenHandler.List)
 		cliGroup.DELETE("/tokens/:id", cliTokenHandler.Revoke)
+	}
+
+	// Runtime proxy: hub-fronted runtime API entry for the no-Kong mode.
+	// Kong mode keeps its own /{org}/{agent} Service/Route chain and must NOT
+	// register /runtime/* (falls to NoRoute → 302 /static).
+	if cfg.Kong.AdminURL == "" {
+		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc)
 	}
 
 	// 未匹配路由重定向到前端 SPA

@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +80,7 @@ type aigcConfigProvider interface {
 type AgentDeployerService struct {
 	client        *deployer.Client
 	publicHost    string
+	upstreamHost  string // cfg.Deployer.DeployerURLHost; strict, no PublicHost fallback
 	cdnHost       string
 	encryptionKey string
 	runtimeAPIKey string
@@ -192,9 +195,17 @@ func (s *AgentDeployerService) probeGatewayHealthy(tenantID, name string) bool {
 	return probeURL(ctx, gatewayURL+"/health", 3*time.Second)
 }
 
+// healthProbeURL 构造默认（无 Kong）健康探针 URL。JoinHostPort 保证 IPv6
+// publicHost 产出合法的带方括号 URL（http://[2001:db8::1]:8080/health），
+// Sprintf "%s:%d" 形式对 IPv6 是非法 URL。与 Kong 路由探测用的
+// probeURL(ctx, url, timeout) 是两回事（后者接收完整 URL）。
+func healthProbeURL(host string, port int) string {
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/health"
+}
+
 // defaultHealthProbe performs an active HTTP check against the runtime /health endpoint.
 func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
-	url := fmt.Sprintf("http://%s:%d/health", publicHost, port)
+	url := healthProbeURL(publicHost, port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false
@@ -212,10 +223,11 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
+func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
 	s := &AgentDeployerService{
 		client:            client,
 		publicHost:        publicHost,
+		upstreamHost:      upstreamHost,
 		cdnHost:           cdnHost,
 		encryptionKey:     encryptionKey,
 		runtimeAPIKey:     runtimeAPIKey,
@@ -237,9 +249,31 @@ func NewAgentDeployerService(client *deployer.Client, publicHost, cdnHost, encry
 	return s
 }
 
+// kongEnabled mirrors kong_gateway.go's nil-safe check.
+func (s *AgentDeployerService) kongEnabled() bool {
+	return s.kongSvc != nil && s.kongSvc.enabled()
+}
+
+// probeHost selects the health-probe target per mode (spec D1): Kong mode
+// deliberately probes the public path — a deployment public-reachability
+// signal; no-Kong mode probes the internal deployer hostname (no hairpin).
+func (s *AgentDeployerService) probeHost() (string, error) {
+	if s.kongEnabled() {
+		return s.publicHost, nil
+	}
+	if s.upstreamHost == "" {
+		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+	}
+	return s.upstreamHost, nil
+}
+
 // WaitForHealthy polls the deployer and actively probes /health until the agent
 // is ready or timeout is reached. It returns the current host port.
 func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, timeout time.Duration) (int, error) {
+	probeHost, err := s.probeHost()
+	if err != nil {
+		return 0, err // fail closed: never dial without a valid probe host
+	}
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -250,7 +284,7 @@ func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, 
 			if st.Health == "healthy" {
 				return st.HostPort, nil
 			}
-			if st.HostPort > 0 && s.healthProbe(ctx, s.publicHost, st.HostPort) {
+			if st.HostPort > 0 && s.healthProbe(ctx, probeHost, st.HostPort) {
 				return st.HostPort, nil
 			}
 		}
@@ -958,7 +992,8 @@ func isStableDeploymentStatus(status string) bool {
 }
 
 // toDTO converts deployment information into a DeploymentDTO. The RuntimeURL
-// reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled.
+// reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled,
+// or the hub-relative proxy path (/runtime/<org>/<name>) in no-Kong mode.
 func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, containerName string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
 	var deployedAtStr string
 	if deployedAt != nil {
@@ -974,6 +1009,14 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 		if bare := BarePath(tenantID, agentName); bare != "" {
 			bareURL = s.kongSvc.RouteURL(bare)
 		}
+	} else if status == "running" && port > 0 {
+		// No-Kong public address is the hub-relative proxy path (issue #77);
+		// frontend resolves it against the current origin.
+		// Org identity assumption: URLPath uses orgSlug(tenantID), which
+		// equals the raw tenant_id for builtin and conforming casdoor orgs
+		// (slug is identity); legacy non-conforming tenant IDs 404 through
+		// the proxy by design (issue #77 acceptance #2).
+		url = "/runtime" + URLPath(tenantID, agentName)
 	}
 
 	return &DeploymentDTO{

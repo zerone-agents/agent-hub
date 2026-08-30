@@ -163,6 +163,36 @@ describe('DeployModal', () => {
     expect(screen.queryByText('短路径 URL')).not.toBeInTheDocument()
   })
 
+  it('resolves relative runtimeUrl against current origin for display and copy', async () => {
+    const writeText = vi.fn()
+    // userEvent.setup() unconditionally installs its own navigator.clipboard stub
+    // (attachClipboardStubToView), even with writeToClipboard: false — so the spy
+    // must be defined AFTER setup to replace it. defineProperty is required:
+    // the installed property is an accessor whose setter swallows plain assignment.
+    const user = userEvent.setup({ writeToClipboard: false })
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    // jsdom does not implement window.isSecureContext (undefined), and handleCopy
+    // gates the async clipboard API on it — stub it true to exercise the primary
+    // copy path instead of the execCommand fallback.
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', runtimeUrl: '/runtime/default/test' })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    const expected = `${window.location.origin}/runtime/default/test`
+    expect(await screen.findByText(expected)).toBeInTheDocument() // 展示为绝对 URL
+    await user.click(screen.getByTitle('复制 URL'))
+    await waitFor(() => { expect(writeText).toHaveBeenCalledWith(expected) }) // 复制也是绝对 URL
+  })
+
+  it('renders absolute runtimeUrl (Kong mode) unchanged', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', runtimeUrl: 'https://kong.example.com/default/test' })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    expect(await screen.findByText('https://kong.example.com/default/test')).toBeInTheDocument()
+  })
+
   it('member: 操作按钮全部 disabled，聊天按钮可用', async () => {
     setAuthRole('member')
     vi.mocked(agentApi.getDeployment).mockResolvedValue(
