@@ -245,6 +245,24 @@ func (s *AgentChatService) kongEnabledForChat() bool {
 	return s.deployerSvc != nil && s.deployerSvc.kongEnabled()
 }
 
+// resolveBaseURL 按网关模式严格分支选取拨号目标（issue #77 验收 #10：Kong
+// 链路零变化）：
+//
+//	① Kong 启用 → 信任 toDTO 已填充的网关 RuntimeURL；空 URL 的预注册边缘
+//	   （Kong enabled 但路由尚未注册完成）保持本 PR 合入前的 main 行为：
+//	   http://{publicHost}:{hostPort} 公网地址，绝不回落到 deployer 内网回源。
+//	② 无 Kong → 公开地址（hairpin 绝对 URL 或相对路径）永远不是内部拨号
+//	   目标，一律走 deployer hostname 内网回源（issue #77 验收 #8）。
+func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, hostPort int) (string, error) {
+	if !kongEnabled {
+		return s.noKongUpstream(hostPort)
+	}
+	if runtimeURL == "" {
+		return fmt.Sprintf("http://%s:%d", s.publicHost, hostPort), nil
+	}
+	return runtimeURL, nil
+}
+
 // ResolveRuntime verifies the agent is deployed and running, and returns
 // the runtime base URL and the per-agent runtime API key (decrypted from
 // the agents table).
@@ -254,10 +272,10 @@ func (s *AgentChatService) kongEnabledForChat() bool {
 // "https://agents.example.com/zerone/pharmaceutical"). The runtime client appends
 // /v1/agents/{name}/runs to this base; Kong's StripPath strips the
 // agent-name prefix and forwards the canonical runtime API path to the
-// container. When Kong is not configured, RuntimeURL falls back to the
-// internal upstream URL http://{DeployerURLHost}:{hostPort} so hub→runtime
-// traffic stays on the deployer network instead of hairpinning via the
-// public host.
+// container. When Kong is not configured, the public RuntimeURL (absolute
+// hairpin URL or hub-relative path) is never an internal dial target — the
+// internal upstream URL http://{DeployerURLHost}:{hostPort} is used instead
+// so hub→runtime traffic stays on the deployer network.
 func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
@@ -269,15 +287,9 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 	if status.HostPort == 0 {
 		return "", "", fmt.Errorf("agent running but no host port")
 	}
-	baseURL := status.RuntimeURL
-	if !s.kongEnabledForChat() || baseURL == "" {
-		// 无 Kong：RuntimeURL 是公开地址（hairpin 绝对 URL，或本任务后的相对路径），
-		// 永远不是内部拨号目标——一律走 deployer hostname 内网回源（issue #77 验收 #8）
-		fallback, err := s.noKongUpstream(status.HostPort)
-		if err != nil {
-			return "", "", err
-		}
-		baseURL = fallback
+	baseURL, err := s.resolveBaseURL(s.kongEnabledForChat(), status.RuntimeURL, status.HostPort)
+	if err != nil {
+		return "", "", err
 	}
 	return baseURL, status.APIKey, nil
 }

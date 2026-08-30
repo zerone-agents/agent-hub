@@ -26,7 +26,10 @@ writeFileSync(
 );
 
 const commands = await import("../../src/commands/agent");
-const CommandClass = (commands as Record<string, new () => any>)[className];
+// 模块里除 Command 子类外还有普通函数导出（如 resolveRuntimeUrl），
+// 直接 as Record 不满足重叠检查，须经 unknown 双重断言（className 由
+// argv 传入，始终是 Command 类名，不会命中函数导出）。
+const CommandClass = (commands as unknown as Record<string, new () => any>)[className];
 const cmd = new CommandClass();
 Object.assign(cmd, {
   file,

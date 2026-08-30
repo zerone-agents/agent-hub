@@ -182,7 +182,7 @@ describe('DeployModal', () => {
     const expected = `${window.location.origin}/runtime/default/test`
     expect(await screen.findByText(expected)).toBeInTheDocument() // 展示为绝对 URL
     await user.click(screen.getByTitle('复制 URL'))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expected)) // 复制也是绝对 URL
+    await waitFor(() => { expect(writeText).toHaveBeenCalledWith(expected) }) // 复制也是绝对 URL
   })
 
   it('renders absolute runtimeUrl (Kong mode) unchanged', async () => {

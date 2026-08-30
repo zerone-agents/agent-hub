@@ -1,5 +1,6 @@
 import { Command, Option } from "clipanion";
 import { AgentYamlError, parseAgentYaml } from "../agent-yaml";
+import { getActiveProfile } from "../config";
 import { outputJson } from "../output/json";
 import { outputYaml } from "../output/yaml";
 import { outputTable } from "../output/table";
@@ -56,14 +57,31 @@ function renderAgent(agent: Agent, output: string) {
   }
 }
 
-function renderDeployment(d: DeploymentInfo, output: string) {
+// no-Kong 模式下 runtimeUrl 是 hub 相对路径（/runtime/{org}/{agent}），直接
+// 打印对终端用户不可用——人类可读输出需按 profile serverUrl 解析为绝对 URL
+// （new URL 自动处理尾部斜杠拼接）；绝对 URL 原样返回；serverUrl 缺失/非法
+// 时同样原样返回，避免误报。
+export function resolveRuntimeUrl(runtimeUrl: string, serverUrl: string): string {
+  if (/^https?:\/\//i.test(runtimeUrl)) return runtimeUrl;
+  try {
+    return new URL(runtimeUrl, serverUrl).toString();
+  } catch {
+    return runtimeUrl;
+  }
+}
+
+async function renderDeployment(d: DeploymentInfo, output: string) {
   if (output === "json") {
+    // JSON 输出原样镜像 API payload（供脚本消费），相对 runtimeUrl 不做解析。
     outputJson(d);
     return;
   }
   console.log(`Status:    ${d.status}`);
   if (d.health) console.log(`Health:    ${d.health}`);
-  if (d.runtimeUrl) console.log(`Runtime:   ${d.runtimeUrl}`);
+  if (d.runtimeUrl) {
+    const { serverUrl } = await getActiveProfile();
+    console.log(`Runtime:   ${resolveRuntimeUrl(d.runtimeUrl, serverUrl)}`);
+  }
   if (d.hostPort) console.log(`Port:      ${d.hostPort}`);
   if (d.deployedAt) console.log(`Deployed:  ${d.deployedAt}`);
   if (d.message) console.log(`Message:   ${d.message}`);
@@ -259,7 +277,7 @@ export class AgentDeployCommand extends Command {
 
   async execute(): Promise<number> {
     const d = await deployAgent(this.name, this.force);
-    renderDeployment(d, this.output);
+    await renderDeployment(d, this.output);
     return 0;
   }
 }
@@ -287,7 +305,7 @@ export class AgentStartCommand extends Command {
 
   async execute(): Promise<number> {
     const d = await startAgent(this.name);
-    renderDeployment(d, this.output);
+    await renderDeployment(d, this.output);
     return 0;
   }
 }
@@ -314,7 +332,7 @@ export class AgentStatusCommand extends Command {
 
   async execute(): Promise<number> {
     const d = await getDeploymentStatus(this.name);
-    renderDeployment(d, this.output);
+    await renderDeployment(d, this.output);
     return 0;
   }
 }

@@ -57,9 +57,12 @@ var proxyAllowlist = []proxyRoute{
 	{methods: []string{http.MethodGet, http.MethodHead}, pattern: "/v1/files/content", timeout: 10 * time.Minute},
 }
 
-// Conservative org/agent name gate; the authoritative check is the exact-match
-// tenant-scoped GetByName below (unknown names → 404 either way).
-var proxyNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+// proxyOrgNameRe 是 org 命名契约：小写字母开头，仅小写字母数字，≤63 字符。
+// 契约源同 internal/handler/ops_tenant_client.go 的 opsOrgNameRe（unexported，
+// 无法跨包引用，故在此重复声明并锚定来源）；动机见彼处注释——org 用于拼接
+// 部署键与 URL 路径段，禁止连字符/大写/下划线/前导数字消除跨租户键歧义。
+// agent 名契约复用同包 agent_validator.go 的 validAgentNamePattern，不重复声明。
+var proxyOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,62}$`)
 
 type RuntimeProxyService struct {
 	repo         RuntimeProxyAgentRepo
@@ -75,7 +78,10 @@ func NewRuntimeProxyService(repo RuntimeProxyAgentRepo, upstreamHost string) *Ru
 // It never inspects credentials (pure passthrough auth model, D4).
 func (s *RuntimeProxyService) Resolve(org, agentName, method, escapedRemainder, decodedRemainder string) (*ProxyDecision, *ProxyError) {
 	notFound := &ProxyError{Code: 404, Reason: "not found"}
-	if !proxyNameRe.MatchString(org) || !proxyNameRe.MatchString(agentName) {
+	// 命名门必须在 GetByName 之前拒绝：MySQL 大小写不敏感 collation 或 legacy
+	// 存量行可能让大写/下划线/前导数字 ID 命中数据（issue #77 验收 #2，
+	// legacy 命名一律 404，不触 DB）。
+	if !proxyOrgNameRe.MatchString(org) || !validAgentNamePattern.MatchString(agentName) {
 		return nil, notFound
 	}
 	canon, ok := canonicalizePath(escapedRemainder, decodedRemainder)

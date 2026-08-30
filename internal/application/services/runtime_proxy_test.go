@@ -164,3 +164,43 @@ func TestResolveUpstreamIPv6(t *testing.T) {
 		t.Fatalf("IPv6 upstream = %q, want http://[2001:db8::1]:32100", d.UpstreamBase)
 	}
 }
+
+// legacy 不合规命名（大写/下划线/前导数字/尾连字符）必须在触碰 DB 之前 404
+// （issue #77 验收 #2）——即使 DB 中存在形近存量行（大小写不敏感 collation
+// 或 legacy 行可能命中），命名门也先行拒绝，GetByName 不被调用。
+func TestResolveLegacyInvalidNames(t *testing.T) {
+	repo := newTestRepo()
+	// 预置 legacy 形式的存量行：若命名门失效，这些行可能被命中。
+	repo.agents["Acme/test"] = &agent.AgentConfig{DeploymentStatus: "running", RuntimePort: 32102}
+	repo.agents["default/under_score"] = &agent.AgentConfig{DeploymentStatus: "running", RuntimePort: 32103}
+	repo.agents["0rg/test"] = &agent.AgentConfig{DeploymentStatus: "running", RuntimePort: 32104}
+	repo.agents["default/test-"] = &agent.AgentConfig{DeploymentStatus: "running", RuntimePort: 32105}
+	svc := NewRuntimeProxyService(repo, "agent-deployer")
+	cases := []struct{ name, org, agentName string }{
+		{"uppercase org", "Acme", "test"},
+		{"underscore agent", "default", "under_score"},
+		{"leading-digit org", "0rg", "test"},
+		{"trailing-hyphen agent", "default", "test-"},
+		{"hyphenated org", "ac-me", "test"},
+		{"uppercase agent", "default", "Test"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo.gotOrg = "" // 每例重置，验证不触 DB
+			d, pe := svc.Resolve(tc.org, tc.agentName, "GET", "/health", "/health")
+			if pe == nil || pe.Code != 404 {
+				t.Fatalf("want 404, got decision=%+v err=%+v", d, pe)
+			}
+			if d != nil {
+				t.Fatalf("no decision may be produced for legacy-invalid names")
+			}
+			if repo.gotOrg != "" {
+				t.Fatalf("repo must not be queried for legacy-invalid %q/%q (got query org=%q)", tc.org, tc.agentName, repo.gotOrg)
+			}
+		})
+	}
+	// 对照：合规命名仍放行（default/test 在 newTestRepo 中为 running）。
+	if _, pe := svc.Resolve("default", "test", "GET", "/health", "/health"); pe != nil {
+		t.Fatalf("conforming name must keep passing, got %v", pe)
+	}
+}

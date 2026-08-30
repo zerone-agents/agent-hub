@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -193,9 +195,17 @@ func (s *AgentDeployerService) probeGatewayHealthy(tenantID, name string) bool {
 	return probeURL(ctx, gatewayURL+"/health", 3*time.Second)
 }
 
+// healthProbeURL 构造默认（无 Kong）健康探针 URL。JoinHostPort 保证 IPv6
+// publicHost 产出合法的带方括号 URL（http://[2001:db8::1]:8080/health），
+// Sprintf "%s:%d" 形式对 IPv6 是非法 URL。与 Kong 路由探测用的
+// probeURL(ctx, url, timeout) 是两回事（后者接收完整 URL）。
+func healthProbeURL(host string, port int) string {
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/health"
+}
+
 // defaultHealthProbe performs an active HTTP check against the runtime /health endpoint.
 func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
-	url := fmt.Sprintf("http://%s:%d/health", publicHost, port)
+	url := healthProbeURL(publicHost, port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false
