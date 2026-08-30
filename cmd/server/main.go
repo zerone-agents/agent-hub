@@ -591,6 +591,14 @@ func main() {
 		cliGroup.DELETE("/tokens/:id", cliTokenHandler.Revoke)
 	}
 
+	// Runtime proxy: hub-fronted runtime API entry for the no-Kong mode.
+	// Kong mode keeps its own /{org}/{agent} Service/Route chain and must NOT
+	// register /runtime/* (falls to NoRoute → 302 /static).
+	if cfg.Kong.AdminURL == "" {
+		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc)
+	}
+
 	// 未匹配路由重定向到前端 SPA
 	r.NoRoute(func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/static")
