@@ -59,3 +59,14 @@ func TestNoKongUpstream(t *testing.T) {
 		t.Fatal("empty upstream host must return error")
 	}
 }
+
+func TestKongEnabledForChat(t *testing.T) {
+	nilDeployer := &AgentChatService{}
+	if nilDeployer.kongEnabledForChat() {
+		t.Fatal("nil deployerSvc must be treated as no-Kong")
+	}
+	withKong := &AgentChatService{deployerSvc: &AgentDeployerService{kongSvc: &KongGatewayService{client: newFakeKong()}}}
+	if !withKong.kongEnabledForChat() {
+		t.Fatal("kong-enabled deployerSvc must report true")
+	}
+}

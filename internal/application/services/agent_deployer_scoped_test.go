@@ -322,6 +322,25 @@ func TestToDTO_BareRuntimeURL(t *testing.T) {
 	}
 }
 
+func TestToDTO_NoKongRunningReturnsRelativeRuntimeURL(t *testing.T) {
+	s := &AgentDeployerService{publicHost: "203.0.113.10"} // kongSvc == nil → no Kong
+	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
+	if dto.RuntimeURL != "/runtime/default/test" {
+		t.Fatalf("RuntimeURL = %q, want /runtime/default/test", dto.RuntimeURL)
+	}
+	if dto.BareRuntimeURL != "" {
+		t.Fatalf("no-Kong must not expose bare URL, got %q", dto.BareRuntimeURL)
+	}
+}
+
+func TestToDTO_NoKongNotRunningKeepsLegacyBehavior(t *testing.T) {
+	s := &AgentDeployerService{publicHost: "203.0.113.10"}
+	dto := s.toDTO("default", "test", "stopped", "unhealthy", "c", 0, nil, "")
+	if dto.RuntimeURL == "/runtime/default/test" {
+		t.Fatal("non-running deployment must not get a proxy URL")
+	}
+}
+
 // TestDeploy_PreCleanRemovesLegacyBareEntities asserts Deploy's pre-clean
 // Deregister removes the old bare-name Kong entities (using the scoped key for
 // the new entities and the bare name as legacyBare).

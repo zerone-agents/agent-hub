@@ -982,7 +982,8 @@ func isStableDeploymentStatus(status string) bool {
 }
 
 // toDTO converts deployment information into a DeploymentDTO. The RuntimeURL
-// reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled.
+// reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled,
+// or the hub-relative proxy path (/runtime/<org>/<name>) in no-Kong mode.
 func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, containerName string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
 	var deployedAtStr string
 	if deployedAt != nil {
@@ -998,6 +999,10 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 		if bare := BarePath(tenantID, agentName); bare != "" {
 			bareURL = s.kongSvc.RouteURL(bare)
 		}
+	} else if status == "running" && port > 0 {
+		// No-Kong public address is the hub-relative proxy path (issue #77);
+		// frontend resolves it against the current origin.
+		url = "/runtime" + URLPath(tenantID, agentName)
 	}
 
 	return &DeploymentDTO{

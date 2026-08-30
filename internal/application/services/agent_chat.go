@@ -239,6 +239,12 @@ func (s *AgentChatService) noKongUpstream(port int) (string, error) {
 	return "http://" + net.JoinHostPort(s.upstreamHost, strconv.Itoa(port)), nil
 }
 
+// kongEnabledForChat reports whether the Kong gateway chain is active. A nil
+// deployerSvc is treated as no-Kong (lean toward the internal upstream).
+func (s *AgentChatService) kongEnabledForChat() bool {
+	return s.deployerSvc != nil && s.deployerSvc.kongEnabled()
+}
+
 // ResolveRuntime verifies the agent is deployed and running, and returns
 // the runtime base URL and the per-agent runtime API key (decrypted from
 // the agents table).
@@ -264,7 +270,9 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 		return "", "", fmt.Errorf("agent running but no host port")
 	}
 	baseURL := status.RuntimeURL
-	if baseURL == "" {
+	if !s.kongEnabledForChat() || baseURL == "" {
+		// 无 Kong：RuntimeURL 是公开地址（hairpin 绝对 URL，或本任务后的相对路径），
+		// 永远不是内部拨号目标——一律走 deployer hostname 内网回源（issue #77 验收 #8）
 		fallback, err := s.noKongUpstream(status.HostPort)
 		if err != nil {
 			return "", "", err
