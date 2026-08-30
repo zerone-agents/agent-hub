@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -242,6 +243,34 @@ func TestProxyErrorSemantics(t *testing.T) {
 				t.Fatalf("status = %d, want %d", w.Code, want)
 			}
 		})
+	}
+}
+
+// 502 路径（终审 T3-3 部分）：upstream 端口无人监听时，ErrorHandler 必须回
+// respondError 同形状的 JSON 信封 {"success":false,"error":"..."}，中性文案
+// 不泄 upstream 地址。端口获取：先起 httptest.Server 再 Close，复用其端口。
+func TestProxyUpstreamUnavailableReturnsEnvelope(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	port := portOf(dead.URL)
+	dead.Close() // 端口回归空闲：dial 被拒 → ReverseProxy ErrorHandler
+
+	r := newProxyEngine(port)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/default/test/health", nil))
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("content-type = %q, want application/json", ct)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not the respondError envelope: %q (err %v)", w.Body.String(), err)
+	}
+	// 恰好两个字段：success=false + 中性 error 文案，无多余字段。
+	if len(body) != 2 || body["success"] != false || body["error"] != "runtime upstream unavailable" {
+		t.Fatalf("body = %v, want exactly {success:false, error:%q}", body, "runtime upstream unavailable")
 	}
 }
 

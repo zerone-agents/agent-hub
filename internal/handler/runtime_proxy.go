@@ -98,7 +98,9 @@ func (h *RuntimeProxyHandler) Proxy(c *gin.Context) {
 			upstreamErr = classifyUpstreamErr(e)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway) // stable 502; never leak upstream address
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "bad gateway", "reason": "runtime upstream unavailable"})
+			// Same envelope as respondError — one endpoint, one error schema.
+			// No gin.Context here, so write the identical fields by hand.
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "runtime upstream unavailable"})
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			for _, hdr := range []string{"Set-Cookie2", "Server", "X-Powered-By"} {
@@ -111,8 +113,12 @@ func (h *RuntimeProxyHandler) Proxy(c *gin.Context) {
 	auditRuntimeProxy(c, org, agentName, c.Writer.Status(), start, upstreamErr)
 }
 
-// escapedRemainder extracts the escaped wildcard remainder ("/v1/...") from
-// the full escaped path ("/runtime/{org}/{agent}/v1/...").
+// escapedRemainder extracts the escaped wildcard remainder INCLUDING the
+// agent segment ("/{agent}/{path}") from the full escaped path
+// ("/runtime/{org}/{agent}/{path}") — SplitN(path, "/", 4) stops after the
+// third separator, so parts[3] still carries the agent name. It is a
+// fail-closed SUPERSET consumed by the %2f/%2e containment scan; exact
+// allowlist matching uses only the decoded path.
 func escapedRemainder(escapedPath string) string {
 	parts := strings.SplitN(escapedPath, "/", 4)
 	if len(parts) < 4 || parts[1] != "runtime" {

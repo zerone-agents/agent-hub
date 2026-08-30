@@ -1002,6 +1002,10 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	} else if status == "running" && port > 0 {
 		// No-Kong public address is the hub-relative proxy path (issue #77);
 		// frontend resolves it against the current origin.
+		// Org identity assumption: URLPath uses orgSlug(tenantID), which
+		// equals the raw tenant_id for builtin and conforming casdoor orgs
+		// (slug is identity); legacy non-conforming tenant IDs 404 through
+		// the proxy by design (issue #77 acceptance #2).
 		url = "/runtime" + URLPath(tenantID, agentName)
 	}
 
