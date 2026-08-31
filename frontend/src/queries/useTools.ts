@@ -13,13 +13,26 @@ export function useTools() {
   })
 }
 
-export function useCreateTool() {
+export function useCreateCustomTool() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: Partial<Tool>) => toolApi.create(data),
+    mutationFn: (data: { name: string; title?: string; description?: string; file: File }) =>
+      toolApi.createCustom(data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tools'] })
-      message.success('工具已创建')
+      message.success('自定义工具已上传')
+    },
+    onError: (err) => message.error(parseApiError(err))
+  })
+}
+
+export function useUploadToolFile() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, file }: { name: string; file: File }) => toolApi.uploadFile(name, file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['tools'] })
+      message.success('工具文件已更新')
     },
     onError: (err) => message.error(parseApiError(err))
   })
@@ -28,7 +41,7 @@ export function useCreateTool() {
 export function useUpdateTool() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, data }: { name: string; data: Partial<Tool> }) =>
+    mutationFn: ({ name, data }: { name: string; data: { title?: string; description?: string } }) =>
       toolApi.update(name, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tools'] })

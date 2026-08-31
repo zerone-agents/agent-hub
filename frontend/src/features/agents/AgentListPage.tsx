@@ -20,6 +20,7 @@ import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
+import { buildToolOptions } from './toolOptions'
 import DeployModal from './DeployModal'
 import AgentKnowledgeModal from './AgentKnowledgeModal'
 import CardGrid from '@/components/CardGrid'
@@ -382,7 +383,7 @@ export default function AgentListPage() {
     .filter((a) => a.name !== currentName)
     .map((a) => ({ value: a.name, label: a.config.title?.zh ?? a.config.title?.en ?? a.name }))
 
-  const toolOptions = tools.map((tl) => ({ value: tl.name, label: tl.name, disabled: defaultToolNames.has(tl.name) }))
+  const toolOptions = buildToolOptions(tools, selectedTools, defaultToolNames)
 
   const mcpOptions = mcps.map((m) => ({
     value: m.name,

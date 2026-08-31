@@ -23,7 +23,7 @@ Thanks for your interest in contributing to agent-hub! 🎉
   - DB fields: `snake_case`
   - JSON fields: `camelCase`
   - Go fields: `PascalCase`
-- **i18n**: Core entities maintain both Chinese (`description`) and English (`descriptionEn`) fields
+- **i18n**: Core entities maintain both Chinese (`description`) and English (`descriptionEn`) fields (exception: Tool — Hub-side title/description is console-display metadata only per issue #88; the runtime-facing description comes from the tool file itself)
 - **Error messages**: User-facing errors in Chinese; internal errors in English with stack
 
 ## License

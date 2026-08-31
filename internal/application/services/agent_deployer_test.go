@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	providerdomain "control-panel/internal/domain/provider"
@@ -128,9 +130,11 @@ func (m *mockProviderSvc) GetRawAPIKey(tenantID string, id uint64) (string, erro
 	return m.getRawKeyFunc(id)
 }
 
-type mockToolRepo struct{}
+type mockToolRepo struct{ tools []*agent.Tool }
 
-func (m *mockToolRepo) GetToolsByAgent(agentID uint64) ([]string, error) { return nil, nil }
+func (m *mockToolRepo) GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, error) {
+	return m.tools, nil
+}
 
 type mockSkillRepo struct{}
 
@@ -506,4 +510,71 @@ func TestGetStatus_StableStatusPersisted(t *testing.T) {
 			}
 		})
 	}
+}
+
+func customToolRecordsFixture() []*agent.Tool {
+	return []*agent.Tool{
+		{Name: "Zeta", TenantID: "t", Source: agent.ToolSourceCustom, FileName: "z.mjs",
+			FileURL: "tools/t/Zeta/h1.mjs", FileHash: "h1", FileSize: 3},
+		{Name: "Alpha", TenantID: "t", Source: agent.ToolSourceCustom, FileName: "a.ts",
+			FileURL: "tools/t/Alpha/h2.ts", FileHash: "h2", FileSize: 4},
+		{Name: "Bash", TenantID: "", Source: agent.ToolSourceBuiltin},
+	}
+}
+
+// buildReqTestProvider mirrors deployTokenProviderSvc's construction so
+// buildCreateRequest receives a valid providerdomain.Provider.
+func buildReqTestProvider(t *testing.T, id uint64) providerdomain.Provider {
+	t.Helper()
+	p := providerdomain.NewGenericProvider("openai")
+	if err := p.Base().SetSummary(&providerdomain.ProviderSummary{ID: id, BaseURL: "http://example.com", Protocol: "openai"}); err != nil {
+		t.Fatalf("build provider fixture: %v", err)
+	}
+	return p
+}
+
+func buildReqWithTools(t *testing.T, tools []*agent.Tool, cdnHost string) (*deployer.CreateAgentRequest, error) {
+	t.Helper()
+	providerID := uint64(1)
+	provider := buildReqTestProvider(t, providerID)
+	agentRepo := &mockAgentRepo{getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+		return &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "m",
+			SystemPrompt: "p", Description: map[string]string{"zh": "d"}}, nil
+	}}
+	providerSvc := &mockProviderSvc{
+		getByIDFunc:   func(id uint64) (providerdomain.Provider, error) { return buildReqTestProvider(t, id), nil },
+		getRawKeyFunc: func(id uint64) (string, error) { return "k", nil },
+	}
+	svc := newTestAgentDeployerService(t, "http://deployer.test", agentRepo, providerSvc)
+	svc.toolRepo = &mockToolRepo{tools: tools}
+	svc.cdnHost = cdnHost
+	cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "m", SystemPrompt: "p"}
+	return svc.buildCreateRequest(context.Background(), "t", cfg, provider, tools, nil, nil, nil)
+}
+
+func TestBuildCreateRequest_CustomToolsSortedAndToolsFull(t *testing.T) {
+	req, err := buildReqWithTools(t, customToolRecordsFixture(), "https://cdn.example.com")
+	require.NoError(t, err)
+	// Tools = 全量关联名（含 builtin），排序
+	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agent.Tools)
+	// CustomTools = custom+ready 子集，按名排序，URL=CDN+key
+	require.Len(t, req.Agent.CustomTools, 2)
+	require.Equal(t, "Alpha", req.Agent.CustomTools[0].Name)
+	require.Equal(t, "https://cdn.example.com/tools/t/Alpha/h2.ts", req.Agent.CustomTools[0].URL)
+	require.Equal(t, "h2", req.Agent.CustomTools[0].Hash)
+	require.Equal(t, "a.ts", req.Agent.CustomTools[0].FileName)
+	require.Equal(t, "Zeta", req.Agent.CustomTools[1].Name)
+}
+
+func TestBuildCreateRequest_MissingCustomToolFailsFast(t *testing.T) {
+	tools := append(customToolRecordsFixture(), &agent.Tool{Name: "Legacy", TenantID: "t", Source: agent.ToolSourceCustom})
+	_, err := buildReqWithTools(t, tools, "https://cdn.example.com")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Legacy")
+}
+
+func TestBuildCreateRequest_CustomToolsRequireCDNHost(t *testing.T) {
+	_, err := buildReqWithTools(t, customToolRecordsFixture(), "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "OSS_CDN_HOST")
 }

@@ -7,6 +7,7 @@ Source of truth: `internal/domain/*/` (`model.go` / per-entity files). All GORM 
 - Business tables carry a `tenant_id` column (`varchar(64)`, default `''`). Tenant ID = Casdoor org name (casdoor mode) or `default` (builtin mode).
 - Empty string `''` is the **shared sentinel**: rows with `tenant_id=''` are global seed/builtin rows (built-in tools, MCP servers, shared provider presets) — readable by every tenant, writable by none (copy-on-write for providers).
 - Name uniqueness is tenant-scoped via composite unique indexes: `uk_agents_tenant_name` (agents), `uk_tenant_key` (provider_summaries), `uk_skills_tenant_name` (skills), `uk_scenes_tenant_name` (scenes), `uk_mcp_tenant_name` (mcp_servers), `uk_tools_tenant_name` (tools), `uk_tenant_id` (aigc_configs).
+- `tools.source`（builtin|custom）与制品字段（file_name/file_url/file_hash/file_size）：custom 四字段完整 = ready，否则 missing（迁移存量）；custom 强制 is_default=false，builtin 恒 ready。
 
 ## Entity Overview
 

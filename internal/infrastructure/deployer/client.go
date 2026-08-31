@@ -18,16 +18,20 @@ type AgentDefinition struct {
 	// does. Required by the deployer: agent-runtime 2.0 rejects configs
 	// without it, and it is what the parent agent's Task tool shows when
 	// mounting subagents.
-	Description     string                     `json:"description"`
-	Model           string                     `json:"model"`
-	SystemPrompt    string                     `json:"systemPrompt"`
-	MaxTurns        *int                       `json:"maxTurns,omitempty"`
-	MaxSessionTurns *int                       `json:"maxSessionTurns,omitempty"`
-	PermissionMode  string                     `json:"permissionMode,omitempty"`
-	Tools           []string                   `json:"tools,omitempty"`
-	Skills          []SkillSource              `json:"skills,omitempty"`
-	Subagents       []SubagentDefinition       `json:"subagents,omitempty"`
-	McpServers      map[string]McpServerConfig `json:"mcpServers,omitempty"`
+	Description     string   `json:"description"`
+	Model           string   `json:"model"`
+	SystemPrompt    string   `json:"systemPrompt"`
+	MaxTurns        *int     `json:"maxTurns,omitempty"`
+	MaxSessionTurns *int     `json:"maxSessionTurns,omitempty"`
+	PermissionMode  string   `json:"permissionMode,omitempty"`
+	Tools           []string `json:"tools,omitempty"`
+	// CustomTools lists custom Tool artifacts to download and install before
+	// the container starts (issue #88). Tools above stays the complete
+	// allow-list; CustomTools only carries source=custom && ready rows.
+	CustomTools []ToolSource               `json:"customTools,omitempty"`
+	Skills      []SkillSource              `json:"skills,omitempty"`
+	Subagents   []SubagentDefinition       `json:"subagents,omitempty"`
+	McpServers  map[string]McpServerConfig `json:"mcpServers,omitempty"`
 	// Datasets maps dataset-id to description, consumed by the runtime for
 	// building the agent system prompt and knowledge tool context.
 	Datasets map[string]string `json:"datasets,omitempty"`
@@ -74,6 +78,18 @@ type SkillSource struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 	Hash string `json:"hash"`
+}
+
+// ToolSource defines a single custom Tool file for agent-deployer (issue #88).
+// Mirrors the deployer's model.ToolSource: name must match ^[A-Za-z0-9._-]{1,64}$;
+// url must be absolute http(s) — the deployer never follows redirects; hash is
+// 64-hex sha256; fileName's extension must be .ts/.mts/.js/.mjs (case-sensitive)
+// and its directory components are never used by the deployer.
+type ToolSource struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Hash     string `json:"hash"`
+	FileName string `json:"fileName"`
 }
 
 // ProviderConfig defines the LLM provider configuration.

@@ -6,73 +6,73 @@ import { antdTheme } from '@/lib/antd-theme'
 import ToolForm from './ToolForm'
 import type { Tool } from '@/api/tools'
 
-const mockDefaultTool: Tool = {
-  id: 1,
-  name: 'Bash',
-  title: '执行命令',
-  description: '执行 bash 命令',
-  isDefault: true,
-  createdAt: '2026-06-10T10:00:00Z',
-  updatedAt: ''
+const customReadyTool: Tool = {
+  id: 2,
+  name: 'SayHello',
+  title: '问候',
+  description: '问候工具',
+  isDefault: false,
+  source: 'custom',
+  artifactStatus: 'ready',
+  fileName: 'say.ts',
+  fileHash: 'abcd1234abcd1234',
+  fileSize: 1024,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z'
 }
 
-const mockNormalTool: Tool = {
-  id: 2,
-  name: 'Read',
-  title: '读取文件',
-  description: '读取文件内容',
+const customMissingTool: Tool = {
+  id: 3,
+  name: 'Legacy',
+  title: '存量',
+  description: '存量工具',
   isDefault: false,
-  createdAt: '2026-06-12T10:00:00Z',
-  updatedAt: ''
+  source: 'custom',
+  artifactStatus: 'missing',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z'
 }
 
 vi.mock('@/queries/useTools', () => ({
-  useCreateTool: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateCustomTool: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUploadToolFile: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateTool: () => ({ mutateAsync: vi.fn(), isPending: false })
 }))
 
+type FormMode = 'create' | 'edit' | 'upload'
+
+const renderForm = (mode: FormMode, editingTool: Tool | null) =>
+  render(
+    <ConfigProvider theme={antdTheme}>
+      <ToolForm open mode={mode} editingTool={editingTool} onClose={vi.fn()} />
+    </ConfigProvider>
+  )
+
 describe('ToolForm', () => {
-  it('renders default tool switch as ON when editing a default tool', async () => {
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <ToolForm open editingTool={mockDefaultTool} onClose={vi.fn()} />
-      </ConfigProvider>
-    )
-
-    await waitFor(() => {
-      const switchEl = screen.getByRole('switch')
-      expect(switchEl).toHaveAttribute('aria-checked', 'true')
-    })
+  it('create mode requires file upload and has no default switch', async () => {
+    renderForm('create', null)
+    expect(screen.getByText('上传自定义工具')).toBeInTheDocument() // modal 标题
+    expect(screen.getByText(/选择 \.ts \/ \.mts \/ \.js \/ \.mjs 文件/)).toBeInTheDocument()
+    expect(screen.queryByText('默认工具')).not.toBeInTheDocument()
   })
 
-  it('renders default tool switch as OFF when editing a non-default tool', async () => {
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <ToolForm open editingTool={mockNormalTool} onClose={vi.fn()} />
-      </ConfigProvider>
-    )
-
-    await waitFor(() => {
-      const switchEl = screen.getByRole('switch')
-      expect(switchEl).toHaveAttribute('aria-checked', 'false')
-    })
-  })
-
-  it('toggles the default tool switch when clicked', async () => {
+  it('create mode blocks submit without file', async () => {
     const user = userEvent.setup()
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <ToolForm open editingTool={mockNormalTool} onClose={vi.fn()} />
-      </ConfigProvider>
-    )
+    renderForm('create', null)
+    await user.type(screen.getByLabelText('工具标识'), 'SayHello')
+    // antd 对两字中文按钮自动插入空格（"上 传"），用 \s* 兼容（KnowledgeForm.test 先例）
+    await user.click(screen.getByRole('button', { name: /上\s*传/ }))
+    await waitFor(() => expect(screen.getByText('请选择工具文件')).toBeInTheDocument())
+  })
 
-    const switchEl = await screen.findByRole('switch')
-    expect(switchEl).toHaveAttribute('aria-checked', 'false')
+  it('edit mode shows metadata only for custom ready tool', async () => {
+    renderForm('edit', customReadyTool)
+    expect(screen.getByDisplayValue('SayHello')).toBeDisabled()
+    expect(screen.getByText('替换文件（可选）')).toBeInTheDocument()
+  })
 
-    // Clicking the switch itself should toggle it
-    await user.click(switchEl)
-    await waitFor(() => {
-      expect(switchEl).toHaveAttribute('aria-checked', 'true')
-    })
+  it('upload mode (backfill) requires file', async () => {
+    renderForm('upload', customMissingTool)
+    expect(screen.getByRole('button', { name: /补\s*传/ })).toBeInTheDocument()
   })
 })

@@ -137,8 +137,16 @@ curl -X POST http://localhost:8081/api/v1/admin/providers/probe \
 | Domain | Key Endpoint |
 |---|---|
 | **Agent** | `GET /api/v1/agents/manifest` |
-| **Tool** | `GET /api/v1/admin/tools` |
+| **Tool** | `POST /api/v1/admin/tools`（multipart 上传自定义工具）；`PUT /api/v1/admin/tools/:name/file`（补传/替换）；`GET /api/v1/admin/tools/:name/download` |
 | **Skill** | `GET /api/v1/skills/:name/download` |
 | **Provider** | `GET /api/v1/providers` |
 | **Scene** | `GET /api/v1/scenes` |
 | **Chat** | `POST /api/v1/chat/push` |
+
+### Custom Tools (issue #88)
+
+- 单文件 `.ts/.mts/.js/.mjs`，≤5 MiB；工具名来自文件默认导出的 `name`（Hub 不执行代码，Runtime 部署时校验）。
+- `tools.source`：`builtin`（共享只读预设）/ `custom`（租户制品）；custom 制品状态派生 `ready|missing`。
+- 删除仍被 Agent 挂载的自定义工具返回 `409` + `data.agents` 名单；内置工具拒绝一切写操作。
+- 部署请求向 agent-deployer 下发 `customTools []ToolSource{name,url,hash,fileName}`（仅 custom+ready，按名排序；URL = OSS_CDN_HOST + 内容寻址 key）。
+- PUT /api/v1/admin/tools/:name 仅接受 title/description；其他字段（如 isDefault）会被静默忽略。

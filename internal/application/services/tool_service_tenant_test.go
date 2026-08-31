@@ -60,6 +60,11 @@ func setupToolTenantServiceTestDB(t *testing.T) *gorm.DB {
 			title VARCHAR(128) DEFAULT '',
 			description TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
+			source VARCHAR(16) NOT NULL DEFAULT 'custom',
+			file_name VARCHAR(255),
+			file_url VARCHAR(512),
+			file_hash VARCHAR(128),
+			file_size INTEGER,
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
@@ -115,33 +120,6 @@ func newMinimalAgent(name string) *agent.AgentConfig {
 	return &agent.AgentConfig{Name: name}
 }
 
-// TestToolService_CreateDefaultTool_TenantScoped：org-a 创建 is_default 工具时
-// AddToolToAllAgents 只绑 org-a 的 agent。
-func TestToolService_CreateDefaultTool_TenantScoped(t *testing.T) {
-	db := setupToolTenantServiceTestDB(t)
-	agentRepo := repository.NewAgentRepository()
-	require.NoError(t, agentRepo.Create("org-a", newMinimalAgent("a1")))
-	require.NoError(t, agentRepo.Create("org-b", newMinimalAgent("b1")))
-
-	svc := NewToolService()
-	_, err := svc.Create("org-a", &CreateToolInput{Name: "a-def", IsDefault: true})
-	require.NoError(t, err)
-
-	var names []string
-	require.NoError(t, db.Raw(`
-		SELECT t.name FROM agent_tools at JOIN tools t ON t.id = at.tool_id
-		JOIN agents a ON a.id = at.agent_id WHERE a.name = 'b1'
-	`).Pluck("name", &names).Error)
-	assert.Empty(t, names, "org-b agent 不得被 org-a 的默认工具绑定")
-
-	names = nil
-	require.NoError(t, db.Raw(`
-		SELECT t.name FROM agent_tools at JOIN tools t ON t.id = at.tool_id
-		JOIN agents a ON a.id = at.agent_id WHERE a.name = 'a1'
-	`).Pluck("name", &names).Error)
-	assert.Contains(t, names, "a-def", "org-a 自家 agent 应被绑定")
-}
-
 // TestToolService_UpdateAgentTools_TenantIsolation：org-b 保存空工具列表时，
 // 自动合并的默认工具不得包含 org-a 的默认工具（可含共享默认行）。
 func TestToolService_UpdateAgentTools_TenantIsolation(t *testing.T) {
@@ -149,10 +127,12 @@ func TestToolService_UpdateAgentTools_TenantIsolation(t *testing.T) {
 	agentRepo := repository.NewAgentRepository()
 	require.NoError(t, agentRepo.Create("org-b", newMinimalAgent("b1")))
 
-	toolSvc := NewToolService()
-	_, err := toolSvc.Create("org-a", &CreateToolInput{Name: "a-def", IsDefault: true})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default) VALUES ('shared-def', '', 1)`).Error)
+	toolSvc := NewToolService(nil)
+	// a-def 为 org-a 的默认工具（旧 JSON 创建语义的存量形态，改用直插模拟）；
+	// shared-def 为共享默认行——source 标 builtin，否则 UpdateAgentTools 的
+	// missing 守卫会拒绝这个无制品的共享行。
+	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default) VALUES ('a-def', 'org-a', 1)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default, source) VALUES ('shared-def', '', 1, 'builtin')`).Error)
 
 	require.NoError(t, toolSvc.UpdateAgentTools("org-b", "b1", []string{}))
 
@@ -170,13 +150,12 @@ func TestToolService_UpdateAgentTools_TenantIsolation(t *testing.T) {
 func TestAgentService_CreateAgent_DoesNotBindOtherTenantDefaultTools(t *testing.T) {
 	db := setupToolTenantServiceTestDB(t)
 
-	toolSvc := NewToolService()
-	_, err := toolSvc.Create("org-a", &CreateToolInput{Name: "a-def", IsDefault: true})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default) VALUES ('shared-def', '', 1)`).Error)
+	// 同上：直插两行默认工具（org-a 专属 + 共享 builtin 行）。
+	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default) VALUES ('a-def', 'org-a', 1)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default, source) VALUES ('shared-def', '', 1, 'builtin')`).Error)
 
 	agentSvc := NewAgentService("test-encryption-key")
-	_, err = agentSvc.CreateAgent("org-b", &CreateAgentInput{
+	_, err := agentSvc.CreateAgent("org-b", &CreateAgentInput{
 		Name:   "b-new",
 		Config: map[string]interface{}{"systemPrompt": "test"},
 	})

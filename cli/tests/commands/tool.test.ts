@@ -35,6 +35,14 @@ function writeTempYaml(content: string): string {
   return filePath;
 }
 
+function writeTempSource(content: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "zhub-test-"));
+  tempDirs.push(dir);
+  const filePath = join(dir, "tool.ts");
+  writeFileSync(filePath, content, "utf-8");
+  return filePath;
+}
+
 afterEach(() => {
   for (const dir of tempDirs) {
     try {
@@ -261,7 +269,7 @@ describe("tool get command", () => {
 describe("tool create command", () => {
   beforeEach(setupConfigMock);
 
-  test("sends POST /api/v1/admin/tools with body from --file", async () => {
+  test("sends POST /api/v1/admin/tools with multipart from --file", async () => {
     const fakeTool = {
       id: 1,
       name: "calculator",
@@ -274,6 +282,7 @@ describe("tool create command", () => {
     const filePath = writeTempYaml(
       "name: calculator\ntitle: Calculator\ndescription: Math tool\nisDefault: true"
     );
+    const sourcePath = writeTempSource("export default {}\n");
 
     const { ToolCreateCommand } = await import(
       `../../src/commands/tool.ts?t=${Date.now()}`
@@ -281,6 +290,7 @@ describe("tool create command", () => {
     const cmd = new ToolCreateCommand();
     (cmd as any).file = filePath;
     (cmd as any).json = undefined;
+    (cmd as any).source = sourcePath;
     (cmd as any).output = "yaml";
 
     const logs: string[] = [];
@@ -296,14 +306,18 @@ describe("tool create command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/tools");
     expect(calls[0][1].method).toBe("POST");
-    expect(calls[0][1].body.name).toBe("calculator");
-    expect(calls[0][1].body.title).toBe("Calculator");
-    expect(calls[0][1].body.description).toBe("Math tool");
-    expect(calls[0][1].body.isDefault).toBe(true);
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+    expect(calls[0][1].body.get("name")).toBe("calculator");
+    expect(calls[0][1].body.get("title")).toBe("Calculator");
+    expect(calls[0][1].body.get("description")).toBe("Math tool");
+    expect(calls[0][1].body.get("isDefault")).toBe(null);
+    const file = calls[0][1].body.get("file");
+    expect(file).toBeInstanceOf(Blob);
+    expect((file as File).name).toBe("tool.ts");
     expect(logs.join("\n")).toContain("calculator");
   });
 
-  test("sends POST with body from --json", async () => {
+  test("sends POST with multipart from --json", async () => {
     const fakeTool = {
       id: 2,
       name: "weather",
@@ -312,6 +326,7 @@ describe("tool create command", () => {
       isDefault: false,
     };
     const fetchMock = setupFetchMock(fakeTool);
+    const sourcePath = writeTempSource("export const x = 1;\n");
 
     const { ToolCreateCommand } = await import(
       `../../src/commands/tool.ts?t=${Date.now()}`
@@ -322,8 +337,8 @@ describe("tool create command", () => {
       name: "weather",
       title: "Weather",
       description: "Weather tool",
-      isDefault: false,
     });
+    (cmd as any).source = sourcePath;
     (cmd as any).output = "yaml";
 
     const logs: string[] = [];
@@ -339,7 +354,10 @@ describe("tool create command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/tools");
     expect(calls[0][1].method).toBe("POST");
-    expect(calls[0][1].body.name).toBe("weather");
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+    expect(calls[0][1].body.get("name")).toBe("weather");
+    const file = calls[0][1].body.get("file");
+    expect((file as File).name).toBe("tool.ts");
   });
 
   test("returns error 2 without --file or --json", async () => {
@@ -397,6 +415,7 @@ describe("tool create command", () => {
     const cmd = new ToolCreateCommand();
     (cmd as any).file = "/tmp/nonexistent-zhub-tool-missing.yaml";
     (cmd as any).json = undefined;
+    (cmd as any).source = writeTempSource("export default {}\n");
     (cmd as any).output = "yaml";
 
     const origErr = process.stderr.write;
@@ -422,6 +441,7 @@ describe("tool create command", () => {
     const cmd = new ToolCreateCommand();
     (cmd as any).file = undefined;
     (cmd as any).json = "not valid json";
+    (cmd as any).source = writeTempSource("export default {}\n");
     (cmd as any).output = "yaml";
 
     const origErr = process.stderr.write;
@@ -447,6 +467,7 @@ describe("tool create command", () => {
     const cmd = new ToolCreateCommand();
     (cmd as any).file = undefined;
     (cmd as any).json = JSON.stringify([{ name: "x" }]);
+    (cmd as any).source = writeTempSource("export default {}\n");
     (cmd as any).output = "yaml";
 
     const origErr = process.stderr.write;
@@ -590,5 +611,164 @@ describe("tool delete command", () => {
     expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator");
     expect(calls[0][1].method).toBe("DELETE");
     expect(logs.join("\n")).toContain("已删除");
+  });
+});
+
+// ── Create command (custom tools) ──────────────────────────────
+
+describe("tool create command (custom tools)", () => {
+  beforeEach(setupConfigMock);
+
+  test("fails without --source", async () => {
+    // Mock ofetch too so the pre-fix code path can't hit the network
+    // (the command should exit 2 before any request once implemented).
+    setupFetchMock({});
+    const { ToolCreateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cli = new Cli({ binaryName: "zhub" });
+    cli.register(ToolCreateCommand);
+    const rc = await cli.run(["tool", "create", "--json", '{"name":"SayHello"}']);
+    expect(rc).toBe(2);
+  });
+
+  test("returns error 2 when metadata lacks name", async () => {
+    setupFetchMock({});
+    const { ToolCreateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolCreateCommand();
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({ title: "no name" });
+    (cmd as any).source = writeTempSource("export default {}\n");
+    (cmd as any).output = "yaml";
+
+    const origErr = process.stderr.write;
+    const errs: string[] = [];
+    process.stderr.write = ((s: string) => {
+      errs.push(s);
+      return true;
+    }) as any;
+
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(2);
+      expect(errs.join("")).toContain("name");
+    } finally {
+      process.stderr.write = origErr as any;
+    }
+  });
+});
+
+// ── Upload command ─────────────────────────────────────────────
+
+describe("tool upload command", () => {
+  beforeEach(setupConfigMock);
+
+  test("PUTs multipart to /:name/file with --source", async () => {
+    const fakeTool = {
+      id: 1,
+      name: "calculator",
+      title: "Calculator",
+      description: "Math tool",
+      isDefault: false,
+    };
+    const fetchMock = setupFetchMock(fakeTool);
+    const sourcePath = writeTempSource("export default { hi: 1 }\n");
+
+    const { ToolUploadCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUploadCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).source = sourcePath;
+    (cmd as any).output = "yaml";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator/file");
+    expect(calls[0][1].method).toBe("PUT");
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+    expect(calls[0][1].body.get("name")).toBe(null);
+    const file = calls[0][1].body.get("file");
+    expect(file).toBeInstanceOf(Blob);
+    expect((file as File).name).toBe("tool.ts");
+    expect(logs.join("\n")).toContain("calculator");
+  });
+
+  test("returns error 2 without --source", async () => {
+    const { ToolUploadCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUploadCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).source = undefined;
+    (cmd as any).output = "yaml";
+
+    const origErr = process.stderr.write;
+    const errs: string[] = [];
+    process.stderr.write = ((s: string) => {
+      errs.push(s);
+      return true;
+    }) as any;
+
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(2);
+      expect(errs.join("")).toContain("--source");
+    } finally {
+      process.stderr.write = origErr as any;
+    }
+  });
+});
+
+// ── Download command ───────────────────────────────────────────
+
+describe("tool download command", () => {
+  beforeEach(setupConfigMock);
+
+  test("GETs /:name/download and prints the url", async () => {
+    const fetchMock = setupFetchMock({
+      url: "https://cdn.local/tools/say.ts",
+      expiresIn: 600,
+    });
+
+    const { ToolDownloadCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolDownloadCommand();
+    (cmd as any).name = "calculator";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origErr = process.stderr.write;
+    const errs: string[] = [];
+    console.log = (s: string) => logs.push(s);
+    process.stderr.write = ((s: string) => {
+      errs.push(s);
+      return true;
+    }) as any;
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+      process.stderr.write = origErr as any;
+    }
+
+    expect(logs.join("\n")).toContain("https://cdn.local/tools/say.ts");
+    expect(errs.join("")).toContain("600");
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator/download");
+    expect(calls[0][1].method).toBe("GET");
   });
 });
