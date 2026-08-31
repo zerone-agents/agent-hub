@@ -15,6 +15,60 @@ export type ToolFormMode = 'create' | 'edit' | 'upload'
 const ALLOWED_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
+// 三种表单模式（create/edit/upload）的全部 UI 显隐与校验差异集中于此；
+// 组件内除提交时的三路 API 调用序列外不再出现 mode 分支
+interface ToolFormModeConfig {
+  title: string // modal 标题
+  submitText: string // 主按钮文案
+  showMetadata: boolean // name/title/description 元数据字段区
+  showNameField: boolean // 工具标识输入（含"基本信息"区块）
+  nameEditable: boolean // 工具标识仅 create 可编辑，其余 disabled
+  fileRequired: boolean // 提交前必须已选文件
+  fileSectionTitle: string // 文件区小节标题
+  fileHint: string // 文件区引导文案（空串 = 不渲染；有 uploadError 时隐藏）
+  showTrustHints: boolean // 三行可信代码安全提示
+  prefillFromTool: boolean // 打开时用 editingTool 预填元数据（false = 重置表单）
+}
+
+const TOOL_FORM_MODES: Record<ToolFormMode, ToolFormModeConfig> = {
+  create: {
+    title: '上传自定义工具',
+    submitText: '上传',
+    showMetadata: true,
+    showNameField: true,
+    nameEditable: true,
+    fileRequired: true,
+    fileSectionTitle: '工具文件',
+    fileHint: '',
+    showTrustHints: true,
+    prefillFromTool: false
+  },
+  edit: {
+    title: '编辑工具',
+    submitText: '更新',
+    showMetadata: true,
+    showNameField: true,
+    nameEditable: false,
+    fileRequired: false,
+    fileSectionTitle: '替换文件（可选）',
+    fileHint: '留空则保留原文件，选择新文件将替换',
+    showTrustHints: false,
+    prefillFromTool: true
+  },
+  upload: {
+    title: '补传/替换工具文件',
+    submitText: '补传',
+    showMetadata: false,
+    showNameField: false,
+    nameEditable: false,
+    fileRequired: true,
+    fileSectionTitle: '工具文件',
+    fileHint: '支持 .ts / .mts / .js / .mjs 文件，最大 5MB',
+    showTrustHints: false,
+    prefillFromTool: true
+  }
+}
+
 const useStyles = createStyles(({ css }) => ({
   modalHead: css`
     display: flex;
@@ -129,13 +183,14 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState('')
+  const cfg = TOOL_FORM_MODES[mode]
 
   useEffect(() => {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-related local state on modal open; coupled to the antd form.setFieldsValue below
       setSelectedFile(null)
       setUploadError('')
-      if (mode === 'create' || !editingTool) {
+      if (!cfg.prefillFromTool || !editingTool) {
         form.resetFields()
       } else {
         form.setFieldsValue({
@@ -145,7 +200,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         })
       }
     }
-  }, [open, mode, editingTool, form])
+  }, [open, cfg, editingTool, form])
 
   const beforeUpload: UploadProps['beforeUpload'] = (file) => {
     const ext = file.name.substring(file.name.lastIndexOf('.'))
@@ -168,11 +223,13 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
 
   const handleSubmit = async () => {
     const file = selectedFile
-    if (mode !== 'edit' && !file) {
+    if (cfg.fileRequired && !file) {
       setUploadError('请选择工具文件')
       return
     }
 
+    // 以下三路 API 调用序列（upload 单传文件 / create 建工具 / edit 先改元数据再可选替换文件）
+    // 是固有业务逻辑，为组件内仅存的 mode 分支；元数据校验只发生在 showMetadata 的分支中
     if (mode === 'upload') {
       if (!editingTool || !file) return
       await uploadToolFile.mutateAsync({ name: editingTool.name, file })
@@ -203,10 +260,6 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
     onClose()
   }
 
-  const modalTitle = mode === 'create' ? '上传自定义工具' : mode === 'edit' ? '编辑工具' : '补传/替换工具文件'
-  const submitText = mode === 'create' ? '上传' : mode === 'edit' ? '更新' : '补传'
-  const showMetadata = mode !== 'upload'
-
   return (
     <Modal
       open={open}
@@ -219,23 +272,27 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
       destroyOnHidden
     >
       <div className={styles.modalHead}>
-        <div className={styles.modalTitle}>{modalTitle}</div>
+        <div className={styles.modalTitle}>{cfg.title}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
           <XIcon size={18} />
         </button>
       </div>
 
       <Form form={form} layout="vertical" className={styles.modalBody} requiredMark={false}>
-        {showMetadata && (
+        {cfg.showMetadata && (
           <>
-            <div className={styles.sectionTitle}>基本信息</div>
-            <Form.Item
-              label="工具标识"
-              name="name"
-              rules={identifierFormRules('工具标识')}
-            >
-              <Input placeholder="e.g. SayHello" disabled={mode !== 'create'} />
-            </Form.Item>
+            {cfg.showNameField && (
+              <>
+                <div className={styles.sectionTitle}>基本信息</div>
+                <Form.Item
+                  label="工具标识"
+                  name="name"
+                  rules={identifierFormRules('工具标识')}
+                >
+                  <Input placeholder="e.g. SayHello" disabled={!cfg.nameEditable} />
+                </Form.Item>
+              </>
+            )}
 
             <div className={styles.sectionTitle} style={{ marginTop: 20 }}>显示设置</div>
             <Form.Item label="中文名称" name="title">
@@ -247,8 +304,8 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
           </>
         )}
 
-        <div className={styles.sectionTitle} style={{ marginTop: showMetadata ? 20 : 0 }}>
-          {mode === 'edit' ? '替换文件（可选）' : '工具文件'}
+        <div className={styles.sectionTitle} style={{ marginTop: cfg.showMetadata ? 20 : 0 }}>
+          {cfg.fileSectionTitle}
         </div>
         <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".ts,.mts,.js,.mjs" maxCount={1}>
           <button type="button" className={styles.uploadBtn}>
@@ -257,13 +314,10 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
           </button>
         </Upload>
         {uploadError && <div className={styles.uploadError}>{uploadError}</div>}
-        {mode === 'edit' && !uploadError && (
-          <div className={styles.uploadHint}>留空则保留原文件，选择新文件将替换</div>
+        {cfg.fileHint && !uploadError && (
+          <div className={styles.uploadHint}>{cfg.fileHint}</div>
         )}
-        {mode === 'upload' && !uploadError && (
-          <div className={styles.uploadHint}>支持 .ts / .mts / .js / .mjs 文件，最大 5MB</div>
-        )}
-        {mode === 'create' && (
+        {cfg.showTrustHints && (
           <div className={styles.hintBlock}>
             <div>· 工具标识必须与文件内默认导出的 name 一致，部署时由 Runtime 最终校验</div>
             <div>· 仅支持 Node.js 内置模块、@zerone-agent/agent-runtime/tools 与 zod，不安装 npm 依赖</div>
@@ -275,7 +329,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
       <div className={styles.modalFoot}>
         <Button onClick={onClose}>取消</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {submitText}
+          {cfg.submitText}
         </PrimaryButton>
       </div>
     </Modal>
