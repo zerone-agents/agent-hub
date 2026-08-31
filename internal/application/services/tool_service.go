@@ -21,18 +21,13 @@ type ToolService struct {
 	repo      *repository.ToolRepository
 	agentRepo *repository.AgentRepository
 	uploader  oss.OSSUploader
-	// cdnHost 管理端下载已不使用（Download 恒 presigned，issue #88）；公共 CDN
-	// 仅供 deployer 制品来源（agent_deployer.go buildArtifactURL，独立配置）。
-	// 保留构造签名与测试注入点：TestDownloadTool 传入非空值以证明被忽略。
-	cdnHost string
 }
 
-func NewToolService(uploader oss.OSSUploader, cdnHost string) *ToolService {
+func NewToolService(uploader oss.OSSUploader) *ToolService {
 	return &ToolService{
 		repo:      repository.NewToolRepository(),
 		agentRepo: repository.NewAgentRepository(),
 		uploader:  uploader,
-		cdnHost:   cdnHost,
 	}
 }
 
@@ -187,7 +182,7 @@ func (s *ToolService) getTool(tenantID, name string) (*agent.Tool, error) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("%w: %s", agent.ErrToolNotFound, name)
 		}
-		return nil, fmt.Errorf("查询 Tool 失败: %w", err)
+		return nil, fmt.Errorf("query tool failed: %w", err)
 	}
 	return t, nil
 }
@@ -211,7 +206,7 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 	}
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查 Tool 存在性失败: %w", err)
+		return nil, fmt.Errorf("check tool existence failed: %w", err)
 	}
 	if exists {
 		return nil, fmt.Errorf("%w: %s", agent.ErrToolNameExists, input.Name)
@@ -223,7 +218,7 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 	ossKey := BuildToolOSSKey(tenantID, input.Name, hash, ext)
 	ctx := context.Background()
 	if _, err := s.uploader.Upload(ctx, ossKey, bytes.NewReader(data), int64(len(data))); err != nil {
-		return nil, fmt.Errorf("上传工具文件失败: %w", err)
+		return nil, fmt.Errorf("upload tool file failed: %w", err)
 	}
 	t := &agent.Tool{
 		Name:        input.Name,
@@ -237,7 +232,7 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 	}
 	if err := s.repo.Create(tenantID, t); err != nil {
 		_ = s.uploader.Delete(ctx, ossKey)
-		return nil, fmt.Errorf("创建 Tool 失败: %w", err)
+		return nil, fmt.Errorf("create tool failed: %w", err)
 	}
 
 	return toolToDTO(t), nil
@@ -258,7 +253,7 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 		t.Description = *input.Description
 	}
 	if err := s.repo.Update(tenantID, t); err != nil {
-		return nil, fmt.Errorf("更新 Tool 失败: %w", err)
+		return nil, fmt.Errorf("update tool failed: %w", err)
 	}
 
 	return toolToDTO(t), nil
@@ -283,19 +278,26 @@ func (s *ToolService) UploadToolFile(tenantID, name string, input *ToolFileInput
 	newKey := BuildToolOSSKey(tenantID, t.Name, hash, ext)
 	ctx := context.Background()
 	if _, err := s.uploader.Upload(ctx, newKey, bytes.NewReader(data), int64(len(data))); err != nil {
-		return nil, fmt.Errorf("上传工具文件失败: %w", err)
+		return nil, fmt.Errorf("upload tool file failed: %w", err)
 	}
 	oldKey := t.FileURL
 	t.FileName = input.FileName
 	t.FileURL = newKey
 	t.FileHash = hash
 	t.FileSize = int64(len(data))
+	// 顺序契约（与 Delete 的行先对象后一致）：上传 → DB 提交 → 失败才回滚
+	// 清理。repo.Update 失败时旧行原封不动，oldKey 仍是该存活行的 live
+	// artifact，绝不能删；仅当 newKey != oldKey（不同内容 → 不同 key）才删
+	// 刚上传的 newKey——同内容同 key 时它是完好旧行仍在引用的对象。
 	if err := s.repo.Update(tenantID, t); err != nil {
-		return nil, fmt.Errorf("更新 Tool 制品失败: %w", err)
+		if newKey != oldKey {
+			_ = s.uploader.Delete(ctx, newKey)
+		}
+		return nil, fmt.Errorf("update tool artifact failed: %w", err)
 	}
 	if oldKey != "" && oldKey != newKey {
 		if err := s.uploader.Delete(ctx, oldKey); err != nil {
-			log.Printf("清理旧工具文件失败 (tool=%s, key=%s): %v", t.Name, oldKey, err)
+			log.Printf("cleanup of old tool file failed (tool=%s, key=%s): %v", t.Name, oldKey, err)
 		}
 	}
 	return toolToDTO(t), nil
@@ -311,7 +313,7 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	}
 	agents, err := s.repo.GetAgentNamesByToolID(t.ID)
 	if err != nil {
-		return fmt.Errorf("查询 Tool 关联 Agent 失败: %w", err)
+		return fmt.Errorf("query tool agent associations failed: %w", err)
 	}
 	if len(agents) > 0 {
 		return &agent.ToolInUseError{ToolName: t.Name, Agents: agents}
@@ -321,12 +323,12 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	// 随之断裂；先删行则最坏情况只是留下一个孤立对象（见下），行与对象始终一致。
 	key := t.FileURL
 	if err := s.repo.Delete(tenantID, t.ID); err != nil {
-		return fmt.Errorf("删除 Tool 失败: %w", err)
+		return fmt.Errorf("delete tool failed: %w", err)
 	}
 	// 行已删成功：残留对象只是无引用方的孤立内容寻址副本，删除失败无害，仅记日志。
 	if key != "" && s.uploader != nil {
 		if err := s.uploader.Delete(context.Background(), key); err != nil {
-			log.Printf("清理 OSS 工具文件失败 (tool=%s, key=%s): %v", t.Name, key, err)
+			log.Printf("cleanup of OSS tool file failed (tool=%s, key=%s): %v", t.Name, key, err)
 		}
 	}
 	return nil
@@ -351,7 +353,7 @@ func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
 	}
 	url, err := s.uploader.GetPresignedURL(context.Background(), t.FileURL)
 	if err != nil {
-		return nil, fmt.Errorf("生成下载链接失败: %w", err)
+		return nil, fmt.Errorf("generate presigned download URL failed: %w", err)
 	}
 	return &DownloadDTO{URL: url, ExpiresIn: 3600}, nil
 }

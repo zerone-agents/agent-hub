@@ -31,7 +31,7 @@ func setupToolCustomServiceDB(t *testing.T) *gorm.DB {
 func newCustomToolService(t *testing.T) (*ToolService, *mockUploader) {
 	t.Helper()
 	up := &mockUploader{data: map[string][]byte{}}
-	return NewToolService(up, ""), up
+	return NewToolService(up), up
 }
 
 const tsContent = "export default { name: 'SayHello', description: 'd' }\n"
@@ -96,7 +96,7 @@ func CreateToolInputLike(name string) *CreateCustomToolInput {
 
 func TestCreateCustomTool_StorageDisabled(t *testing.T) {
 	setupToolCustomServiceDB(t)
-	svc := NewToolService(nil, "")
+	svc := NewToolService(nil)
 	_, in := customFileInput()
 	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.ErrorIs(t, err, agent.ErrToolStorageDisabled)
@@ -210,7 +210,7 @@ func TestDeleteTool_DBFailureKeepsObjectAndRow(t *testing.T) {
 
 	err = svc.Delete("acme", "SayHello")
 	require.ErrorIs(t, err, forced)
-	require.Contains(t, err.Error(), "删除 Tool 失败")
+	require.Contains(t, err.Error(), "delete tool failed")
 
 	// OSS 对象保留：行删除失败时不得先清对象（行+对象保持一致）
 	_, objExists := up.data[created.FileURL]
@@ -222,17 +222,95 @@ func TestDeleteTool_DBFailureKeepsObjectAndRow(t *testing.T) {
 	require.Equal(t, int64(1), cnt)
 }
 
+// forceToolsUpdateFail 经 GORM Update 回调注入，强制 tools 表的更新语句失败
+// （模式同 TestDeleteTool_DBFailureKeepsObjectAndRow 的 Delete 注入）。
+func forceToolsUpdateFail(t *testing.T, db *gorm.DB) error {
+	t.Helper()
+	forced := errors.New("forced tools update failure")
+	require.NoError(t, db.Callback().Update().Before("gorm:before_update").Register("test:force_tools_update_fail", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "tools" {
+			_ = tx.AddError(forced)
+		}
+	}))
+	t.Cleanup(func() {
+		_ = db.Callback().Update().Remove("test:force_tools_update_fail")
+	})
+	return forced
+}
+
+// TestUploadToolFile_DBFailureRollsBackNewObject 锁定补传/替换的回滚契约
+// （expert review round 2 Fix A）：repo.Update 失败时，刚上传的 newKey 必须
+// 回滚删除，而旧行及其 oldKey 对象原封不动（issue #88「数据库更新失败及旧
+// 制品清理」覆盖）。
+func TestUploadToolFile_DBFailureRollsBackNewObject(t *testing.T) {
+	db := setupToolCustomServiceDB(t)
+	svc, up := newCustomToolService(t)
+	_, in := customFileInput()
+	created, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{
+		Name:          "SayHello",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+	oldKey := created.FileURL
+
+	forced := forceToolsUpdateFail(t, db)
+
+	// 替换为不同内容 → 新 hash → 新 key；DB 更新失败 → 新对象必须回滚删除
+	v2 := "export default { name: 'SayHello' } // v2\n"
+	buf := bytes.NewBufferString(v2)
+	_, err = svc.UploadToolFile("acme", "SayHello", &ToolFileInput{FileName: "v2.mjs", File: buf, FileSize: int64(buf.Len())})
+	require.ErrorIs(t, err, forced)
+	require.Contains(t, err.Error(), "update tool artifact failed")
+
+	newKey := BuildToolOSSKey("acme", "SayHello", fmt.Sprintf("%x", sha256.Sum256([]byte(v2))), ".mjs")
+	_, newObjExists := up.data[newKey]
+	require.False(t, newObjExists, "DB 更新失败时刚上传的新对象必须回滚删除")
+	_, oldObjExists := up.data[oldKey]
+	require.True(t, oldObjExists, "旧行的 oldKey 对象必须原封不动")
+
+	// DB 行仍持有旧制品三元组（ready、旧 hash）
+	var row agent.Tool
+	require.NoError(t, db.Where("name = ?", "SayHello").First(&row).Error)
+	require.Equal(t, agent.ToolArtifactReady, row.ArtifactStatus())
+	require.Equal(t, created.FileHash, row.FileHash)
+	require.Equal(t, oldKey, row.FileURL)
+}
+
+// TestUploadToolFile_DBFailureSameKeyKeepsObject 同内容重传（同 key）+ DB
+// 更新失败：共享 key 对象绝不能删——它正是完好旧行仍在引用的 live artifact
+// （回滚删除必须以 newKey != oldKey 为界）。
+func TestUploadToolFile_DBFailureSameKeyKeepsObject(t *testing.T) {
+	db := setupToolCustomServiceDB(t)
+	svc, up := newCustomToolService(t)
+	_, in := customFileInput()
+	created, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{
+		Name:          "SayHello",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+
+	forced := forceToolsUpdateFail(t, db)
+
+	// 同内容重传 → 同 key；DB 更新失败 → 该对象必须保留
+	buf := bytes.NewBufferString(tsContent)
+	_, err = svc.UploadToolFile("acme", "SayHello", &ToolFileInput{FileName: "same.ts", File: buf, FileSize: int64(buf.Len())})
+	require.ErrorIs(t, err, forced)
+	_, objExists := up.data[created.FileURL]
+	require.True(t, objExists, "同内容同 key 时对象是旧行的 live artifact，不得删除")
+}
+
 func TestDownloadTool(t *testing.T) {
 	setupToolCustomServiceDB(t)
 	up := &mockUploader{data: map[string][]byte{}}
-	svc := NewToolService(up, "https://cdn.example.com")
+	svc := NewToolService(up)
 	_, in := customFileInput()
 	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.NoError(t, err)
 	dto, err := svc.Download("acme", "SayHello")
 	require.NoError(t, err)
-	// 管理端恒 presigned（issue #88）：构造时显式传入 cdnHost，证明管理端
-	// 下载路径忽略它；URL 为 mockUploader.GetPresignedURL 的 presigned 形态。
+	// 管理端恒 presigned（issue #88）：公共 CDN 链接仅保留给 deployer 侧制品
+	// 来源（agent_deployer.go buildArtifactURL）；URL 为 mockUploader.
+	// GetPresignedURL 的 presigned 形态。
 	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(tsContent)))
 	require.Equal(t, "https://example.com/tools/acme/SayHello/"+sum+".ts", dto.URL)
 	require.Equal(t, int64(3600), dto.ExpiresIn)

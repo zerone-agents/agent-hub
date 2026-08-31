@@ -53,6 +53,22 @@ func (h *ToolHandler) Get(c *gin.Context) {
 	respondSuccess(c, t)
 }
 
+// parseToolFile 解析 multipart file 字段为 ToolFileInput（Create 与
+// UploadFile 单一构造点）；缺失时写 400 响应并返回 nil。调用方负责在成功
+// 路径 defer 关闭（返回的 closeFn）。
+func parseToolFile(c *gin.Context) (input *services.ToolFileInput, closeFn func()) {
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+		return nil, nil
+	}
+	return &services.ToolFileInput{
+		FileName: header.Filename,
+		File:     file,
+		FileSize: header.Size,
+	}, func() { _ = file.Close() }
+}
+
 // Create 处理自定义工具创建（multipart：name/title/description/file）。
 func (h *ToolHandler) Create(c *gin.Context) {
 	name := c.PostForm("name")
@@ -60,22 +76,17 @@ func (h *ToolHandler) Create(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "name 参数不能为空")
 		return
 	}
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+	in, closeFn := parseToolFile(c)
+	if in == nil {
 		return
 	}
-	defer file.Close()
+	defer closeFn()
 
 	t, err := h.service.CreateCustomTool(tenant.GetTenantID(c), &services.CreateCustomToolInput{
-		Name:        name,
-		Title:       c.PostForm("title"),
-		Description: c.PostForm("description"),
-		ToolFileInput: services.ToolFileInput{
-			FileName: header.Filename,
-			File:     file,
-			FileSize: header.Size,
-		},
+		Name:          name,
+		Title:         c.PostForm("title"),
+		Description:   c.PostForm("description"),
+		ToolFileInput: *in,
 	})
 	if err != nil {
 		respondToolError(c, err)
@@ -101,18 +112,13 @@ func (h *ToolHandler) Update(c *gin.Context) {
 
 // UploadFile 补传（missing）与替换（ready）共用：multipart file。
 func (h *ToolHandler) UploadFile(c *gin.Context) {
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+	in, closeFn := parseToolFile(c)
+	if in == nil {
 		return
 	}
-	defer file.Close()
+	defer closeFn()
 
-	t, err := h.service.UploadToolFile(tenant.GetTenantID(c), c.Param("name"), &services.ToolFileInput{
-		FileName: header.Filename,
-		File:     file,
-		FileSize: header.Size,
-	})
+	t, err := h.service.UploadToolFile(tenant.GetTenantID(c), c.Param("name"), in)
 	if err != nil {
 		respondToolError(c, err)
 		return

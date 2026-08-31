@@ -219,7 +219,7 @@ func main() {
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
-	toolService := services.NewToolService(uploader, cfg.OSS.CDNHost)
+	toolService := services.NewToolService(uploader)
 	toolHandler := handler.NewToolHandler(toolService)
 
 	skillService := services.NewSkillService(uploader, cfg.OSS.CDNHost)

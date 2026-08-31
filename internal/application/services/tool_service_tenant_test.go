@@ -127,7 +127,7 @@ func TestToolService_UpdateAgentTools_TenantIsolation(t *testing.T) {
 	agentRepo := repository.NewAgentRepository()
 	require.NoError(t, agentRepo.Create("org-b", newMinimalAgent("b1")))
 
-	toolSvc := NewToolService(nil, "")
+	toolSvc := NewToolService(nil)
 	// a-def 为 org-a 的默认工具（旧 JSON 创建语义的存量形态，改用直插模拟）；
 	// shared-def 为共享默认行——source 标 builtin，否则 UpdateAgentTools 的
 	// missing 守卫会拒绝这个无制品的共享行。

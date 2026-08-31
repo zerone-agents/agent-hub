@@ -47,7 +47,7 @@ func setupToolHandlerRouter(t *testing.T) *gin.Engine {
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
 
-	h := NewToolHandler(services.NewToolService(&toolUploaderMock{data: map[string][]byte{}}, ""))
+	h := NewToolHandler(services.NewToolService(&toolUploaderMock{data: map[string][]byte{}}))
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// 生产租户来自 JWT 中间件 c.Set("tenant_id")（chat_handler_test 同款注入）

@@ -42,7 +42,7 @@ func validateToolFileBytes(fileName string, size int64, r io.Reader) ([]byte, st
 	}
 	data, err := io.ReadAll(io.LimitReader(r, MaxToolFileSize+1))
 	if err != nil {
-		return nil, "", "", fmt.Errorf("读取工具文件失败: %w", err)
+		return nil, "", "", fmt.Errorf("read tool file failed: %w", err)
 	}
 	if len(data) == 0 {
 		return nil, "", "", agent.ErrToolFileEmpty
