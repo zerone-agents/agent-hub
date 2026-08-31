@@ -358,18 +358,32 @@ func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
 	return &DownloadDTO{URL: url, ExpiresIn: 3600}, nil
 }
 
-func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error) {
-	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
+// getAgentCfg 统一按名取 Agent 的错误契约（同 getTool 模式）：仓储返回
+// gorm.ErrRecordNotFound 映射 agent.ErrAgentNotFound（errors.Is 可判，handler
+// 据此映射 404）；其余 DB 错误包装为内部错误，绝不伪装成 not-found。
+func (s *ToolService) getAgentCfg(tenantID, agentName string) (*agent.AgentConfig, error) {
+	a, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, agentName)
+		}
+		return nil, fmt.Errorf("query agent failed: %w", err)
+	}
+	return a, nil
+}
+
+func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error) {
+	agentCfg, err := s.getAgentCfg(tenantID, agentName)
+	if err != nil {
+		return nil, err
 	}
 	return s.repo.GetToolsByAgent(agentCfg.ID)
 }
 
 func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []string) error {
-	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
+	agentCfg, err := s.getAgentCfg(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		return err
 	}
 
 	defaultToolNames, err := s.repo.GetDefaultToolNames(tenantID)

@@ -31,7 +31,7 @@ func respondToolError(c *gin.Context, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, agent.ErrToolNotFound):
+	case errors.Is(err, agent.ErrToolNotFound), errors.Is(err, agent.ErrAgentNotFound):
 		respondError(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, agent.ErrToolStorageDisabled):
 		respondError(c, http.StatusServiceUnavailable, err.Error())
@@ -180,7 +180,8 @@ func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 func (h *ToolHandler) GetAgentTools(c *gin.Context) {
 	toolNames, err := h.service.GetAgentTools(tenant.GetTenantID(c), c.Param("name"))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		// agent 不存在 → 404；DB 故障经 default 桶如实 500（对齐 UpdateAgentTools）
+		respondToolError(c, err)
 		return
 	}
 	respondSuccess(c, toolNames)

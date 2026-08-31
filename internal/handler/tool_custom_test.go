@@ -62,7 +62,8 @@ func setupToolHandlerRouter(t *testing.T) *gin.Engine {
 
 // setupToolHandlerRouterWith 支持注入自定义 uploader（nil=存储未配置、
 // failingUploaderMock=OSS 故障），供 5xx 语义回归测试使用；路由对齐
-// cmd/server/main.go 的 Tool 领域注册（含 GET /:name）。
+// cmd/server/main.go 的 Tool 领域注册（含 GET /:name），并注册挂载在
+// /agents/:name/tools 的 UpdateAgentTools/GetAgentTools 两条。
 func setupToolHandlerRouterWith(t *testing.T, uploader oss.OSSUploader) *gin.Engine {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -83,6 +84,8 @@ func setupToolHandlerRouterWith(t *testing.T, uploader oss.OSSUploader) *gin.Eng
 	r.PUT("/api/v1/admin/tools/:name/file", h.UploadFile)
 	r.GET("/api/v1/admin/tools/:name/download", h.Download)
 	r.DELETE("/api/v1/admin/tools/:name", h.Delete)
+	r.PUT("/api/v1/admin/agents/:name/tools", h.UpdateAgentTools)
+	r.GET("/api/v1/admin/agents/:name/tools", h.GetAgentTools)
 	return r
 }
 
@@ -249,4 +252,27 @@ func TestToolHandler_GetMissing404(t *testing.T) {
 	r.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/admin/tools/NoSuchTool", nil))
 	require.Equal(t, http.StatusNotFound, resp.Code)
 	require.Contains(t, resp.Body.String(), "Tool 不存在")
+}
+
+// TestToolHandler_AgentToolsAgentMissing404 回归守卫：不存在的 Agent → 404 且
+// 文案携带 Agent 名。此前 service 层一律包成 "Agent '%s' 不存在"（非 sentinel），
+// UpdateAgentTools 落 500 桶、GetAgentTools 直写 500，均非 not-found 语义。
+func TestToolHandler_AgentToolsAgentMissing404(t *testing.T) {
+	r := setupToolHandlerRouter(t)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/NoSuchAgent/tools", bytes.NewBufferString(`{"toolNames":["Bash"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusNotFound, resp.Code)
+	var body struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	require.Contains(t, body.Error, "Agent 不存在")
+	require.Contains(t, body.Error, "NoSuchAgent")
+
+	// GET 同契约（该 handler 此前绕过 respondToolError 直写 500）
+	resp2 := httptest.NewRecorder()
+	r.ServeHTTP(resp2, httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/NoSuchAgent/tools", nil))
+	require.Equal(t, http.StatusNotFound, resp2.Code)
 }

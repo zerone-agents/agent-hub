@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按
+// fmt.Errorf("%w: %s", ErrAgentNotFound, name) 包装，handler 用 errors.Is 映射
+// 404（对齐 ErrToolNotFound；DB 故障走英文诊断包装 → 500 桶，绝不伪装 not-found）。
+var ErrAgentNotFound = errors.New("Agent 不存在")
+
 // Tool 领域 sentinel errors（issue #88）。handler 用 errors.Is/As 精确映射
 // HTTP 状态码——模式对齐 internal/domain/skill/errors.go。
 var (
