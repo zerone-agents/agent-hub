@@ -62,8 +62,8 @@ func setupToolHandlerRouter(t *testing.T) *gin.Engine {
 
 // setupToolHandlerRouterWith 支持注入自定义 uploader（nil=存储未配置、
 // failingUploaderMock=OSS 故障），供 5xx 语义回归测试使用；路由对齐
-// cmd/server/main.go 的 Tool 领域注册（含 GET /:name），并注册挂载在
-// /agents/:name/tools 的 UpdateAgentTools/GetAgentTools 两条。
+// cmd/server/main.go 的 Tool 领域注册（含 GET 列表与 GET /:name），并注册
+// 挂载在 /agents/:name/tools 的 UpdateAgentTools/GetAgentTools 两条。
 func setupToolHandlerRouterWith(t *testing.T, uploader oss.OSSUploader) *gin.Engine {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -79,6 +79,7 @@ func setupToolHandlerRouterWith(t *testing.T, uploader oss.OSSUploader) *gin.Eng
 	// 生产租户来自 JWT 中间件 c.Set("tenant_id")（chat_handler_test 同款注入）
 	r.Use(func(c *gin.Context) { c.Set("tenant_id", "tenant-a") })
 	r.POST("/api/v1/admin/tools", h.Create)
+	r.GET("/api/v1/admin/tools", h.List)
 	r.GET("/api/v1/admin/tools/:name", h.Get)
 	r.PUT("/api/v1/admin/tools/:name", h.Update)
 	r.PUT("/api/v1/admin/tools/:name/file", h.UploadFile)
@@ -225,6 +226,32 @@ func TestToolHandler_GetDBFailure500(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, resp.Code)
 	require.Contains(t, resp.Body.String(), "服务器内部错误")
 	require.NotContains(t, resp.Body.String(), "query tool failed")
+}
+
+// TestToolHandler_ListDBFailure500 锁定 List 的 DB 故障 → 500 中性文案
+// （expert review round 4：List 此前绕过 respondToolError 直写 err.Error()，
+// 泄漏 DB/驱动诊断；注入标记 forced-list-failure 及 service 层包装文案均
+// 不得出现在响应体）。注入手法与 GetDBFailure500 相同：Query 回调按
+// tools 表守卫强制失败。
+func TestToolHandler_ListDBFailure500(t *testing.T) {
+	r := setupToolHandlerRouter(t)
+	db := database.GetDB()
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:force_tools_list_fail", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "tools" {
+			_ = tx.AddError(errors.New("forced-list-failure"))
+		}
+	}))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove("test:force_tools_list_fail")
+	})
+
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/admin/tools", nil))
+	require.Equal(t, http.StatusInternalServerError, resp.Code)
+	body := resp.Body.String()
+	require.Contains(t, body, "服务器内部错误")
+	require.NotContains(t, body, "forced-list-failure")
+	require.NotContains(t, body, "获取 Tool 列表失败")
 }
 
 // TestToolHandler_CreateInvalidName400 锁定非法工具名（deployer 契约拒绝

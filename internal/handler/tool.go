@@ -52,7 +52,9 @@ func respondToolError(c *gin.Context, err error) {
 func (h *ToolHandler) List(c *gin.Context) {
 	tools, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		// DB 故障经 default 桶 → 500 中性文案（expert review round 4：
+		// 不再直写 err.Error() 泄漏 DB/驱动诊断）。
+		respondToolError(c, err)
 		return
 	}
 	respondSuccess(c, tools)
