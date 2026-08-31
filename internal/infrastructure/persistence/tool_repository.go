@@ -15,6 +15,11 @@ func NewToolRepository() *ToolRepository {
 	return &ToolRepository{db: database.GetDB()}
 }
 
+// NewToolRepositoryWithDB 供测试注入隔离 DB（对齐 NewSkillRepositoryWithDB）。
+func NewToolRepositoryWithDB(db *gorm.DB) *ToolRepository {
+	return &ToolRepository{db: db}
+}
+
 // mustOwnTool 写路径统一入口校验（同 mustOwnProvider 模式）：tool 不属于该
 // 租户则返回 gorm.ErrRecordNotFound，不暴露存在性。共享内置行（tenant_id=”
 // 的 Skill/Task/... 模板）只读——tenantID 为空串的系统路径（SeedBuiltins）
@@ -90,6 +95,31 @@ func (r *ToolRepository) GetToolsByAgent(agentID uint64) ([]string, error) {
 		Joins("JOIN tools ON agent_tools.tool_id = tools.id").
 		Where("agent_tools.agent_id = ?", agentID).
 		Pluck("tools.name", &names).Error
+	return names, err
+}
+
+// GetToolRecordsByAgent 返回 agent 关联的完整 Tool 行（含 source 与制品字段）。
+// 部署请求构建的单一数据源：Tools 全量名与 CustomTools ready 子集都从这里派生。
+func (r *ToolRepository) GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, error) {
+	var tools []*agent.Tool
+	err := r.db.Table("agent_tools").
+		Select("tools.*").
+		Joins("JOIN tools ON agent_tools.tool_id = tools.id").
+		Where("agent_tools.agent_id = ?", agentID).
+		Find(&tools).Error
+	return tools, err
+}
+
+// GetAgentNamesByToolID 返回仍挂载该工具的 agent 名单（删除保护 409 载荷）。
+// 跨租户全量：工具归属已由主表校验，名单仅作提示。
+func (r *ToolRepository) GetAgentNamesByToolID(toolID uint64) ([]string, error) {
+	var names []string
+	err := r.db.Table("agent_tools").
+		Select("agents.name").
+		Joins("JOIN agents ON agent_tools.agent_id = agents.id").
+		Where("agent_tools.tool_id = ?", toolID).
+		Order("agents.name ASC").
+		Pluck("agents.name", &names).Error
 	return names, err
 }
 
