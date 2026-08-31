@@ -33,6 +33,8 @@ import {
   ToolCreateCommand,
   ToolUpdateCommand,
   ToolDeleteCommand,
+  ToolUploadCommand,
+  ToolDownloadCommand,
 } from "./commands/tool";
 import {
   McpListCommand,
@@ -91,6 +93,8 @@ cli.register(ToolGetCommand);
 cli.register(ToolCreateCommand);
 cli.register(ToolUpdateCommand);
 cli.register(ToolDeleteCommand);
+cli.register(ToolUploadCommand);
+cli.register(ToolDownloadCommand);
 
 // mcp
 cli.register(McpListCommand);

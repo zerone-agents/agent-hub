@@ -64,20 +64,54 @@ describe("tool client", () => {
     expect(calls[0][1].method).toBe("GET");
   });
 
-  test("createTool calls POST /api/v1/admin/tools with body", async () => {
-    const body = { name: "calculator", title: "Calculator" };
+  test("createTool posts multipart form data", async () => {
     const fetchMock = setupFetchMock(sampleTool);
 
     const { createTool } = await import(
       `../../src/client/tool.ts?t=${Date.now()}`
     );
-    const result = await createTool(body);
+    const result = await createTool({
+      name: "SayHello",
+      title: "Hello",
+      fileBuffer: Buffer.from("export default {}"),
+      fileName: "say.ts",
+    });
 
-    expect(result.title).toBe("Calculator");
+    expect(result.name).toBe("calculator");
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/tools");
     expect(calls[0][1].method).toBe("POST");
-    expect(calls[0][1].body).toEqual(body);
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+  });
+
+  test("uploadToolFile PUTs multipart to /:name/file", async () => {
+    const fetchMock = setupFetchMock(sampleTool);
+
+    const { uploadToolFile } = await import(
+      `../../src/client/tool.ts?t=${Date.now()}`
+    );
+    await uploadToolFile("SayHello", {
+      fileBuffer: Buffer.from("x"),
+      fileName: "say.ts",
+    });
+
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/SayHello/file");
+    expect(calls[0][1].method).toBe("PUT");
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+  });
+
+  test("downloadTool GETs /:name/download", async () => {
+    const fetchMock = setupFetchMock({ url: "https://x/y", expiresIn: 3600 });
+
+    const { downloadTool } = await import(
+      `../../src/client/tool.ts?t=${Date.now()}`
+    );
+    const res = await downloadTool("SayHello");
+
+    expect(res.url).toBe("https://x/y");
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/SayHello/download");
   });
 
   test("updateTool calls PUT /api/v1/admin/tools/:name", async () => {
