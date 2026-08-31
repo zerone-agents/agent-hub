@@ -60,6 +60,20 @@ func (AgentSubagent) TableName() string {
 	return "agent_subagents"
 }
 
+// Tool 来源（issue #88）：builtin = tenant_id=” 的共享只读预设行；
+// custom = 租户上传的单文件工具（.ts/.mts/.js/.mjs 制品）。
+const (
+	ToolSourceBuiltin = "builtin"
+	ToolSourceCustom  = "custom"
+)
+
+// 自定义工具制品状态（由文件字段派生，不持久化）：四字段完整为 ready，
+// 否则 missing（存量迁移行——列表可见但不可新增挂载/部署，补传后恢复）。
+const (
+	ToolArtifactReady   = "ready"
+	ToolArtifactMissing = "missing"
+)
+
 type Tool struct {
 	ID          uint64    `gorm:"primaryKey;autoIncrement"`
 	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_tools_tenant_name,priority:2;not null"`
@@ -67,6 +81,11 @@ type Tool struct {
 	Title       string    `gorm:"type:varchar(128)"`
 	Description string    `gorm:"type:text"`
 	IsDefault   bool      `gorm:"column:is_default;not null;default:false"`
+	Source      string    `gorm:"type:varchar(16);not null;default:'custom'"`
+	FileName    string    `gorm:"column:file_name;type:varchar(255)"` // 上传原始文件名（展示/审计，扩展名来源）
+	FileURL     string    `gorm:"column:file_url;type:varchar(512)"`  // OSS object key（非完整 URL，同 skill.URL）
+	FileHash    string    `gorm:"column:file_hash;type:varchar(128)"` // sha256 hex
+	FileSize    int64     `gorm:"column:file_size"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at;index"`
 }
@@ -74,6 +93,19 @@ type Tool struct {
 func (Tool) TableName() string {
 	return "tools"
 }
+
+// ArtifactStatus 派生制品状态。builtin 无制品语义，恒 ready。
+func (t *Tool) ArtifactStatus() string {
+	if t.Source != ToolSourceCustom {
+		return ToolArtifactReady
+	}
+	if t.FileName != "" && t.FileURL != "" && t.FileHash != "" && t.FileSize > 0 {
+		return ToolArtifactReady
+	}
+	return ToolArtifactMissing
+}
+
+func (t *Tool) IsBuiltin() bool { return t.Source == ToolSourceBuiltin }
 
 // PresetToolNames 是以共享模板行（tenant_id=”）写入 tools 表的全部预设
 // 工具名单，来源 = ToolService.SeedBuiltins（前三个：Skill/Task/MultiTask）

@@ -60,6 +60,11 @@ func setupToolTenantServiceTestDB(t *testing.T) *gorm.DB {
 			title VARCHAR(128) DEFAULT '',
 			description TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
+			source VARCHAR(16) NOT NULL DEFAULT 'custom',
+			file_name VARCHAR(255),
+			file_url VARCHAR(512),
+			file_hash VARCHAR(128),
+			file_size INTEGER,
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,

@@ -85,6 +85,7 @@ func (s *ToolService) SeedBuiltins() error {
 	const sysTenant = ""
 	for i := range builtinTools {
 		t := builtinTools[i]
+		t.Source = agent.ToolSourceBuiltin
 		exists, err := s.repo.ExistsByName(sysTenant, t.Name)
 		if err != nil {
 			return fmt.Errorf("检查内置 %s tool 失败: %w", t.Name, err)
@@ -276,6 +277,7 @@ func (s *ToolService) SeedIfEmpty() error {
 			Name:        p.tool.Name,
 			Title:       p.tool.Title,
 			Description: p.tool.Description,
+			Source:      agent.ToolSourceBuiltin,
 		}
 		if err := s.repo.Create(sysTenant, t); err != nil {
 			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", t.Name, err)

@@ -221,6 +221,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("migrate tenant default_key sentinel: %w", err)
 	}
 
+	if err := migrateToolsSource(); err != nil {
+		return fmt.Errorf("migrate tools source column: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -254,6 +258,33 @@ func migrateTenantDefaultKeySentinel() error {
 	}
 	return DB.Exec("UPDATE tenant_oauth_clients SET default_key = ? WHERE default_key IS NOT NULL AND default_key != ?",
 		authdomain.DefaultKeySentinel, authdomain.DefaultKeySentinel).Error
+}
+
+// migrateToolsSource 归一 tools.source 列（issue #88）：
+//   - 共享行（tenant_id=”）且 name ∈ PresetToolNames → builtin；
+//   - source 为空/NULL 的行（防御，正常路径不存在）→ custom；
+//   - custom 行强制 is_default=false（领域约束：默认工具仅 builtin 可任），
+//     既有 agent_tools 关联保留不动（不静默删数据）。
+//
+// 幂等：条件不满足的行第二次运行不再命中。
+func migrateToolsSource() error {
+	if err := DB.Model(&agent.Tool{}).
+		Where("tenant_id = '' AND name IN ?", agent.PresetToolNames).
+		Where("source IS NULL OR source = '' OR source = ?", agent.ToolSourceCustom).
+		Update("source", agent.ToolSourceBuiltin).Error; err != nil {
+		return fmt.Errorf("mark builtin tools: %w", err)
+	}
+	if err := DB.Model(&agent.Tool{}).
+		Where("source IS NULL OR source = ''").
+		Update("source", agent.ToolSourceCustom).Error; err != nil {
+		return fmt.Errorf("normalize custom tools: %w", err)
+	}
+	if err := DB.Model(&agent.Tool{}).
+		Where("source = ? AND is_default = ?", agent.ToolSourceCustom, true).
+		Update("is_default", false).Error; err != nil {
+		return fmt.Errorf("clear is_default on custom tools: %w", err)
+	}
+	return nil
 }
 
 // migrateProviderSplit copies rows from the legacy vendor_presets backup
