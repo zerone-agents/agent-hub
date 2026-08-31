@@ -216,3 +216,38 @@ func TestUpdateAgentTools_RejectNewMissing(t *testing.T) {
 	require.NoError(t, database.GetDB().Create(&agent.AgentTool{AgentID: a.ID, ToolID: missing.ID}).Error)
 	require.NoError(t, svc.UpdateAgentTools("acme", "bot", []string{"Legacy"}))
 }
+
+// TestToolOps_NotFoundSentinel 锁定 not-found 契约（Task 3 review Fix 1）：
+// 不存在的工具名必须 errors.Is(err, agent.ErrToolNotFound)（handler 据此
+// 映射 404），且错误消息携带工具名。
+func TestToolOps_NotFoundSentinel(t *testing.T) {
+	setupToolCustomServiceDB(t)
+	svc, _ := newCustomToolService(t)
+	title := "t"
+	cases := []struct {
+		name string
+		op   func() error
+	}{
+		{"GetByName", func() error { _, err := svc.GetByName("acme", "Ghost"); return err }},
+		{"Update", func() error { _, err := svc.Update("acme", "Ghost", &UpdateToolInput{Title: &title}); return err }},
+		{"UploadToolFile", func() error {
+			buf := bytes.NewBufferString(tsContent)
+			_, err := svc.UploadToolFile("acme", "Ghost", &CustomToolFileInput{FileName: "g.ts", File: buf, FileSize: int64(buf.Len())})
+			return err
+		}},
+		{"Delete", func() error { return svc.Delete("acme", "Ghost") }},
+		{"Download", func() error { _, err := svc.Download("acme", "Ghost"); return err }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.op()
+			require.ErrorIs(t, err, agent.ErrToolNotFound)
+			require.Contains(t, err.Error(), "Ghost")
+		})
+	}
+
+	// UpdateAgentTools 的 per-tool 查找同契约（Agent 本身存在，工具不存在）
+	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, database.GetDB().Create(a).Error)
+	require.ErrorIs(t, svc.UpdateAgentTools("acme", "bot", []string{"Ghost"}), agent.ErrToolNotFound)
+}

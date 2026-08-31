@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"control-panel/internal/domain/agent"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/oss"
+
+	"gorm.io/gorm"
 )
 
 type ToolService struct {
@@ -56,7 +59,7 @@ var presetToolSpecs = []presetToolSpec{
 	{agent.Tool{Name: "CronDelete", Title: "删除定时任务", Description: "删除一个已创建的定时任务。", IsDefault: false}, false},
 	{agent.Tool{Name: "CronList", Title: "列出定时任务", Description: "列出所有已创建的定时任务。", IsDefault: false}, false},
 	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", IsDefault: false}, false},
-	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的任务列表，跟踪任务进度。", IsDefault: false}, false},
+	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", IsDefault: false}, false},
 	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", IsDefault: false}, false},
 }
 
@@ -179,10 +182,25 @@ func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
 	return dtos, nil
 }
 
-func (s *ToolService) GetByName(tenantID, name string) (*ToolDTO, error) {
+// getTool 统一按名取 Tool 的错误契约（issue #88）：仓储返回
+// gorm.ErrRecordNotFound 时映射为 agent.ErrToolNotFound（携带工具名，
+// errors.Is 可判，handler 据此映射 404）；其余 DB 错误包装为内部错误，
+// 绝不伪装成 not-found。
+func (s *ToolService) getTool(tenantID, name string) (*agent.Tool, error) {
 	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("Tool 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrToolNotFound, name)
+		}
+		return nil, fmt.Errorf("查询 Tool 失败: %w", err)
+	}
+	return t, nil
+}
+
+func (s *ToolService) GetByName(tenantID, name string) (*ToolDTO, error) {
+	t, err := s.getTool(tenantID, name)
+	if err != nil {
+		return nil, err
 	}
 	return toolToDTO(t), nil
 }
@@ -231,9 +249,9 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 }
 
 func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*ToolDTO, error) {
-	t, err := s.repo.GetByName(tenantID, name)
+	t, err := s.getTool(tenantID, name)
 	if err != nil {
-		return nil, agent.ErrToolNotFound
+		return nil, err
 	}
 	if t.IsBuiltin() {
 		return nil, agent.ErrToolIsBuiltin
@@ -253,9 +271,9 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 
 // UploadToolFile 同时承担存量 missing 补传与 ready 替换（issue #88）。
 func (s *ToolService) UploadToolFile(tenantID, name string, input *CustomToolFileInput) (*ToolDTO, error) {
-	t, err := s.repo.GetByName(tenantID, name)
+	t, err := s.getTool(tenantID, name)
 	if err != nil {
-		return nil, agent.ErrToolNotFound
+		return nil, err
 	}
 	if t.IsBuiltin() {
 		return nil, agent.ErrToolIsBuiltin
@@ -289,9 +307,9 @@ func (s *ToolService) UploadToolFile(tenantID, name string, input *CustomToolFil
 }
 
 func (s *ToolService) Delete(tenantID, name string) error {
-	t, err := s.repo.GetByName(tenantID, name)
+	t, err := s.getTool(tenantID, name)
 	if err != nil {
-		return agent.ErrToolNotFound
+		return err
 	}
 	if t.IsBuiltin() {
 		return agent.ErrToolIsBuiltin
@@ -313,9 +331,9 @@ func (s *ToolService) Delete(tenantID, name string) error {
 
 // Download 对 ready 自定义工具返回短期下载地址（CDN 永久或 presigned 1h）。
 func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
-	t, err := s.repo.GetByName(tenantID, name)
+	t, err := s.getTool(tenantID, name)
 	if err != nil {
-		return nil, agent.ErrToolNotFound
+		return nil, err
 	}
 	if t.IsBuiltin() {
 		return nil, agent.ErrToolIsBuiltin
@@ -369,9 +387,9 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 	var missingNew []string
 	toolIDs := make([]uint64, 0, len(toolNames))
 	for _, toolName := range toolNames {
-		t, err := s.repo.GetByName(tenantID, toolName)
+		t, err := s.getTool(tenantID, toolName)
 		if err != nil {
-			return fmt.Errorf("Tool '%s' 不存在", toolName)
+			return err
 		}
 		if t.Source == agent.ToolSourceCustom &&
 			t.ArtifactStatus() == agent.ToolArtifactMissing && !current[toolName] {
