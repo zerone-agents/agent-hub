@@ -12,8 +12,8 @@ import { setAuthRole } from '@/test/auth-store-mock'
 vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const mockTools: Tool[] = [
-  { id: 1, name: 'Read', title: '读取文件', description: '读取文件内容', isDefault: true, createdAt: '2026-06-10T10:00:00Z', updatedAt: '' },
-  { id: 2, name: 'Write', title: '写入文件', description: '写入文件内容', isDefault: false, createdAt: '2026-06-12T10:00:00Z', updatedAt: '' }
+  { id: 1, name: 'Read', title: '读取文件', description: '读取文件内容', isDefault: true, source: 'builtin', createdAt: '2026-06-10T10:00:00Z', updatedAt: '' },
+  { id: 2, name: 'Write', title: '写入文件', description: '写入文件内容', isDefault: false, source: 'builtin', createdAt: '2026-06-12T10:00:00Z', updatedAt: '' }
 ]
 
 vi.mock('@/queries/useTools', () => ({

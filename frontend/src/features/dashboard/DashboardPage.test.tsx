@@ -19,7 +19,7 @@ const mockAgents: Agent[] = [
   { id: 2, name: 'coder', config: { title: { zh: '编程助手' } }, desktopEnabled: false, createdAt: '2026-06-15T10:00:00Z' }
 ]
 const mockTools: Tool[] = [
-  { id: 1, name: 'search', title: '搜索', description: '', isDefault: false, createdAt: '2026-06-12T10:00:00Z', updatedAt: '' }
+  { id: 1, name: 'search', title: '搜索', description: '', isDefault: false, source: 'builtin', createdAt: '2026-06-12T10:00:00Z', updatedAt: '' }
 ]
 const mockSkills: Skill[] = [
   { id: 1, name: 'py', type: 'expert', title: 'Python', titleEn: 'Python', description: '', descriptionEn: '', url: '', fileHash: '', fileSize: 0, createdAt: '2026-06-14T10:00:00Z', updatedAt: '' },

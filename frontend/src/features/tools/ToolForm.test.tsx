@@ -12,6 +12,7 @@ const mockDefaultTool: Tool = {
   title: '执行命令',
   description: '执行 bash 命令',
   isDefault: true,
+  source: 'builtin',
   createdAt: '2026-06-10T10:00:00Z',
   updatedAt: ''
 }
@@ -22,6 +23,7 @@ const mockNormalTool: Tool = {
   title: '读取文件',
   description: '读取文件内容',
   isDefault: false,
+  source: 'builtin',
   createdAt: '2026-06-12T10:00:00Z',
   updatedAt: ''
 }
