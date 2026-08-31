@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -17,84 +19,121 @@ func NewToolHandler(service *services.ToolService) *ToolHandler {
 	return &ToolHandler{service: service}
 }
 
+// respondToolError 映射 Tool 领域错误（issue #88）：关联删除保护 409 带
+// data.agents 名单；sentinel 400；NotFound 404；默认 400（沿现状）。
+func respondToolError(c *gin.Context, err error) {
+	var inUse *agent.ToolInUseError
+	if errors.As(err, &inUse) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents}})
+		return
+	}
+	switch {
+	case errors.Is(err, agent.ErrToolNotFound):
+		respondError(c, http.StatusNotFound, err.Error())
+	default:
+		respondError(c, http.StatusBadRequest, err.Error())
+	}
+}
+
 func (h *ToolHandler) List(c *gin.Context) {
 	tools, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    tools,
-	})
+	respondSuccess(c, tools)
 }
 
 func (h *ToolHandler) Get(c *gin.Context) {
-	name := c.Param("name")
-	t, err := h.service.GetByName(tenant.GetTenantID(c), name)
+	t, err := h.service.GetByName(tenant.GetTenantID(c), c.Param("name"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    t,
-	})
+	respondSuccess(c, t)
 }
 
-// Create 是 issue #88 Task 3 的临时编译垫片：旧 JSON CreateToolInput/Create
-// 服务端语义已随制品生命周期改造删除（被 CreateCustomTool 取代），multipart
-// 端点由后续 handler 改造（issue #88）提供。
+// Create 处理自定义工具创建（multipart：name/title/description/file）。
 func (h *ToolHandler) Create(c *gin.Context) {
-	c.JSON(http.StatusBadRequest, gin.H{
-		"success": false,
-		"error":   "Tool 创建已迁移为文件上传方式，当前接口暂不可用",
+	name := c.PostForm("name")
+	if name == "" {
+		respondError(c, http.StatusBadRequest, "name 参数不能为空")
+		return
+	}
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+		return
+	}
+	defer file.Close()
+
+	t, err := h.service.CreateCustomTool(tenant.GetTenantID(c), &services.CreateCustomToolInput{
+		Name:        name,
+		Title:       c.PostForm("title"),
+		Description: c.PostForm("description"),
+		FileName:    header.Filename,
+		File:        file,
+		FileSize:    header.Size,
 	})
+	if err != nil {
+		respondToolError(c, err)
+		return
+	}
+	respondCreated(c, t)
 }
 
+// Update 仅更新展示元数据（JSON：title/description），builtin 拒绝。
 func (h *ToolHandler) Update(c *gin.Context) {
-	name := c.Param("name")
 	var input services.UpdateToolInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	t, err := h.service.Update(tenant.GetTenantID(c), name, &input)
+	t, err := h.service.Update(tenant.GetTenantID(c), c.Param("name"), &input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondToolError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    t,
+	respondSuccess(c, t)
+}
+
+// UploadFile 补传（missing）与替换（ready）共用：multipart file。
+func (h *ToolHandler) UploadFile(c *gin.Context) {
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+		return
+	}
+	defer file.Close()
+
+	t, err := h.service.UploadToolFile(tenant.GetTenantID(c), c.Param("name"), &services.CustomToolFileInput{
+		FileName: header.Filename,
+		File:     file,
+		FileSize: header.Size,
 	})
+	if err != nil {
+		respondToolError(c, err)
+		return
+	}
+	respondSuccess(c, t)
+}
+
+// Download 返回短期下载地址（ready 自定义工具 only）。
+func (h *ToolHandler) Download(c *gin.Context) {
+	dto, err := h.service.Download(tenant.GetTenantID(c), c.Param("name"))
+	if err != nil {
+		respondToolError(c, err)
+		return
+	}
+	respondSuccess(c, dto)
 }
 
 func (h *ToolHandler) Delete(c *gin.Context) {
-	name := c.Param("name")
-	if err := h.service.Delete(tenant.GetTenantID(c), name); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+	if err := h.service.Delete(tenant.GetTenantID(c), c.Param("name")); err != nil {
+		respondToolError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Tool 已删除",
-	})
+	respondMessage(c, http.StatusOK, "Tool 已删除")
 }
 
 type updateAgentToolsReq struct {
@@ -102,40 +141,23 @@ type updateAgentToolsReq struct {
 }
 
 func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
-	agentName := c.Param("name")
 	var req updateAgentToolsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentTools(tenant.GetTenantID(c), agentName, req.ToolNames); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+	if err := h.service.UpdateAgentTools(tenant.GetTenantID(c), c.Param("name"), req.ToolNames); err != nil {
+		respondToolError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Agent Tool 关系已更新",
-	})
+	respondMessage(c, http.StatusOK, "Agent Tool 关系已更新")
 }
 
 func (h *ToolHandler) GetAgentTools(c *gin.Context) {
-	agentName := c.Param("name")
-	toolNames, err := h.service.GetAgentTools(tenant.GetTenantID(c), agentName)
+	toolNames, err := h.service.GetAgentTools(tenant.GetTenantID(c), c.Param("name"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    toolNames,
-	})
+	respondSuccess(c, toolNames)
 }

@@ -432,6 +432,8 @@ func main() {
 		toolsGroup.POST("", toolHandler.Create)
 		toolsReadGroup.GET("/:name", toolHandler.Get)
 		toolsGroup.PUT("/:name", toolHandler.Update)
+		toolsGroup.PUT("/:name/file", toolHandler.UploadFile)
+		toolsReadGroup.GET("/:name/download", toolHandler.Download)
 		toolsGroup.DELETE("/:name", toolHandler.Delete)
 	}
 
