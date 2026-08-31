@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +47,7 @@ type agentRepository interface {
 
 // toolRepository defines the methods needed from the tool repository.
 type toolRepository interface {
-	GetToolsByAgent(agentID uint64) ([]string, error)
+	GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, error)
 }
 
 // skillRepository defines the methods needed from the skill repository.
@@ -761,8 +762,8 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 }
 
 // loadAgentRelations loads tools, skills, and subagents for an agent.
-func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.AgentConfig) ([]string, []*skill.Skill, []agent.AgentConfig, error) {
-	tools, err := s.toolRepo.GetToolsByAgent(cfg.ID)
+func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.AgentConfig) ([]*agent.Tool, []*skill.Skill, []agent.AgentConfig, error) {
+	toolRecords, err := s.toolRepo.GetToolRecordsByAgent(cfg.ID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("load tools failed: %w", err)
 	}
@@ -787,7 +788,7 @@ func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.Ag
 		subagents = append(subagents, *sub)
 	}
 
-	return tools, skills, subagents, nil
+	return toolRecords, skills, subagents, nil
 }
 
 // buildCreateRequest builds the deployer.CreateAgentRequest from agent config and relations.
@@ -796,7 +797,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 	tenantID string,
 	cfg *agent.AgentConfig,
 	providerDTO providerdomain.Provider,
-	tools []string,
+	toolRecords []*agent.Tool,
 	skills []*skill.Skill,
 	subagents []agent.AgentConfig,
 	mcpServers map[string]*McpClientDTO,
@@ -813,6 +814,37 @@ func (s *AgentDeployerService) buildCreateRequest(
 		})
 	}
 
+	// Custom tool artifacts (issue #88): Tools stays the complete allow-list;
+	// CustomTools only carries source=custom && ready rows, sorted by name so
+	// the request and generated YAML are reproducible.
+	toolNames := make([]string, 0, len(toolRecords))
+	customToolSources := make([]deployer.ToolSource, 0)
+	missingCustom := make([]string, 0)
+	for _, t := range toolRecords {
+		toolNames = append(toolNames, t.Name)
+		if t.Source != agent.ToolSourceCustom {
+			continue
+		}
+		if t.ArtifactStatus() != agent.ToolArtifactReady {
+			missingCustom = append(missingCustom, t.Name)
+			continue
+		}
+		customToolSources = append(customToolSources, deployer.ToolSource{
+			Name:     t.Name,
+			URL:      s.buildArtifactURL(t.FileURL),
+			Hash:     t.FileHash,
+			FileName: t.FileName,
+		})
+	}
+	if len(missingCustom) > 0 {
+		return nil, fmt.Errorf("自定义工具缺少制品文件，无法部署：%s。请先在工具页补传文件或解除挂载", strings.Join(missingCustom, "、"))
+	}
+	if len(customToolSources) > 0 && s.cdnHost == "" {
+		return nil, fmt.Errorf("未配置 OSS_CDN_HOST，无法为自定义工具构造下载地址（共 %d 个）。请配置 CDN 后重新部署", len(customToolSources))
+	}
+	sort.Strings(toolNames)
+	sort.Slice(customToolSources, func(i, j int) bool { return customToolSources[i].Name < customToolSources[j].Name })
+
 	// Build skill sources from full skill records
 	skillSources := make([]deployer.SkillSource, 0, len(skills))
 	for _, sk := range skills {
@@ -822,7 +854,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 		}
 		skillSources = append(skillSources, deployer.SkillSource{
 			Name: sk.Name,
-			URL:  s.buildSkillURL(sk.URL),
+			URL:  s.buildArtifactURL(sk.URL),
 			Hash: sk.FileHash,
 		})
 	}
@@ -898,7 +930,8 @@ func (s *AgentDeployerService) buildCreateRequest(
 			MaxTurns:        intPtr(cfg.MaxTurns),
 			MaxSessionTurns: cfg.MaxSessionTurns,
 			PermissionMode:  cfg.PermissionMode,
-			Tools:           tools,
+			Tools:           toolNames,
+			CustomTools:     customToolSources,
 			Skills:          skillSources,
 			Subagents:       subagentDefs,
 			McpServers:      mcpServerConfigs,
@@ -968,12 +1001,12 @@ func (s *AgentDeployerService) runtimeURL(port int) string {
 	return fmt.Sprintf("http://%s:%d", s.publicHost, port)
 }
 
-// buildSkillURL turns a stored OSS object key (e.g. "expert/foo/abc.zip") into
-// a public http(s) URL the deployer can fetch. Skills store OSS keys rather
-// than full URLs because presigned URLs expire; the CDN host provides the
-// public prefix. When cdnHost is empty the key is returned unchanged so the
-// failure surfaces clearly at the deployer boundary instead of being masked.
-func (s *AgentDeployerService) buildSkillURL(ossKey string) string {
+// buildArtifactURL turns a stored OSS object key into a public http(s) URL the
+// deployer can fetch (CDN host + key; the deployer never follows redirects).
+// When cdnHost is empty the key is returned unchanged so the failure surfaces
+// clearly at the deployer boundary — buildCreateRequest fail-fasts earlier for
+// custom tools, skills keep the legacy behavior.
+func (s *AgentDeployerService) buildArtifactURL(ossKey string) string {
 	if s.cdnHost == "" || ossKey == "" {
 		return ossKey
 	}
