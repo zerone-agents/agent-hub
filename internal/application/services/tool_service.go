@@ -119,7 +119,7 @@ type ToolDTO struct {
 	Source         string `json:"source"`
 	ArtifactStatus string `json:"artifactStatus"`
 	FileName       string `json:"fileName,omitempty"`
-	FileURL        string `json:"fileUrl,omitempty"`
+	FileURL        string `json:"-"` // issue #88: object key 不外泄给前端；字段保留供服务层测试与内部使用
 	FileHash       string `json:"fileHash,omitempty"`
 	FileSize       int64  `json:"fileSize,omitempty"`
 	CreatedAt      string `json:"createdAt"`
