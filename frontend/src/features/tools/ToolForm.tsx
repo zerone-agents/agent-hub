@@ -1,11 +1,19 @@
-import { useEffect } from 'react'
-import { Modal, Form, Input, Switch, Button } from 'antd'
-import { XIcon } from '@phosphor-icons/react'
+import { useEffect, useState } from 'react'
+import { Modal, Form, Input, Upload, Button } from 'antd'
+import type { UploadProps } from 'antd'
+import { XIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Tool } from '@/api/tools'
-import { useCreateTool, useUpdateTool } from '@/queries/useTools'
+import { useCreateCustomTool, useUploadToolFile, useUpdateTool } from '@/queries/useTools'
 import { identifierFormRules } from '@/utils/identifier'
+import { tokens as t } from '@/styles/tokens'
+
+export type ToolFormMode = 'create' | 'edit' | 'upload'
+
+// 与 deployer 契约一致：扩展名大小写敏感
+const ALLOWED_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
+const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 const useStyles = createStyles(({ css }) => ({
   modalHead: css`
@@ -51,14 +59,44 @@ const useStyles = createStyles(({ css }) => ({
     letter-spacing: 0.05em;
     margin-bottom: 14px;
   `,
-  toggleRow: css`
-    display: flex; align-items: center; gap: 12px; padding: 12px 0;
+  uploadBtn: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--paper);
+    color: var(--text-secondary);
+    border: 1px dashed color-mix(in srgb, var(--foreground) 20%, transparent);
+    border-radius: 4px;
+    font-family: ${t.fontSans};
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    &:hover { background: var(--ink-subtle); border-radius: 4px; padding: 12px 8px; margin: 0 -8px; }
+    transition: all 0.15s;
+    &:hover {
+      border-color: var(--ink);
+      color: var(--ink);
+    }
   `,
-  toggleText: css`display: flex; flex-direction: column;`,
-  toggleName: css`font-size: 13px; font-weight: 500; color: var(--text);`,
-  toggleDesc: css`font-size: 11px; color: var(--text-muted);`,
+  uploadError: css`
+    margin-top: 8px;
+    font-size: 12px;
+    color: ${t.danger};
+  `,
+  uploadHint: css`
+    margin-top: 8px;
+    font-size: 12px;
+    color: ${t.textTertiary};
+  `,
+  hintBlock: css`
+    margin-top: 16px;
+    padding: 10px 12px;
+    background: var(--ink-subtle);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    line-height: 1.8;
+  `,
   modalFoot: css`
     display: flex;
     justify-content: flex-end;
@@ -68,8 +106,9 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-interface ToolFormProps {
+export interface ToolFormProps {
   open: boolean
+  mode: ToolFormMode
   editingTool: Tool | null
   onClose: () => void
 }
@@ -78,48 +117,95 @@ interface FormValues {
   name: string
   title: string
   description: string
-  isDefault: boolean
 }
 
-export default function ToolForm({ open, editingTool, onClose }: ToolFormProps) {
+export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormProps) {
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
-  const createTool = useCreateTool()
+  const createCustomTool = useCreateCustomTool()
   const updateTool = useUpdateTool()
-  const submitting = createTool.isPending || updateTool.isPending
+  const uploadToolFile = useUploadToolFile()
+  const submitting = createCustomTool.isPending || updateTool.isPending || uploadToolFile.isPending
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadError, setUploadError] = useState('')
 
   useEffect(() => {
     if (open) {
-      if (editingTool) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-related local state on modal open; coupled to the antd form.setFieldsValue below
+      setSelectedFile(null)
+      setUploadError('')
+      if (mode === 'create' || !editingTool) {
+        form.resetFields()
+      } else {
         form.setFieldsValue({
           name: editingTool.name,
           title: editingTool.title || '',
-          description: editingTool.description || '',
-          isDefault: editingTool.isDefault || false
+          description: editingTool.description || ''
         })
-      } else {
-        form.resetFields()
       }
     }
-  }, [open, editingTool, form])
+  }, [open, mode, editingTool, form])
+
+  const beforeUpload: UploadProps['beforeUpload'] = (file) => {
+    const ext = file.name.substring(file.name.lastIndexOf('.'))
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      setUploadError('仅支持 .ts / .mts / .js / .mjs 文件')
+      return Upload.LIST_IGNORE
+    }
+    if (file.size === 0) {
+      setUploadError('文件不能为空')
+      return Upload.LIST_IGNORE
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadError('文件大小不能超过 5MB')
+      return Upload.LIST_IGNORE
+    }
+    setUploadError('')
+    setSelectedFile(file)
+    return false // prevent auto-upload
+  }
 
   const handleSubmit = async () => {
+    const file = selectedFile
+    if (mode !== 'edit' && !file) {
+      setUploadError('请选择工具文件')
+      return
+    }
+
+    if (mode === 'upload') {
+      if (!editingTool || !file) return
+      await uploadToolFile.mutateAsync({ name: editingTool.name, file })
+      onClose()
+      return
+    }
+
     const values = await form.validateFields()
-    if (editingTool) {
-      await updateTool.mutateAsync({
-        name: editingTool.name,
-        data: { title: values.title, description: values.description, isDefault: values.isDefault }
-      })
-    } else {
-      await createTool.mutateAsync({
+    if (mode === 'create') {
+      if (!file) return
+      await createCustomTool.mutateAsync({
         name: values.name,
         title: values.title,
         description: values.description,
-        isDefault: values.isDefault
+        file
       })
+    } else {
+      if (!editingTool) return
+      // 先更新元数据，再（可选）上传替换文件
+      await updateTool.mutateAsync({
+        name: editingTool.name,
+        data: { title: values.title, description: values.description }
+      })
+      if (file) {
+        await uploadToolFile.mutateAsync({ name: editingTool.name, file })
+      }
     }
     onClose()
   }
+
+  const modalTitle = mode === 'create' ? '上传自定义工具' : mode === 'edit' ? '编辑工具' : '补传/替换工具文件'
+  const submitText = mode === 'create' ? '上传' : mode === 'edit' ? '更新' : '补传'
+  const showMetadata = mode !== 'upload'
 
   return (
     <Modal
@@ -133,49 +219,63 @@ export default function ToolForm({ open, editingTool, onClose }: ToolFormProps) 
       destroyOnHidden
     >
       <div className={styles.modalHead}>
-        <div className={styles.modalTitle}>{editingTool ? '编辑工具' : '新建工具'}</div>
+        <div className={styles.modalTitle}>{modalTitle}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
           <XIcon size={18} />
         </button>
       </div>
 
       <Form form={form} layout="vertical" className={styles.modalBody} requiredMark={false}>
-        <div className={styles.sectionTitle}>基本信息</div>
-        <Form.Item
-          label="工具标识"
-          name="name"
-          rules={identifierFormRules('工具标识')}
-        >
-          <Input placeholder="e.g. Read" disabled={!!editingTool} />
-        </Form.Item>
+        {showMetadata && (
+          <>
+            <div className={styles.sectionTitle}>基本信息</div>
+            <Form.Item
+              label="工具标识"
+              name="name"
+              rules={identifierFormRules('工具标识')}
+            >
+              <Input placeholder="e.g. SayHello" disabled={mode !== 'create'} />
+            </Form.Item>
 
-        <div className={styles.sectionTitle}>显示设置</div>
-        <Form.Item label="中文名称" name="title">
-          <Input placeholder="中文名称" />
-        </Form.Item>
-        <Form.Item label="功能描述" name="description">
-          <Input.TextArea placeholder="描述此工具的功能用途" rows={3} />
-        </Form.Item>
+            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>显示设置</div>
+            <Form.Item label="中文名称" name="title">
+              <Input placeholder="中文名称" />
+            </Form.Item>
+            <Form.Item label="功能描述" name="description">
+              <Input.TextArea placeholder="描述此工具的功能用途" rows={3} />
+            </Form.Item>
+          </>
+        )}
 
-        <div className={styles.sectionTitle}>默认设置</div>
-        <div className={styles.toggleRow} onClick={() => { form.setFieldValue('isDefault', !form.getFieldValue('isDefault')); }}>
-          <Form.Item name="isDefault" valuePropName="checked" noStyle>
-            <Switch
-              size="small"
-              onClick={(_checked, ev) => { ev.stopPropagation(); }}
-            />
-          </Form.Item>
-          <div className={styles.toggleText}>
-            <span className={styles.toggleName}>默认工具</span>
-            <span className={styles.toggleDesc}>自动添加到所有当前及未来的 Agent，且不可取消选择</span>
-          </div>
+        <div className={styles.sectionTitle} style={{ marginTop: showMetadata ? 20 : 0 }}>
+          {mode === 'edit' ? '替换文件（可选）' : '工具文件'}
         </div>
+        <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".ts,.mts,.js,.mjs" maxCount={1}>
+          <button type="button" className={styles.uploadBtn}>
+            <UploadSimpleIcon size={16} />
+            {selectedFile ? selectedFile.name : '选择 .ts / .mts / .js / .mjs 文件'}
+          </button>
+        </Upload>
+        {uploadError && <div className={styles.uploadError}>{uploadError}</div>}
+        {mode === 'edit' && !uploadError && (
+          <div className={styles.uploadHint}>留空则保留原文件，选择新文件将替换</div>
+        )}
+        {mode === 'upload' && !uploadError && (
+          <div className={styles.uploadHint}>支持 .ts / .mts / .js / .mjs 文件，最大 5MB</div>
+        )}
+        {mode === 'create' && (
+          <div className={styles.hintBlock}>
+            <div>· 工具标识必须与文件内默认导出的 name 一致，部署时由 Runtime 最终校验</div>
+            <div>· 仅支持 Node.js 内置模块、@zerone-agent/agent-runtime/tools 与 zod，不安装 npm 依赖</div>
+            <div>· 工具将在 Agent Runtime 进程中执行并拥有完整 Node.js 权限，仅上传可信代码</div>
+          </div>
+        )}
       </Form>
 
       <div className={styles.modalFoot}>
         <Button onClick={onClose}>取消</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {editingTool ? '更新' : '创建'}
+          {submitText}
         </PrimaryButton>
       </div>
     </Modal>

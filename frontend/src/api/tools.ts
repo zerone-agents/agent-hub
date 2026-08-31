@@ -32,8 +32,6 @@ const multipartHeaders = { 'Content-Type': 'multipart/form-data' }
 export const toolApi = {
   list: () => apiClient.get('/api/v1/admin/tools'),
   get: (name: string) => apiClient.get(`/api/v1/admin/tools/${encodeURIComponent(name)}`),
-  // 临时保留：Task 9 ToolForm 改造后删除（issue #88）
-  create: (data: Partial<Tool>) => apiClient.post('/api/v1/admin/tools', data),
   createCustom: (data: CustomToolCreateInput) => {
     const formData = new FormData()
     formData.append('name', data.name)

@@ -13,19 +13,6 @@ export function useTools() {
   })
 }
 
-// 临时保留：Task 9 ToolForm 改造后删除（issue #88）
-export function useCreateTool() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: Partial<Tool>) => toolApi.create(data),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['tools'] })
-      message.success('工具已创建')
-    },
-    onError: (err) => message.error(parseApiError(err))
-  })
-}
-
 export function useCreateCustomTool() {
   const qc = useQueryClient()
   return useMutation({
@@ -51,11 +38,10 @@ export function useUploadToolFile() {
   })
 }
 
-// 临时保留：Task 9 收窄为 { title?; description? }（issue #88）——ToolForm 仍传 isDefault
 export function useUpdateTool() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, data }: { name: string; data: Partial<Tool> }) =>
+    mutationFn: ({ name, data }: { name: string; data: { title?: string; description?: string } }) =>
       toolApi.update(name, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tools'] })
