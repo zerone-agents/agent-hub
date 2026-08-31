@@ -17,6 +17,10 @@ var (
 	ErrToolFileTooLarge    = errors.New("工具文件大小不能超过 5 MiB")
 	ErrToolArtifactMissing = errors.New("自定义工具缺少制品文件，请先补传")
 	ErrToolStorageDisabled = errors.New("文件存储未配置（OSS），无法上传或下载工具文件")
+	// ErrInvalidToolName 工具名校验失败（含 deployer 契约拒绝的 "."/".."）。
+	// ValidateToolName 的所有拒绝路径都包装本 sentinel，handler 据此映射 400
+	// （expert review round 3：校验失败与基础设施故障分流）。
+	ErrInvalidToolName = errors.New("Tool 标识无效")
 )
 
 // ToolInUseError 删除保护：仍被 Agent 关联的自定义工具禁止删除。Agents 携带

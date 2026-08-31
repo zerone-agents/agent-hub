@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"control-panel/internal/application/services"
@@ -19,8 +20,10 @@ func NewToolHandler(service *services.ToolService) *ToolHandler {
 	return &ToolHandler{service: service}
 }
 
-// respondToolError 映射 Tool 领域错误（issue #88）：关联删除保护 409 带
-// data.agents 名单；sentinel 400；NotFound 404；默认 400（沿现状）。
+// respondToolError 映射 Tool 领域错误（issue #88「可行动的错误层级」）：
+// 校验/领域冲突 → 400；仍被挂载 → 409（带 data.agents）；不存在 → 404；
+// 存储未配置 → 503（可行动的配置提示）；基础设施故障（OSS/DB）→ 500 中性
+// 文案，完整错误链只在服务端日志（英文诊断包装已由 service 层保证）。
 func respondToolError(c *gin.Context, err error) {
 	var inUse *agent.ToolInUseError
 	if errors.As(err, &inUse) {
@@ -30,8 +33,19 @@ func respondToolError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, agent.ErrToolNotFound):
 		respondError(c, http.StatusNotFound, err.Error())
-	default:
+	case errors.Is(err, agent.ErrToolStorageDisabled):
+		respondError(c, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, agent.ErrInvalidToolName),
+		errors.Is(err, agent.ErrToolNameExists),
+		errors.Is(err, agent.ErrToolIsBuiltin),
+		errors.Is(err, agent.ErrInvalidToolFile),
+		errors.Is(err, agent.ErrToolFileEmpty),
+		errors.Is(err, agent.ErrToolFileTooLarge),
+		errors.Is(err, agent.ErrToolArtifactMissing):
 		respondError(c, http.StatusBadRequest, err.Error())
+	default:
+		log.Printf("[ToolHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -47,7 +61,9 @@ func (h *ToolHandler) List(c *gin.Context) {
 func (h *ToolHandler) Get(c *gin.Context) {
 	t, err := h.service.GetByName(tenant.GetTenantID(c), c.Param("name"))
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		// not-found → 404 语义不变；DB 故障经 default 桶如实 500
+		// （expert review round 3：不再一律伪装 404）。
+		respondToolError(c, err)
 		return
 	}
 	respondSuccess(c, t)
