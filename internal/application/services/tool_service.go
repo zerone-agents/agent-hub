@@ -1,23 +1,33 @@
 package services
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"control-panel/internal/domain/agent"
 	repository "control-panel/internal/infrastructure/persistence"
+	"control-panel/pkg/oss"
 )
 
 type ToolService struct {
 	repo      *repository.ToolRepository
 	agentRepo *repository.AgentRepository
+	uploader  oss.OSSUploader
+	cdnHost   string
 }
 
-func NewToolService() *ToolService {
+func NewToolService(uploader oss.OSSUploader, cdnHost string) *ToolService {
 	return &ToolService{
 		repo:      repository.NewToolRepository(),
 		agentRepo: repository.NewAgentRepository(),
+		uploader:  uploader,
+		cdnHost:   cdnHost,
 	}
 }
 
@@ -46,7 +56,7 @@ var presetToolSpecs = []presetToolSpec{
 	{agent.Tool{Name: "CronDelete", Title: "删除定时任务", Description: "删除一个已创建的定时任务。", IsDefault: false}, false},
 	{agent.Tool{Name: "CronList", Title: "列出定时任务", Description: "列出所有已创建的定时任务。", IsDefault: false}, false},
 	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", IsDefault: false}, false},
-	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", IsDefault: false}, false},
+	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的任务列表，跟踪任务进度。", IsDefault: false}, false},
 	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", IsDefault: false}, false},
 }
 
@@ -101,38 +111,60 @@ func (s *ToolService) SeedBuiltins() error {
 }
 
 type ToolDTO struct {
-	ID          uint64 `json:"id"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	IsDefault   bool   `json:"isDefault"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
+	ID             uint64 `json:"id"`
+	Name           string `json:"name"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	IsDefault      bool   `json:"isDefault"`
+	Source         string `json:"source"`
+	ArtifactStatus string `json:"artifactStatus"`
+	FileName       string `json:"fileName,omitempty"`
+	FileURL        string `json:"fileUrl,omitempty"`
+	FileHash       string `json:"fileHash,omitempty"`
+	FileSize       int64  `json:"fileSize,omitempty"`
+	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
 }
 
-type CreateToolInput struct {
-	Name        string `json:"name" binding:"required"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	IsDefault   bool   `json:"isDefault"`
+func toolToDTO(t *agent.Tool) *ToolDTO {
+	dto := &ToolDTO{
+		ID:             t.ID,
+		Name:           t.Name,
+		Title:          t.Title,
+		Description:    t.Description,
+		IsDefault:      t.IsDefault,
+		Source:         t.Source,
+		ArtifactStatus: t.ArtifactStatus(),
+		CreatedAt:      t.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:      t.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	if t.Source == agent.ToolSourceCustom {
+		dto.FileName = t.FileName
+		dto.FileURL = t.FileURL
+		dto.FileHash = t.FileHash
+		dto.FileSize = t.FileSize
+	}
+	return dto
+}
+
+type CreateCustomToolInput struct {
+	Name        string
+	Title       string
+	Description string
+	FileName    string
+	File        io.Reader
+	FileSize    int64
+}
+
+type CustomToolFileInput struct {
+	FileName string
+	File     io.Reader
+	FileSize int64
 }
 
 type UpdateToolInput struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
-	IsDefault   *bool   `json:"isDefault"`
-}
-
-func toolToDTO(t *agent.Tool) *ToolDTO {
-	return &ToolDTO{
-		ID:          t.ID,
-		Name:        t.Name,
-		Title:       t.Title,
-		Description: t.Description,
-		IsDefault:   t.IsDefault,
-		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   t.UpdatedAt.UTC().Format(time.RFC3339),
-	}
 }
 
 func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
@@ -155,34 +187,44 @@ func (s *ToolService) GetByName(tenantID, name string) (*ToolDTO, error) {
 	return toolToDTO(t), nil
 }
 
-func (s *ToolService) Create(tenantID string, input *CreateToolInput) (*ToolDTO, error) {
+// CreateCustomTool 创建租户自定义工具（multipart 上传，issue #88）：先上传
+// 内容寻址对象，再落库；落库失败回滚删对象（skill 先例）。
+func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolInput) (*ToolDTO, error) {
 	if err := ValidateToolName(input.Name); err != nil {
 		return nil, err
 	}
-
+	if s.uploader == nil {
+		return nil, agent.ErrToolStorageDisabled
+	}
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
 		return nil, fmt.Errorf("检查 Tool 存在性失败: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("Tool '%s' 已存在", input.Name)
+		return nil, fmt.Errorf("%w: %s", agent.ErrToolNameExists, input.Name)
 	}
-
+	data, ext, hash, err := validateToolFileBytes(input.FileName, input.FileSize, input.File)
+	if err != nil {
+		return nil, err
+	}
+	ossKey := BuildToolOSSKey(tenantID, input.Name, hash, ext)
+	ctx := context.Background()
+	if _, err := s.uploader.Upload(ctx, ossKey, bytes.NewReader(data), int64(len(data))); err != nil {
+		return nil, fmt.Errorf("上传工具文件失败: %w", err)
+	}
 	t := &agent.Tool{
 		Name:        input.Name,
 		Title:       input.Title,
 		Description: input.Description,
-		IsDefault:   input.IsDefault,
+		Source:      agent.ToolSourceCustom,
+		FileName:    input.FileName,
+		FileURL:     ossKey,
+		FileHash:    hash,
+		FileSize:    int64(len(data)),
 	}
-
 	if err := s.repo.Create(tenantID, t); err != nil {
+		_ = s.uploader.Delete(ctx, ossKey)
 		return nil, fmt.Errorf("创建 Tool 失败: %w", err)
-	}
-
-	if input.IsDefault {
-		if err := s.repo.AddToolToAllAgents(tenantID, t.ID); err != nil {
-			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
-		}
 	}
 
 	return toolToDTO(t), nil
@@ -191,25 +233,17 @@ func (s *ToolService) Create(tenantID string, input *CreateToolInput) (*ToolDTO,
 func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*ToolDTO, error) {
 	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("Tool 不存在: %w", err)
+		return nil, agent.ErrToolNotFound
 	}
-
+	if t.IsBuiltin() {
+		return nil, agent.ErrToolIsBuiltin
+	}
 	if input.Title != nil {
 		t.Title = *input.Title
 	}
 	if input.Description != nil {
 		t.Description = *input.Description
 	}
-
-	if input.IsDefault != nil && *input.IsDefault && !t.IsDefault {
-		if err := s.repo.AddToolToAllAgents(tenantID, t.ID); err != nil {
-			return nil, fmt.Errorf("添加默认 Tool 到 Agent 失败: %w", err)
-		}
-	}
-	if input.IsDefault != nil {
-		t.IsDefault = *input.IsDefault
-	}
-
 	if err := s.repo.Update(tenantID, t); err != nil {
 		return nil, fmt.Errorf("更新 Tool 失败: %w", err)
 	}
@@ -217,12 +251,89 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 	return toolToDTO(t), nil
 }
 
+// UploadToolFile 同时承担存量 missing 补传与 ready 替换（issue #88）。
+func (s *ToolService) UploadToolFile(tenantID, name string, input *CustomToolFileInput) (*ToolDTO, error) {
+	t, err := s.repo.GetByName(tenantID, name)
+	if err != nil {
+		return nil, agent.ErrToolNotFound
+	}
+	if t.IsBuiltin() {
+		return nil, agent.ErrToolIsBuiltin
+	}
+	if s.uploader == nil {
+		return nil, agent.ErrToolStorageDisabled
+	}
+	data, ext, hash, err := validateToolFileBytes(input.FileName, input.FileSize, input.File)
+	if err != nil {
+		return nil, err
+	}
+	newKey := BuildToolOSSKey(tenantID, t.Name, hash, ext)
+	ctx := context.Background()
+	if _, err := s.uploader.Upload(ctx, newKey, bytes.NewReader(data), int64(len(data))); err != nil {
+		return nil, fmt.Errorf("上传工具文件失败: %w", err)
+	}
+	oldKey := t.FileURL
+	t.FileName = input.FileName
+	t.FileURL = newKey
+	t.FileHash = hash
+	t.FileSize = int64(len(data))
+	if err := s.repo.Update(tenantID, t); err != nil {
+		return nil, fmt.Errorf("更新 Tool 制品失败: %w", err)
+	}
+	if oldKey != "" && oldKey != newKey {
+		if err := s.uploader.Delete(ctx, oldKey); err != nil {
+			log.Printf("清理旧工具文件失败 (tool=%s, key=%s): %v", t.Name, oldKey, err)
+		}
+	}
+	return toolToDTO(t), nil
+}
+
 func (s *ToolService) Delete(tenantID, name string) error {
 	t, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return fmt.Errorf("Tool '%s' 不存在", name)
+		return agent.ErrToolNotFound
+	}
+	if t.IsBuiltin() {
+		return agent.ErrToolIsBuiltin
+	}
+	agents, err := s.repo.GetAgentNamesByToolID(t.ID)
+	if err != nil {
+		return fmt.Errorf("查询 Tool 关联 Agent 失败: %w", err)
+	}
+	if len(agents) > 0 {
+		return &agent.ToolInUseError{ToolName: t.Name, Agents: agents}
+	}
+	if t.FileURL != "" && s.uploader != nil {
+		if err := s.uploader.Delete(context.Background(), t.FileURL); err != nil {
+			log.Printf("删除 OSS 工具文件失败 (tool=%s, key=%s): %v", t.Name, t.FileURL, err)
+		}
 	}
 	return s.repo.Delete(tenantID, t.ID)
+}
+
+// Download 对 ready 自定义工具返回短期下载地址（CDN 永久或 presigned 1h）。
+func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
+	t, err := s.repo.GetByName(tenantID, name)
+	if err != nil {
+		return nil, agent.ErrToolNotFound
+	}
+	if t.IsBuiltin() {
+		return nil, agent.ErrToolIsBuiltin
+	}
+	if t.ArtifactStatus() != agent.ToolArtifactReady {
+		return nil, agent.ErrToolArtifactMissing
+	}
+	if s.cdnHost != "" {
+		return &DownloadDTO{URL: buildPublicURL(s.cdnHost, t.FileURL), ExpiresIn: 0}, nil
+	}
+	if s.uploader == nil {
+		return nil, agent.ErrToolStorageDisabled
+	}
+	url, err := s.uploader.GetPresignedURL(context.Background(), t.FileURL)
+	if err != nil {
+		return nil, fmt.Errorf("生成下载链接失败: %w", err)
+	}
+	return &DownloadDTO{URL: url, ExpiresIn: 3600}, nil
 }
 
 func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error) {
@@ -245,13 +356,32 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 	}
 	toolNames = mergeStringSlices(toolNames, defaultToolNames)
 
+	// 已有关联名单：存量 missing 工具保持挂载合法，仅拒绝「新增」（issue #88）。
+	currentNames, err := s.repo.GetToolsByAgent(agentCfg.ID)
+	if err != nil {
+		return fmt.Errorf("获取 Agent 现有 Tool 失败: %w", err)
+	}
+	current := make(map[string]bool, len(currentNames))
+	for _, n := range currentNames {
+		current[n] = true
+	}
+
+	var missingNew []string
 	toolIDs := make([]uint64, 0, len(toolNames))
 	for _, toolName := range toolNames {
 		t, err := s.repo.GetByName(tenantID, toolName)
 		if err != nil {
 			return fmt.Errorf("Tool '%s' 不存在", toolName)
 		}
+		if t.Source == agent.ToolSourceCustom &&
+			t.ArtifactStatus() == agent.ToolArtifactMissing && !current[toolName] {
+			missingNew = append(missingNew, toolName)
+			continue
+		}
 		toolIDs = append(toolIDs, t.ID)
+	}
+	if len(missingNew) > 0 {
+		return fmt.Errorf("%w：%s", agent.ErrToolArtifactMissing, strings.Join(missingNew, "、"))
 	}
 	return s.repo.ReplaceAgentTools(agentCfg.ID, toolIDs)
 }

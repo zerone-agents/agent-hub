@@ -30,7 +30,7 @@ func setupToolServiceTestDB(t *testing.T) *gorm.DB {
 
 func TestSeedBuiltins_CreatesSkillTaskMultiTask(t *testing.T) {
 	setupToolServiceTestDB(t)
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 
 	require.NoError(t, svc.SeedBuiltins())
 
@@ -49,7 +49,7 @@ func TestSeedBuiltins_CreatesSkillTaskMultiTask(t *testing.T) {
 
 func TestSeedBuiltins_IsIdempotent(t *testing.T) {
 	setupToolServiceTestDB(t)
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 
 	require.NoError(t, svc.SeedBuiltins())
 	require.NoError(t, svc.SeedBuiltins()) // second run must not fail or duplicate
@@ -75,7 +75,7 @@ func TestSeedBuiltins_PreservesExistingSkillWhenAddingTasks(t *testing.T) {
 		IsDefault:   false,
 	}).Error)
 
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 	require.NoError(t, svc.SeedBuiltins())
 
 	toolRepo := repository.NewToolRepository()

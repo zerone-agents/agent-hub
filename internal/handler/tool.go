@@ -48,26 +48,13 @@ func (h *ToolHandler) Get(c *gin.Context) {
 	})
 }
 
+// Create 是 issue #88 Task 3 的临时编译垫片：旧 JSON CreateToolInput/Create
+// 服务端语义已随制品生命周期改造删除（被 CreateCustomTool 取代），multipart
+// 端点由后续 handler 改造（issue #88）提供。
 func (h *ToolHandler) Create(c *gin.Context) {
-	var input services.CreateToolInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-		return
-	}
-	t, err := h.service.Create(tenant.GetTenantID(c), &input)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"data":    t,
+	c.JSON(http.StatusBadRequest, gin.H{
+		"success": false,
+		"error":   "Tool 创建已迁移为文件上传方式，当前接口暂不可用",
 	})
 }
 

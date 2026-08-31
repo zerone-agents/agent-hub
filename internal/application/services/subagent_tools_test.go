@@ -223,7 +223,7 @@ func TestBackfillSubagentToolBindings_AttachesToAgentsWithSubagents(t *testing.T
 	require.NoError(t, agentRepo.ReplaceSubagents(p1.ID, []uint64{c.ID}))
 	require.NoError(t, agentRepo.ReplaceSubagents(p2.ID, []uint64{c.ID}))
 
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 	require.NoError(t, svc.BackfillSubagentToolBindings())
 
 	for _, name := range []string{"parent1", "parent2"} {
@@ -249,7 +249,7 @@ func TestBackfillSubagentToolBindings_IsIdempotent(t *testing.T) {
 	c, _ := agentRepo.GetByName("default", "child")
 	require.NoError(t, agentRepo.ReplaceSubagents(p.ID, []uint64{c.ID}))
 
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 	require.NoError(t, svc.BackfillSubagentToolBindings())
 	require.NoError(t, svc.BackfillSubagentToolBindings())
 
@@ -260,7 +260,7 @@ func TestBackfillSubagentToolBindings_IsIdempotent(t *testing.T) {
 
 func TestBackfillSubagentToolBindings_NoAgents(t *testing.T) {
 	setupSubagentToolsTestDB(t)
-	svc := NewToolService()
+	svc := NewToolService(nil, "")
 	// Empty database — must not error.
 	require.NoError(t, svc.BackfillSubagentToolBindings())
 }
