@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"sort"
 	"strings"
@@ -22,7 +21,10 @@ type ToolService struct {
 	repo      *repository.ToolRepository
 	agentRepo *repository.AgentRepository
 	uploader  oss.OSSUploader
-	cdnHost   string
+	// cdnHost 管理端下载已不使用（Download 恒 presigned，issue #88）；公共 CDN
+	// 仅供 deployer 制品来源（agent_deployer.go buildArtifactURL，独立配置）。
+	// 保留构造签名与测试注入点：TestDownloadTool 传入非空值以证明被忽略。
+	cdnHost string
 }
 
 func NewToolService(uploader oss.OSSUploader, cdnHost string) *ToolService {
@@ -150,19 +152,12 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 	return dto
 }
 
+// CreateCustomToolInput 创建请求：展示元数据 + 内嵌制品三元组（ToolFileInput）。
 type CreateCustomToolInput struct {
 	Name        string
 	Title       string
 	Description string
-	FileName    string
-	File        io.Reader
-	FileSize    int64
-}
-
-type CustomToolFileInput struct {
-	FileName string
-	File     io.Reader
-	FileSize int64
+	ToolFileInput
 }
 
 type UpdateToolInput struct {
@@ -270,7 +265,7 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 }
 
 // UploadToolFile 同时承担存量 missing 补传与 ready 替换（issue #88）。
-func (s *ToolService) UploadToolFile(tenantID, name string, input *CustomToolFileInput) (*ToolDTO, error) {
+func (s *ToolService) UploadToolFile(tenantID, name string, input *ToolFileInput) (*ToolDTO, error) {
 	t, err := s.getTool(tenantID, name)
 	if err != nil {
 		return nil, err
@@ -321,15 +316,25 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	if len(agents) > 0 {
 		return &agent.ToolInUseError{ToolName: t.Name, Agents: agents}
 	}
-	if t.FileURL != "" && s.uploader != nil {
-		if err := s.uploader.Delete(context.Background(), t.FileURL); err != nil {
-			log.Printf("删除 OSS 工具文件失败 (tool=%s, key=%s): %v", t.Name, t.FileURL, err)
+	// 顺序契约（expert review Fix 1）：先删 DB 行，后清 OSS 对象。若先删对象
+	// 而行删除失败，会残留指向已删对象的 ready 行（false-ready），下载/部署
+	// 随之断裂；先删行则最坏情况只是留下一个孤立对象（见下），行与对象始终一致。
+	key := t.FileURL
+	if err := s.repo.Delete(tenantID, t.ID); err != nil {
+		return fmt.Errorf("删除 Tool 失败: %w", err)
+	}
+	// 行已删成功：残留对象只是无引用方的孤立内容寻址副本，删除失败无害，仅记日志。
+	if key != "" && s.uploader != nil {
+		if err := s.uploader.Delete(context.Background(), key); err != nil {
+			log.Printf("清理 OSS 工具文件失败 (tool=%s, key=%s): %v", t.Name, key, err)
 		}
 	}
-	return s.repo.Delete(tenantID, t.ID)
+	return nil
 }
 
-// Download 对 ready 自定义工具返回短期下载地址（CDN 永久或 presigned 1h）。
+// Download 对 ready 自定义工具恒返回 presigned 短期地址（issue #88：「下载仅
+// 对 ready 自定义工具开放，返回短期有效地址」）。管理端刻意不走 CDN 永久链接：
+// 公共 CDN URL 仅保留给 deployer 侧制品来源（agent_deployer.go buildArtifactURL）。
 func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
 	t, err := s.getTool(tenantID, name)
 	if err != nil {
@@ -340,9 +345,6 @@ func (s *ToolService) Download(tenantID, name string) (*DownloadDTO, error) {
 	}
 	if t.ArtifactStatus() != agent.ToolArtifactReady {
 		return nil, agent.ErrToolArtifactMissing
-	}
-	if s.cdnHost != "" {
-		return &DownloadDTO{URL: buildPublicURL(s.cdnHost, t.FileURL), ExpiresIn: 0}, nil
 	}
 	if s.uploader == nil {
 		return nil, agent.ErrToolStorageDisabled

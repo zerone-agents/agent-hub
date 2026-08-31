@@ -75,9 +75,12 @@ const (
 )
 
 type Tool struct {
-	ID          uint64    `gorm:"primaryKey;autoIncrement"`
-	Name        string    `gorm:"type:varchar(64);uniqueIndex:uk_tools_tenant_name,priority:2;not null"`
-	TenantID    string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tools_tenant_name,priority:1;index"`
+	ID       uint64 `gorm:"primaryKey;autoIncrement"`
+	Name     string `gorm:"type:varchar(64);uniqueIndex:uk_tools_tenant_name,priority:2;not null"`
+	TenantID string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tools_tenant_name,priority:1;index"`
+	// Title/Description 仅为控制台展示元数据（issue #88）：Runtime 使用的工具
+	// 描述来自工具文件自身，控制台单语中文，故刻意豁免双语字段约定（见
+	// CONTRIBUTING.md i18n 条目的 Tool 例外）。
 	Title       string    `gorm:"type:varchar(128)"`
 	Description string    `gorm:"type:text"`
 	IsDefault   bool      `gorm:"column:is_default;not null;default:false"`

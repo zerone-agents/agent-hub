@@ -15,6 +15,14 @@ const MaxToolFileSize = 5 * 1024 * 1024
 // toolFileExts 大小写敏感（".TS" 拒绝），与 deployer toolFileExts 契约一致。
 var toolFileExts = map[string]struct{}{".ts": {}, ".mts": {}, ".js": {}, ".mjs": {}}
 
+// ToolFileInput 承载单文件制品的原始上传三元组（multipart 解析结果）。
+// CreateCustomToolInput（内嵌）与 UploadToolFile 共用，单一定义避免两处重复。
+type ToolFileInput struct {
+	FileName string
+	File     io.Reader
+	FileSize int64
+}
+
 // BuildToolOSSKey 内容寻址 key（issue #88）：tools/<tenant>/<name>/<sha256><ext>。
 // 替换文件即换 hash 即换 key，天然避免覆盖冲突。
 func BuildToolOSSKey(tenantID, name, hash, ext string) string {

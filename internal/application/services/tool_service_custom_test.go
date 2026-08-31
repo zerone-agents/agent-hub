@@ -3,8 +3,8 @@ package services
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"control-panel/internal/domain/agent"
@@ -36,9 +36,9 @@ func newCustomToolService(t *testing.T) (*ToolService, *mockUploader) {
 
 const tsContent = "export default { name: 'SayHello', description: 'd' }\n"
 
-func customFileInput() (*bytes.Buffer, CustomToolFileInput) {
+func customFileInput() (*bytes.Buffer, ToolFileInput) {
 	buf := bytes.NewBufferString(tsContent)
-	return buf, CustomToolFileInput{FileName: "say_hello.ts", File: buf, FileSize: int64(buf.Len())}
+	return buf, ToolFileInput{FileName: "say_hello.ts", File: buf, FileSize: int64(buf.Len())}
 }
 
 func TestCreateCustomTool_Success(t *testing.T) {
@@ -46,7 +46,9 @@ func TestCreateCustomTool_Success(t *testing.T) {
 	svc, up := newCustomToolService(t)
 	_, in := customFileInput()
 	dto, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{
-		Name: "SayHello", Title: "问候", FileName: in.FileName, File: in.File, FileSize: in.FileSize,
+		Name:          "SayHello",
+		Title:         "问候",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
 	})
 	require.NoError(t, err)
 	require.Equal(t, agent.ToolSourceCustom, dto.Source)
@@ -64,20 +66,20 @@ func TestCreateCustomTool_Validations(t *testing.T) {
 
 	// 扩展名不支持（含大写 .TS）
 	buf := bytes.NewBufferString("x")
-	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", FileName: "a.py", File: buf, FileSize: 1})
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: "a.py", File: buf, FileSize: 1}})
 	require.ErrorIs(t, err, agent.ErrInvalidToolFile)
 	buf2 := bytes.NewBufferString("x")
-	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", FileName: "a.TS", File: buf2, FileSize: 1})
+	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: "a.TS", File: buf2, FileSize: 1}})
 	require.ErrorIs(t, err, agent.ErrInvalidToolFile)
 
 	// 空文件
 	buf3 := bytes.NewBufferString("")
-	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", FileName: "a.ts", File: buf3, FileSize: 0})
+	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: "a.ts", File: buf3, FileSize: 0}})
 	require.ErrorIs(t, err, agent.ErrToolFileEmpty)
 
 	// 超限 5 MiB + 1
 	big := bytes.Repeat([]byte("a"), MaxToolFileSize+1)
-	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", FileName: "a.ts", File: bytes.NewReader(big), FileSize: int64(len(big))})
+	_, err = svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: "a.ts", File: bytes.NewReader(big), FileSize: int64(len(big))}})
 	require.ErrorIs(t, err, agent.ErrToolFileTooLarge)
 
 	// 与可见内置工具重名（共享行 Bash 由 seed 直接插库模拟）
@@ -89,14 +91,14 @@ func TestCreateCustomTool_Validations(t *testing.T) {
 // CreateToolInputLike 是测试辅助：按 CreateCustomToolInput 组同名请求。
 func CreateToolInputLike(name string) *CreateCustomToolInput {
 	buf := bytes.NewBufferString(tsContent)
-	return &CreateCustomToolInput{Name: name, FileName: "x.ts", File: buf, FileSize: int64(buf.Len())}
+	return &CreateCustomToolInput{Name: name, ToolFileInput: ToolFileInput{FileName: "x.ts", File: buf, FileSize: int64(buf.Len())}}
 }
 
 func TestCreateCustomTool_StorageDisabled(t *testing.T) {
 	setupToolCustomServiceDB(t)
 	svc := NewToolService(nil, "")
 	_, in := customFileInput()
-	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", FileName: in.FileName, File: in.File, FileSize: in.FileSize})
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "A", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.ErrorIs(t, err, agent.ErrToolStorageDisabled)
 }
 
@@ -104,13 +106,13 @@ func TestUploadToolFile_ReplaceCleansOldKey(t *testing.T) {
 	setupToolCustomServiceDB(t)
 	svc, up := newCustomToolService(t)
 	_, in := customFileInput()
-	created, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", FileName: in.FileName, File: in.File, FileSize: in.FileSize})
+	created, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.NoError(t, err)
 	oldKey := created.FileURL
 
 	// 替换为新内容 → 新 hash → 新 key；旧 key 被清理
 	buf2 := bytes.NewBufferString("export default { name: 'SayHello' } // v2\n")
-	dto, err := svc.UploadToolFile("acme", "SayHello", &CustomToolFileInput{FileName: "v2.mjs", File: buf2, FileSize: int64(buf2.Len())})
+	dto, err := svc.UploadToolFile("acme", "SayHello", &ToolFileInput{FileName: "v2.mjs", File: buf2, FileSize: int64(buf2.Len())})
 	require.NoError(t, err)
 	require.Equal(t, "v2.mjs", dto.FileName)
 	require.NotEqual(t, oldKey, dto.FileURL)
@@ -126,14 +128,14 @@ func TestUploadToolFile_MissingBackfill_AndBuiltinRejected(t *testing.T) {
 	// missing 存量行（迁移产物）
 	require.NoError(t, database.GetDB().Create(&agent.Tool{Name: "Legacy", TenantID: "acme", Source: agent.ToolSourceCustom}).Error)
 	buf := bytes.NewBufferString(tsContent)
-	dto, err := svc.UploadToolFile("acme", "Legacy", &CustomToolFileInput{FileName: "l.ts", File: buf, FileSize: int64(buf.Len())})
+	dto, err := svc.UploadToolFile("acme", "Legacy", &ToolFileInput{FileName: "l.ts", File: buf, FileSize: int64(buf.Len())})
 	require.NoError(t, err)
 	require.Equal(t, agent.ToolArtifactReady, dto.ArtifactStatus)
 
 	// builtin 拒绝补传
 	require.NoError(t, database.GetDB().Create(&agent.Tool{Name: "Bash", TenantID: "", Source: agent.ToolSourceBuiltin}).Error)
 	buf2 := bytes.NewBufferString(tsContent)
-	_, err = svc.UploadToolFile("acme", "Bash", &CustomToolFileInput{FileName: "b.ts", File: buf2, FileSize: int64(buf2.Len())})
+	_, err = svc.UploadToolFile("acme", "Bash", &ToolFileInput{FileName: "b.ts", File: buf2, FileSize: int64(buf2.Len())})
 	require.ErrorIs(t, err, agent.ErrToolIsBuiltin)
 }
 
@@ -141,7 +143,7 @@ func TestUpdateTool_MetadataOnly(t *testing.T) {
 	setupToolCustomServiceDB(t)
 	svc, _ := newCustomToolService(t)
 	_, in := customFileInput()
-	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", FileName: in.FileName, File: in.File, FileSize: in.FileSize})
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.NoError(t, err)
 	title := "新标题"
 	dto, err := svc.Update("acme", "SayHello", &UpdateToolInput{Title: &title})
@@ -163,7 +165,7 @@ func TestDeleteTool_Protections(t *testing.T) {
 
 	// 有关联 → ToolInUseError 带名单
 	_, in := customFileInput()
-	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", FileName: in.FileName, File: in.File, FileSize: in.FileSize})
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.NoError(t, err)
 	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
 	require.NoError(t, database.GetDB().Create(a).Error)
@@ -182,16 +184,58 @@ func TestDeleteTool_Protections(t *testing.T) {
 	require.False(t, exists)
 }
 
+// TestDeleteTool_DBFailureKeepsObjectAndRow 锁定删除顺序契约（expert review
+// Fix 1）：DB 行删除失败时 OSS 对象必须原封不动——若先删对象后删行失败，会
+// 留下指向已删对象的 ready 行（false-ready）。经 GORM Delete 回调注入，强制
+// tools 表的删除语句失败。
+func TestDeleteTool_DBFailureKeepsObjectAndRow(t *testing.T) {
+	db := setupToolCustomServiceDB(t)
+	svc, up := newCustomToolService(t)
+	_, in := customFileInput()
+	created, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{
+		Name:          "SayHello",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+
+	forced := errors.New("forced tools delete failure")
+	require.NoError(t, db.Callback().Delete().Before("gorm:before_delete").Register("test:force_tools_delete_fail", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "tools" {
+			_ = tx.AddError(forced)
+		}
+	}))
+	t.Cleanup(func() {
+		_ = db.Callback().Delete().Remove("test:force_tools_delete_fail")
+	})
+
+	err = svc.Delete("acme", "SayHello")
+	require.ErrorIs(t, err, forced)
+	require.Contains(t, err.Error(), "删除 Tool 失败")
+
+	// OSS 对象保留：行删除失败时不得先清对象（行+对象保持一致）
+	_, objExists := up.data[created.FileURL]
+	require.True(t, objExists, "DB 删除失败时 OSS 对象必须原封不动")
+
+	// DB 行保留
+	var cnt int64
+	require.NoError(t, db.Model(&agent.Tool{}).Where("name = ?", "SayHello").Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt)
+}
+
 func TestDownloadTool(t *testing.T) {
 	setupToolCustomServiceDB(t)
 	up := &mockUploader{data: map[string][]byte{}}
 	svc := NewToolService(up, "https://cdn.example.com")
 	_, in := customFileInput()
-	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", FileName: in.FileName, File: in.File, FileSize: in.FileSize})
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{Name: "SayHello", ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize}})
 	require.NoError(t, err)
 	dto, err := svc.Download("acme", "SayHello")
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(dto.URL, "https://cdn.example.com/tools/acme/SayHello/"))
+	// 管理端恒 presigned（issue #88）：构造时显式传入 cdnHost，证明管理端
+	// 下载路径忽略它；URL 为 mockUploader.GetPresignedURL 的 presigned 形态。
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(tsContent)))
+	require.Equal(t, "https://example.com/tools/acme/SayHello/"+sum+".ts", dto.URL)
+	require.Equal(t, int64(3600), dto.ExpiresIn)
 
 	// missing → 明确错误
 	require.NoError(t, database.GetDB().Create(&agent.Tool{Name: "Legacy", TenantID: "acme", Source: agent.ToolSourceCustom}).Error)
@@ -232,7 +276,7 @@ func TestToolOps_NotFoundSentinel(t *testing.T) {
 		{"Update", func() error { _, err := svc.Update("acme", "Ghost", &UpdateToolInput{Title: &title}); return err }},
 		{"UploadToolFile", func() error {
 			buf := bytes.NewBufferString(tsContent)
-			_, err := svc.UploadToolFile("acme", "Ghost", &CustomToolFileInput{FileName: "g.ts", File: buf, FileSize: int64(buf.Len())})
+			_, err := svc.UploadToolFile("acme", "Ghost", &ToolFileInput{FileName: "g.ts", File: buf, FileSize: int64(buf.Len())})
 			return err
 		}},
 		{"Delete", func() error { return svc.Delete("acme", "Ghost") }},

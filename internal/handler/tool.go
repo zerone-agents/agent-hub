@@ -71,9 +71,11 @@ func (h *ToolHandler) Create(c *gin.Context) {
 		Name:        name,
 		Title:       c.PostForm("title"),
 		Description: c.PostForm("description"),
-		FileName:    header.Filename,
-		File:        file,
-		FileSize:    header.Size,
+		ToolFileInput: services.ToolFileInput{
+			FileName: header.Filename,
+			File:     file,
+			FileSize: header.Size,
+		},
 	})
 	if err != nil {
 		respondToolError(c, err)
@@ -106,7 +108,7 @@ func (h *ToolHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	t, err := h.service.UploadToolFile(tenant.GetTenantID(c), c.Param("name"), &services.CustomToolFileInput{
+	t, err := h.service.UploadToolFile(tenant.GetTenantID(c), c.Param("name"), &services.ToolFileInput{
 		FileName: header.Filename,
 		File:     file,
 		FileSize: header.Size,
