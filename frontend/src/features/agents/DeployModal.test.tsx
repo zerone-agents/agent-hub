@@ -161,6 +161,8 @@ describe('DeployModal', () => {
     // 手动复制框（aria-label 区分于 antd Modal 自身的 role=dialog）
     const dialog = await screen.findByRole('dialog', { name: '手动复制' })
     expect(dialog.querySelector('textarea')?.value).toBe(expected)
+    // P1 回归锁：非安全上下文只是「手动复制」，不得误报「已复制」
+    expect(screen.queryByText('已复制')).toBeNull()
   })
 
   it('renders absolute runtimeUrl (Kong mode) unchanged', async () => {

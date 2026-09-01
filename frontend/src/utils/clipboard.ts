@@ -54,17 +54,25 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /**
+ * copyOrManual 的结果三态：
+ * - copied：剪贴板 API 真实成功——调用方可以显示「已复制」
+ * - manual：非安全上下文，手动复制框已弹出——调用方不要再显示成功态
+ * - failed：真实失败——调用方应提示错误
+ */
+export type CopyResult = 'copied' | 'manual' | 'failed'
+
+/**
  * User-facing copy: secure contexts use copyToClipboard() and return its real
  * result; insecure contexts (plain HTTP + IP) run a best-effort execCommand
  * and ALWAYS open the manual-copy dialog, because modern Chromium silently
  * no-ops execCommand there (returns true without writing) and the clipboard
  * cannot be read back to verify — the dialog is the only dependable path.
  */
-export async function copyOrManual(text: string): Promise<boolean> {
+export async function copyOrManual(text: string): Promise<CopyResult> {
   if (window.isSecureContext) {
-    return copyToClipboard(text)
+    return (await copyToClipboard(text)) ? 'copied' : 'failed'
   }
   void copyToClipboard(text) // best-effort: Safari / Firefox may genuinely copy
   showManualCopy(text)
-  return true // handled via the manual dialog
+  return 'manual' // handled via the manual dialog — 不是真成功，调用方勿显示「已复制」
 }

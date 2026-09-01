@@ -530,13 +530,15 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   )
 
   const handleCopy = async (which: 'url' | 'key', text: string) => {
-    if (await copyOrManual(text)) {
+    const result = await copyOrManual(text)
+    if (result === 'copied') {
       setCopied(which)
       setTimeout(() => { setCopied(null); }, 1500)
-    } else {
+    } else if (result === 'failed') {
       // 纯 HTTP + IP 等非安全上下文下两条复制路径都可能失败——静默吞错会让测试者误判
       message.error('复制失败，请手动选择复制')
     }
+    // 'manual'：手动复制框已弹出，不显示成功态
   }
 
   return (

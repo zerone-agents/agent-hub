@@ -418,9 +418,10 @@ function ChunkImage({
   };
 
   const copyImageId = async () => {
-    if (await copyOrManual(imageId)) {
+    const result = await copyOrManual(imageId);
+    if (result === "copied") {
       message.success("已复制 image id");
-    } else {
+    } else if (result === "failed") {
       message.error("复制失败");
     }
   };
@@ -757,9 +758,10 @@ export default function KnowledgeChunksPage() {
   };
 
   const copyChunkId = async (chunkId: string) => {
-    if (await copyOrManual(chunkId)) {
+    const result = await copyOrManual(chunkId);
+    if (result === "copied") {
       message.success("已复制 chunk id");
-    } else {
+    } else if (result === "failed") {
       message.error("复制失败");
     }
   };

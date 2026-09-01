@@ -18,9 +18,10 @@ export default function SignupLinkModal({ open, signupUrl, onClose }: SignupLink
   const primaryBtnCls = usePrimaryButtonStyle()
   const copyURL = async () => {
     if (!signupUrl) return
-    if (await copyOrManual(signupUrl)) {
+    const result = await copyOrManual(signupUrl)
+    if (result === 'copied') {
       message.success('注册链接已复制')
-    } else {
+    } else if (result === 'failed') {
       message.error('复制失败，请手动选择复制')
     }
   }
