@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography } from 'antd'
+import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography, message } from 'antd'
 import {
   RocketIcon,
   StopIcon,
@@ -15,6 +15,7 @@ import {
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { agentApi } from '@/api/agents'
+import { copyToClipboard } from '@/utils/clipboard'
 import { parseApiError } from '@/api/client'
 import { useKnowledgeList } from '@/queries/useKnowledge'
 import { useCanWrite } from '@/hooks/useCanWrite'
@@ -529,26 +530,12 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   )
 
   const handleCopy = async (which: 'url' | 'bareUrl' | 'key', text: string) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: clipboard API may be undefined in non-HTTPS / older browsers despite TS lib typing it as required
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        // Fallback for non-secure contexts (plain HTTP remote).
-        const ta = document.createElement('textarea')
-        ta.value = text
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
-        document.body.appendChild(ta)
-        ta.select()
-        // eslint-disable-next-line @typescript-eslint/no-deprecated -- only programmatic fallback available for non-secure (plain HTTP) contexts where navigator.clipboard is undefined
-        document.execCommand('copy')
-        document.body.removeChild(ta)
-      }
+    if (await copyToClipboard(text)) {
       setCopied(which)
       setTimeout(() => { setCopied(null); }, 1500)
-    } catch {
-      // clipboard unavailable; ignore
+    } else {
+      // 纯 HTTP + IP 等非安全上下文下两条复制路径都可能失败——静默吞错会让测试者误判
+      message.error('复制失败，请手动选择复制')
     }
   }
 

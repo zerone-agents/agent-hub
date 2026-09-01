@@ -5,6 +5,7 @@ import { usersApi, type UserRole, type CreatedInvite } from '@/api/users'
 import { parseApiError } from '@/api/client'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { useQueryClient } from '@tanstack/react-query'
+import { copyToClipboard } from '@/utils/clipboard'
 
 interface CreateInviteModalProps {
   open: boolean
@@ -61,10 +62,9 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
 
   const copyURL = async () => {
     if (!inviteURL) return
-    try {
-      await navigator.clipboard.writeText(inviteURL)
+    if (await copyToClipboard(inviteURL)) {
       message.success('邀请链接已复制')
-    } catch {
+    } else {
       message.error('复制失败，请手动选择复制')
     }
   }
