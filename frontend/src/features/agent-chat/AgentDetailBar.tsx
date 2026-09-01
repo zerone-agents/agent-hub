@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createStyles } from 'antd-style'
 import { useAgentDetail } from '@/queries/useAgentDetail'
+import { useAgents } from '@/queries/useAgents'
 import { tokens as t } from '@/styles/tokens'
 import AgentDetailSummary, { type AgentDetailCounts } from './AgentDetailSummary'
 import AgentDetailGrid from './AgentDetailGrid'
@@ -19,11 +20,17 @@ interface Props {
 export default function AgentDetailBar({ agentName }: Props) {
   const { styles } = useStyles()
   const { data, isLoading, isError } = useAgentDetail(agentName)
+  const agents = useAgents()
   const [expanded, setExpanded] = useState(false)
 
   // Silent hide on loading/error/success-no-data. Chat flow continues
   // independently — this panel is non-blocking decoration.
   if (isLoading || isError || !data) return null
+
+  // Prefer the human-readable title from the hub agent record; fall back
+  // to the technical identifier when the record/title is unavailable.
+  const hubAgent = agents.data?.find((a) => a.name === agentName)
+  const displayName = hubAgent?.config.title?.zh ?? hubAgent?.config.title?.en ?? data.name
 
   const counts: AgentDetailCounts = {
     tools: data.allowedTools?.length ?? 0,
@@ -36,7 +43,7 @@ export default function AgentDetailBar({ agentName }: Props) {
   return (
     <div className={styles.wrapper}>
       <AgentDetailSummary
-        name={data.name}
+        name={displayName}
         model={data.model}
         status={data.status}
         counts={counts}
