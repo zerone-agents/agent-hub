@@ -437,6 +437,23 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 	})
 }
 
+func TestAppendMcpToolNames(t *testing.T) {
+	got := appendMcpToolNames([]string{"Read", "mcp__duplicate__lookup"}, map[string]*McpClientDTO{
+		"knowledge": {
+			Tools: []McpTool{{Name: "knowledge_search"}, {Name: " "}},
+		},
+		"duplicate": {
+			Tools: []McpTool{{Name: "lookup"}},
+		},
+	})
+
+	require.ElementsMatch(t, []string{
+		"Read",
+		"mcp__knowledge__knowledge_search",
+		"mcp__duplicate__lookup",
+	}, got)
+}
+
 // newGetStatusServer builds a mock deployer whose GET
 // /api/v1/agents/<name>/status always reports the given Docker status.
 func newGetStatusServer(t *testing.T, status string) *httptest.Server {
