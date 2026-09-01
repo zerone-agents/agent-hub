@@ -398,6 +398,14 @@ func mustMarshalMcpTools(tools []McpTool) string {
 // administrator-editable URL, headers, title, or description.
 func applyBuiltinMetadata(existing, definition *mcp.McpServer) bool {
 	changed := false
+	// Shared built-ins cannot be edited through tenant-scoped APIs. Backfill an
+	// empty URL from configuration so installations created before
+	// KNOWLEDGE_MCP_URL was introduced become usable after a restart, while
+	// preserving a non-empty URL explicitly stored by older versions.
+	if strings.TrimSpace(existing.URL) == "" && strings.TrimSpace(definition.URL) != "" {
+		existing.URL = strings.TrimSpace(definition.URL)
+		changed = true
+	}
 	if !existing.IsBuiltin {
 		existing.IsBuiltin = true
 		changed = true
@@ -419,7 +427,16 @@ func applyBuiltinMetadata(existing, definition *mcp.McpServer) bool {
 
 // SeedBuiltins ensures built-in MCP servers exist in the database.
 // It is idempotent and should be called once at service startup.
-func (s *McpService) SeedBuiltins() error {
+func (s *McpService) SeedBuiltins(knowledgeMCPURL ...string) error {
+	mcpURL := ""
+	if len(knowledgeMCPURL) > 0 {
+		mcpURL = strings.TrimSpace(knowledgeMCPURL[0])
+	}
+	if mcpURL != "" {
+		if err := validateMcpConfig(mcp.TransportHTTP, mcpURL); err != nil {
+			return fmt.Errorf("invalid KNOWLEDGE_MCP_URL: %w", err)
+		}
+	}
 	headersEnc, err := s.encryptMap(map[string]string{
 		"Authorization": BuiltinKnowledgeAuthHeader,
 	})
@@ -431,7 +448,7 @@ func (s *McpService) SeedBuiltins() error {
 		Title:         "知识库检索",
 		Description:   "基于知识库进行文本检索，为 Agent 提供文档问答能力",
 		TransportType: mcp.TransportHTTP,
-		URL:           "",
+		URL:           mcpURL,
 		Headers:       headersEnc,
 		IsBuiltin:     true,
 		ToolsJSON:     mustMarshalMcpTools(builtinKnowledgeTools),

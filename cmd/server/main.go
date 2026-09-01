@@ -272,7 +272,7 @@ func main() {
 	}
 
 	mcpService := services.NewMcpService(cfg.Provider.EncryptionKey)
-	if err := mcpService.SeedBuiltins(); err != nil {
+	if err := mcpService.SeedBuiltins(cfg.Knowledge.MCPURL); err != nil {
 		log.Fatalf("Failed to seed builtin MCPs: %v", err)
 	}
 	if err := toolService.SeedBuiltins(); err != nil {

@@ -67,6 +67,9 @@ services:
       KONG_ADMIN_URL: ${KONG_ADMIN_URL:-}
       MULTIRAG_BASE_URL: ${MULTIRAG_BASE_URL:-}
       MULTIRAG_API_KEY: ${MULTIRAG_API_KEY:-}
+      # Full Hub MCP endpoint reachable from runtime containers. For Linux
+      # deployments, use the host IP/domain (not localhost inside a container).
+      KNOWLEDGE_MCP_URL: ${KNOWLEDGE_MCP_URL:-}
     ports:
       - "${HUB_PORT:-8081}:${HUB_PORT:-8081}"
 
