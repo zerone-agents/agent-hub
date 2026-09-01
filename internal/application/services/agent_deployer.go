@@ -24,17 +24,14 @@ import (
 
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
-	Status     string `json:"status"`
-	Health     string `json:"health"`
-	RuntimeURL string `json:"runtimeUrl"`
-	// BareRuntimeURL 是 default 租户的裸路径 URL（"/<agent>"），仅 Kong
-	// 启用且 orgSlug(tenantID)=="default" 时非空；其他情况省略。
-	BareRuntimeURL string `json:"bareRuntimeUrl,omitempty"`
-	ContainerName  string `json:"containerName"`
-	DeployedAt     string `json:"deployedAt"`
-	Message        string `json:"message"`
-	HostPort       int    `json:"hostPort"`
-	APIKey         string `json:"apiKey"`
+	Status        string `json:"status"`
+	Health        string `json:"health"`
+	RuntimeURL    string `json:"runtimeUrl"`
+	ContainerName string `json:"containerName"`
+	DeployedAt    string `json:"deployedAt"`
+	Message       string `json:"message"`
+	HostPort      int    `json:"hostPort"`
+	APIKey        string `json:"apiKey"`
 }
 
 // agentRepository defines the methods needed from the agent repository.
@@ -350,18 +347,11 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, err
 	}
 
-	// D-1 legacy timing: record whether a legacy compatibility entity exists
-	// BEFORE the pre-clean Deregister below deletes it, so the later Register
-	// (in registerWhenHealthy) can still mount the "/<bare>" compatibility
-	// route.
-	legacyBare := s.legacyBareFor(ctx, tenantID, name)
-
-	// Deregister any existing Kong route before recreating (scoped entities
-	// plus the old bare-name entities of this agent). This is idempotent
+	// Deregister any existing Kong route before recreating. This is idempotent
 	// (no-op if the agent was never registered) and avoids serving 502s while
 	// the container is being rebuilt.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, key, name)
+		_ = s.kongSvc.Deregister(ctx, key)
 	}
 	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p, tools, skills, subagents, mcpServers)
 	if err != nil {
@@ -397,7 +387,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		dto.APIKey = token
 		// Register Kong route asynchronously once the runtime reports healthy.
 		if s.kongSvc != nil {
-			go s.registerWhenHealthy(tenantID, name, legacyBare, resp.HostPort)
+			go s.registerWhenHealthy(tenantID, name, resp.HostPort)
 		}
 	}
 	return dto, nil
@@ -471,58 +461,17 @@ func generateRuntimeToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// legacyBareFor reports the bare agent name whose legacy compatibility route
-// should survive this deploy/start cycle, or "" when none applies. Two probes
-// count, both run BEFORE the pre-clean Deregister that deletes the entities:
-//
-//  1. the pre-upgrade bare-name Kong service still exists (fresh upgrade); or
-//  2. a "<scoped-key>-legacy" route is already mounted — after the first
-//     redeploy the bare service is gone, but that route proves the agent
-//     opted into compatibility, so it is re-mounted every redeploy until it
-//     is removed by hand (runbook step 3).
-func (s *AgentDeployerService) legacyBareFor(ctx context.Context, tenantID, name string) string {
-	if s.kongSvc == nil {
-		return ""
-	}
-	// default 租户：裸路径恒挂主 route（双路径），-legacy 探测被取代；但
-	// 保留 bare-service 探测，让部署 pre-clean 的 Deregister 显式删除
-	// 升级前的旧裸名实体。挂载侧由 RegisterWithLegacy 退化语义兜底。
-	if orgSlug(tenantID) == defaultTenantSlug {
-		if s.kongSvc.LegacyExists(ctx, name) {
-			return name
-		}
-		return ""
-	}
-	if s.kongSvc.LegacyExists(ctx, name) {
-		return name
-	}
-	if s.kongSvc.LegacyRouteExists(ctx, DeployKey(tenantID, name)) {
-		return name
-	}
-	return ""
-}
-
 // registerWhenHealthy waits for the agent to become healthy and then registers
-// its Kong route under the tenant-scoped key/path. legacyBare is non-empty only
-// when the deploy flow recorded a pre-existing bare-name Kong service before
-// its pre-clean Deregister (D-1); in that case the "/<bare>" compatibility
-// route is force-mounted on the scoped service. After registration it probes
+// its Kong route under the tenant-scoped key/path. After registration it probes
 // the gateway route with retries so route propagation delay is accounted for.
 // Errors are logged, not returned.
-func (s *AgentDeployerService) registerWhenHealthy(tenantID, name, legacyBare string, hostPort int) {
+func (s *AgentDeployerService) registerWhenHealthy(tenantID, name string, hostPort int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	key := DeployKey(tenantID, name)
 	publicPath := URLPath(tenantID, name)
 	register := func(port int) {
-		if legacyBare != "" {
-			// The bare entities were already deleted by the pre-clean
-			// Deregister, so Register's internal probe would never fire;
-			// force-mount from the recorded flag.
-			_ = s.kongSvc.RegisterWithLegacy(ctx, key, publicPath, legacyBare, port)
-			return
-		}
-		_ = s.kongSvc.Register(ctx, key, publicPath, "", port)
+		_ = s.kongSvc.Register(ctx, key, publicPath, port)
 	}
 	var hp int
 	var err error
@@ -652,7 +601,7 @@ func (s *AgentDeployerService) Stop(tenantID, name string) error {
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name), name)
+		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name))
 	}
 
 	return nil
@@ -668,12 +617,9 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 
 	ctx := context.Background()
 	key := DeployKey(tenantID, name)
-	// D-1: record any legacy compatibility entity before the pre-clean
-	// Deregister deletes it, so the restart can re-mount the legacy route.
-	legacyBare := s.legacyBareFor(ctx, tenantID, name)
 	// Deregister any existing Kong route before restarting.
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, key, name)
+		_ = s.kongSvc.Deregister(ctx, key)
 	}
 	if err := s.client.StartAgent(ctx, key); err != nil {
 		return nil, fmt.Errorf("start agent failed: %w", err)
@@ -694,7 +640,7 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 		dto.APIKey, _ = providerdomain.Decrypt(agentCfg.RuntimeToken, s.encryptionKey)
 		// Register Kong route asynchronously once the runtime reports healthy.
 		if s.kongSvc != nil {
-			go s.registerWhenHealthy(tenantID, name, legacyBare, statusResp.HostPort)
+			go s.registerWhenHealthy(tenantID, name, statusResp.HostPort)
 		}
 	}
 	return dto, nil
@@ -725,7 +671,7 @@ func (s *AgentDeployerService) deleteWithPurge(tenantID, name string, purge bool
 	}
 
 	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name), name)
+		_ = s.kongSvc.Deregister(ctx, DeployKey(tenantID, name))
 	}
 
 	// Update DB status. When archived we keep the record with status=archived so
@@ -1068,13 +1014,9 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	url := s.runtimeURL(port)
-	var bareURL string
 	if s.kongSvc != nil && s.kongSvc.enabled() {
 		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
 			url = kongURL
-		}
-		if bare := BarePath(tenantID, agentName); bare != "" {
-			bareURL = s.kongSvc.RouteURL(bare)
 		}
 	} else if status == "running" && port > 0 {
 		// No-Kong public address is the hub-relative proxy path (issue #77);
@@ -1087,14 +1029,13 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	return &DeploymentDTO{
-		Status:         status,
-		Health:         health,
-		RuntimeURL:     url,
-		BareRuntimeURL: bareURL,
-		ContainerName:  containerName,
-		DeployedAt:     deployedAtStr,
-		Message:        message,
-		HostPort:       port,
+		Status:        status,
+		Health:        health,
+		RuntimeURL:    url,
+		ContainerName: containerName,
+		DeployedAt:    deployedAtStr,
+		Message:       message,
+		HostPort:      port,
 	}
 }
 

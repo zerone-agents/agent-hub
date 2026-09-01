@@ -163,12 +163,6 @@ agent 的部署标识自本版本起按**租户限定**（tenant-scoped）：
 - **数据库仍存裸名**（`agents.name` 等），租户归属由 `tenant_id` 列表达，部署键仅在部署/网关层拼接。
 - **hub 代理按限定名寻址**：hub 的聊天代理（chatbox proxy / agent 详情等）经 `/v1/agents/<org>-<name>` 限定名访问 runtime，**裸名 404**；subagent 例外——子 agent 不独立部署，名保持裸名。
 
-**存量 agent 迁移**（升级前以裸名 `/<agent>` 部署的 agent）分三步：
-
-1. **升级后逐个重新部署**：重新部署即落位新部署键 `<org>-<agent>` 与新 URL `/<org>/<agent>`。重新部署前面板显示「未部署」属预期（面板按新部署键查询，尚无对应容器），**外部旧 URL 不受影响**（升级重启后 Reconcile 已挂 `-legacy` 兼容路由），完成重新部署后面板与聊天即恢复。
-2. **`-legacy` 兼容路由自动挂载**：重新部署时自动检测升级前的旧裸名 Kong 实体，或上一次部署已挂载的 `-legacy` 路由（兼容窗口从升级重启起算、持续到手动删除该路由为止，**期间含多次重新部署**：每次重新部署前探测到任一存在，清理后都会由新容器重挂兼容路由）；命中则挂载兼容路由 `agent-<org>-<name>-route-legacy`，旧 URL `/<agent>` 继续可用（指向新容器），下游调用方无感。
-3. **择机下线旧路由**：确认所有调用方已切换到新 URL 后，经 Kong admin API 删除 `agent-<org>-<name>-route-legacy` 路由（或联系平台方处理）。删除后下次重新部署不再重挂（两种探测均不命中），旧 URL 正式下线。
-
 ## OSS (S3 / MinIO)
 
 | Variable | Required | Default | Description |

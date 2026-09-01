@@ -83,15 +83,7 @@ flowchart TB
 
 - **Tenant = Casdoor org** (casdoor mode) / `default` (builtin mode). Business tables carry a `tenant_id` column; roles are managed locally in `user_identities` (Casdoor only provides identity).
 - **Multi-org login**: a second and subsequent org can log in through its own Casdoor Application, registered via the Ops API (`/api/v1/ops/tenant-clients`, guarded by the `X-Ops-Key` header). See configuration.md for the runbook.
-- **Tenant-scoped deployment keys**: runtime URL `/<org>/<name>`, Kong/deployer key `<org>-<name>`; the hub chat proxy addresses runtimes by qualified name (`/v1/agents/<org>-<name>`, bare name → 404 except subagents). Upgrades from bare-name deployments automatically mount a `-legacy` compatibility route on Kong (see configuration.md).
-
-> **default 租户裸路径**：`default` 租户的 agent 主 Route 额外挂载裸路径
-> `/{agent}`（与 `/{org}/{agent}` 同一条 Route 的双路径，`StripPath` 归一后等价），
-> 部署响应中的 `bareRuntimeUrl` 字段随之返回、部署弹窗展示两个 URL。
-> 裸路径命名空间归 default 租户所有：其他托管实体（如多租户 `-legacy` 兼容路由、
-> 升级前旧裸名路由）对同一路径的声明会在部署与对账时被自动清理；
-> 无托管 tag（`managed-by:control-panel`）的外部手工实体不受管理，会造成歧义
-> 匹配，需运维手工处理。
+- **Tenant-scoped deployment keys**: runtime URL `/<org>/<name>`, Kong/deployer key `<org>-<name>`; the hub chat proxy addresses runtimes by qualified name (`/v1/agents/<org>-<name>`, bare name → 404 except subagents).
 
 ## Recommended Configuration for Single-ECS Deployment
 
