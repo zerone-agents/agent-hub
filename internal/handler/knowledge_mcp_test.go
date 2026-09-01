@@ -140,8 +140,24 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties missing or invalid: %v", inputSchema["properties"])
 	}
-	if _, ok := properties["question"]; !ok {
-		t.Fatalf("inputSchema missing required question property")
+	if _, ok := properties["query"]; !ok {
+		t.Fatalf("inputSchema missing required query property")
+	}
+	if _, ok := properties["question"]; ok {
+		t.Fatalf("inputSchema should not advertise legacy question property")
+	}
+	required, ok := inputSchema["required"].([]interface{})
+	if !ok {
+		t.Fatalf("required missing or invalid: %v", inputSchema["required"])
+	}
+	found := false
+	for _, r := range required {
+		if s, ok := r.(string); ok && s == "query" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("required should contain query, got %v", required)
 	}
 }
 
@@ -150,7 +166,7 @@ func TestKnowledgeMcpHandler_ToolsCall_NoBoundDatasets(t *testing.T) {
 		&fakeKnowledgeMcpService{},
 		&fakeAgentMcpService{datasets: []string{}},
 	)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {
@@ -173,7 +189,7 @@ func TestKnowledgeMcpHandler_ToolsCall_UnauthorizedDataset(t *testing.T) {
 		&fakeKnowledgeMcpService{},
 		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
 	)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello","dataset_ids":["unauthorized-dataset"]}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["unauthorized-dataset"]}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {
@@ -212,7 +228,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
 		knowledgeSvc,
 		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
 	)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello","top_k":5,"similarity_threshold":0.3,"vector_similarity_weight":0.5,"highlight":true}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","top_k":5,"similarity_threshold":0.3,"vector_similarity_weight":0.5,"highlight":true}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {
@@ -225,6 +241,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
 	if isErrorResult(resp.Result) {
 		t.Fatalf("expected isError=false, got result = %v", resp.Result)
 	}
+	// 下游 multirag /api/v1/retrieval 的契约 key 仍是 question；只有 MCP 入参改名 query。
 	if gotQuestion, _ := gotReq["question"].(string); gotQuestion != "hello" {
 		t.Fatalf("question = %q, want hello", gotQuestion)
 	}
@@ -249,6 +266,58 @@ func TestKnowledgeMcpHandler_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestKnowledgeMcpHandler_ToolsCall_LegacyQuestionArg(t *testing.T) {
+	// 兼容已部署未重启的 runtime 容器：它们缓存了旧 tools/list schema，
+	// 升级 hub 后仍会发 question 参数，须继续接受（schema 只广播 query）。
+	var gotReq knowledge.RetrievalRequest
+	knowledgeSvc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			gotReq = req
+			return &knowledge.RetrievalResult{}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(
+		knowledgeSvc,
+		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
+	)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"legacy hello"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("expected isError=false for legacy question arg, got result = %v", resp.Result)
+	}
+	if gotQuestion, _ := gotReq["question"].(string); gotQuestion != "legacy hello" {
+		t.Fatalf("downstream question = %q, want legacy hello", gotQuestion)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_MissingQuery(t *testing.T) {
+	router := setupKnowledgeMcpRouter(
+		&fakeKnowledgeMcpService{},
+		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
+	)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "query is required") {
+		t.Fatalf("expected 'query is required' error, got %+v", resp)
+	}
+}
+
 func TestKnowledgeMcpHandler_ToolsCall_Defaults(t *testing.T) {
 	var gotReq knowledge.RetrievalRequest
 	knowledgeSvc := &fakeKnowledgeMcpService{
@@ -261,7 +330,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Defaults(t *testing.T) {
 		knowledgeSvc,
 		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
 	)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {
@@ -290,7 +359,7 @@ func TestKnowledgeMcpHandler_ToolsCall_ServiceError(t *testing.T) {
 		},
 		&fakeAgentMcpService{datasets: []string{"allowed-dataset"}},
 	)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {
@@ -324,7 +393,7 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 		c.Next()
 	}, NewKnowledgeMcpHandler(&fakeKnowledgeMcpService{}, agentSvc).HandleMessage)
 
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if gotTenantID != "" {
@@ -347,7 +416,7 @@ func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
 		return []string{"tenant-a-dataset"}, nil
 	}}
 	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
-	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
 	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
 
 	if rec.Code != http.StatusOK {

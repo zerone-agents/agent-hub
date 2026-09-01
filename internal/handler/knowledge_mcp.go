@@ -49,6 +49,10 @@ type toolCallParams struct {
 }
 
 type knowledgeSearchArgs struct {
+	Query string `json:"query"`
+	// Question 是已废弃的旧参数名，仅作兼容回退：缓存了旧 tools/list
+	// schema 的已部署 runtime 容器升级 hub 后仍会发 question，直到
+	// 重新部署/重启才会拿到只广播 query 的新 schema。
 	Question               string   `json:"question"`
 	DatasetIDs             []string `json:"dataset_ids"`
 	TopK                   *int     `json:"top_k"`
@@ -140,9 +144,9 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
-							"question": map[string]interface{}{
+							"query": map[string]interface{}{
 								"type":        "string",
-								"description": "A search-optimized question for the knowledge base. Keep core entities, keywords, and intent; remove conversational filler words to retrieve more relevant snippets.",
+								"description": "A search-optimized query for the knowledge base. Keep core entities, keywords, and intent; remove conversational filler words to retrieve more relevant snippets.",
 							},
 							"dataset_ids": map[string]interface{}{
 								"type":        "array",
@@ -176,7 +180,7 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"default":     false,
 							},
 						},
-						"required": []string{"question"},
+						"required": []string{"query"},
 					},
 				},
 			},
@@ -198,9 +202,12 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 	if err := json.Unmarshal(p.Arguments, &args); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	args.Question = strings.TrimSpace(args.Question)
-	if args.Question == "" {
-		return jsonRPCResponse{}, fmt.Errorf("question is required")
+	args.Query = strings.TrimSpace(args.Query)
+	if args.Query == "" {
+		args.Query = strings.TrimSpace(args.Question)
+	}
+	if args.Query == "" {
+		return jsonRPCResponse{}, fmt.Errorf("query is required")
 	}
 
 	// Apply defaults that match the inputSchema advertised in tools/list.
@@ -268,7 +275,8 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 	}
 
 	req := knowledge.RetrievalRequest{
-		"question":                 args.Question,
+		// 下游 multirag /api/v1/retrieval 的契约 key 仍是 question，仅 MCP 入参改名 query。
+		"question":                 args.Query,
 		"dataset_ids":              datasetIDs,
 		"top_k":                    *args.TopK,
 		"similarity_threshold":     *args.SimilarityThreshold,
