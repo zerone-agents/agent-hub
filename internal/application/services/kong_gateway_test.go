@@ -603,6 +603,22 @@ func TestURLPath(t *testing.T) {
 	}
 }
 
+// seedScopedAgentWithLegacyRoute registers a healthy scoped deployment and
+// attaches the leftover "-legacy" compatibility route from the removed
+// bare-path design. Shared fixture for the upgrade-cleanup tests.
+func seedScopedAgentWithLegacyRoute(t *testing.T, s *KongGatewayService, fk *fakeKong) {
+	t.Helper()
+	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000); err != nil {
+		t.Fatalf("seed register failed: %v", err)
+	}
+	legacy := routeFor("zerone-assistant", testRouteHost, []string{"/assistant"},
+		&kong.ServiceRef{ID: fk.services["agent-zerone-assistant"].ID}, tagsFor("zerone-assistant"))
+	legacy.Name = legacyRouteName("zerone-assistant")
+	if _, err := fk.CreateRoute(context.Background(), legacy); err != nil {
+		t.Fatalf("seed legacy route failed: %v", err)
+	}
+}
+
 // TestReconcile_RemovesStaleLegacyRoute covers the upgrade path from the
 // removed bare-path/-legacy design: deployments reconciled by older builds may
 // still carry a managed "<key>-route-legacy" route serving "/<name>". The
@@ -614,18 +630,7 @@ func TestReconcile_RemovesStaleLegacyRoute(t *testing.T) {
 		{TenantID: "zerone", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
 	})
 	s := newKongService(fk, repo)
-
-	// Seed a healthy deployment exactly as the current code creates it…
-	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000); err != nil {
-		t.Fatalf("seed register failed: %v", err)
-	}
-	// …plus a leftover legacy compat route from the old design.
-	tags := tagsFor("zerone-assistant")
-	legacy := routeFor("zerone-assistant", testRouteHost, []string{"/assistant"}, &kong.ServiceRef{ID: fk.services["agent-zerone-assistant"].ID}, tags)
-	legacy.Name = "agent-zerone-assistant-route-legacy"
-	if _, err := fk.CreateRoute(context.Background(), legacy); err != nil {
-		t.Fatalf("seed legacy route failed: %v", err)
-	}
+	seedScopedAgentWithLegacyRoute(t, s, fk)
 
 	fixes, err := s.Reconcile(context.Background())
 	if err != nil {
@@ -634,7 +639,7 @@ func TestReconcile_RemovesStaleLegacyRoute(t *testing.T) {
 	if fixes != 1 {
 		t.Fatalf("expected 1 fix (remove stale legacy route), got %d", fixes)
 	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+	if fk.routes[legacyRouteName("zerone-assistant")] != nil {
 		t.Fatal("expected stale legacy route to be removed")
 	}
 	if fk.routes["agent-zerone-assistant-route"] == nil {
@@ -648,20 +653,12 @@ func TestReconcile_RemovesStaleLegacyRoute(t *testing.T) {
 func TestDeregister_RemovesLegacyRoute(t *testing.T) {
 	fk := newFakeKong()
 	s := newKongService(fk, newMemRepo(nil))
-	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000); err != nil {
-		t.Fatalf("seed register failed: %v", err)
-	}
-	tags := tagsFor("zerone-assistant")
-	legacy := routeFor("zerone-assistant", testRouteHost, []string{"/assistant"}, &kong.ServiceRef{ID: fk.services["agent-zerone-assistant"].ID}, tags)
-	legacy.Name = "agent-zerone-assistant-route-legacy"
-	if _, err := fk.CreateRoute(context.Background(), legacy); err != nil {
-		t.Fatalf("seed legacy route failed: %v", err)
-	}
+	seedScopedAgentWithLegacyRoute(t, s, fk)
 
 	if err := s.Deregister(context.Background(), "zerone-assistant"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
+	if fk.routes[legacyRouteName("zerone-assistant")] != nil {
 		t.Fatal("expected legacy route to be removed on deregister")
 	}
 	if fk.services["agent-zerone-assistant"] != nil {

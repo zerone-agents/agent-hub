@@ -281,9 +281,9 @@ func (s *KongGatewayService) Deregister(ctx context.Context, key string) error {
 	if !agentNameRe.MatchString(key) {
 		return nil
 	}
-	ln := legacyRouteName(key)
-	if err := s.client.DeleteRoute(ctx, ln); err != nil {
-		s.logger.Printf("kong: delete legacy route %s failed: %v", ln, err)
+	legacyName := legacyRouteName(key)
+	if err := s.client.DeleteRoute(ctx, legacyName); err != nil {
+		s.logger.Printf("kong: delete legacy route %s failed: %v", legacyName, err)
 	}
 	sn, rn := svcName(key), routeName(key)
 	if err := s.client.DeleteRoute(ctx, rn); err != nil {
@@ -419,20 +419,20 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 // behind by older builds (removed bare-path design). It reports whether a
 // route was removed.
 func (s *KongGatewayService) removeStaleLegacyRoute(ctx context.Context, key string) bool {
-	ln := legacyRouteName(key)
-	_, found, err := s.client.GetRoute(ctx, ln)
+	legacyName := legacyRouteName(key)
+	_, found, err := s.client.GetRoute(ctx, legacyName)
 	if err != nil {
-		s.logger.Printf("kong: get legacy route %s failed: %v", ln, err)
+		s.logger.Printf("kong: get legacy route %s failed: %v", legacyName, err)
 		return false
 	}
 	if !found {
 		return false
 	}
-	if err := s.client.DeleteRoute(ctx, ln); err != nil {
-		s.logger.Printf("kong: delete stale legacy route %s failed: %v", ln, err)
+	if err := s.client.DeleteRoute(ctx, legacyName); err != nil {
+		s.logger.Printf("kong: delete stale legacy route %s failed: %v", legacyName, err)
 		return false
 	}
-	s.logger.Printf("kong: removed stale legacy route %s", ln)
+	s.logger.Printf("kong: removed stale legacy route %s", legacyName)
 	return true
 }
 
