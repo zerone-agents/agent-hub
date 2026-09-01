@@ -9,6 +9,7 @@ import { router } from '@/routes'
 import { queryClient } from '@/lib/query-client'
 import { createAntdTheme, formValidateMessages } from '@/lib/antd-theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ManualCopyHost } from '@/components/ManualCopyDialog'
 import { setTokens } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
 import { getTheme, type ThemeColors } from '@/styles/themes'
@@ -114,6 +115,7 @@ export default function App() {
               <QueryClientProvider client={queryClient}>
                 <RouterProvider router={router} />
               </QueryClientProvider>
+              <ManualCopyHost />
             </AntdApp>
           </ConfigProvider>
         </StyleThemeProvider>
