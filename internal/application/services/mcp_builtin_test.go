@@ -52,3 +52,17 @@ func TestApplyBuiltinMetadataIsIdempotent(t *testing.T) {
 
 	assert.False(t, applyBuiltinMetadata(existing, definition))
 }
+
+func TestApplyBuiltinMetadataBackfillsEmptyURL(t *testing.T) {
+	existing := &mcp.McpServer{Name: "knowledge", IsBuiltin: true, ProbeStatus: "success"}
+	definition := &mcp.McpServer{
+		Name:        "knowledge",
+		URL:         "https://hub.example.com/api/v1/knowledge/mcp",
+		IsBuiltin:   true,
+		ToolsJSON:   mustMarshalMcpTools(builtinKnowledgeTools),
+		ProbeStatus: "success",
+	}
+
+	assert.True(t, applyBuiltinMetadata(existing, definition))
+	assert.Equal(t, definition.URL, existing.URL)
+}

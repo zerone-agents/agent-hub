@@ -111,8 +111,11 @@ type KongConfig struct {
 }
 
 type KnowledgeConfig struct {
-	MultiragBaseURL      string `mapstructure:"multirag_base_url"`
-	MultiragAPIKey       string `mapstructure:"multirag_api_key"`
+	MultiragBaseURL string `mapstructure:"multirag_base_url"`
+	MultiragAPIKey  string `mapstructure:"multirag_api_key"`
+	// MCPURL is the hub endpoint reachable from agent-runtime containers.
+	// It must include the full /api/v1/knowledge/mcp path.
+	MCPURL               string `mapstructure:"mcp_url"`
 	TimeoutSeconds       int    `mapstructure:"timeout_seconds"`
 	UploadTimeoutSeconds int    `mapstructure:"upload_timeout_seconds"`
 }
@@ -176,6 +179,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("deployer.runtime_api_key", "AGENT_RUNTIME_API_KEY")
 	viper.BindEnv("knowledge.multirag_base_url", "MULTIRAG_BASE_URL")
 	viper.BindEnv("knowledge.multirag_api_key", "MULTIRAG_API_KEY")
+	viper.BindEnv("knowledge.mcp_url", "KNOWLEDGE_MCP_URL")
 	viper.BindEnv("knowledge.timeout_seconds", "MULTIRAG_TIMEOUT_SECONDS")
 	viper.BindEnv("knowledge.upload_timeout_seconds", "MULTIRAG_UPLOAD_TIMEOUT_SECONDS")
 	viper.BindEnv("kong.admin_url", "KONG_ADMIN_URL")

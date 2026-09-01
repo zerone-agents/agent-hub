@@ -207,6 +207,7 @@ openssl rand -hex 32
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MULTIRAG_BASE_URL` | Required for KB module | — | multirag service address, e.g. `http://multirag:8000`; if missing, the service still starts, and knowledge base APIs return 503 |
+| `KNOWLEDGE_MCP_URL` | Required when agents use knowledge bases | — | Hub 的完整知识库 MCP 地址，必须包含 `/api/v1/knowledge/mcp`，并且可从 agent-runtime 容器访问（例如 `http://10.0.0.10:8081/api/v1/knowledge/mcp`；不要误用容器内的 `localhost`）。启动时会自动写入或回填内置 `knowledge` MCP；修改后需重启 Hub 并重新部署 Agent。 |
 | `MULTIRAG_API_KEY` | Required for KB module | — | Bearer token for the agent-hub service account to access multirag; not exposed to the browser |
 | `MULTIRAG_TIMEOUT_SECONDS` | No | `30` | Timeout for agent-hub calling standard multirag APIs |
 | `MULTIRAG_UPLOAD_TIMEOUT_SECONDS` | No | `3600` | Timeout (seconds) for agent-hub streaming document uploads to multirag |

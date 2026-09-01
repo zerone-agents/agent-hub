@@ -885,6 +885,9 @@ func (s *AgentDeployerService) buildCreateRequest(
 	// Build MCP server configs (headers are already decrypted by the MCP service).
 	mcpServerConfigs := make(map[string]deployer.McpServerConfig, len(mcpServers))
 	for name, mcp := range mcpServers {
+		if name == "knowledge" && strings.TrimSpace(mcp.URL) == "" {
+			return nil, fmt.Errorf("内置 knowledge MCP 未配置可达地址，请设置 KNOWLEDGE_MCP_URL（完整路径需包含 /api/v1/knowledge/mcp），重启 Hub 后重新部署 Agent")
+		}
 		mcpServerConfigs[name] = deployer.McpServerConfig{
 			Type:    mcp.Type,
 			URL:     mcp.URL,
