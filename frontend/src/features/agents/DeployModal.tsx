@@ -15,7 +15,7 @@ import {
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { agentApi } from '@/api/agents'
-import { copyToClipboard } from '@/utils/clipboard'
+import { copyOrManual } from '@/utils/clipboard'
 import { parseApiError } from '@/api/client'
 import { useKnowledgeList } from '@/queries/useKnowledge'
 import { useCanWrite } from '@/hooks/useCanWrite'
@@ -530,7 +530,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   )
 
   const handleCopy = async (which: 'url' | 'key', text: string) => {
-    if (await copyToClipboard(text)) {
+    if (await copyOrManual(text)) {
       setCopied(which)
       setTimeout(() => { setCopied(null); }, 1500)
     } else {

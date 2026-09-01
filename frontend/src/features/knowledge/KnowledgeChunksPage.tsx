@@ -36,7 +36,7 @@ import {
 import { createStyles } from "antd-style";
 import { useNavigate, useParams } from "react-router";
 import { parseApiError } from "@/api/client";
-import { copyToClipboard } from "@/utils/clipboard";
+import { copyOrManual } from "@/utils/clipboard";
 import {
   knowledgeApi,
   type ChunkFormInput,
@@ -418,7 +418,7 @@ function ChunkImage({
   };
 
   const copyImageId = async () => {
-    if (await copyToClipboard(imageId)) {
+    if (await copyOrManual(imageId)) {
       message.success("已复制 image id");
     } else {
       message.error("复制失败");
@@ -757,7 +757,7 @@ export default function KnowledgeChunksPage() {
   };
 
   const copyChunkId = async (chunkId: string) => {
-    if (await copyToClipboard(chunkId)) {
+    if (await copyOrManual(chunkId)) {
       message.success("已复制 chunk id");
     } else {
       message.error("复制失败");

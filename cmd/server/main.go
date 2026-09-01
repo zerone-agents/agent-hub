@@ -50,6 +50,22 @@ func (sfs *SPAFileSystem) Open(name string) (http.File, error) {
 //go:embed all:dist
 var staticFiles embed.FS
 
+// staticCacheHeaders sets Cache-Control for the embedded SPA. Vite emits
+// content-hashed assets under /static/assets/ (safe to cache forever); the
+// entry index.html and SPA client routes keep their URLs across releases and
+// must always revalidate. The embed FS carries no Last-Modified/ETag
+// validators, and browsers apply heuristic caching when no explicit policy is
+// sent — without these headers, users keep running stale JS after upgrades.
+func staticCacheHeaders(c *gin.Context) {
+	p := c.Request.URL.Path
+	if strings.HasPrefix(p, "/static/assets/") {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	} else if strings.HasPrefix(p, "/static") {
+		c.Header("Cache-Control", "no-cache")
+	}
+	c.Next()
+}
+
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -147,6 +163,7 @@ func main() {
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.CORS(cfg.Server.CorsOrigins))
+	r.Use(staticCacheHeaders)
 
 	// 静态资源管理
 	dist, err := fs.Sub(staticFiles, "dist")

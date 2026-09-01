@@ -1,7 +1,7 @@
 import { Modal, Input, Typography, message, Space, Button } from 'antd'
 import { CopyIcon } from '@phosphor-icons/react'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
-import { copyToClipboard } from '@/utils/clipboard'
+import { copyOrManual } from '@/utils/clipboard'
 
 interface SignupLinkModalProps {
   open: boolean
@@ -18,7 +18,7 @@ export default function SignupLinkModal({ open, signupUrl, onClose }: SignupLink
   const primaryBtnCls = usePrimaryButtonStyle()
   const copyURL = async () => {
     if (!signupUrl) return
-    if (await copyToClipboard(signupUrl)) {
+    if (await copyOrManual(signupUrl)) {
       message.success('注册链接已复制')
     } else {
       message.error('复制失败，请手动选择复制')
