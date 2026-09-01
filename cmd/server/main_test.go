@@ -32,6 +32,10 @@ func TestStaticCacheHeaders(t *testing.T) {
 		{"/static/agents", "no-cache"}, // SPA client route served by the fallback
 		{"/static/favicon.ico", "no-cache"},
 		{"/api/v1/ping", ""}, // non-static paths untouched
+		// 相邻前缀负例：不属于 /static/* 的路径不得被误打缓存头
+		{"/staticity", ""},
+		{"/static-old", ""},
+		{"/static2/assets/x.js", ""},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
