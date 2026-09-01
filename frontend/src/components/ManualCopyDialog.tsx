@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { Button } from 'antd'
+import PrimaryButton from '@/components/PrimaryButton'
 import { createStyles } from 'antd-style'
 
 const useStyles = createStyles(() => ({
@@ -47,7 +47,9 @@ const useStyles = createStyles(() => ({
  * - navigator.clipboard 不存在；
  * - document.execCommand('copy') 在 Chrome 中静默假成功（返回 true 但未写入，无法检出）；
  * - 剪贴板写入又无法回读验证。
- * 因此统一改为弹出手动复制框：全文只读 textarea 自动聚焦全选，用户 ⌘C / Ctrl+C 后关闭。
+ * 因此统一改为弹出手动复制框：只读 textarea 聚焦供用户自选，
+ * 用户选中后按 ⌘C / Ctrl+C 复制、关闭。
+ * 注意不能自动全选（也不能在 onFocus 里重选），否则会覆盖用户的手动选区。
  */
 export function showManualCopy(text: string) {
   const wrap = document.createElement('div')
@@ -70,26 +72,24 @@ function ManualCopyDialog({ text, onClose }: { text: string; onClose: () => void
 
   useEffect(() => {
     taRef.current?.focus()
-    taRef.current?.select()
   }, [])
 
   return (
     <div className={styles.mask} role="dialog" aria-label="手动复制">
       <div className={styles.box}>
         <div className={styles.hint}>
-          浏览器限制非 HTTPS 页面自动复制。内容已自动选中，请按 ⌘C / Ctrl+C 复制，完成后关闭。
+          浏览器限制非 HTTPS 页面自动复制。请选中下方内容后按 ⌘C / Ctrl+C 复制，完成后关闭。
         </div>
         <textarea
           ref={taRef}
           className={styles.textarea}
           readOnly
           value={text}
-          onFocus={(e) => { e.currentTarget.select() }}
         />
         <div className={styles.footer}>
-          <Button type="primary" onClick={onClose}>
+          <PrimaryButton onClick={onClose}>
             关闭
-          </Button>
+          </PrimaryButton>
         </div>
       </div>
     </div>

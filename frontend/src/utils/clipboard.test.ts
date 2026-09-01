@@ -83,7 +83,7 @@ describe('copyOrManual', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('insecure context：尽力复制并弹出手动复制框（全文 + 自动全选）', async () => {
+  it('insecure context：尽力复制并弹出手动复制框（全文只读 + 用户自选）', async () => {
     const exec = vi.fn().mockReturnValue(true)
     Object.defineProperty(document, 'execCommand', { value: exec, configurable: true })
     // jsdom 默认无 window.isSecureContext → 自动走非安全分支
@@ -98,8 +98,6 @@ describe('copyOrManual', () => {
     const ta = document.querySelector('textarea')
     expect(ta).not.toBeNull()
     expect(ta?.value).toBe(text)
-    // 自动全选：用户直接 ⌘C 即可
-    expect(ta?.selectionStart).toBe(0)
-    expect(ta?.selectionEnd).toBe(text.length)
+    expect(ta?.readOnly).toBe(true)
   })
 })
