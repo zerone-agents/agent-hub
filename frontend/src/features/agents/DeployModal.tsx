@@ -203,8 +203,14 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     gap: 8px;
     justify-content: flex-end;
+    flex-wrap: wrap;
     .ant-btn:not(.ant-btn-primary) {
       box-shadow: none;
+    }
+    @media (max-width: 480px) {
+      .ant-btn {
+        flex: 1 1 calc(50% - 8px);
+      }
     }
   `,
 }))
