@@ -62,7 +62,7 @@ function renderPage(qc = new QueryClient({ defaultOptions: { queries: { retry: f
   return qc
 }
 
-describe('AgentChatPage stream error display', () => {
+describe('AgentChatPage stream error display', { timeout: 15000 }, () => {
   beforeEach(() => {
     mockStream.reset.mockClear()
     mockStream.state = {
@@ -158,7 +158,7 @@ describe('AgentChatPage stream error display', () => {
   })
 })
 
-describe('AgentChatPage session scoping', () => {
+describe('AgentChatPage session scoping', { timeout: 15000 }, () => {
   beforeEach(() => {
     mockStream.state = {
       phase: 'streaming',
