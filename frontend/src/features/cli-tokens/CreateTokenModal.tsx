@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Modal, Form, Input, Select, Alert, Button } from 'antd'
+import { Modal, Form, Input, Select, Alert, Button, message } from 'antd'
 import { CheckOutlined } from '@ant-design/icons'
 import { useCLITokens, useIssueCLIToken } from '@/queries/useCLITokens'
 import { identifierFormRules } from '@/utils/identifier'
+import { copyToClipboard } from '@/utils/clipboard'
 import PrimaryButton from '@/components/PrimaryButton'
 
 const TTL_OPTIONS = [
@@ -118,7 +119,9 @@ export default function CreateTokenModal({ open, onClose }: Props) {
                 type="link"
                 size="small"
                 onClick={() => {
-                  void navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); })
+                  void copyToClipboard(issuedToken).then((ok) => {
+                    if (ok) setCopied(true); else message.error('复制失败，请手动选择复制')
+                  })
                 }}
               >
                 复制
