@@ -76,6 +76,14 @@ const useStyles = createStyles(({ css }) => ({
   footerHint: css`
     color: ${t.textMuted};
     font-size: 12px;
+  `,
+  promptTip: css`
+    // Long scene prompts would otherwise fill the whole screen; cap the
+    // tooltip height and scroll instead. pre-wrap keeps line breaks readable.
+    max-height: 50vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
   `
 }))
 
@@ -110,7 +118,11 @@ export default function SceneWelcome({ agentName, onPick, disabled }: SceneWelco
       <div className={styles.head}>你可以试试以下场景：</div>
       <div className={styles.grid}>
         {scenes.map((scene) => (
-          <Tooltip key={scene.id} title={scene.prompt} placement="top">
+          <Tooltip
+            key={scene.id}
+            title={<div className={styles.promptTip}>{scene.prompt}</div>}
+            placement="top"
+          >
             <button
               type="button"
               className={`${styles.card}${disabled ? ` ${styles.cardDisabled}` : ''}`}
