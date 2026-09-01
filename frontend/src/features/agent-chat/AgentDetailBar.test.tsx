@@ -8,7 +8,12 @@ vi.mock('@/queries/useAgentDetail', () => ({
   useAgentDetail: vi.fn(),
 }))
 
+vi.mock('@/queries/useAgents', () => ({
+  useAgents: vi.fn(),
+}))
+
 import { useAgentDetail } from '@/queries/useAgentDetail'
+import { useAgents } from '@/queries/useAgents'
 import type { AgentDetail } from '@/api/agents'
 
 function renderWith(ui: React.ReactElement) {
@@ -30,7 +35,10 @@ const fullDetail: AgentDetail = {
 }
 
 describe('AgentDetailBar', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(useAgents as any).mockReturnValue({ data: [] })
+  })
 
   it('renders null when isLoading', () => {
     ;(useAgentDetail as any).mockReturnValue({ data: undefined, isLoading: true, isError: false })
@@ -61,6 +69,23 @@ describe('AgentDetailBar', () => {
     fireEvent.click(screen.getByText('threapy-agent'))
     expect(screen.getByText('Bash')).toBeInTheDocument()
     expect(screen.getByText('coder')).toBeInTheDocument()
+  })
+
+  it('prefers hub agent title over technical name when available', () => {
+    ;(useAgentDetail as any).mockReturnValue({ data: fullDetail, isLoading: false, isError: false })
+    ;(useAgents as any).mockReturnValue({
+      data: [{ id: 1, name: 'threapy-agent', config: { title: { zh: '疗愈助手', en: 'Therapy' } } }],
+    })
+    renderWith(<AgentDetailBar agentName="threapy-agent" />)
+    expect(screen.getByText('疗愈助手')).toBeInTheDocument()
+    expect(screen.queryByText('threapy-agent')).not.toBeInTheDocument()
+  })
+
+  it('falls back to technical name when hub agent record is missing', () => {
+    ;(useAgentDetail as any).mockReturnValue({ data: fullDetail, isLoading: false, isError: false })
+    ;(useAgents as any).mockReturnValue({ data: [] })
+    renderWith(<AgentDetailBar agentName="x" />)
+    expect(screen.getByText('threapy-agent')).toBeInTheDocument()
   })
 
   it('hides grid again on second click', () => {
