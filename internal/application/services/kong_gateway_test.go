@@ -153,7 +153,7 @@ func newKongService(fk *fakeKong, repo *memRepo) *KongGatewayService {
 
 func TestRegister_Disabled_IsNoOp(t *testing.T) {
 	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, newMemRepo(nil), 60)
-	if err := s.Register(context.Background(), "general", "/default/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/default/general", 3000); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 }
@@ -162,7 +162,7 @@ func TestRegister_CreatesServiceAndRoute(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "zerone-general", "/zerone/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "zerone-general", "/zerone/general", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if fk.services["agent-zerone-general"] == nil {
@@ -196,13 +196,12 @@ func TestRegister_CreatesServiceAndRoute(t *testing.T) {
 }
 
 func TestRegister_SingleSegmentPath_Rejected(t *testing.T) {
-	// pathRe requires at least two segments (/<org>/<name>): the pre-Task-2
-	// single-segment "/"+bareName form must now be rejected so no route can
-	// claim a cross-tenant bare path.
+	// pathRe requires at least two segments (/<org>/<name>): single-segment
+	// paths are rejected so no route can claim a cross-tenant bare path.
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "general", "/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/general", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(fk.services) != 0 || len(fk.routes) != 0 {
@@ -214,10 +213,10 @@ func TestRegister_IsIdempotent_SecondCallNoDup(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "general", "/t/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/t/general", 3000); err != nil {
 		t.Fatalf("first register failed: %v", err)
 	}
-	if err := s.Register(context.Background(), "general", "/t/general", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/t/general", 3000); err != nil {
 		t.Fatalf("second register failed: %v", err)
 	}
 	if len(fk.services) != 1 {
@@ -232,7 +231,7 @@ func TestRegister_InvalidName_Skipped(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "Bad Name", "/default/bad", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "Bad Name", "/default/bad", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(fk.services) != 0 || len(fk.routes) != 0 {
@@ -244,7 +243,7 @@ func TestRegister_InvalidPublicPath_Skipped(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "general", "/Bad Path", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "general", "/Bad Path", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(fk.services) != 0 || len(fk.routes) != 0 {
@@ -252,190 +251,13 @@ func TestRegister_InvalidPublicPath_Skipped(t *testing.T) {
 	}
 }
 
-func TestRegister_LegacyRouteCreatedWhenBareServiceExists(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-	// Pre-existing legacy bare-name service.
-	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-
-	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	lr := fk.routes["agent-zerone-assistant-route-legacy"]
-	if lr == nil {
-		t.Fatal("expected legacy route agent-zerone-assistant-route-legacy to be created")
-	}
-	if len(lr.Paths) != 1 || lr.Paths[0] != "/assistant" {
-		t.Fatalf("unexpected legacy route paths: %v", lr.Paths)
-	}
-	if !lr.StripPath {
-		t.Fatal("expected legacy route strip_path to be true")
-	}
-	if lr.Service == nil || lr.Service.ID != fk.services["agent-zerone-assistant"].ID {
-		t.Fatal("expected legacy route to reference the new service")
-	}
-	// The legacy bare service itself is left untouched (kept serving until
-	// decommissioned by Deregister).
-	if fk.services["agent-assistant"] == nil {
-		t.Fatal("expected legacy bare service to survive register")
-	}
-}
-
-func TestRegister_NoLegacyRouteWhenBareServiceAbsent(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("expected no legacy route when bare service does not exist")
-	}
-}
-
-func TestRegister_LegacyRouteIdempotent(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-
-	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000)
-	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000)
-	if len(fk.routes) != 2 {
-		t.Fatalf("expected 2 routes (main + legacy), got %d", len(fk.routes))
-	}
-}
-
-func TestLegacyExists(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-
-	if !s.LegacyExists(context.Background(), "assistant") {
-		t.Error("expected LegacyExists(assistant) = true")
-	}
-	if s.LegacyExists(context.Background(), "other") {
-		t.Error("expected LegacyExists(other) = false")
-	}
-	if s.LegacyExists(context.Background(), "Bad Name") {
-		t.Error("invalid bare name should report false")
-	}
-	disabled := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60)
-	if disabled.LegacyExists(context.Background(), "assistant") {
-		t.Error("disabled service should report false")
-	}
-}
-
-// TestLegacyRouteExists covers the second legacy probe: after the first
-// redeploy the bare-name entities are gone, but the mounted "<key>-legacy"
-// route is the surviving proof that this agent opted into compatibility, so
-// the deploy flow can keep re-mounting it on subsequent redeploys.
-func TestLegacyRouteExists(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-
-	if s.LegacyRouteExists(context.Background(), "zerone-assistant") {
-		t.Error("expected LegacyRouteExists(zerone-assistant) = false before any registration")
-	}
-
-	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !s.LegacyRouteExists(context.Background(), "zerone-assistant") {
-		t.Error("expected LegacyRouteExists(zerone-assistant) = true after forced mount")
-	}
-	if s.LegacyRouteExists(context.Background(), "zerone-other") {
-		t.Error("expected LegacyRouteExists(zerone-other) = false")
-	}
-
-	disabled := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60)
-	if disabled.LegacyRouteExists(context.Background(), "zerone-assistant") {
-		t.Error("disabled service should report false")
-	}
-}
-
-// TestRegisterWithLegacy_MountsDespiteMissingBareService covers the D-1
-// timing: the deploy flow records legacy existence BEFORE its pre-clean
-// Deregister deletes the bare entities, so the forced mount must not depend on
-// the bare service still being present in Kong.
-func TestRegisterWithLegacy_MountsDespiteMissingBareService(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-
-	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	lr := fk.routes["agent-zerone-assistant-route-legacy"]
-	if lr == nil {
-		t.Fatal("expected legacy route despite missing bare service")
-	}
-	if len(lr.Paths) != 1 || lr.Paths[0] != "/assistant" {
-		t.Fatalf("legacy route paths = %v, want [/assistant]", lr.Paths)
-	}
-	if lr.Service == nil || lr.Service.ID != fk.services["agent-zerone-assistant"].ID {
-		t.Fatal("expected legacy route to reference the scoped service")
-	}
-	if fk.routes["agent-zerone-assistant-route"] == nil {
-		t.Fatal("expected main scoped route to be registered too")
-	}
-
-	// Idempotent: a second forced mount must not duplicate anything.
-	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("second call failed: %v", err)
-	}
-	if len(fk.routes) != 2 {
-		t.Fatalf("expected 2 routes (main + legacy), got %d", len(fk.routes))
-	}
-}
-
-// P1 回归：default 先注册拥有裸路径后，非 default 的 legacy 重挂让位；
-// default 主路由不受影响。
-func TestRegisterWithLegacy_NonDefaultYieldsToDefaultBarePathOwner(t *testing.T) {
-	fk := newFakeKong()
-	s := newKongService(fk, newMemRepo(nil))
-
-	// default 先注册（拥有 /assistant）
-	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
-		t.Fatalf("register default: %v", err)
-	}
-	// 非 default 重部署：bare service 存在使 legacyBare 生效
-	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
-	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("register legacy: %v", err)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("legacy mount must yield when default owns the bare path")
-	}
-	if fk.routes["agent-default-assistant-route"] == nil {
-		t.Fatal("default's main route must be untouched")
-	}
-}
-
-// P1 反向：default 主路由不存在时 legacy 照常挂载（升级兼容语义不变）。
-func TestRegisterWithLegacy_StillMountsWhenDefaultAbsent(t *testing.T) {
-	fk := newFakeKong()
-	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
-	s := newKongService(fk, newMemRepo(nil))
-
-	if err := s.RegisterWithLegacy(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("register legacy: %v", err)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] == nil {
-		t.Fatal("legacy route must still mount when default tenant has no claim")
-	}
-}
-
 func TestDeregister_RemovesServiceAndIsIdempotent(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "general", "/t/general", "", 3000)
+	_ = s.Register(context.Background(), "general", "/t/general", 3000)
 
-	if err := s.Deregister(context.Background(), "general", ""); err != nil {
+	if err := s.Deregister(context.Background(), "general"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if fk.services["agent-general"] != nil {
@@ -446,46 +268,21 @@ func TestDeregister_RemovesServiceAndIsIdempotent(t *testing.T) {
 	}
 
 	// Idempotent: deregistering again should not error
-	if err := s.Deregister(context.Background(), "general", ""); err != nil {
+	if err := s.Deregister(context.Background(), "general"); err != nil {
 		t.Fatalf("idempotent deregister failed: %v", err)
 	}
 }
 
-func TestDeregister_CleansLegacyEntities(t *testing.T) {
+func TestDeregister_OnlyScopedEntities(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	// Set up: legacy bare entities + new scoped entities (with legacy route).
-	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-	fk.routes["agent-assistant-route"] = &kong.Route{ID: "legacy-route-id", Name: "agent-assistant-route"}
-	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "assistant", 3000)
+	// An unrelated same-suffix entity that must NOT be touched: Deregister
+	// only removes entities of the exact scoped deploy key.
+	fk.services["agent-assistant"] = &kong.Service{ID: "other-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
 
-	if err := s.Deregister(context.Background(), "zerone-assistant", "assistant"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.services["agent-zerone-assistant"] != nil {
-		t.Fatal("expected scoped service to be removed")
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("expected scoped legacy route to be removed")
-	}
-	if fk.services["agent-assistant"] != nil {
-		t.Fatal("expected legacy bare service to be removed")
-	}
-	if fk.routes["agent-assistant-route"] != nil {
-		t.Fatal("expected legacy bare route to be removed")
-	}
-}
-
-func TestDeregister_EmptyLegacyBare_OnlyScopedEntities(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo(nil)
-	s := newKongService(fk, repo)
-	// An unrelated bare-name entity that must NOT be touched when legacyBare is empty.
-	fk.services["agent-assistant"] = &kong.Service{ID: "legacy-id", Name: "agent-assistant", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-
-	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "", 3000)
-	if err := s.Deregister(context.Background(), "zerone-assistant", ""); err != nil {
+	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000)
+	if err := s.Deregister(context.Background(), "zerone-assistant"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if fk.services["agent-zerone-assistant"] != nil {
@@ -500,7 +297,7 @@ func TestUpdateUpstream_UpdatesPort(t *testing.T) {
 	fk := newFakeKong()
 	repo := newMemRepo(nil)
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "general", "/t/general", "", 3000)
+	_ = s.Register(context.Background(), "general", "/t/general", 3000)
 	if err := s.UpdateUpstream(context.Background(), "general", 4000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -564,8 +361,8 @@ func TestReconcile_TwoTenantsSameName_NoCrossDelete(t *testing.T) {
 		{TenantID: "ayu", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3001},
 	})
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "", 3000)
-	_ = s.Register(context.Background(), "ayu-assistant", "/ayu/assistant", "", 3001)
+	_ = s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000)
+	_ = s.Register(context.Background(), "ayu-assistant", "/ayu/assistant", 3001)
 
 	fixes, err := s.Reconcile(context.Background())
 	if err != nil {
@@ -585,7 +382,7 @@ func TestReconcile_FixesPortDrift(t *testing.T) {
 		{TenantID: "zerone", Name: "general", DeploymentStatus: "running", RuntimePort: 4000},
 	})
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", "", 3000)
+	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", 3000)
 
 	fixes, err := s.Reconcile(context.Background())
 	if err != nil {
@@ -608,7 +405,7 @@ func TestReconcile_FixesRouteHostDrift(t *testing.T) {
 		{TenantID: "zerone", Name: "general", DeploymentStatus: "running", RuntimePort: 3000},
 	})
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", "", 3000)
+	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", 3000)
 
 	// Simulate route host drift by changing it to a stale value.
 	fk.routes["agent-zerone-general-route"].Hosts = []string{"stale.example.com"}
@@ -631,7 +428,7 @@ func TestReconcile_FixesRoutePathDrift(t *testing.T) {
 		{TenantID: "zerone", Name: "general", DeploymentStatus: "running", RuntimePort: 3000},
 	})
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", "", 3000)
+	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", 3000)
 
 	// Simulate path drift.
 	fk.routes["agent-zerone-general-route"].Paths = []string{"/stale/general"}
@@ -654,7 +451,7 @@ func TestReconcile_DeregistersUnserviceable(t *testing.T) {
 		{TenantID: "zerone", Name: "general", DeploymentStatus: "stopped", RuntimePort: 3000},
 	})
 	s := newKongService(fk, repo)
-	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", "", 3000)
+	_ = s.Register(context.Background(), "zerone-general", "/zerone/general", 3000)
 
 	fixes, err := s.Reconcile(context.Background())
 	if err != nil {
@@ -702,16 +499,16 @@ func TestReconcile_KeepsUntaggedServiceWhenTagFilterIgnored(t *testing.T) {
 	s := newKongService(fk, repo)
 	// A foreign service whose name collides with the agent-* prefix but which
 	// is NOT managed by control-panel (no managed tag).
-	fk.services["agent-legacy"] = &kong.Service{Name: "agent-legacy", Host: "10.0.0.1", Port: 9000}
-	fk.routes["agent-legacy-route"] = &kong.Route{Name: "agent-legacy-route"}
+	fk.services["agent-foreign"] = &kong.Service{Name: "agent-foreign", Host: "10.0.0.1", Port: 9000}
+	fk.routes["agent-foreign-route"] = &kong.Route{Name: "agent-foreign-route"}
 
 	if _, err := s.Reconcile(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fk.services["agent-legacy"] == nil {
+	if fk.services["agent-foreign"] == nil {
 		t.Fatal("expected untagged service to survive reconcile")
 	}
-	if fk.routes["agent-legacy-route"] == nil {
+	if fk.routes["agent-foreign-route"] == nil {
 		t.Fatal("expected untagged route to survive reconcile")
 	}
 }
@@ -806,197 +603,78 @@ func TestURLPath(t *testing.T) {
 	}
 }
 
-// --- default 租户裸路径（dual-path）---
-
-func TestBarePath(t *testing.T) {
-	cases := []struct {
-		tenant, agent, want string
-	}{
-		{"default", "assistant", "/assistant"}, // default 租户 → 裸路径
-		{"Default", "assistant", "/assistant"}, // orgSlug 归一化大小写
-		{"zerone", "assistant", ""},            // 非 default 租户 → 空
-		{"default", "Bad Name", "/bad-name"},   // NormalizeAgentName 归一为合法名
-		{"defaults", "assistant", ""},          // 字面相等而非前缀匹配
+// seedScopedAgentWithLegacyRoute registers a healthy scoped deployment and
+// attaches the leftover "-legacy" compatibility route from the removed
+// bare-path design. Shared fixture for the upgrade-cleanup tests.
+func seedScopedAgentWithLegacyRoute(t *testing.T, s *KongGatewayService, fk *fakeKong) {
+	t.Helper()
+	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000); err != nil {
+		t.Fatalf("seed register failed: %v", err)
 	}
-	for _, c := range cases {
-		if got := BarePath(c.tenant, c.agent); got != c.want {
-			t.Errorf("BarePath(%q, %q) = %q, want %q", c.tenant, c.agent, got, c.want)
-		}
+	legacy := routeFor("zerone-assistant", testRouteHost, []string{"/assistant"},
+		&kong.ServiceRef{ID: fk.services["agent-zerone-assistant"].ID}, tagsFor("zerone-assistant"))
+	legacy.Name = legacyRouteName("zerone-assistant")
+	if _, err := fk.CreateRoute(context.Background(), legacy); err != nil {
+		t.Fatalf("seed legacy route failed: %v", err)
 	}
 }
 
-func TestRoutePaths(t *testing.T) {
-	if got := routePaths("/default/foo"); len(got) != 2 || got[0] != "/default/foo" || got[1] != "/foo" {
-		t.Errorf("routePaths(/default/foo) = %v, want [/default/foo /foo]", got)
-	}
-	if got := routePaths("/zerone/foo"); len(got) != 1 || got[0] != "/zerone/foo" {
-		t.Errorf("routePaths(/zerone/foo) = %v, want [/zerone/foo]", got)
-	}
-	// 拒绝分支（v2 补）：裸段非法 / 段数不对 → 恒返回单 scoped 路径
-	if got := routePaths("/default/Bad!"); len(got) != 1 || got[0] != "/default/Bad!" {
-		t.Errorf("routePaths(/default/Bad!) = %v, want single scoped path", got)
-	}
-	if got := routePaths("/default"); len(got) != 1 || got[0] != "/default" {
-		t.Errorf("routePaths(/default) = %v, want single scoped path", got)
-	}
-}
-
-func TestRegister_DefaultTenantDualPaths(t *testing.T) {
+// TestReconcile_RemovesStaleLegacyRoute covers the upgrade path from the
+// removed bare-path/-legacy design: deployments reconciled by older builds may
+// still carry a managed "<key>-route-legacy" route serving "/<name>". The
+// single-path policy requires Reconcile to remove it while keeping the main
+// tenant-scoped route intact.
+func TestReconcile_RemovesStaleLegacyRoute(t *testing.T) {
 	fk := newFakeKong()
-	s := newKongService(fk, newMemRepo(nil))
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "zerone", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	s := newKongService(fk, repo)
+	seedScopedAgentWithLegacyRoute(t, s, fk)
 
-	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
+	fixes, err := s.Reconcile(context.Background())
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	r := fk.routes["agent-default-assistant-route"]
-	if r == nil {
-		t.Fatal("expected route to be created")
+	if fixes != 1 {
+		t.Fatalf("expected 1 fix (remove stale legacy route), got %d", fixes)
 	}
-	if len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
-		t.Fatalf("expected dual paths [/default/assistant /assistant], got %v", r.Paths)
-	}
-}
-
-func TestRegister_DefaultTenantSupersedesLegacyRoute(t *testing.T) {
-	fk := newFakeKong()
-	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{
-		Name:  "agent-default-assistant-route-legacy",
-		Paths: []string{"/assistant"},
-	}
-	s := newKongService(fk, newMemRepo(nil))
-
-	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.routes["agent-default-assistant-route-legacy"] != nil {
-		t.Fatal("expected superseded -legacy route to be deleted for default tenant")
-	}
-}
-
-// v2：裸路径命名空间归 default——其他托管实体对同一路径的声明被清理；
-// zerone 的 scoped 主路由不受影响；无托管 tag 的外部实体永不动。
-func TestRegister_DefaultTenantSupersedesForeignBarePathClaims(t *testing.T) {
-	fk := newFakeKong()
-	// 租户 zerone 的 -legacy 兼容路由声明了 /assistant（升级前裸名）
-	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
-		Name:  "agent-zerone-assistant-route-legacy",
-		Paths: []string{"/assistant"},
-		Tags:  tagsFor("zerone-assistant"),
-	}
-	// zerone 的主路由不受影响
-	fk.routes["agent-zerone-assistant-route"] = &kong.Route{
-		Name:  "agent-zerone-assistant-route",
-		Paths: []string{"/zerone/assistant"},
-		Tags:  tagsFor("zerone-assistant"),
-	}
-	// 无托管 tag 的外部路由：不可见，绝不动
-	fk.routes["foreign-route"] = &kong.Route{Name: "foreign-route", Paths: []string{"/assistant"}}
-	s := newKongService(fk, newMemRepo(nil))
-
-	if err := s.Register(context.Background(), "default-assistant", "/default/assistant", "", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("expected foreign -legacy claim on /assistant to be deleted")
+	if fk.routes[legacyRouteName("zerone-assistant")] != nil {
+		t.Fatal("expected stale legacy route to be removed")
 	}
 	if fk.routes["agent-zerone-assistant-route"] == nil {
-		t.Fatal("zerone's scoped main route must be untouched")
-	}
-	if fk.routes["foreign-route"] == nil {
-		t.Fatal("foreign (untagged) route must never be touched")
+		t.Fatal("expected main scoped route to survive")
 	}
 }
 
-func TestRegister_NonDefaultTenantSinglePathUnchanged(t *testing.T) {
+// TestDeregister_RemovesLegacyRoute: Deregister must also remove a leftover
+// "-legacy" route, otherwise a non-cascading Kong backend keeps serving the
+// old bare URL after the deployment is torn down.
+func TestDeregister_RemovesLegacyRoute(t *testing.T) {
+	fk := newFakeKong()
+	s := newKongService(fk, newMemRepo(nil))
+	seedScopedAgentWithLegacyRoute(t, s, fk)
+
+	if err := s.Deregister(context.Background(), "zerone-assistant"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fk.routes[legacyRouteName("zerone-assistant")] != nil {
+		t.Fatal("expected legacy route to be removed on deregister")
+	}
+	if fk.services["agent-zerone-assistant"] != nil {
+		t.Fatal("expected service to be removed")
+	}
+}
+
+func TestRegister_SinglePathRoute(t *testing.T) {
 	fk := newFakeKong()
 	s := newKongService(fk, newMemRepo(nil))
 
-	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", "", 3000); err != nil {
+	if err := s.Register(context.Background(), "zerone-assistant", "/zerone/assistant", 3000); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	r := fk.routes["agent-zerone-assistant-route"]
 	if r == nil || len(r.Paths) != 1 || r.Paths[0] != "/zerone/assistant" {
 		t.Fatalf("expected single path /zerone/assistant, got %+v", r)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("legacy route must not be mounted for non-default tenant without legacy entity")
-	}
-}
-
-// v2：RegisterWithLegacy 在 default 双路径场景退化为普通 Register，
-// 绝不强制挂 -legacy（否则与主 route 裸路径歧义匹配）。
-func TestRegisterWithLegacy_DefaultTenantDegradesToRegister(t *testing.T) {
-	fk := newFakeKong()
-	// 预置旧裸名 service（default 的 legacyBareFor 会因它返回 name，
-	// registerWhenHealthy 随之调用 RegisterWithLegacy）
-	fk.services["agent-assistant"] = &kong.Service{Name: "agent-assistant"}
-	s := newKongService(fk, newMemRepo(nil))
-
-	if err := s.RegisterWithLegacy(context.Background(), "default-assistant", "/default/assistant", "assistant", 3000); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	r := fk.routes["agent-default-assistant-route"]
-	if r == nil || len(r.Paths) != 2 {
-		t.Fatalf("expected dual paths via degraded Register, got %+v", r)
-	}
-	if fk.routes["agent-default-assistant-route-legacy"] != nil {
-		t.Fatal("-legacy must not be force-mounted for default tenant")
-	}
-}
-
-func TestReconcile_DefaultTenantDualPaths(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo([]agent.AgentConfig{
-		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
-	})
-	s := newKongService(fk, repo)
-
-	if _, err := s.Reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	r := fk.routes["agent-default-assistant-route"]
-	if r == nil || len(r.Paths) != 2 || r.Paths[0] != "/default/assistant" || r.Paths[1] != "/assistant" {
-		t.Fatalf("expected dual paths for default tenant, got %+v", r)
-	}
-}
-
-func TestReconcile_DefaultTenantDriftHealedAndOrphanLegacyDeleted(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo([]agent.AgentConfig{
-		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
-	})
-	// 预置漂移：单路径 route + 孤儿 -legacy route
-	fk.services["agent-default-assistant"] = &kong.Service{Name: "agent-default-assistant", Host: "agent-runtime", Port: 3000, Tags: tagsFor("default-assistant")}
-	fk.routes["agent-default-assistant-route"] = &kong.Route{Name: "agent-default-assistant-route", Paths: []string{"/default/assistant"}, Tags: tagsFor("default-assistant")}
-	fk.routes["agent-default-assistant-route-legacy"] = &kong.Route{Name: "agent-default-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("default-assistant")}
-	s := newKongService(fk, repo)
-
-	if _, err := s.Reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	r := fk.routes["agent-default-assistant-route"]
-	if r == nil || len(r.Paths) != 2 {
-		t.Fatalf("expected drift healed to dual paths, got %+v", r)
-	}
-	if fk.routes["agent-default-assistant-route-legacy"] != nil {
-		t.Fatal("expected orphaned -legacy route to be deleted")
-	}
-}
-
-func TestReconcile_DefaultTenantCleansBarePathConflicts(t *testing.T) {
-	fk := newFakeKong()
-	repo := newMemRepo([]agent.AgentConfig{
-		{TenantID: "default", Name: "assistant", DeploymentStatus: "running", RuntimePort: 3000},
-	})
-	fk.routes["agent-zerone-assistant-route-legacy"] = &kong.Route{
-		Name: "agent-zerone-assistant-route-legacy", Paths: []string{"/assistant"}, Tags: tagsFor("zerone-assistant"),
-	}
-	s := newKongService(fk, repo)
-
-	if _, err := s.Reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.routes["agent-zerone-assistant-route-legacy"] != nil {
-		t.Fatal("reconcile must clean foreign bare-path claims for default tenant")
 	}
 }

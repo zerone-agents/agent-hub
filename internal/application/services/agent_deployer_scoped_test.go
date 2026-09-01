@@ -13,7 +13,6 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/infrastructure/deployer"
-	"control-panel/internal/infrastructure/kong"
 )
 
 // scopedRecorder captures every deployer request so tests can assert the
@@ -294,76 +293,19 @@ func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 	}
 }
 
-// v2：default 租户 + Kong 启用时返回裸路径 URL；非 default 租户与未启用
-// Kong 时为空。
-func TestToDTO_BareRuntimeURL(t *testing.T) {
-	withKong := &AgentDeployerService{
-		publicHost: "10.0.0.1",
-		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
-	}
-
-	dto := withKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
-	if dto.BareRuntimeURL != "https://deploy.example.com/assistant" {
-		t.Errorf("BareRuntimeURL = %q, want https://deploy.example.com/assistant", dto.BareRuntimeURL)
-	}
-	if dto.RuntimeURL != "https://deploy.example.com/default/assistant" {
-		t.Errorf("RuntimeURL = %q, want scoped path", dto.RuntimeURL)
-	}
-
-	dto = withKong.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
-	if dto.BareRuntimeURL != "" {
-		t.Errorf("BareRuntimeURL for non-default tenant = %q, want empty", dto.BareRuntimeURL)
-	}
-
-	noKong := &AgentDeployerService{publicHost: "10.0.0.1"}
-	dto = noKong.toDTO("default", "assistant", "running", "healthy", "c", 3000, nil, "")
-	if dto.BareRuntimeURL != "" {
-		t.Errorf("BareRuntimeURL without kong = %q, want empty", dto.BareRuntimeURL)
-	}
-}
-
 func TestToDTO_NoKongRunningReturnsRelativeRuntimeURL(t *testing.T) {
 	s := &AgentDeployerService{publicHost: "203.0.113.10"} // kongSvc == nil → no Kong
 	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/default/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/default/test", dto.RuntimeURL)
 	}
-	if dto.BareRuntimeURL != "" {
-		t.Fatalf("no-Kong must not expose bare URL, got %q", dto.BareRuntimeURL)
-	}
 }
 
-func TestToDTO_NoKongNotRunningKeepsLegacyBehavior(t *testing.T) {
+func TestToDTO_NotRunning_NoProxyURL(t *testing.T) {
 	s := &AgentDeployerService{publicHost: "203.0.113.10"}
 	dto := s.toDTO("default", "test", "stopped", "unhealthy", "c", 0, nil, "")
 	if dto.RuntimeURL == "/runtime/default/test" {
 		t.Fatal("non-running deployment must not get a proxy URL")
-	}
-}
-
-// TestDeploy_PreCleanRemovesLegacyBareEntities asserts Deploy's pre-clean
-// Deregister removes the old bare-name Kong entities (using the scoped key for
-// the new entities and the bare name as legacyBare).
-func TestDeploy_PreCleanRemovesLegacyBareEntities(t *testing.T) {
-	rec := &scopedRecorder{}
-	srv := newScopedDeployerServer(t, rec, false, "created") // "created" keeps the async goroutine off
-	defer srv.Close()
-
-	fk := newFakeKong()
-	fk.services["agent-general"] = &kong.Service{ID: "legacy-id", Name: "agent-general", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-	fk.routes["agent-general-route"] = &kong.Route{ID: "legacy-route-id", Name: "agent-general-route"}
-
-	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(&deployTokenFixture{}, ""), deployTokenProviderSvc())
-	s.kongSvc = NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60)
-
-	if _, err := s.Deploy("tenant-a", "general", false, false); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if fk.services["agent-general"] != nil {
-		t.Error("expected legacy bare service to be removed by Deploy pre-clean")
-	}
-	if fk.routes["agent-general-route"] != nil {
-		t.Error("expected legacy bare route to be removed by Deploy pre-clean")
 	}
 }
 
@@ -387,14 +329,12 @@ func registerWhenHealthyFixture(t *testing.T) (*AgentDeployerService, *fakeKong)
 	}, fk
 }
 
-// TestRegisterWhenHealthy_MountsLegacyAfterPreClean covers the D-1 timing: by
-// the time registerWhenHealthy runs, Deploy's pre-clean has already deleted
-// the bare-name entities, so the legacy route must mount from the flag the
-// deploy flow recorded earlier — not from probing Kong for the bare service.
-func TestRegisterWhenHealthy_MountsLegacyAfterPreClean(t *testing.T) {
+// TestRegisterWhenHealthy_RegistersScopedRoute asserts registerWhenHealthy
+// registers exactly one route with the tenant-scoped path.
+func TestRegisterWhenHealthy_RegistersScopedRoute(t *testing.T) {
 	s, fk := registerWhenHealthyFixture(t)
 
-	s.registerWhenHealthy("tenant-a", "general", "general", 3000)
+	s.registerWhenHealthy("tenant-a", "general", 3000)
 
 	if fk.services["agent-tenant-a-general"] == nil {
 		t.Fatal("expected scoped service agent-tenant-a-general")
@@ -406,100 +346,8 @@ func TestRegisterWhenHealthy_MountsLegacyAfterPreClean(t *testing.T) {
 	if len(r.Paths) != 1 || r.Paths[0] != "/tenant-a/general" {
 		t.Fatalf("scoped route paths = %v, want [/tenant-a/general]", r.Paths)
 	}
-	lr := fk.routes["agent-tenant-a-general-route-legacy"]
-	if lr == nil {
-		t.Fatal("expected legacy route agent-tenant-a-general-route-legacy despite bare service being pre-cleaned")
-	}
-	if len(lr.Paths) != 1 || lr.Paths[0] != "/general" {
-		t.Fatalf("legacy route paths = %v, want [/general]", lr.Paths)
-	}
-	if lr.Service == nil || lr.Service.ID != fk.services["agent-tenant-a-general"].ID {
-		t.Fatal("expected legacy route to reference the scoped service")
-	}
-}
-
-// TestRegisterWhenHealthy_NoLegacyRouteWhenNotRecorded asserts no legacy route
-// mounts when the deploy flow did not record a pre-existing bare entity.
-func TestRegisterWhenHealthy_NoLegacyRouteWhenNotRecorded(t *testing.T) {
-	s, fk := registerWhenHealthyFixture(t)
-
-	s.registerWhenHealthy("tenant-a", "general", "", 3000)
-
-	if fk.routes["agent-tenant-a-general-route-legacy"] != nil {
-		t.Fatal("expected no legacy route when no legacy entity was recorded")
-	}
-	if fk.routes["agent-tenant-a-general-route"] == nil {
-		t.Fatal("expected scoped route to be registered")
-	}
-}
-
-// TestLegacyBareFor_LegacyRouteOnly covers the redeploy scenario (I-1): after
-// the first redeploy the bare-name Kong entities no longer exist (the first
-// pre-clean deleted them), but the "<key>-legacy" route mounted by that
-// redeploy is still there. The deploy flow must still pass legacyBare so
-// registerWhenHealthy re-mounts the route and the old URL survives until it
-// is removed by hand.
-func TestLegacyBareFor_LegacyRouteOnly(t *testing.T) {
-	fk := newFakeKong()
-	fk.routes["agent-tenant-a-general-route-legacy"] = &kong.Route{
-		ID:    "legacy-route-id",
-		Name:  "agent-tenant-a-general-route-legacy",
-		Paths: []string{"/general"},
-	}
-	s := &AgentDeployerService{
-		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
-	}
-
-	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "general" {
-		t.Fatalf("legacyBareFor = %q, want %q (legacy route present, bare service gone)", got, "general")
-	}
-}
-
-// TestLegacyBareFor_BareServiceStillThere covers the fresh-upgrade scenario:
-// the pre-upgrade bare-name service exists, so the first redeploy detects it
-// via the bare probe.
-func TestLegacyBareFor_BareServiceStillThere(t *testing.T) {
-	fk := newFakeKong()
-	fk.services["agent-general"] = &kong.Service{ID: "legacy-id", Name: "agent-general", Host: "10.0.0.1", Port: 3000, Tags: []string{kongManagedTag}}
-	s := &AgentDeployerService{
-		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
-	}
-
-	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "general" {
-		t.Fatalf("legacyBareFor = %q, want %q (bare service present)", got, "general")
-	}
-}
-
-// TestLegacyBareFor_None asserts no legacy mount is requested when neither the
-// bare-name service nor a "-legacy" route exists (never opted in, or the
-// legacy route was already manually decommissioned).
-func TestLegacyBareFor_None(t *testing.T) {
-	fk := newFakeKong()
-	s := &AgentDeployerService{
-		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
-	}
-
-	if got := s.legacyBareFor(context.Background(), "tenant-a", "general"); got != "" {
-		t.Fatalf("legacyBareFor = %q, want empty (no legacy entity anywhere)", got)
-	}
-}
-
-// v2：default 租户仅保留 bare-service 探测（供 pre-clean 显式删除升级前
-// 旧裸名实体），跳过 -legacy 路由探测（被裸路径 supersede）。
-func TestLegacyBareFor_DefaultTenantKeepsBareServiceProbeOnly(t *testing.T) {
-	fk := newFakeKong()
-	s := &AgentDeployerService{
-		kongSvc: NewKongGatewayService(fk, "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
-	}
-	// 仅 -legacy 路由存在：default 跳过该探测 → 空
-	fk.routes["agent-default-general-route-legacy"] = &kong.Route{Name: "agent-default-general-route-legacy"}
-	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "" {
-		t.Fatalf("legacyBareFor(default, -legacy only) = %q, want empty", got)
-	}
-	// bare service 存在：保留探测（供 pre-clean 删除旧实体）
-	fk.services["agent-general"] = &kong.Service{Name: "agent-general"}
-	if got := s.legacyBareFor(context.Background(), "default", "general"); got != "general" {
-		t.Fatalf("legacyBareFor(default, bare service) = %q, want general", got)
+	if len(fk.routes) != 1 {
+		t.Fatalf("expected exactly 1 route, got %d", len(fk.routes))
 	}
 }
 
