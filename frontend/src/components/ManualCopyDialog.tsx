@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal, Typography } from 'antd'
+import { Input, Modal, Typography } from 'antd'
+import type { TextAreaRef } from 'antd/es/input/TextArea'
 import PrimaryButton from '@/components/PrimaryButton'
 
 /**
@@ -28,7 +29,7 @@ export function showManualCopy(text: string) {
 
 export function ManualCopyHost() {
   const [text, setText] = useState<string | null>(null)
-  const taRef = useRef<HTMLTextAreaElement>(null)
+  const taRef = useRef<TextAreaRef>(null)
 
   useEffect(() => {
     showHandler = setText
@@ -47,19 +48,12 @@ export function ManualCopyHost() {
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 13 }}>
         浏览器限制非 HTTPS 页面自动复制。请选中下方内容后按 ⌘C / Ctrl+C 复制，完成后关闭。
       </Typography.Paragraph>
-      <textarea
+      <Input.TextArea
         ref={taRef}
         readOnly
         value={text ?? ''}
-        style={{
-          width: '100%',
-          minHeight: 96,
-          resize: 'none',
-          fontFamily: 'monospace',
-          fontSize: 13,
-          padding: 8,
-          boxSizing: 'border-box',
-        }}
+        rows={4}
+        style={{ fontFamily: 'monospace', fontSize: 13 }}
       />
     </Modal>
   )
