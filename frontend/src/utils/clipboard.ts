@@ -1,3 +1,5 @@
+import { showManualCopy } from '@/components/ManualCopyDialog'
+
 /**
  * Copy text to the clipboard with a legacy fallback.
  *
@@ -5,6 +7,11 @@
  * localhost). On plain-HTTP remote deployments (e.g. testing over
  * http://<ip>:<port>) navigator.clipboard is undefined, so we fall back to
  * the deprecated-but-universal document.execCommand('copy') route.
+ *
+ * IMPORTANT: on modern Chromium in insecure contexts execCommand('copy')
+ * silently no-ops while still returning true, and clipboard contents cannot
+ * be read back for verification — use copyOrManual() for user-facing actions
+ * so a manual-copy dialog always backs the best-effort path.
  *
  * The fallback follows the clipboard.js recipe: a readonly textarea pinned
  * off-viewport (display:none would make it unselectable; opacity:0 alone is
@@ -44,4 +51,20 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * User-facing copy: secure contexts use copyToClipboard() and return its real
+ * result; insecure contexts (plain HTTP + IP) run a best-effort execCommand
+ * and ALWAYS open the manual-copy dialog, because modern Chromium silently
+ * no-ops execCommand there (returns true without writing) and the clipboard
+ * cannot be read back to verify — the dialog is the only dependable path.
+ */
+export async function copyOrManual(text: string): Promise<boolean> {
+  if (window.isSecureContext) {
+    return copyToClipboard(text)
+  }
+  void copyToClipboard(text) // best-effort: Safari / Firefox may genuinely copy
+  showManualCopy(text)
+  return true // handled via the manual dialog
 }

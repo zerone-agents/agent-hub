@@ -185,6 +185,26 @@ describe('DeployModal', () => {
     await waitFor(() => { expect(writeText).toHaveBeenCalledWith(expected) }) // 复制也是绝对 URL
   })
 
+  it('非安全上下文（jsdom 默认无 isSecureContext）：复制 URL 弹出手动复制框', async () => {
+    const user = userEvent.setup({ writeToClipboard: false })
+    // 显式钉死非安全环境：前一个用例 stub 过的 isSecureContext / navigator.clipboard
+    // 没有 afterEach 清理，会跨用例残留 → copyOrManual 必须走非安全分支
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+    delete (navigator as unknown as { clipboard?: unknown }).clipboard
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', runtimeUrl: '/runtime/default/test' })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    const expected = `${window.location.origin}/runtime/default/test`
+    expect(await screen.findByText(expected)).toBeInTheDocument()
+
+    await user.click(screen.getByTitle('复制 URL'))
+
+    // 手动复制框（aria-label 区分于 antd Modal 自身的 role=dialog）
+    const dialog = await screen.findByRole('dialog', { name: '手动复制' })
+    expect(dialog.querySelector('textarea')?.value).toBe(expected)
+  })
+
   it('renders absolute runtimeUrl (Kong mode) unchanged', async () => {
     vi.mocked(agentApi.getDeployment).mockResolvedValue(
       mockResponse(makeStatus({ status: 'running', runtimeUrl: 'https://kong.example.com/default/test' })) as never

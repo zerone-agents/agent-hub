@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { copyToClipboard } from './clipboard'
+import { copyToClipboard, copyOrManual } from './clipboard'
 
 /**
  * jsdom does not implement window.isSecureContext (undefined) and does not
@@ -62,5 +62,44 @@ describe('copyToClipboard', () => {
 
     expect(await copyToClipboard('x')).toBe(false)
     expect(document.querySelector('textarea')).toBeNull()
+  })
+})
+
+describe('copyOrManual', () => {
+  afterEach(() => {
+    delete (navigator as unknown as Record<string, unknown>).clipboard
+    delete (window as unknown as Record<string, unknown>).isSecureContext
+    delete (document as unknown as Record<string, unknown>).execCommand
+    document.body.innerHTML = ''
+  })
+
+  it('secure context：走 Clipboard API 且不弹手动复制框', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
+
+    expect(await copyOrManual('https://example.com/x')).toBe(true)
+    expect(writeText).toHaveBeenCalledWith('https://example.com/x')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('insecure context：尽力复制并弹出手动复制框（全文 + 自动全选）', async () => {
+    const exec = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'execCommand', { value: exec, configurable: true })
+    // jsdom 默认无 window.isSecureContext → 自动走非安全分支
+
+    const text = 'http://127.0.0.1/runtime'
+    expect(await copyOrManual(text)).toBe(true)
+    expect(exec).toHaveBeenCalledWith('copy') // 尽力路径照常尝试
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    })
+    const ta = document.querySelector('textarea')
+    expect(ta).not.toBeNull()
+    expect(ta?.value).toBe(text)
+    // 自动全选：用户直接 ⌘C 即可
+    expect(ta?.selectionStart).toBe(0)
+    expect(ta?.selectionEnd).toBe(text.length)
   })
 })
