@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import DeployModal from './DeployModal'
+import { ManualCopyHost } from '@/components/ManualCopyDialog'
 import { agentApi } from '@/api/agents'
 import type { Agent, DeploymentStatus } from '@/api/agents'
 import type { Provider } from '@/api/providers'
@@ -152,13 +153,13 @@ describe('DeployModal', () => {
     vi.mocked(agentApi.getDeployment).mockResolvedValue(
       mockResponse(makeStatus({ status: 'running', runtimeUrl: '/runtime/default/test' })) as never
     )
-    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    render(<><ManualCopyHost /><DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} /></>)
     const expected = `${window.location.origin}/runtime/default/test`
     expect(await screen.findByText(expected)).toBeInTheDocument()
 
     await user.click(screen.getByTitle('复制 URL'))
 
-    // 手动复制框（aria-label 区分于 antd Modal 自身的 role=dialog）
+    // 手动复制框（antd Modal，标题即无障碍名，与底层「部署 Agent」弹窗区分）
     const dialog = await screen.findByRole('dialog', { name: '手动复制' })
     expect(dialog.querySelector('textarea')?.value).toBe(expected)
     // P1 回归锁：非安全上下文只是「手动复制」，不得误报「已复制」

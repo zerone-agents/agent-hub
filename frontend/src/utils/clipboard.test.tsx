@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 
 import { copyToClipboard, copyOrManual } from './clipboard'
+import { ManualCopyHost } from '@/components/ManualCopyDialog'
 
 /**
  * jsdom does not implement window.isSecureContext (undefined) and does not
@@ -84,6 +85,7 @@ describe('copyOrManual', () => {
     const exec = vi.fn().mockReturnValue(true)
     Object.defineProperty(document, 'execCommand', { value: exec, configurable: true })
     // jsdom 默认无 window.isSecureContext → 自动走非安全分支
+    render(<ManualCopyHost />) // 复制框经应用树内 host 渲染（生产由 App 根部挂载）
 
     const text = 'http://127.0.0.1/runtime'
     expect(await copyOrManual(text)).toBe('manual')
@@ -100,6 +102,7 @@ describe('copyOrManual', () => {
 
   it('insecure context：用户在复制框中的局部选区不被焦点事件覆盖', async () => {
     Object.defineProperty(document, 'execCommand', { value: vi.fn().mockReturnValue(true), configurable: true })
+    render(<ManualCopyHost />)
     await copyOrManual('0123456789')
     await vi.waitFor(() => {
       expect(document.querySelector('[role="dialog"]')).not.toBeNull()
