@@ -836,6 +836,7 @@ func (s *AgentDeployerService) buildCreateRequest(
 			FileName: t.FileName,
 		})
 	}
+	toolNames = appendMcpToolNames(toolNames, mcpServers)
 	if len(missingCustom) > 0 {
 		return nil, fmt.Errorf("自定义工具缺少制品文件，无法部署：%s。请先在工具页补传文件或解除挂载", strings.Join(missingCustom, "、"))
 	}
@@ -950,6 +951,36 @@ func (s *AgentDeployerService) buildCreateRequest(
 	s.applyHub(req, tenantID)
 
 	return req, nil
+}
+
+// appendMcpToolNames adds the SDK-qualified names of probed MCP tools to an
+// agent's allow-list. agent-sdk registers MCP tools as
+// `mcp__<server-name>__<tool-name>` and then applies allowedTools by exact
+// name; omitting these entries makes a healthy MCP connection invisible to
+// the model whenever the agent has any ordinary tool allow-list.
+func appendMcpToolNames(toolNames []string, mcpServers map[string]*McpClientDTO) []string {
+	seen := make(map[string]struct{}, len(toolNames))
+	for _, name := range toolNames {
+		seen[name] = struct{}{}
+	}
+	for serverName, server := range mcpServers {
+		if server == nil {
+			continue
+		}
+		for _, tool := range server.Tools {
+			toolName := strings.TrimSpace(tool.Name)
+			if toolName == "" {
+				continue
+			}
+			qualified := "mcp__" + serverName + "__" + toolName
+			if _, ok := seen[qualified]; ok {
+				continue
+			}
+			toolNames = append(toolNames, qualified)
+			seen[qualified] = struct{}{}
+		}
+	}
+	return toolNames
 }
 
 // applyHub injects the runtime chat-record pushback config (agents.yaml hub

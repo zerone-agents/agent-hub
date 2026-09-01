@@ -69,6 +69,10 @@ type McpClientDTO struct {
 	URL         string            `json:"url,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	RetryPolicy *RetryPolicyDTO   `json:"retryPolicy,omitempty"`
+	// Tools is deployment-only metadata. The runtime discovers schemas from
+	// the MCP server itself, but Hub needs the probed names to extend the
+	// agent's allowedTools whitelist with SDK-qualified MCP tool names.
+	Tools []McpTool `json:"-"`
 }
 
 type RetryPolicyDTO struct {
@@ -204,6 +208,11 @@ func (s *McpService) toClientDTO(m *mcp.McpServer) (*McpClientDTO, error) {
 		Type:    m.TransportType,
 		URL:     m.URL,
 		Headers: headersMap,
+	}
+	if m.ToolsJSON != "" {
+		if err := json.Unmarshal([]byte(m.ToolsJSON), &dto.Tools); err != nil {
+			return nil, fmt.Errorf("解析 MCP %q tools 失败: %w", m.Name, err)
+		}
 	}
 	if m.RetryMaxRetries != nil || m.RetryTimeoutMs != nil {
 		dto.RetryPolicy = &RetryPolicyDTO{
