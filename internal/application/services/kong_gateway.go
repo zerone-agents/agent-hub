@@ -137,6 +137,15 @@ func svcName(agentName string) string   { return "agent-" + agentName }
 func routeName(agentName string) string { return "agent-" + agentName + "-route" }
 func tagsFor(agentName string) []string { return []string{kongManagedTag, "agent:" + agentName} }
 
+// legacyRouteName is the route name the removed bare-path/-legacy design used
+// for its compatibility route. Reconcile and Deregister still clean these up
+// so upgrades from older builds converge on the single-path policy.
+func legacyRouteName(key string) string { return routeName(key) + "-legacy" }
+
+// expectedPaths is the single source of truth for the route-path policy:
+// every deployment exposes exactly one tenant-scoped path (/{org}/{name}).
+func expectedPaths(publicPath string) []string { return []string{publicPath} }
+
 // serviceFor builds a Kong Service payload for an agent runtime, with timeout
 // budgets tuned for long SSE streams (see kong*TimeoutMs constants above).
 func serviceFor(name, host string, port int, tags []string) *kong.Service {
@@ -227,7 +236,7 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath strin
 		svcID = existing.ID
 	}
 
-	paths := []string{publicPath}
+	paths := expectedPaths(publicPath)
 	wantRoute := routeFor(key, s.routeHost, paths, &kong.ServiceRef{ID: svcID}, tags)
 	if _, rFound, err := s.client.GetRoute(ctx, rn); err != nil {
 		s.logger.Printf("kong: get route %s failed: %v", rn, err)
@@ -261,14 +270,20 @@ func (s *KongGatewayService) UpdateUpstream(ctx context.Context, key string, hos
 }
 
 // Deregister idempotently removes the Kong Route and Service for a deployment
-// key. The route is deleted first to avoid foreign-key violations on Kong
-// backends that do not cascade service deletes to attached routes.
+// key, plus any leftover "-legacy" compatibility route from the removed
+// bare-path design. Routes are deleted before the service to avoid
+// foreign-key violations on Kong backends that do not cascade service
+// deletes to attached routes.
 func (s *KongGatewayService) Deregister(ctx context.Context, key string) error {
 	if !s.enabled() {
 		return nil
 	}
 	if !agentNameRe.MatchString(key) {
 		return nil
+	}
+	ln := legacyRouteName(key)
+	if err := s.client.DeleteRoute(ctx, ln); err != nil {
+		s.logger.Printf("kong: delete legacy route %s failed: %v", ln, err)
 	}
 	sn, rn := svcName(key), routeName(key)
 	if err := s.client.DeleteRoute(ctx, rn); err != nil {
@@ -346,14 +361,19 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 						fixes++
 					}
 				} else if len(route.Hosts) != 1 || route.Hosts[0] != s.routeHost ||
-					!slices.Equal(route.Paths, []string{publicPath}) {
-					wantRoute := routeFor(key, s.routeHost, []string{publicPath}, route.Service, tagsFor(key))
+					!slices.Equal(route.Paths, expectedPaths(publicPath)) {
+					wantRoute := routeFor(key, s.routeHost, expectedPaths(publicPath), route.Service, tagsFor(key))
 					if _, err := s.client.UpdateRoute(ctx, rn, wantRoute); err != nil {
 						s.logger.Printf("kong reconcile: update route %s failed: %v", rn, err)
 					} else {
 						fixes++
 					}
 				}
+			}
+			// Upgrade cleanup: older builds mounted a "-legacy" compatibility
+			// route on this deployment; the single-path policy retires it.
+			if s.removeStaleLegacyRoute(ctx, key) {
+				fixes++
 			}
 		} else {
 			if found {
@@ -393,6 +413,27 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 		}
 	}
 	return fixes, nil
+}
+
+// removeStaleLegacyRoute deletes the "-legacy" compatibility route left
+// behind by older builds (removed bare-path design). It reports whether a
+// route was removed.
+func (s *KongGatewayService) removeStaleLegacyRoute(ctx context.Context, key string) bool {
+	ln := legacyRouteName(key)
+	_, found, err := s.client.GetRoute(ctx, ln)
+	if err != nil {
+		s.logger.Printf("kong: get legacy route %s failed: %v", ln, err)
+		return false
+	}
+	if !found {
+		return false
+	}
+	if err := s.client.DeleteRoute(ctx, ln); err != nil {
+		s.logger.Printf("kong: delete stale legacy route %s failed: %v", ln, err)
+		return false
+	}
+	s.logger.Printf("kong: removed stale legacy route %s", ln)
+	return true
 }
 
 // StartReconciler starts a background goroutine that periodically runs Reconcile.
