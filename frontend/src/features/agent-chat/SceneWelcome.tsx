@@ -80,7 +80,7 @@ const useStyles = createStyles(({ css }) => ({
   promptTip: css`
     // Long scene prompts would otherwise fill the whole screen; cap the
     // tooltip height and scroll instead. pre-wrap keeps line breaks readable.
-    max-height: 50vh;
+    max-height: 40vh;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
