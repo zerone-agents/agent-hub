@@ -62,9 +62,10 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
 
   const copyURL = async () => {
     if (!inviteURL) return
-    if (await copyOrManual(inviteURL)) {
+    const result = await copyOrManual(inviteURL)
+    if (result === 'copied') {
       message.success('邀请链接已复制')
-    } else {
+    } else if (result === 'failed') {
       message.error('复制失败，请手动选择复制')
     }
   }

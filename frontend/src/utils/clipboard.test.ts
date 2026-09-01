@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent } from '@testing-library/react'
 
 import { copyToClipboard, copyOrManual } from './clipboard'
 
@@ -7,13 +8,16 @@ import { copyToClipboard, copyOrManual } from './clipboard'
  * expose navigator.clipboard — the default state is therefore exactly the
  * insecure-context scenario these tests target. Stubs are installed as own,
  * configurable properties and deleted in afterEach to restore that state.
+ * （两份 describe 共用的浏览器 stub 清理 + 手动复制框 DOM 清理，放顶层统一做）
  */
+afterEach(() => {
+  delete (navigator as unknown as Record<string, unknown>).clipboard
+  delete (window as unknown as Record<string, unknown>).isSecureContext
+  delete (document as unknown as Record<string, unknown>).execCommand
+  document.body.innerHTML = ''
+})
+
 describe('copyToClipboard', () => {
-  afterEach(() => {
-    delete (navigator as unknown as Record<string, unknown>).clipboard
-    delete (window as unknown as Record<string, unknown>).isSecureContext
-    delete (document as unknown as Record<string, unknown>).execCommand
-  })
 
   it('uses the async Clipboard API in secure contexts', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
@@ -66,30 +70,23 @@ describe('copyToClipboard', () => {
 })
 
 describe('copyOrManual', () => {
-  afterEach(() => {
-    delete (navigator as unknown as Record<string, unknown>).clipboard
-    delete (window as unknown as Record<string, unknown>).isSecureContext
-    delete (document as unknown as Record<string, unknown>).execCommand
-    document.body.innerHTML = ''
-  })
-
   it('secure context：走 Clipboard API 且不弹手动复制框', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
 
-    expect(await copyOrManual('https://example.com/x')).toBe(true)
+    expect(await copyOrManual('https://example.com/x')).toBe('copied')
     expect(writeText).toHaveBeenCalledWith('https://example.com/x')
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('insecure context：尽力复制并弹出手动复制框（全文 + 自动全选）', async () => {
+  it('insecure context：尽力复制并弹出手动复制框（返回 manual，非成功态）', async () => {
     const exec = vi.fn().mockReturnValue(true)
     Object.defineProperty(document, 'execCommand', { value: exec, configurable: true })
     // jsdom 默认无 window.isSecureContext → 自动走非安全分支
 
     const text = 'http://127.0.0.1/runtime'
-    expect(await copyOrManual(text)).toBe(true)
+    expect(await copyOrManual(text)).toBe('manual')
     expect(exec).toHaveBeenCalledWith('copy') // 尽力路径照常尝试
 
     await vi.waitFor(() => {
@@ -98,8 +95,22 @@ describe('copyOrManual', () => {
     const ta = document.querySelector('textarea')
     expect(ta).not.toBeNull()
     expect(ta?.value).toBe(text)
-    // 自动全选：用户直接 ⌘C 即可
-    expect(ta?.selectionStart).toBe(0)
-    expect(ta?.selectionEnd).toBe(text.length)
+    expect(ta?.readOnly).toBe(true)
+  })
+
+  it('insecure context：用户在复制框中的局部选区不被焦点事件覆盖', async () => {
+    Object.defineProperty(document, 'execCommand', { value: vi.fn().mockReturnValue(true), configurable: true })
+    await copyOrManual('0123456789')
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    })
+    const ta = document.querySelector('textarea')
+    if (!ta) throw new Error('manual-copy textarea not found')
+
+    ta.setSelectionRange(2, 5)
+    fireEvent.focus(ta)
+    // 回归锁：禁止任何 onFocus 重选——用户的手动选区必须保持
+    expect(ta.selectionStart).toBe(2)
+    expect(ta.selectionEnd).toBe(5)
   })
 })

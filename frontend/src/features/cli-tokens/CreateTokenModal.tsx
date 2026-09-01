@@ -119,8 +119,9 @@ export default function CreateTokenModal({ open, onClose }: Props) {
                 type="link"
                 size="small"
                 onClick={() => {
-                  void copyOrManual(issuedToken).then((ok) => {
-                    if (ok) setCopied(true); else message.error('复制失败，请手动选择复制')
+                  void copyOrManual(issuedToken).then((result) => {
+                    if (result === 'copied') setCopied(true)
+                    else if (result === 'failed') message.error('复制失败，请手动选择复制')
                   })
                 }}
               >

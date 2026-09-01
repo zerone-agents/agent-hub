@@ -60,9 +60,10 @@ func staticCacheHeaders(c *gin.Context) {
 	p := c.Request.URL.Path
 	if strings.HasPrefix(p, "/static/assets/") {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
-	} else if strings.HasPrefix(p, "/static") {
+	} else if p == "/static" || strings.HasPrefix(p, "/static/") {
 		c.Header("Cache-Control", "no-cache")
 	}
+	// 相邻前缀路径（/staticity、/static-old 等）不属于 SPA 静态区，不动头
 	c.Next()
 }
 
