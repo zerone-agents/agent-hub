@@ -28,8 +28,8 @@ config:
 
   maxTurns: 20
 
-  # Max session context turns: controls how many history turns are sent to the LLM (optional, empty = unlimited)
-  maxSessionTurns: 50
+  # Max session queries: caps the number of queries per session (optional, empty = unlimited)
+  maxSessionQueries: 50
 
   # Permission mode: auto | always_ask | never_ask (optional, default auto)
   permissionMode: auto
