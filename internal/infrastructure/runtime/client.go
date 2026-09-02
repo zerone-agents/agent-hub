@@ -7,6 +7,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -151,4 +152,35 @@ func (c *Client) ProxyFiles(ctx context.Context, method, baseURL, apiKey, pathAn
 	}
 
 	return resp, nil
+}
+
+// HealthInfo is the runtime GET /health response. The endpoint is
+// unauthenticated and reports the runtime version (from its package.json).
+type HealthInfo struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
+
+// Health calls GET {baseURL}/health. Capability probing only (issue #94):
+// attachments require runtime >= 2.5.0.
+func (c *Client) Health(ctx context.Context, baseURL string) (*HealthInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/health", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build health request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime health request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("runtime health returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	var info HealthInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return nil, fmt.Errorf("parse health response: %w", err)
+	}
+	return &info, nil
 }

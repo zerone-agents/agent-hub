@@ -1,10 +1,12 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"control-panel/internal/domain/agent"
@@ -44,6 +46,10 @@ type AgentChatService struct {
 	publicHost    string
 	runtimeKey    string
 	upstreamHost  string // cfg.Deployer.DeployerURLHost; "" = fail closed (no-Kong upstream)
+
+	// attachment capability probe cache（15s TTL，issue #94）
+	probeMu    sync.Mutex
+	probeCache map[string]attachmentProbe
 }
 
 // NewAgentChatService constructs an AgentChatService.
@@ -76,6 +82,14 @@ func (s *AgentChatService) PublicHost() string { return s.publicHost }
 
 // Source constant identifying sessions created from the Agent Chatbox page.
 const SourceAgentChatPage = "agent_chat_page"
+
+// attachmentRuntimeMinVersion is the runtime release that shipped upload +
+// rich-content Run support (PR #48 → runtime-v2.5.0; the "2.4.0" in issue
+// #94 is wrong — see the correction comment on the issue).
+const attachmentRuntimeMinVersion = "2.5.0"
+
+// attachmentProbeTTL bounds capability probe caching.
+const attachmentProbeTTL = 15 * time.Second
 
 // ListSessions returns sessions for the given (agent, user) pair.
 // source filters the session origin (e.g. "agent_chat_page"); pass empty to list all.
@@ -293,4 +307,46 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 		return "", "", err
 	}
 	return baseURL, status.APIKey, nil
+}
+
+// attachmentProbe caches one capability probe result.
+type attachmentProbe struct {
+	ok bool
+	at time.Time
+}
+
+// AttachmentsSupportedAt probes the runtime /health endpoint (no auth) on an
+// already-resolved base URL and reports whether the version supports chat
+// attachments (>= 2.5.0, the release that shipped runtime PR #48).
+func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL string) bool {
+	info, err := s.runtimeClient.Health(ctx, baseURL)
+	if err != nil {
+		return false
+	}
+	return compareSemver(info.Version, attachmentRuntimeMinVersion) >= 0
+}
+
+// AttachmentsAvailable reports (15s TTL cache) whether the agent's runtime
+// supports attachments. Probe failures return false — text chat is never
+// blocked by this.
+func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, agentName string) bool {
+	key := tenantID + "\x00" + agentName
+	s.probeMu.Lock()
+	if hit, ok := s.probeCache[key]; ok && time.Since(hit.at) < attachmentProbeTTL {
+		s.probeMu.Unlock()
+		return hit.ok
+	}
+	s.probeMu.Unlock()
+
+	ok := false
+	if baseURL, _, err := s.ResolveRuntime(tenantID, agentName); err == nil {
+		ok = s.AttachmentsSupportedAt(ctx, baseURL)
+	}
+	s.probeMu.Lock()
+	if s.probeCache == nil {
+		s.probeCache = make(map[string]attachmentProbe)
+	}
+	s.probeCache[key] = attachmentProbe{ok: ok, at: time.Now()}
+	s.probeMu.Unlock()
+	return ok
 }

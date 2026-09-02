@@ -95,6 +95,14 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 	respondMessage(c, http.StatusOK, "session deleted")
 }
 
+// Capabilities reports feature availability for the agent chat page
+// (issue #94: attachments require runtime >= 2.5.0).
+func (h *AgentChatHandler) Capabilities(c *gin.Context) {
+	agentName := services.NormalizeAgentName(c.Param("name"))
+	ok := h.svc.AttachmentsAvailable(c.Request.Context(), tenant.GetTenantID(c), agentName)
+	respondSuccess(c, gin.H{"attachmentsEnabled": ok})
+}
+
 type sendMessageReq struct {
 	Content string `json:"content" binding:"required"`
 }
