@@ -865,19 +865,18 @@ func (s *AgentDeployerService) buildCreateRequest(
 		// (<org>-<name>) so same-name agents across tenants never collide;
 		// child agents (task-3) keep bare names (runtime-internal logic
 		// names).
-		Name:         DeployKey(tenantID, cfg.Name),
-		Description:  firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
-		Model:        cfg.ModelID,
-		SystemPrompt: cfg.SystemPrompt,
-		MaxTurns:     intPtr(cfg.MaxTurns),
-		// MaxSessionQueries is not populated yet: the domain field is still
-		// named MaxSessionTurns until issue #111 task-2 renames it.
-		PermissionMode: cfg.PermissionMode,
-		Tools:          toolNames,
-		CustomTools:    customToolSources,
-		Skills:         skillSources,
-		McpServers:     mcpServerConfigs,
-		Datasets:       agentDatasets,
+		Name:              DeployKey(tenantID, cfg.Name),
+		Description:       firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
+		Model:             cfg.ModelID,
+		SystemPrompt:      cfg.SystemPrompt,
+		MaxTurns:          intPtr(cfg.MaxTurns),
+		MaxSessionQueries: cfg.MaxSessionQueries,
+		PermissionMode:    cfg.PermissionMode,
+		Tools:             toolNames,
+		CustomTools:       customToolSources,
+		Skills:            skillSources,
+		McpServers:        mcpServerConfigs,
+		Datasets:          agentDatasets,
 	}
 	req := &deployer.CreateAgentRequest{
 		RootAgentID: rootDef.Name,

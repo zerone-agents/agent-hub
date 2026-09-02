@@ -352,7 +352,10 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, err
 	}
 
-	cfg := s.prepareCreateConfig(input)
+	cfg, err := s.prepareCreateConfig(input)
+	if err != nil {
+		return nil, err
+	}
 
 	if cfg.IsDefault {
 		if err := s.repo.ClearAllDefault(tenantID); err != nil {
@@ -380,7 +383,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 }
 
 // prepareCreateConfig builds an AgentConfig from creation input with enabled/isDefault resolution.
-func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) *agent.AgentConfig {
+func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.AgentConfig, error) {
 	desktop := false
 	if input.DesktopEnabled != nil {
 		desktop = *input.DesktopEnabled
@@ -401,8 +404,10 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) *agent.Agent
 		MobileEnabled:  mobile,
 		IsDefault:      isDefault,
 	}
-	unpackConfigToModel(input.Config, cfg, s.encryptionKey)
-	return cfg
+	if err := unpackConfigToModel(input.Config, cfg, s.encryptionKey); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // applyCreateDefaults sets default values for permission mode and max turns.
@@ -445,7 +450,9 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 		if err := ValidateConfig(*input.Config); err != nil {
 			return err
 		}
-		unpackConfigToModel(*input.Config, cfg, s.encryptionKey)
+		if err := unpackConfigToModel(*input.Config, cfg, s.encryptionKey); err != nil {
+			return err
+		}
 	}
 
 	if input.DesktopEnabled != nil {
@@ -522,7 +529,13 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	return syncSubagentToolBindings(s.repo, s.toolRepo, cfg.ID, len(subagentNames) > 0)
 }
 
-func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, encryptionKey string) {
+func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, encryptionKey string) error {
+	// 旧 key 哨兵：SDK 3.1.0 起 maxSessionTurns 更名为 maxSessionQueries
+	// （issue #111）。在任何字段解包前拒绝，保证调用方不会拿到部分解包的
+	// 半成品 cfg。
+	if _, exists := config["maxSessionTurns"]; exists {
+		return fmt.Errorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
+	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
 	}
@@ -566,10 +579,10 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.Group = v
 	}
 
-	// Handle maxSessionTurns field
-	if v, ok := config["maxSessionTurns"].(float64); ok {
+	// Handle maxSessionQueries field
+	if v, ok := config["maxSessionQueries"].(float64); ok {
 		n := int(v)
-		cfg.MaxSessionTurns = &n
+		cfg.MaxSessionQueries = &n
 	}
 
 	// Handle fieldOverrides
@@ -595,6 +608,7 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 			cfg.FieldOverrides = string(jsonBytes)
 		}
 	}
+	return nil
 }
 
 func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]interface{} {
@@ -609,10 +623,10 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 		"group":          cfg.Group,
 	}
 
-	if cfg.MaxSessionTurns != nil {
-		m["maxSessionTurns"] = *cfg.MaxSessionTurns
+	if cfg.MaxSessionQueries != nil {
+		m["maxSessionQueries"] = float64(*cfg.MaxSessionQueries)
 	} else {
-		m["maxSessionTurns"] = nil
+		m["maxSessionQueries"] = nil
 	}
 
 	if cfg.ProviderID != nil {
