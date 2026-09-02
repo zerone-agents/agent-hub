@@ -407,6 +407,16 @@ var builtinKnowledgeTools = []McpTool{
 	},
 }
 
+// BuiltinKnowledgeToolNames 返回内置 knowledge MCP 种子的工具名集合，
+// 供 handler 层测试跨检 tools/list 广播与种子不漂移（两份手写副本）。
+func BuiltinKnowledgeToolNames() []string {
+	names := make([]string, 0, len(builtinKnowledgeTools))
+	for _, t := range builtinKnowledgeTools {
+		names = append(names, t.Name)
+	}
+	return names
+}
+
 func mustMarshalMcpTools(tools []McpTool) string {
 	raw, err := json.Marshal(tools)
 	if err != nil {

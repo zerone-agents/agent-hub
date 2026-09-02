@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/tenant"
@@ -810,6 +811,11 @@ func TestKnowledgeMcpHandler_ToolsCall_Documents_DefaultsAndClamp(t *testing.T) 
 	if gotReq.PageSize != 50 {
 		t.Fatalf("clamp wrong: %+v", gotReq)
 	}
+	// ≤0 视为未传 → 回落默认值
+	postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_documents","arguments":{"dataset_id":"ds-1","page":0,"page_size":-5}}`), testValidToken)
+	if gotReq.Page != 1 || gotReq.PageSize != 20 {
+		t.Fatalf("non-positive paging should fall back to defaults, got %+v", gotReq)
+	}
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_Documents_Unauthorized(t *testing.T) {
@@ -887,6 +893,53 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_RequiredArgs(t *testing.T) {
 	}
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "document_id is required") {
 		t.Fatalf("expected document_id required error, got %+v", resp)
+	}
+	// 缺 dataset_id → JSON-RPC error
+	rec2 := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_chunks","arguments":{"document_id":"doc-1"}}`), testValidToken)
+	var resp2 jsonRPCResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id is required") {
+		t.Fatalf("expected dataset_id required error, got %+v", resp2)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsListMatchesBuiltinSeed(t *testing.T) {
+	// 种子 ToolsJSON（管理界面展示）与 tools/list 广播（runtime 消费）是两份手写副本，
+	// 工具名集合必须一致，防止单边漂移（改了一边忘了另一边）。
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{})
+	rec := postJSONRPC(t, router, "tools/list", nil, testValidToken)
+
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result is not an object: %v", resp.Result)
+	}
+	tools, ok := result["tools"].([]interface{})
+	if !ok {
+		t.Fatalf("tools missing: %v", result["tools"])
+	}
+	advertised := map[string]bool{}
+	for _, tl := range tools {
+		if m, ok := tl.(map[string]interface{}); ok {
+			if name, ok := m["name"].(string); ok {
+				advertised[name] = true
+			}
+		}
+	}
+	seedNames := services.BuiltinKnowledgeToolNames()
+	if len(advertised) != len(seedNames) {
+		t.Fatalf("tools/list has %d tools but seed has %d — 两份副本已漂移: advertised=%v seed=%v",
+			len(advertised), len(seedNames), advertised, seedNames)
+	}
+	for _, name := range seedNames {
+		if !advertised[name] {
+			t.Fatalf("builtin seed tool %q not advertised in tools/list — 两份副本已漂移", name)
+		}
 	}
 }
 
