@@ -505,17 +505,40 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
+	resolved := make([]*agent.AgentConfig, 0, len(subagentNames))
 	for _, subName := range subagentNames {
 		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
 			return fmt.Errorf("子 Agent '%s' 不存在", subName)
 		}
 		subagentIDs = append(subagentIDs, subCfg.ID)
+		resolved = append(resolved, subCfg)
 	}
 
 	for _, subName := range subagentNames {
 		if subName == agentName {
 			return fmt.Errorf("子 Agent 不能与主 Agent 相同")
+		}
+	}
+
+	// One delegation level only (issue #111; runtime depth is fixed at one):
+	// an agent that is already mounted cannot mount others, and an agent
+	// that already mounts others cannot be mounted. Legacy states that
+	// predate this invariant still fail explicitly at deploy time
+	// (loadAgentGraph); clearing an agent's own list stays allowed so such
+	// violations remain fixable from the console.
+	if len(subagentNames) > 0 {
+		if parentIsMounted, err := s.repo.ExistsSubagentBinding(cfg.ID); err != nil {
+			return err
+		} else if parentIsMounted {
+			return fmt.Errorf("Agent %q 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）", agentName)
+		}
+		for _, subCfg := range resolved {
+			if n, err := s.repo.CountSubagentsOf(subCfg.ID); err != nil {
+				return err
+			} else if n > 0 {
+				return fmt.Errorf("Agent %q 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）", subCfg.Name)
+			}
 		}
 	}
 

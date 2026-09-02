@@ -320,19 +320,9 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, fmt.Errorf("load provider failed: %w", err)
 	}
 
-	// Load relations
-	tools, skills, subagents, err := s.loadAgentRelations(tenantID, agentCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	// Load MCP servers (already decrypted)
-	mcpServers, err := s.mcpSvc.GetClientMcpsByAgent(tenantID, agentCfg.Name)
-	if err != nil {
-		return nil, fmt.Errorf("load mcp servers failed: %w", err)
-	}
-
-	// Build create request
+	// Build create request. The complete agent graph (root + mounted
+	// subagents with their own capabilities) is resolved inside
+	// buildCreateRequest via loadAgentGraph; MCP servers load per-agent.
 	ctx := context.Background()
 
 	// All deployer calls address the container by the tenant-scoped deploy key
@@ -353,7 +343,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	if s.kongSvc != nil {
 		_ = s.kongSvc.Deregister(ctx, key)
 	}
-	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p, tools, skills, subagents, mcpServers)
+	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p)
 	if err != nil {
 		return nil, fmt.Errorf("build create request failed: %w", err)
 	}
@@ -433,22 +423,24 @@ func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, key stri
 const agentRuntimeTokenPlaceholder = "$agent_runtime_token"
 
 // resolveMcpHeaders replaces the $agent_runtime_token placeholder in MCP
-// server header values with the actual runtime token being deployed.
-// Header maps are rebuilt rather than mutated in place so the MCP DTOs
-// returned by the MCP service are never modified.
+// server header values with the actual runtime token being deployed, across
+// every agent node of the graph — mounted agents carry their own MCP servers
+// and their headers need the same substitution as the root's. Header maps
+// are rebuilt rather than mutated in place so the MCP DTOs returned by the
+// MCP service are never modified.
 func (s *AgentDeployerService) resolveMcpHeaders(req *deployer.CreateAgentRequest, token string) {
-	// TODO(issue #111 task-3): iterate every Agents[i] once the graph is
-	// built; root-only requests carry all MCP servers on Agents[0].
-	for name, mcp := range req.Agents[0].McpServers {
-		if len(mcp.Headers) == 0 {
-			continue
+	for i := range req.Agents {
+		for name, mcp := range req.Agents[i].McpServers {
+			if len(mcp.Headers) == 0 {
+				continue
+			}
+			headers := make(map[string]string, len(mcp.Headers))
+			for k, v := range mcp.Headers {
+				headers[k] = strings.ReplaceAll(v, agentRuntimeTokenPlaceholder, token)
+			}
+			mcp.Headers = headers
+			req.Agents[i].McpServers[name] = mcp
 		}
-		headers := make(map[string]string, len(mcp.Headers))
-		for k, v := range mcp.Headers {
-			headers[k] = strings.ReplaceAll(v, agentRuntimeTokenPlaceholder, token)
-		}
-		mcp.Headers = headers
-		req.Agents[0].McpServers[name] = mcp
 	}
 }
 
@@ -709,55 +701,55 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 	return nil
 }
 
-// loadAgentRelations loads tools, skills, and subagents for an agent.
-func (s *AgentDeployerService) loadAgentRelations(tenantID string, cfg *agent.AgentConfig) ([]*agent.Tool, []*skill.Skill, []agent.AgentConfig, error) {
-	toolRecords, err := s.toolRepo.GetToolRecordsByAgent(cfg.ID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("load tools failed: %w", err)
-	}
-
-	skills, err := s.skillRepo.GetAgentSkillsFull(cfg.ID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("load skills failed: %w", err)
-	}
-
-	subagentNames, err := s.agentRepo.GetSubagents(cfg.ID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("load subagents failed: %w", err)
-	}
-
-	// Load full subagent configs
-	subagents := make([]agent.AgentConfig, 0, len(subagentNames))
-	for _, subName := range subagentNames {
-		sub, err := s.agentRepo.GetByName(tenantID, subName)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("load subagent %s failed: %w", subName, err)
-		}
-		subagents = append(subagents, *sub)
-	}
-
-	return toolRecords, skills, subagents, nil
+// definitionOpts carries graph-position context into buildAgentDefinition.
+// The root node is named by its tenant-scoped deploy key (<org>-<name>) so
+// same-name agents across tenants never collide, and is the only node
+// allowed to carry the runtime-global fields (Model, MaxSessionQueries,
+// PermissionMode) — the deployer v3 rejects them on children. Child nodes
+// keep bare names (runtime-internal logic names).
+type definitionOpts struct {
+	isRoot    bool
+	deployKey string // root only: tenant-scoped deploy key
 }
 
-// buildCreateRequest builds the deployer.CreateAgentRequest from agent config and relations.
-func (s *AgentDeployerService) buildCreateRequest(
-	ctx context.Context,
-	tenantID string,
-	cfg *agent.AgentConfig,
-	providerDTO providerdomain.Provider,
-	toolRecords []*agent.Tool,
-	skills []*skill.Skill,
-	subagents []agent.AgentConfig,
-	mcpServers map[string]*McpClientDTO,
-) (*deployer.CreateAgentRequest, error) {
-	// TODO(issue #111 task-3): graph construction — child AgentDefinitions
-	// and the root's subagent id references are assembled here. Until then
-	// the request stays root-only and the parameter is unused.
-	_ = subagents
+// buildAgentDefinition assembles one agent's complete AgentDefinition: its
+// own tools allow-list (extended with SDK-qualified MCP tool names), custom
+// tool artifacts, skills, MCP servers, knowledge datasets and subagent id
+// references. Mounted agents never inherit or fall back to the root's
+// capabilities — an empty relation stays empty. It also returns the agent's
+// subagent names so loadAgentGraph can traverse the closure without a second
+// query.
+func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantID string, cfg *agent.AgentConfig, opts definitionOpts) (*deployer.AgentDefinition, []string, error) {
+	name := cfg.Name
+	if opts.isRoot {
+		name = opts.deployKey
+	}
+	def := &deployer.AgentDefinition{
+		Name:         name,
+		Description:  firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
+		SystemPrompt: cfg.SystemPrompt,
+		MaxTurns:     intPtr(cfg.MaxTurns),
+	}
+	if opts.isRoot {
+		def.Model = cfg.ModelID
+		def.MaxSessionQueries = cfg.MaxSessionQueries
+		def.PermissionMode = cfg.PermissionMode
+	}
 
 	// Custom tool artifacts (issue #88): Tools stays the complete allow-list;
 	// CustomTools only carries source=custom && ready rows, sorted by name so
 	// the request and generated YAML are reproducible.
+	toolRecords, err := s.toolRepo.GetToolRecordsByAgent(cfg.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load tools failed: %w", err)
+	}
+	// Load the agent's own MCP servers (already decrypted). MCP mounts are
+	// per-agent: a mounted agent's servers come from its own relations and
+	// are never inherited from the root.
+	mcpServers, err := s.mcpSvc.GetClientMcpsByAgent(tenantID, cfg.Name)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load mcp servers failed: %w", err)
+	}
 	toolNames := make([]string, 0, len(toolRecords))
 	customToolSources := make([]deployer.ToolSource, 0)
 	missingCustom := make([]string, 0)
@@ -779,19 +771,27 @@ func (s *AgentDeployerService) buildCreateRequest(
 	}
 	toolNames = appendMcpToolNames(toolNames, mcpServers)
 	if len(missingCustom) > 0 {
-		return nil, fmt.Errorf("自定义工具缺少制品文件，无法部署：%s。请先在工具页补传文件或解除挂载", strings.Join(missingCustom, "、"))
+		return nil, nil, fmt.Errorf("自定义工具缺少制品文件，无法部署：%s。请先在工具页补传文件或解除挂载", strings.Join(missingCustom, "、"))
 	}
 	if len(customToolSources) > 0 && s.cdnHost == "" {
-		return nil, fmt.Errorf("未配置 OSS_CDN_HOST，无法为自定义工具构造下载地址（共 %d 个）。请配置 CDN 后重新部署", len(customToolSources))
+		return nil, nil, fmt.Errorf("未配置 OSS_CDN_HOST，无法为自定义工具构造下载地址（共 %d 个）。请配置 CDN 后重新部署", len(customToolSources))
 	}
 	sort.Strings(toolNames)
 	sort.Slice(customToolSources, func(i, j int) bool { return customToolSources[i].Name < customToolSources[j].Name })
+	def.Tools = toolNames
+	def.CustomTools = customToolSources
 
-	// Build skill sources from full skill records
+	// Build skill sources from full skill records. A node that declares any
+	// skill must also set settingSources=["user"] (deployer v3 contract:
+	// skills are installed per-agent and scanned at user level).
+	skills, err := s.skillRepo.GetAgentSkillsFull(cfg.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load skills failed: %w", err)
+	}
 	skillSources := make([]deployer.SkillSource, 0, len(skills))
 	for _, sk := range skills {
 		if sk.Name == "" || sk.URL == "" || sk.FileHash == "" {
-			log.Printf("buildCreateRequest: skip skill %s: missing name/url/hash", sk.Name)
+			log.Printf("buildAgentDefinition: skip skill %s: missing name/url/hash", sk.Name)
 			continue
 		}
 		skillSources = append(skillSources, deployer.SkillSource{
@@ -800,7 +800,112 @@ func (s *AgentDeployerService) buildCreateRequest(
 			Hash: sk.FileHash,
 		})
 	}
+	def.Skills = skillSources
+	if len(skillSources) > 0 {
+		def.SettingSources = []string{"user"}
+	}
 
+	// Build MCP server configs (headers are already decrypted by the MCP service).
+	mcpServerConfigs := make(map[string]deployer.McpServerConfig, len(mcpServers))
+	for name, mcp := range mcpServers {
+		if name == "knowledge" && strings.TrimSpace(mcp.URL) == "" {
+			return nil, nil, fmt.Errorf("内置 knowledge MCP 未配置可达地址，请设置 KNOWLEDGE_MCP_URL（完整路径需包含 /api/v1/knowledge/mcp），重启 Hub 后重新部署 Agent")
+		}
+		mcpServerConfigs[name] = deployer.McpServerConfig{
+			Type:    mcp.Type,
+			URL:     mcp.URL,
+			Headers: mcp.Headers,
+		}
+	}
+	def.McpServers = mcpServerConfigs
+
+	// Load bound knowledge datasets and resolve their metadata.
+	datasetIDs, err := s.agentRepo.GetKnowledgeDatasetIDsByAgent(cfg.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load agent knowledge datasets failed: %w", err)
+	}
+	agentDatasets := make(map[string]string, len(datasetIDs))
+	for _, id := range datasetIDs {
+		ds, err := s.knowledgeSvc.GetDataset(ctx, id)
+		if err != nil {
+			log.Printf("skip dataset %s metadata for agent %s: %v", id, cfg.Name, err)
+			continue
+		}
+		desc := strings.TrimSpace(stringOrEmpty((*ds)["description"]))
+		if desc == "" {
+			return nil, nil, fmt.Errorf("dataset %s 缺少 description，无法下发给 Agent 运行时，请完善知识库描述后重新部署", id)
+		}
+		agentDatasets[id] = desc
+	}
+	def.Datasets = agentDatasets
+
+	// Subagent id references (deployer v3: pure ids to sibling graph entries).
+	subagentNames, err := s.agentRepo.GetSubagents(cfg.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load subagents failed: %w", err)
+	}
+	def.Subagents = subagentNames
+
+	return def, subagentNames, nil
+}
+
+// loadAgentGraph resolves the deploy closure of root: root plus its directly
+// mounted subagents, each as a complete AgentDefinition. Depth is fixed at
+// one delegation level by the runtime; any deeper relation, cycle, or
+// dangling reference fails explicitly instead of being silently skipped.
+func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID string, rootCfg *agent.AgentConfig) ([]deployer.AgentDefinition, error) {
+	deployKey := DeployKey(tenantID, rootCfg.Name)
+
+	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true, deployKey: deployKey})
+	if err != nil {
+		return nil, fmt.Errorf("构造根 Agent 定义失败: %w", err)
+	}
+	defs := []deployer.AgentDefinition{*rootDef}
+
+	for _, subName := range rootSubNames {
+		if subName == rootCfg.Name {
+			return nil, fmt.Errorf("Agent %q 不能挂载自己作为子 Agent", rootCfg.Name)
+		}
+		if subName == deployKey {
+			return nil, fmt.Errorf("子 Agent %q 与根 Agent 的部署标识 %q 冲突，请重命名", subName, deployKey)
+		}
+		if !validAgentNamePattern.MatchString(subName) { // 存量非 canonical 防御
+			return nil, fmt.Errorf("子 Agent %q 标识不合法（仅小写字母、数字、连字符），无法部署", subName)
+		}
+		sub, err := s.agentRepo.GetByName(tenantID, subName)
+		if err != nil {
+			return nil, fmt.Errorf("挂载的子 Agent %q 不存在，请先解除挂载或创建该 Agent", subName)
+		}
+		subDef, subSubNames, err := s.buildAgentDefinition(ctx, tenantID, sub, definitionOpts{})
+		if err != nil {
+			return nil, fmt.Errorf("构造子 Agent %q 定义失败: %w", subName, err)
+		}
+		for _, grand := range subSubNames {
+			if grand == rootCfg.Name {
+				return nil, fmt.Errorf("检测到子 Agent 挂载环：%q 与 %q 互相挂载", subName, rootCfg.Name)
+			}
+			return nil, fmt.Errorf("子 Agent %q 自身还挂载了 %q：运行时仅支持一层委托，请先解除嵌套挂载", subName, grand)
+		}
+		defs = append(defs, *subDef)
+	}
+	return defs, nil
+}
+
+// buildCreateRequest builds the deployer v3 CreateAgentRequest: the complete
+// agent graph resolved by loadAgentGraph plus the runtime-global provider
+// config (and AIGC / chat-pushback sections). Graph violations — missing,
+// cyclic or too-deep mounts, per-agent capability errors — fail the deploy
+// explicitly inside loadAgentGraph.
+func (s *AgentDeployerService) buildCreateRequest(
+	ctx context.Context,
+	tenantID string,
+	cfg *agent.AgentConfig,
+	providerDTO providerdomain.Provider,
+) (*deployer.CreateAgentRequest, error) {
+	agents, err := s.loadAgentGraph(ctx, tenantID, cfg)
+	if err != nil {
+		return nil, err
+	}
 	// Build provider config
 	baseURL := providerDTO.BaseURL()
 	apiKey, _ := s.providerSvc.GetRawAPIKey(tenantID, providerDTO.ID())
@@ -824,63 +929,9 @@ func (s *AgentDeployerService) buildCreateRequest(
 		LockedAPIKey: apiKey,
 	}
 
-	// Build MCP server configs (headers are already decrypted by the MCP service).
-	mcpServerConfigs := make(map[string]deployer.McpServerConfig, len(mcpServers))
-	for name, mcp := range mcpServers {
-		if name == "knowledge" && strings.TrimSpace(mcp.URL) == "" {
-			return nil, fmt.Errorf("内置 knowledge MCP 未配置可达地址，请设置 KNOWLEDGE_MCP_URL（完整路径需包含 /api/v1/knowledge/mcp），重启 Hub 后重新部署 Agent")
-		}
-		mcpServerConfigs[name] = deployer.McpServerConfig{
-			Type:    mcp.Type,
-			URL:     mcp.URL,
-			Headers: mcp.Headers,
-		}
-	}
-
-	// Load bound knowledge datasets and resolve their metadata.
-	datasetIDs, err := s.agentRepo.GetKnowledgeDatasetIDsByAgent(cfg.ID)
-	if err != nil {
-		return nil, fmt.Errorf("load agent knowledge datasets failed: %w", err)
-	}
-	agentDatasets := make(map[string]string, len(datasetIDs))
-	for _, id := range datasetIDs {
-		ds, err := s.knowledgeSvc.GetDataset(ctx, id)
-		if err != nil {
-			log.Printf("skip dataset %s metadata for agent %s: %v", id, cfg.Name, err)
-			continue
-		}
-		desc := strings.TrimSpace(stringOrEmpty((*ds)["description"]))
-		if desc == "" {
-			return nil, fmt.Errorf("dataset %s 缺少 description，无法下发给 Agent 运行时，请完善知识库描述后重新部署", id)
-		}
-		agentDatasets[id] = desc
-	}
-
-	// NOTE: settingSources stays unset in this intermediate state (issue
-	// #111): the deployer v3 validation requires ["user"] for agents that
-	// declare skills, and graph construction (task-3) will populate it
-	// accordingly.
-	rootDef := deployer.AgentDefinition{
-		// The deployer container key is the tenant-scoped deploy key
-		// (<org>-<name>) so same-name agents across tenants never collide;
-		// child agents (task-3) keep bare names (runtime-internal logic
-		// names).
-		Name:              DeployKey(tenantID, cfg.Name),
-		Description:       firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
-		Model:             cfg.ModelID,
-		SystemPrompt:      cfg.SystemPrompt,
-		MaxTurns:          intPtr(cfg.MaxTurns),
-		MaxSessionQueries: cfg.MaxSessionQueries,
-		PermissionMode:    cfg.PermissionMode,
-		Tools:             toolNames,
-		CustomTools:       customToolSources,
-		Skills:            skillSources,
-		McpServers:        mcpServerConfigs,
-		Datasets:          agentDatasets,
-	}
 	req := &deployer.CreateAgentRequest{
-		RootAgentID: rootDef.Name,
-		Agents:      []deployer.AgentDefinition{rootDef},
+		RootAgentID: DeployKey(tenantID, cfg.Name),
+		Agents:      agents,
 		Provider:    providerConfig,
 	}
 

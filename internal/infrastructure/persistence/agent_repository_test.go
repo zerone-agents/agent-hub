@@ -327,6 +327,46 @@ func TestAgentRepository_Delete_CrossTenantRejected(t *testing.T) {
 	require.Equal(t, int64(1), cnt)
 }
 
+func TestAgentRepository_ExistsSubagentBinding(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	parent := &agent.AgentConfig{Name: "parent", TenantID: "org-a"}
+	child := &agent.AgentConfig{Name: "child", TenantID: "org-a"}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(child).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: child.ID}).Error)
+
+	// child is mounted by parent → true; parent is not mounted by anyone → false.
+	mounted, err := repo.ExistsSubagentBinding(child.ID)
+	require.NoError(t, err)
+	require.True(t, mounted)
+
+	mounted, err = repo.ExistsSubagentBinding(parent.ID)
+	require.NoError(t, err)
+	require.False(t, mounted)
+}
+
+func TestAgentRepository_CountSubagentsOf(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	parent := &agent.AgentConfig{Name: "parent", TenantID: "org-a"}
+	c1 := &agent.AgentConfig{Name: "child-1", TenantID: "org-a"}
+	c2 := &agent.AgentConfig{Name: "child-2", TenantID: "org-a"}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(c1).Error)
+	require.NoError(t, db.Create(c2).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: c1.ID}).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: c2.ID}).Error)
+
+	n, err := repo.CountSubagentsOf(parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+
+	n, err = repo.CountSubagentsOf(c1.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
+}
+
 func TestAgentRepository_GetAllSubagents_TenantIsolation(t *testing.T) {
 	db := setupAgentRepoTestDB(t)
 	repo := NewAgentRepository()

@@ -566,7 +566,7 @@ func buildReqWithTools(t *testing.T, tools []*agent.Tool, cdnHost string) (*depl
 	svc.toolRepo = &mockToolRepo{tools: tools}
 	svc.cdnHost = cdnHost
 	cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "m", SystemPrompt: "p"}
-	return svc.buildCreateRequest(context.Background(), "t", cfg, provider, tools, nil, nil, nil)
+	return svc.buildCreateRequest(context.Background(), "t", cfg, provider)
 }
 
 func TestBuildCreateRequest_CustomToolsSortedAndToolsFull(t *testing.T) {
