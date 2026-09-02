@@ -421,21 +421,17 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
-	args.DatasetID = strings.TrimSpace(args.DatasetID)
-	if args.DatasetID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("dataset_id 不能为空")
-	}
-	allowed, err := h.resolveAgentContext(c)
+	datasetID, deny, err := h.requireDatasetAccess(c, id, args.DatasetID)
 	if err != nil {
 		return jsonRPCResponse{}, err
 	}
-	if !isStringSubset([]string{args.DatasetID}, allowed) {
-		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
+	if deny != nil {
+		return *deny, nil
 	}
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
-	result, err := h.knowledgeService.ListDocuments(ctx, args.DatasetID, knowledge.DocumentListRequest{Page: page, PageSize: pageSize})
+	result, err := h.knowledgeService.ListDocuments(ctx, datasetID, knowledge.DocumentListRequest{Page: page, PageSize: pageSize})
 	if err != nil {
-		log.Printf("knowledge-mcp: list documents failed (dataset=%s page=%d page_size=%d): %v", args.DatasetID, page, pageSize, err)
+		log.Printf("knowledge-mcp: list documents failed (dataset=%s page=%d page_size=%d): %v", datasetID, page, pageSize, err)
 		return mcpErrorResult(id, "知识库文档列表获取失败，请稍后重试"), nil
 	}
 	docs := make([]map[string]any, 0, len(result.Documents))
@@ -457,25 +453,21 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
-	args.DatasetID = strings.TrimSpace(args.DatasetID)
-	args.DocumentID = strings.TrimSpace(args.DocumentID)
-	if args.DatasetID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("dataset_id 不能为空")
-	}
-	if args.DocumentID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("document_id 不能为空")
-	}
-	allowed, err := h.resolveAgentContext(c)
+	datasetID, deny, err := h.requireDatasetAccess(c, id, args.DatasetID)
 	if err != nil {
 		return jsonRPCResponse{}, err
 	}
-	if !isStringSubset([]string{args.DatasetID}, allowed) {
-		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
+	if deny != nil {
+		return *deny, nil
+	}
+	args.DocumentID = strings.TrimSpace(args.DocumentID)
+	if args.DocumentID == "" {
+		return jsonRPCResponse{}, fmt.Errorf("document_id 不能为空")
 	}
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
-	result, err := h.knowledgeService.ListChunks(ctx, args.DatasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
+	result, err := h.knowledgeService.ListChunks(ctx, datasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
 	if err != nil {
-		log.Printf("knowledge-mcp: list chunks failed (dataset=%s document=%s page=%d page_size=%d): %v", args.DatasetID, args.DocumentID, page, pageSize, err)
+		log.Printf("knowledge-mcp: list chunks failed (dataset=%s document=%s page=%d page_size=%d): %v", datasetID, args.DocumentID, page, pageSize, err)
 		return mcpErrorResult(id, "知识库分块读取失败，请稍后重试"), nil
 	}
 	chunks := make([]map[string]any, 0, len(result.Chunks))
@@ -521,6 +513,27 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, err
 		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
 	}
 	return allowed, nil
+}
+
+// requireDatasetAccess 是遍历工具的统一 dataset 入口：TrimSpace + 非空校验
+// （-32603）、agent/租户上下文解析、绑定子集校验（越权 → isError 中性文案）。
+// 授权先于工具自有参数细节校验，未授权调用方拿不到参数校验细节。
+// err 由调用方原样上抛（走 -32603）；deny 非 nil 时直接返回 *deny；皆零值即放行。
+// 新增遍历工具必须经此入口，防止授权步骤在手写编排中漂移。
+func (h *KnowledgeMcpHandler) requireDatasetAccess(c *gin.Context, id interface{}, rawDatasetID string) (datasetID string, deny *jsonRPCResponse, err error) {
+	datasetID = strings.TrimSpace(rawDatasetID)
+	if datasetID == "" {
+		return "", nil, fmt.Errorf("dataset_id 不能为空")
+	}
+	allowed, err := h.resolveAgentContext(c)
+	if err != nil {
+		return "", nil, err
+	}
+	if !isStringSubset([]string{datasetID}, allowed) {
+		resp := mcpErrorResult(id, "无权访问部分知识库 dataset")
+		return datasetID, &resp, nil
+	}
+	return datasetID, nil, nil
 }
 
 // pickFields 白名单拷贝，上游缺失的键直接省略。

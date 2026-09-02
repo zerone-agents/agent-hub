@@ -950,6 +950,20 @@ func TestKnowledgeMcpHandler_ToolsListMatchesBuiltinSeed(t *testing.T) {
 	}
 }
 
+func TestKnowledgeMcpHandler_ToolsCall_Chunks_AuthzBeforeParamValidation(t *testing.T) {
+	// requireDatasetAccess 统一入口的优先级契约：授权先于参数细节校验——
+	// 未授权 dataset + 缺 document_id 时返回「无权访问」，不暴露参数校验细节。
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{datasets: []string{"ds-1"}})
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_chunks","arguments":{"dataset_id":"other"}}`), testValidToken)
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
+		t.Fatalf("expected unauthorized isError before param validation, got %+v", resp)
+	}
+}
+
 func TestKnowledgeMcpHandler_ToolsCall_Chunks_Unauthorized(t *testing.T) {
 	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{datasets: []string{"ds-1"}})
 	params := json.RawMessage(`{"name":"knowledge_chunks","arguments":{"dataset_id":"other","document_id":"doc-1"}}`)
