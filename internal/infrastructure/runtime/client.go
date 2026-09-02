@@ -196,3 +196,23 @@ func (c *Client) Health(ctx context.Context, baseURL string) (*HealthInfo, error
 	}
 	return &info, nil
 }
+
+// UploadFiles POSTs a multipart body to {baseURL}/v1/files/uploads and
+// returns the runtime's raw response. The caller MUST close the response.
+// contentType must carry the multipart boundary VERBATIM from the writer
+// that produced body (re-writing it breaks the runtime's parser).
+func (c *Client) UploadFiles(ctx context.Context, baseURL, apiKey string, body io.Reader, contentType string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/files/uploads", body)
+	if err != nil {
+		return nil, fmt.Errorf("build upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	if apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime upload request failed: %w", err)
+	}
+	return resp, nil
+}

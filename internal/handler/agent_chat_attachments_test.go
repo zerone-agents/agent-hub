@@ -2,12 +2,16 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
@@ -243,4 +247,217 @@ func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
 	var errCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&errCount).Error)
 	require.Zero(t, errCount, "attachment_missing must NOT be persisted as a system error message")
+}
+
+func uploadRequestForAttachments(t *testing.T, env *attachmentChatEnv, files []struct{ name, body string }, sessionID, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, f := range files {
+		fw, err := mw.CreateFormFile("files", f.name)
+		require.NoError(t, err)
+		_, _ = fw.Write([]byte(f.body))
+	}
+	require.NoError(t, mw.Close())
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/uploads", &buf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user_id", userID)
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: sessionID}}
+	env.handler.UploadAttachments(c)
+	return w
+}
+
+func fakeUploadOK(w http.ResponseWriter, r *http.Request) {
+	_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	mr := multipart.NewReader(r.Body, params["boundary"])
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break // io.EOF 或 hub 限额主动断开
+		}
+		if p.FileName() != "" {
+			_, _ = io.Copy(io.Discard, p)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(`{"files":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`))
+}
+
+func TestUploadAttachments_RelaysWithServerSideKey(t *testing.T) {
+	var gotAuth string
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("x-api-key")
+		fakeUploadOK(w, r)
+	}
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: handler})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, "rt-secret", gotAuth, "runtime token must be injected server-side")
+	require.Contains(t, w.Body.String(), ".zerone-uploads/a.txt")
+}
+
+func TestUploadAttachments_NonOwner404(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-u2", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestUploadAttachments_AgentBindingMismatch404(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	// s-att 绑定 min；用 other 名字寻址
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("files", "a.txt")
+	_, _ = fw.Write([]byte("abc"))
+	require.NoError(t, mw.Close())
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/uploads", &buf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "other"}, {Key: "id", Value: "s-att"}}
+	env.handler.UploadAttachments(c)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestUploadAttachments_OldRuntime501(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0"}) // 版本不足
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusNotImplemented, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+}
+
+func TestUploadAttachments_OldRuntimeUpload404Mapped501(t *testing.T) {
+	// /health 报 2.5.0 但上传端点 404（防御性：版本探测与实际能力不一致）
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"}) // 无 uploadHandler → mux 404
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusNotImplemented, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+}
+
+func TestUploadAttachments_RuntimeLimitExceededPassthrough(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"File \"x\" exceeds the 20MB single-file limit","code":"upload_limit_exceeded"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+}
+
+func TestUploadAttachments_HubRejectsTooManyFiles(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	files := make([]struct{ name, body string }, 11)
+	for i := range files {
+		files[i] = struct{ name, body string }{fmt.Sprintf("f%d.txt", i), "x"}
+	}
+	w := uploadRequestForAttachments(t, env, files, "s-att", "u1")
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+}
+
+func TestUploadAttachments_HubRejectsOversizeSingleFile(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("files", "big.bin")
+	_, _ = fw.Write(bytes.Repeat([]byte{0}, (20<<20)+16))
+	require.NoError(t, mw.Close())
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/uploads", &buf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: "s-att"}}
+	env.handler.UploadAttachments(c)
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+}
+
+// 流式性断言：runtime 收到第一个 part 的字节时，客户端尚未写完整个请求
+// （knowledge_test.go 的 io.Pipe 慢生产者范式）。
+func TestUploadAttachments_StreamsPartByPart(t *testing.T) {
+	runtimeSawFirst := make(chan struct{})
+	allowSecond := make(chan struct{})
+	filesReceived := make(chan int, 1)
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			mr := multipart.NewReader(r.Body, params["boundary"])
+			count := 0
+			sawFirst := false
+			for {
+				p, err := mr.NextPart()
+				if err != nil {
+					break
+				}
+				if p.FileName() == "" {
+					continue
+				}
+				count++
+				if !sawFirst {
+					sawFirst = true
+					close(runtimeSawFirst)
+				}
+				_, _ = io.Copy(io.Discard, p)
+			}
+			filesReceived <- count
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"files":[{"id":"f-1","name":"one.bin","mime":"application/octet-stream","size":5,"path":".zerone-uploads/one.bin"},{"id":"f-2","name":"two.bin","mime":"application/octet-stream","size":6,"path":".zerone-uploads/two.bin"}]}`))
+		},
+	})
+
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		fw, _ := mw.CreateFormFile("files", "one.bin")
+		_, _ = fw.Write([]byte("first"))
+		<-allowSecond
+		fw2, _ := mw.CreateFormFile("files", "two.bin")
+		_, _ = fw2.Write([]byte("second"))
+		_ = mw.Close()
+		_ = pw.Close()
+	}()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/uploads", pr)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: "s-att"}}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		env.handler.UploadAttachments(c)
+	}()
+
+	select {
+	case <-runtimeSawFirst:
+		// good：handler 在请求体未写完时已把第一个 part 转发到 runtime
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler buffered the whole request before relaying (not streaming)")
+	}
+	close(allowSecond)
+	<-done
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, 2, <-filesReceived)
 }

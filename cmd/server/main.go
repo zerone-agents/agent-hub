@@ -410,6 +410,7 @@ func main() {
 
 		// Agent chat attachments (issue #94)
 		agentsGroup.GET("/:name/chat/capabilities", agentChatHandler.Capabilities)
+		agentsGroup.POST("/:name/chat/sessions/:id/uploads", agentChatHandler.UploadAttachments)
 	}
 
 	// 管理接口：写方法/敏感 GET（files/content）→ write 组；
