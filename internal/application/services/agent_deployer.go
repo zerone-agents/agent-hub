@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -337,15 +338,20 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, err
 	}
 
+	// Build the create request first: graph construction and capability
+	// validation (loadAgentGraph) are pure DB reads with no deployer side
+	// effects, so a validation failure below returns without touching Kong —
+	// a misconfigured child must not take a healthy agent's route offline.
+	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p)
+	if err != nil {
+		return nil, fmt.Errorf("build create request failed: %w", err)
+	}
+
 	// Deregister any existing Kong route before recreating. This is idempotent
 	// (no-op if the agent was never registered) and avoids serving 502s while
 	// the container is being rebuilt.
 	if s.kongSvc != nil {
 		_ = s.kongSvc.Deregister(ctx, key)
-	}
-	req, err := s.buildCreateRequest(ctx, tenantID, agentCfg, p)
-	if err != nil {
-		return nil, fmt.Errorf("build create request failed: %w", err)
 	}
 	req.RuntimeToken = token
 	s.resolveMcpHeaders(req, token)
@@ -353,9 +359,15 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// Call deployer
 	resp, err := s.client.CreateAgent(ctx, req, force)
 	if err != nil {
-		// Clean up failed container
-		_ = s.client.DeleteAgent(ctx, key, false)
-		_ = s.updateStatus(tenantID, agentCfg, "error", 0, nil)
+		// Mid-flight failures (5xx, network) may have left a half-created
+		// container behind: archive it and mark the deployment errored.
+		// Pre-rejections (4xx protocol validation, 503 runtime floor) happen
+		// before the deployer touches Docker, so any existing container is
+		// still healthy and must stay exactly as is.
+		if !deployerPreRejected(err) {
+			_ = s.client.DeleteAgent(ctx, key, false)
+			_ = s.updateStatus(tenantID, agentCfg, "error", 0, nil)
+		}
 		return nil, fmt.Errorf("deploy agent failed: %w", err)
 	}
 
@@ -1036,6 +1048,19 @@ func (s *AgentDeployerService) buildArtifactURL(ossKey string) string {
 		return ossKey
 	}
 	return strings.TrimRight(s.cdnHost, "/") + "/" + strings.TrimLeft(ossKey, "/")
+}
+
+// deployerPreRejected reports whether the deployer rejected the request
+// before creating anything (4xx protocol validation or 503 runtime
+// floor). In that case any existing container is untouched by the
+// deployer and must not be archived on the hub side.
+func deployerPreRejected(err error) bool {
+	var httpErr *deployer.HTTPError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	return httpErr.StatusCode == http.StatusServiceUnavailable ||
+		(httpErr.StatusCode >= 400 && httpErr.StatusCode < 500)
 }
 
 // isStableDeploymentStatus reports whether a Docker-reported container status

@@ -485,7 +485,12 @@ func migrateMaxSessionQueries() error {
 		return nil
 	}
 	log.Println("Migrating agents.max_session_turns to max_session_queries...")
-	if err := DB.Exec("UPDATE agents SET max_session_queries = max_session_turns").Error; err != nil {
+	// WHERE ... IS NOT NULL: a NULL legacy value must not overwrite a
+	// non-NULL max_session_queries from an earlier upgrade. Without the
+	// guard, a "new hub → rollback (old hub AutoMigrate recreates
+	// max_session_turns all-NULL) → upgrade again" cycle would clobber the
+	// previously backfilled values with NULL.
+	if err := DB.Exec("UPDATE agents SET max_session_queries = max_session_turns WHERE max_session_turns IS NOT NULL").Error; err != nil {
 		return fmt.Errorf("failed to backfill max_session_queries: %w", err)
 	}
 	if err := DB.Exec("ALTER TABLE agents DROP COLUMN max_session_turns").Error; err != nil {

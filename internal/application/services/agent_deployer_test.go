@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/infrastructure/deployer"
+	"control-panel/internal/infrastructure/kong"
 )
 
 func TestWaitForHealthy_DockerHealthyPath(t *testing.T) {
@@ -597,4 +599,241 @@ func TestBuildCreateRequest_CustomToolsRequireCDNHost(t *testing.T) {
 	_, err := buildReqWithTools(t, customToolRecordsFixture(), "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "OSS_CDN_HOST")
+}
+
+// deployFailureFixture captures what a fake deployer saw during a failed
+// Deploy call: create (POST), archive (DELETE) and the DB updates the
+// service performed afterwards.
+type deployFailureFixture struct {
+	postStatus   int  // HTTP status returned to the create (POST) call
+	hijackPost   bool // kill the POST at transport level (network error, not *deployer.HTTPError)
+	postCalled   bool
+	deleteCalled bool
+	updates      []*agent.AgentConfig
+}
+
+// newDeployFailureServer builds a mock deployer for Deploy failure-path
+// tests: the GET probe reports an existing running container, POST returns
+// the fixture's status (or dies at transport level when hijackPost is set),
+// DELETE records the archive call and succeeds.
+func newDeployFailureServer(t *testing.T, f *deployFailureFixture) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
+		case http.MethodPost:
+			f.postCalled = true
+			if f.hijackPost {
+				// Close the connection without a response: the client sees a
+				// transport error (not *deployer.HTTPError), which is the
+				// "hub cannot know what the deployer did" cleanup case.
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Error("test server does not support hijacking")
+					return
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Errorf("hijack failed: %v", err)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			w.WriteHeader(f.postStatus)
+			w.Write([]byte(`{"success":false,"error":"boom"}`))
+		case http.MethodDelete:
+			f.deleteCalled = true
+			w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// deployFailureAgentRepo simulates a healthy, currently-running deployment
+// (stored token, status running) and records every DB update.
+func deployFailureAgentRepo(f *deployFailureFixture, runtimeToken string) *mockAgentRepo {
+	providerID := uint64(1)
+	return &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return &agent.AgentConfig{
+				ID:               1,
+				Name:             "general",
+				ProviderID:       &providerID,
+				ModelID:          "glm-5-turbo",
+				RuntimeToken:     runtimeToken,
+				DeploymentStatus: "running",
+				RuntimePort:      3000,
+			}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
+			f.updates = append(f.updates, a)
+			return nil
+		},
+	}
+}
+
+// preRegisterKongRoute seeds the fake gateway with the service and routes a
+// Deregister call would remove, so tests can tell whether it ran.
+func preRegisterKongRoute(fk *fakeKong, key string) {
+	fk.services[svcName(key)] = &kong.Service{Name: svcName(key)}
+	fk.routes[routeName(key)] = &kong.Route{Name: routeName(key)}
+	fk.routes[legacyRouteName(key)] = &kong.Route{Name: legacyRouteName(key)}
+}
+
+// TestDeploy_CreateAgentFailure_CleanupPolicy pins the post-review contract:
+// pre-rejections (deployer 4xx protocol validation / 503 runtime floor, both
+// decided before the deployer touches Docker) must leave the existing
+// container and the DB deployment status untouched, while mid-flight
+// failures (5xx, network) still archive the half-created container and mark
+// the deployment errored.
+func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
+	// The stored token keeps resolveRuntimeToken from probing the deployer,
+	// so the flow under test is: build request → deregister → create.
+	const storedToken = "0123456789abcdef0123456789abcdef"
+
+	run := func(t *testing.T, f *deployFailureFixture) error {
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		_, err := s.Deploy("default", "general", false, false)
+		return err
+	}
+
+	t.Run("400 pre-rejected keeps container and DB status", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusBadRequest}
+		err := run(t, f)
+		if err == nil || !strings.Contains(err.Error(), "deploy agent failed") || !strings.Contains(err.Error(), "400") {
+			t.Fatalf("expected wrapped HTTP 400 deploy failure, got %v", err)
+		}
+		if f.deleteCalled {
+			t.Error("pre-rejected (400) deploy must not archive the still-running container")
+		}
+		if len(f.updates) != 0 {
+			t.Errorf("pre-rejected (400) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
+		}
+	})
+
+	t.Run("503 pre-rejected keeps container and DB status", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusServiceUnavailable}
+		err := run(t, f)
+		if err == nil || !strings.Contains(err.Error(), "503") {
+			t.Fatalf("expected HTTP 503 deploy failure, got %v", err)
+		}
+		if f.deleteCalled {
+			t.Error("pre-rejected (503) deploy must not archive the still-running container")
+		}
+		if len(f.updates) != 0 {
+			t.Errorf("pre-rejected (503) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
+		}
+	})
+
+	t.Run("500 mid-flight failure still archives and errors", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusInternalServerError}
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		fk := newFakeKong()
+		key := DeployKey("default", "general")
+		preRegisterKongRoute(fk, key)
+		s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0)
+
+		_, err := s.Deploy("default", "general", false, false)
+		if err == nil || !strings.Contains(err.Error(), "500") {
+			t.Fatalf("expected HTTP 500 deploy failure, got %v", err)
+		}
+		if !f.deleteCalled {
+			t.Error("mid-flight (500) failure must archive the half-created container")
+		}
+		if len(f.updates) != 1 || f.updates[0].DeploymentStatus != "error" {
+			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
+		}
+		// Positive control for the Deregister assertion in the graph test
+		// below: the route really is deregistered before the create attempt.
+		if _, ok := fk.routes[routeName(key)]; ok {
+			t.Error("expected Kong route to be deregistered before recreate")
+		}
+	})
+
+	t.Run("network failure still archives and errors", func(t *testing.T) {
+		f := &deployFailureFixture{hijackPost: true}
+		err := run(t, f)
+		if err == nil {
+			t.Fatal("expected network deploy failure, got nil")
+		}
+		if strings.Contains(err.Error(), "deployer returned HTTP") {
+			t.Fatalf("expected transport error, got HTTPError: %v", err)
+		}
+		if !f.deleteCalled {
+			t.Error("network failure must archive the half-created container")
+		}
+		if len(f.updates) != 1 || f.updates[0].DeploymentStatus != "error" {
+			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
+		}
+	})
+}
+
+// TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute pins the
+// ordering fix: buildCreateRequest (graph construction + capability
+// validation, pure DB reads) runs before the Kong deregistration, so a
+// validation failure — here a dangling subagent reference — returns without
+// touching the gateway while the existing container keeps serving.
+func TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute(t *testing.T) {
+	f := &deployFailureFixture{postStatus: http.StatusOK} // create must never be reached
+	srv := newDeployFailureServer(t, f)
+	defer srv.Close()
+
+	providerID := uint64(1)
+	repo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if name != "general" {
+				return nil, fmt.Errorf("agent %q not found", name)
+			}
+			return &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo"}, nil
+		},
+		getSubagentsFunc: func(agentID uint64) ([]string, error) {
+			return []string{"missing-sub"}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
+			f.updates = append(f.updates, a)
+			return nil
+		},
+	}
+	s := newTestAgentDeployerService(t, srv.URL, repo, deployTokenProviderSvc())
+
+	fk := newFakeKong()
+	key := DeployKey("default", "general")
+	preRegisterKongRoute(fk, key)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0)
+
+	// force=true skips the existing-container GET probe; the deploy must die
+	// inside buildCreateRequest on the dangling subagent reference.
+	_, err := s.Deploy("default", "general", true, false)
+	if err == nil {
+		t.Fatal("expected graph validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "不存在") || !strings.Contains(err.Error(), "missing-sub") {
+		t.Errorf("expected dangling-subagent error, got: %v", err)
+	}
+	if f.postCalled {
+		t.Error("graph validation failure must not reach the deployer create call")
+	}
+	if f.deleteCalled {
+		t.Error("graph validation failure must not archive anything")
+	}
+	if len(f.updates) != 0 {
+		t.Errorf("graph validation failure must not touch DB status; got %d update(s)", len(f.updates))
+	}
+	if _, ok := fk.routes[routeName(key)]; !ok {
+		t.Error("Kong route must survive a graph validation failure (Deregister must not run)")
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; !ok {
+		t.Error("legacy Kong route must survive a graph validation failure")
+	}
+	if _, ok := fk.services[svcName(key)]; !ok {
+		t.Error("Kong service must survive a graph validation failure")
+	}
 }
