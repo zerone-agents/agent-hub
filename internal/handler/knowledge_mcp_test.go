@@ -194,6 +194,41 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 			t.Fatalf("tools/list missing tool %s, got %v", want, names)
 		}
 	}
+	// 整型入参（Go *int）在 schema 中须标 integer，浮点入参（*float64）标 number——
+	// 与实际 unmarshal 行为一致，避免客户端按 number 发 2.5 得到莫名 -32603。
+	wantTypes := map[string]map[string]string{
+		"knowledge_search":    {"top_k": "integer", "similarity_threshold": "number", "vector_similarity_weight": "number"},
+		"knowledge_documents": {"page": "integer", "page_size": "integer"},
+		"knowledge_chunks":    {"page": "integer", "page_size": "integer"},
+	}
+	for _, tl := range tools {
+		m, ok := tl.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		want, ok := wantTypes[name]
+		if !ok {
+			continue
+		}
+		schema, ok := m["inputSchema"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s: inputSchema missing or invalid", name)
+		}
+		props, ok := schema["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s: properties missing or invalid", name)
+		}
+		for param, wantType := range want {
+			p, ok := props[param].(map[string]interface{})
+			if !ok {
+				t.Fatalf("%s: property %s missing", name, param)
+			}
+			if got := p["type"]; got != wantType {
+				t.Fatalf("%s.%s type = %v, want %s", name, param, got, wantType)
+			}
+		}
+	}
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_NoBoundDatasets(t *testing.T) {

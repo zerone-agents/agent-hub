@@ -191,7 +191,7 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"description": "Optional. Restrict retrieval to specific knowledge bases. Valid dataset IDs can be found in the <datasets> block of the system prompt. If omitted, all knowledge bases bound to this agent are used automatically.",
 							},
 							"top_k": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Maximum number of relevant text snippets to return. Default is 8. Adjust only when you need to control the result count.",
 								"default":     8,
 								"minimum":     1,
@@ -239,13 +239,13 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"description": "Target knowledge base ID. Must be one of the datasets bound to this agent (see knowledge_datasets).",
 							},
 							"page": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Page number, starting from 1.",
 								"default":     1,
 								"minimum":     1,
 							},
 							"page_size": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Documents per page. Default 20, maximum 50 (values above 50 are clamped).",
 								"default":     20,
 								"minimum":     1,
@@ -270,13 +270,13 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"description": "Target document ID, from knowledge_documents.",
 							},
 							"page": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Page number, starting from 1.",
 								"default":     1,
 								"minimum":     1,
 							},
 							"page_size": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Chunks to read per call. Default 20, maximum 50 (values above 50 are clamped). Read fewer for careful study, more for a quick scan.",
 								"default":     20,
 								"minimum":     1,
