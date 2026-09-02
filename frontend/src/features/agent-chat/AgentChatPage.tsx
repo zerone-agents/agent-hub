@@ -127,8 +127,8 @@ export default function AgentChatPage() {
   const attachmentsEnabled = capabilities?.attachmentsEnabled === true
   const [uploadError, setUploadError] = useState<string | null>(null)
   // attachment_missing 重试路径（fix round 1，人裁定方案 1）：刚发送的文本暂存
-  // lastSentRef，invalidate 时经 chatInputRef.restoreText 写回输入框，
-  // 让「可直接重试发送」承诺成立（ChatInput 在 handleSend resolve true 时已清空文本）。
+  // lastSentRef，invalidate 时经 chatInputRef.restoreText 写回输入框，让「可直接
+  // 重试发送」承诺成立（文本清空在 onEstablished 经 clearText，spec F2）。
   const chatInputRef = useRef<ChatInputHandle>(null)
   const lastSentRef = useRef('')
 
@@ -186,11 +186,17 @@ export default function AgentChatPage() {
   // 文本、error effect 又清掉 optimistic 气泡，用户重试需要重新输入）
   const invalidateAttachments = attachments.invalidate
   useEffect(() => {
-    if (stream.state.phase === 'error' && stream.state.errorCode === 'attachment_missing') {
+    // sessionId 门控（与上方错误展示同款模式）：A 会话的 attachment_missing
+    // 到达时若用户已切到 B 会话，不把 A 的文本写进 B 的输入框。
+    if (
+      stream.state.phase === 'error' &&
+      stream.state.errorCode === 'attachment_missing' &&
+      stream.state.sessionId === selectedId
+    ) {
       if (lastSentRef.current) chatInputRef.current?.restoreText(lastSentRef.current)
       invalidateAttachments()
     }
-  }, [stream.state.phase, stream.state.errorCode, invalidateAttachments])
+  }, [stream.state.phase, stream.state.errorCode, stream.state.sessionId, selectedId, invalidateAttachments])
 
   // Sticky-bottom auto-scroll: pause when user scrolls up, resume when they
   // scroll back to the bottom (within 80px tolerance).
@@ -326,10 +332,12 @@ export default function AgentChatPage() {
       })
     )
 
-    // 3. 发起 SSE。onEstablished（fetch 200 后）才清空附件与本地 blob URL；
-    //    attachment_missing 等前置失败不触发清空，本地文件仍在可重传。
+    // 3. 发起 SSE。onEstablished（fetch 200 后）才清空文本、本地文件与 blob
+    //    URL（spec F2）；409/502/网络错误与 attachment_missing 等失败路径一律
+    //    保留文本与本地文件，可直接重试。
     lastSentRef.current = content
     void stream.send(name, selected.id, content, descriptors, () => {
+      chatInputRef.current?.clearText()
       attachments.clearAll()
     })
     return true

@@ -389,6 +389,36 @@ func TestUploadAttachments_HubRejectsOversizeSingleFile(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
 }
 
+// 整个请求体总量上限（终审 Finding 2）：非 file part 虽被 relayMultipart 跳过，
+// 但读穿它才能定位下一个 boundary——若无总量上限，已认证用户可用「若干小文件 +
+// 巨型 text field」造成无界 ingress。MaxBytesReader 超限的读错误经
+// relayMultipart 落 400 invalid_multipart。
+func TestUploadAttachments_HubRejectsOversizeRequestBody(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	old := uploadMaxRequestBytes
+	uploadMaxRequestBytes = 1 << 10 // 1KB：逼停 2KB text field 的读穿
+	t.Cleanup(func() { uploadMaxRequestBytes = old })
+
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormField("note") // 非 file part：绕开单文件/文件数限额
+	require.NoError(t, err)
+	_, err = fw.Write(bytes.Repeat([]byte("x"), 2<<10))
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/uploads", &buf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: "s-att"}}
+	env.handler.UploadAttachments(c)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_multipart"`)
+}
+
 // 流式性断言：runtime 收到第一个 part 的字节时，客户端尚未写完整个请求
 // （knowledge_test.go 的 io.Pipe 慢生产者范式）。
 func TestUploadAttachments_StreamsPartByPart(t *testing.T) {

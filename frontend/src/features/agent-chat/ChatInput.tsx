@@ -101,15 +101,18 @@ export interface ChatInputAttachments {
   remove: (id: string) => void
 }
 
-/** imperative 接口：attachment_missing 重试路径由页面写回文本（Task 11 fix round 1） */
+/** imperative 接口：文本写回/清空由页面控制（Task 11 fix round 1 + 终审 F2） */
 export interface ChatInputHandle {
+  /** attachment_missing 重试路径由页面写回文本 */
   restoreText: (text: string) => void
+  /** SSE 建立后由页面调用清空文本（spec F2：fetch 200 前文本一律保留） */
+  clearText: () => void
 }
 
 interface ChatInputProps {
   ref?: Ref<ChatInputHandle>
   disabled: boolean
-  /** resolve false 时保留输入文本（上传失败重试路径，issue #94） */
+  /** 返回值不再驱动文本清空（spec F2：清空责任在页面 onEstablished）；类型保留兼容既有调用方 */
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- spec contract: void keeps existing Promise<void> callers assignable; rule's allowInUnionAsReturn covers top-level union only, not nested Promise<void | boolean>
   onSend: (content: string) => void | Promise<void | boolean>
   attachments?: ChatInputAttachments
@@ -121,7 +124,10 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [sending, setSending] = useState(false)
-  useImperativeHandle(ref, () => ({ restoreText: (text: string) => { setValue(text); } }), [])
+  useImperativeHandle(ref, () => ({
+    restoreText: (text: string) => { setValue(text); },
+    clearText: () => { setValue(''); },
+  }), [])
 
   const hasAttachments = (attachments?.items.length ?? 0) > 0
   const inputDisabled = disabled || sending
@@ -132,8 +138,9 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
     if (!trimmed && !hasAttachments) return
     setSending(true)
     try {
-      const ok = await onSend(trimmed)
-      if (ok !== false) setValue('')
+      // spec F2：发送失败（409/502/网络错误等）一律保留文本；清空责任在页面
+      // onEstablished（SSE 建立后经 clearText），组件不再自行清空。
+      await onSend(trimmed)
     } finally {
       setSending(false)
     }

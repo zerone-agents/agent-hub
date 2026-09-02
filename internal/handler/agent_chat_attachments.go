@@ -27,6 +27,10 @@ const (
 	uploadMaxTotalBytes = 50 << 20
 )
 
+// 整个 multipart 请求体硬上限（50MB payload + boundary/headers 余量）；
+// MaxBytesReader 超限时读错误经 relayMultipart 落 invalid_multipart 400。
+var uploadMaxRequestBytes int64 = 60 << 20
+
 // UploadAttachments proxies a multipart upload to the session's runtime.
 // POST /api/v1/agents/:name/chat/sessions/:id/uploads
 //
@@ -68,6 +72,10 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidMultipart, "missing multipart boundary")
 		return
 	}
+	// 整个请求体总量上限：非 file part 虽被 relayMultipart 跳过，但必须读穿
+	// 才能定位 boundary，巨型 text field 会造成无界 ingress——MaxBytesReader
+	// 在读层面截断（超限读错误在 relayMultipart 中按 malformed multipart 映射）。
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, uploadMaxRequestBytes)
 
 	// 流式中继：io.Pipe 一端接 runtime 请求体，一端由 multipart.Writer 重打包。
 	// 绝不调用 gin FormFile/ParseMultipartForm（会整体缓冲）。

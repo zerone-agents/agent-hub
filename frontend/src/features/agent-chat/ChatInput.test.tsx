@@ -1,6 +1,6 @@
 // frontend/src/features/agent-chat/ChatInput.test.tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatInput from './ChatInput'
 import type { ChatInputAttachments, ChatInputHandle } from './ChatInput'
@@ -48,23 +48,21 @@ describe('ChatInput attachments', () => {
     expect(onSend).toHaveBeenCalledWith('')
   })
 
-  it('keeps text when onSend resolves false (upload failure)', async () => {
-    const onSend = vi.fn().mockResolvedValue(false)
+  it('keeps text when onSend resolves (true or false) — clearing is the page onEstablished duty (spec F2)', async () => {
+    // 第一次 resolve false（上传失败重试路径）、第二次 resolve true（SSE 已建立）：
+    // 两种结果组件都不清空文本——清空责任已移交页面 onEstablished（clearText），
+    // 409/502/网络错误等失败不再丢用户输入。
+    const onSend = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     const user = userEvent.setup()
     render(<ChatInput disabled={false} onSend={onSend} attachments={makeAttachments()} />)
     await user.type(screen.getByRole('textbox'), 'hello')
     await user.click(screen.getByRole('button', { name: '发送' }))
     expect(onSend).toHaveBeenCalledWith('hello')
     expect(screen.getByRole('textbox')).toHaveValue('hello')
-  })
-
-  it('clears text when onSend resolves true', async () => {
-    const onSend = vi.fn().mockResolvedValue(true)
-    const user = userEvent.setup()
-    render(<ChatInput disabled={false} onSend={onSend} attachments={makeAttachments()} />)
-    await user.type(screen.getByRole('textbox'), 'hello')
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: '发送' }))
-    await vi.waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
+    expect(onSend).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('textbox')).toHaveValue('hello')
   })
 
   it('pastes files from the clipboard into the queue', () => {
@@ -127,5 +125,21 @@ describe('ChatInput attachments', () => {
     )
     act(() => { handle.current?.restoreText('回归文本'); })
     expect(screen.getByRole('textbox')).toHaveValue('回归文本')
+  })
+
+  it('clearText (ref handle) empties the input (page calls it on SSE established)', async () => {
+    const handle = { current: null as ChatInputHandle | null }
+    const user = userEvent.setup()
+    render(
+      <ChatInput
+        ref={(h: ChatInputHandle | null) => { handle.current = h; }}
+        disabled={false}
+        onSend={vi.fn()}
+        attachments={makeAttachments()}
+      />
+    )
+    await user.type(screen.getByRole('textbox'), '待清空')
+    act(() => { handle.current?.clearText(); })
+    expect(screen.getByRole('textbox')).toHaveValue('')
   })
 })

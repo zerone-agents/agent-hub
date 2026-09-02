@@ -138,6 +138,8 @@ describe('AgentChatPage attachments flow', { timeout: 15000 }, () => {
       expect(fileIdx).toBeGreaterThanOrEqual(0)
       expect(fileIdx).toBeLessThan(textIdx)
     })
+    // spec F2：SSE 建立后（onEstablished）页面经 clearText 清空输入文本
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
   })
 
   it('keeps the local file and shows an error when upload fails', async () => {
