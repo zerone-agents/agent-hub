@@ -837,6 +837,26 @@ func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]
 	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 }
 
+// CanAgentUseSubagent reports whether subagentName is directly mounted by the
+// authenticated parent agent. Knowledge MCP uses this to authorize the
+// per-subagent identity carried by a deployment-generated MCP connection.
+func (s *AgentService) CanAgentUseSubagent(tenantID, agentName, subagentName string) (bool, error) {
+	parent, err := s.repo.GetByName(tenantID, agentName)
+	if err != nil {
+		return false, fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
+	}
+	names, err := s.repo.GetSubagents(parent.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range names {
+		if name == subagentName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // UpdateAgentKnowledgeDatasets replaces the dataset bindings for an agent and
 // automatically enables/disables the built-in 'knowledge' MCP binding.
 func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, datasetIDs []string) error {

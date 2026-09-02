@@ -31,8 +31,13 @@ func (f *fakeKnowledgeMcpService) Retrieval(ctx context.Context, req knowledge.R
 }
 
 type fakeAgentMcpService struct {
-	datasets []string
-	err      error
+	datasets         []string
+	err              error
+	allowedSubagents map[string]bool
+}
+
+func (f *fakeAgentMcpService) CanAgentUseSubagent(tenantID, agentName, subagentName string) (bool, error) {
+	return f.allowedSubagents[subagentName], f.err
 }
 
 func (f *fakeAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
@@ -77,6 +82,21 @@ func postJSONRPC(t *testing.T, router *gin.Engine, method string, params json.Ra
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func postKnowledgeTarget(t *testing.T, router *gin.Engine, params json.RawMessage, target string) *httptest.ResponseRecorder {
+	body := jsonRPCRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: params}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/knowledge/mcp", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testValidToken)
+	req.Header.Set(knowledgeAgentHeader, target)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
@@ -281,6 +301,38 @@ func TestKnowledgeMcpHandler_ToolsCall_Defaults(t *testing.T) {
 	}
 }
 
+func TestKnowledgeMcpHandler_SubagentKnowledgeContext(t *testing.T) {
+	var gotAgent string
+	agentSvc := &tenantAwareAgentMcpService{
+		fn: func(_ string, agentName string) ([]string, error) {
+			gotAgent = agentName
+			return []string{"child-dataset"}, nil
+		},
+		allowedSubagent: "researcher",
+	}
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	rec := postKnowledgeTarget(t, router, params, "researcher")
+
+	if rec.Code != http.StatusOK || gotAgent != "researcher" {
+		t.Fatalf("status=%d agent=%q body=%s", rec.Code, gotAgent, rec.Body.String())
+	}
+}
+
+func TestKnowledgeMcpHandler_RejectsUnmountedKnowledgeAgent(t *testing.T) {
+	agentSvc := &tenantAwareAgentMcpService{fn: func(_ string, _ string) ([]string, error) {
+		t.Fatal("dataset lookup must not run for an unauthorized child")
+		return nil, nil
+	}}
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"question":"hello"}}`)
+	rec := postKnowledgeTarget(t, router, params, "stranger")
+
+	if !strings.Contains(rec.Body.String(), "is not mounted") {
+		t.Fatalf("expected mount rejection, got %s", rec.Body.String())
+	}
+}
+
 func TestKnowledgeMcpHandler_ToolsCall_ServiceError(t *testing.T) {
 	router := setupKnowledgeMcpRouter(
 		&fakeKnowledgeMcpService{
@@ -362,11 +414,16 @@ func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
 }
 
 type tenantAwareAgentMcpService struct {
-	fn func(tenantID, agentName string) ([]string, error)
+	fn              func(tenantID, agentName string) ([]string, error)
+	allowedSubagent string
 }
 
 func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
 	return f.fn(tenantID, agentName)
+}
+
+func (f *tenantAwareAgentMcpService) CanAgentUseSubagent(tenantID, agentName, subagentName string) (bool, error) {
+	return subagentName == f.allowedSubagent, nil
 }
 
 func isErrorResult(result interface{}) bool {

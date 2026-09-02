@@ -65,11 +65,12 @@ type McpServerConfig struct {
 
 // SubagentDefinition defines a subagent configuration.
 type SubagentDefinition struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Prompt      string   `json:"prompt"`
-	Tools       []string `json:"tools,omitempty"`
-	MaxTurns    *int     `json:"maxTurns,omitempty"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Prompt      string            `json:"prompt"`
+	Tools       []string          `json:"tools,omitempty"`
+	MaxTurns    *int              `json:"maxTurns,omitempty"`
+	Datasets    map[string]string `json:"datasets,omitempty"`
 }
 
 // SkillSource defines a skill source for agent-deployer.

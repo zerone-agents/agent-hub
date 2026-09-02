@@ -861,6 +861,58 @@ func (s *AgentDeployerService) buildCreateRequest(
 		agentDatasets[id] = desc
 	}
 
+	// Materialize each mounted subagent's own tools and knowledge catalog. MCP
+	// connections live at the parent runtime level, so each child knowledge
+	// server receives a unique alias and a trusted target-agent header. The Hub
+	// authenticates the parent runtime token, validates the direct mount, then
+	// authorizes retrieval against only that child's dataset bindings.
+	for i, sub := range subagents {
+		childTools, err := s.toolRepo.GetToolRecordsByAgent(sub.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load subagent %s tools failed: %w", sub.Name, err)
+		}
+		childToolNames := make([]string, 0, len(childTools)+1)
+		for _, tool := range childTools {
+			childToolNames = append(childToolNames, tool.Name)
+		}
+
+		childMcps, err := s.mcpSvc.GetClientMcpsByAgent(tenantID, sub.Name)
+		if err != nil {
+			return nil, fmt.Errorf("load subagent %s mcp servers failed: %w", sub.Name, err)
+		}
+		if knowledgeMCP := childMcps["knowledge"]; knowledgeMCP != nil {
+			alias := subagentKnowledgeMCPAlias(sub.Name)
+			aliased := *knowledgeMCP
+			aliased.Name = alias
+			aliased.Headers = cloneStringMap(knowledgeMCP.Headers)
+			aliased.Headers["X-Zerone-Knowledge-Agent"] = sub.Name
+			mcpServerConfigs[alias] = deployer.McpServerConfig{
+				Type: aliased.Type, URL: aliased.URL, Headers: aliased.Headers,
+			}
+			childToolNames = appendMcpToolNames(childToolNames, map[string]*McpClientDTO{alias: &aliased})
+		}
+		sort.Strings(childToolNames)
+		subagentDefs[i].Tools = childToolNames
+
+		childDatasetIDs, err := s.agentRepo.GetKnowledgeDatasetIDsByAgent(sub.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load subagent %s knowledge datasets failed: %w", sub.Name, err)
+		}
+		childDatasets := make(map[string]string, len(childDatasetIDs))
+		for _, id := range childDatasetIDs {
+			ds, err := s.knowledgeSvc.GetDataset(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("load subagent %s dataset %s failed: %w", sub.Name, id, err)
+			}
+			desc := strings.TrimSpace(stringOrEmpty((*ds)["description"]))
+			if desc == "" {
+				return nil, fmt.Errorf("subagent %s dataset %s 缺少 description", sub.Name, id)
+			}
+			childDatasets[id] = desc
+		}
+		subagentDefs[i].Datasets = childDatasets
+	}
+
 	// NOTE: settingSources is intentionally left unset. The deployer owns the
 	// decision of when to scan the user skill directory based on the skills
 	// list above; control-panel populating ["user"] here used to race with
@@ -897,6 +949,16 @@ func (s *AgentDeployerService) buildCreateRequest(
 	s.applyHub(req, tenantID)
 
 	return req, nil
+}
+
+func subagentKnowledgeMCPAlias(name string) string { return "knowledge--" + name }
+
+func cloneStringMap(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src)+1)
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 // appendMcpToolNames adds the SDK-qualified names of probed MCP tools to an

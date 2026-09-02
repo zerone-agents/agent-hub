@@ -22,7 +22,10 @@ type KnowledgeMcpService interface {
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
 type AgentMcpService interface {
 	GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error)
+	CanAgentUseSubagent(tenantID, agentName, subagentName string) (bool, error)
 }
+
+const knowledgeAgentHeader = "X-Zerone-Knowledge-Agent"
 
 type jsonRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -137,6 +140,9 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 				{
 					"name":        "knowledge_search",
 					"description": "When the user's question involves internal documents, product knowledge, private materials, or needs a fact-based answer, you MUST call this tool to retrieve relevant context. Only answer based on the returned text snippets; do not rely on training data or make up information. Do not call this tool if the question does not require a knowledge base.",
+					"annotations": map[string]interface{}{
+						"readOnlyHint": true,
+					},
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
@@ -233,7 +239,21 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		return jsonRPCResponse{}, fmt.Errorf("tenant context missing on knowledge MCP request")
 	}
 
-	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	knowledgeAgentName := strings.TrimSpace(c.GetHeader(knowledgeAgentHeader))
+	if knowledgeAgentName == "" {
+		knowledgeAgentName = agentCfg.Name
+	}
+	if knowledgeAgentName != agentCfg.Name {
+		allowed, err := h.agentService.CanAgentUseSubagent(tenantID, agentCfg.Name, knowledgeAgentName)
+		if err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("failed to validate knowledge subagent: %w", err)
+		}
+		if !allowed {
+			return jsonRPCResponse{}, fmt.Errorf("knowledge agent %q is not mounted by %q", knowledgeAgentName, agentCfg.Name)
+		}
+	}
+
+	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, knowledgeAgentName)
 	if err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
 	}
