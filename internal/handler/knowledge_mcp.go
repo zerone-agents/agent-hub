@@ -292,7 +292,7 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var p toolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid params: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
 
 	switch p.Name {
@@ -305,21 +305,21 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 	case "knowledge_chunks":
 		return h.handleKnowledgeChunks(ctx, c, id, p.Arguments)
 	default:
-		return jsonRPCResponse{}, fmt.Errorf("tool not found: %s", p.Name)
+		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", p.Name)
 	}
 }
 
 func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var args knowledgeSearchArgs
 	if err := json.Unmarshal(params, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
 		args.Query = strings.TrimSpace(args.Question)
 	}
 	if args.Query == "" {
-		return jsonRPCResponse{}, fmt.Errorf("query is required")
+		return jsonRPCResponse{}, fmt.Errorf("query 不能为空")
 	}
 
 	// Apply defaults that match the inputSchema advertised in tools/list.
@@ -419,11 +419,11 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gi
 func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
 	var args listDocumentsArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
 	args.DatasetID = strings.TrimSpace(args.DatasetID)
 	if args.DatasetID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("dataset_id is required")
+		return jsonRPCResponse{}, fmt.Errorf("dataset_id 不能为空")
 	}
 	allowed, err := h.resolveAgentContext(c)
 	if err != nil {
@@ -455,15 +455,15 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
 	var args listChunksArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
 	args.DatasetID = strings.TrimSpace(args.DatasetID)
 	args.DocumentID = strings.TrimSpace(args.DocumentID)
 	if args.DatasetID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("dataset_id is required")
+		return jsonRPCResponse{}, fmt.Errorf("dataset_id 不能为空")
 	}
 	if args.DocumentID == "" {
-		return jsonRPCResponse{}, fmt.Errorf("document_id is required")
+		return jsonRPCResponse{}, fmt.Errorf("document_id 不能为空")
 	}
 	allowed, err := h.resolveAgentContext(c)
 	if err != nil {
@@ -507,18 +507,18 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, error) {
 	agentCfg, ok := middleware.AgentFromContext(c)
 	if !ok {
-		return nil, fmt.Errorf("agent not found in context")
+		return nil, fmt.Errorf("上下文中未找到 Agent 身份")
 	}
 	tenantID := tenant.GetTenantID(c)
 	if tenantID == "" {
 		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
 		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
-		return nil, fmt.Errorf("tenant context missing on knowledge MCP request")
+		return nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
 	}
 	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
 	if err != nil {
 		log.Printf("knowledge-mcp: get agent knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
-		return nil, fmt.Errorf("failed to get agent knowledge datasets")
+		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
 	}
 	return allowed, nil
 }
@@ -537,7 +537,7 @@ func pickFields(obj map[string]any, keys ...string) map[string]any {
 func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("marshal result failed: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("结果序列化失败: %w", err)
 	}
 	return jsonRPCResponse{
 		JSONRPC: "2.0",

@@ -462,8 +462,8 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingQuery(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "query is required") {
-		t.Fatalf("expected 'query is required' error, got %+v", resp)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "query 不能为空") {
+		t.Fatalf("expected 'query 不能为空' error, got %+v", resp)
 	}
 }
 
@@ -599,7 +599,7 @@ func TestKnowledgeMcpHandler_DatasetsLookupErrorNeutralized(t *testing.T) {
 	if resp.Error == nil {
 		t.Fatalf("expected JSON-RPC error, got %+v", resp)
 	}
-	if !strings.Contains(resp.Error.Message, "failed to get agent knowledge datasets") {
+	if !strings.Contains(resp.Error.Message, "获取 Agent 知识库绑定关系失败") {
 		t.Fatalf("expected neutral error message, got %q", resp.Error.Message)
 	}
 	if strings.Contains(resp.Error.Message, "SELECT") || strings.Contains(resp.Error.Message, "tenant_id") {
@@ -672,7 +672,7 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "tenant") {
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "租户") {
 		t.Fatalf("expected explicit tenant-missing error, got %+v", resp)
 	}
 }
@@ -844,7 +844,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Documents_Unauthorized(t *testing.T) {
 	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id is required") {
+	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id 不能为空") {
 		t.Fatalf("expected dataset_id required error, got %+v", resp2)
 	}
 }
@@ -898,7 +898,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_RequiredArgs(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "document_id is required") {
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "document_id 不能为空") {
 		t.Fatalf("expected document_id required error, got %+v", resp)
 	}
 	// 缺 dataset_id → JSON-RPC error
@@ -907,7 +907,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_RequiredArgs(t *testing.T) {
 	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id is required") {
+	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id 不能为空") {
 		t.Fatalf("expected dataset_id required error, got %+v", resp2)
 	}
 }
