@@ -1,11 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useChatStream } from './useChatStream'
-import { agentChatApi } from '@/api/agent-chat'
+import { agentChatApi, ApiError } from '@/api/agent-chat'
 
 vi.mock('@/api/agent-chat', () => ({
   agentChatApi: {
     sendMessageStream: vi.fn(),
+  },
+  // useChatStream 在 catch 分支对 ApiError 做 instanceof 判定（issue #94
+  // errorCode 提取），mock 模块必须导出同引用类。
+  ApiError: class ApiError extends Error {
+    status: number
+    code?: string
+    constructor(message: string, status: number, code?: string) {
+      super(message)
+      this.name = 'ApiError'
+      this.status = status
+      this.code = code
+    }
   },
 }))
 
@@ -164,5 +176,36 @@ describe('useChatStream', () => {
       result.current.reset()
     })
     expect(result.current.state.sessionId).toBeNull()
+  })
+
+  describe('attachments', () => {
+    const ATT = [
+      { id: 'f-1', name: 'a.txt', mime: 'text/plain', size: 3, path: '.zerone-uploads/a.txt' },
+    ]
+
+    it('passes attachments to sendMessageStream and fires onEstablished after 200', async () => {
+      const onEstablished = vi.fn()
+      mockSend.mockResolvedValue(sseResponse('event: done\ndata: {}\n\n'))
+
+      const { result } = renderHook(() => useChatStream())
+      await act(async () => {
+        await result.current.send('min', 's1', 'hello', ATT, onEstablished)
+      })
+      expect(mockSend).toHaveBeenCalledWith('min', 's1', 'hello', expect.anything(), ATT)
+      expect(onEstablished).toHaveBeenCalledTimes(1)
+    })
+
+    it('exposes errorCode when the request fails with an ApiError', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ApiError('Attachment not found', 400, 'attachment_missing')
+      )
+
+      const { result } = renderHook(() => useChatStream())
+      await act(async () => {
+        await result.current.send('min', 's1', 'x', ATT)
+      })
+      expect(result.current.state.errorCode).toBe('attachment_missing')
+      expect(result.current.state.error).toBe('Attachment not found')
+    })
   })
 })

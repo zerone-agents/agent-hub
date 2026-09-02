@@ -4,9 +4,9 @@ import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
-import type { AgentChatSession } from '@/api/agent-chat'
+import { attachmentContentUrl, type AgentChatSession, type AttachmentDesc } from '@/api/agent-chat'
 import type { ChatMessage } from '@/api/chat'
-import { useAgentChatMessages } from '@/queries/useAgentChat'
+import { useAgentChatCapabilities, useAgentChatMessages } from '@/queries/useAgentChat'
 import { tokens as t } from '@/styles/tokens'
 import MessageBubble from '@/features/chat/MessageBubble'
 import ChatSessionList from './ChatSessionList'
@@ -16,6 +16,7 @@ import StreamingMessage from './StreamingMessage'
 import AgentDetailBar from './AgentDetailBar'
 import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
+import { useAttachments } from './useAttachments'
 import CwdFilePanel from './CwdFilePanel'
 
 const useStyles = createStyles(({ css }) => ({
@@ -102,6 +103,14 @@ const useStyles = createStyles(({ css }) => ({
     &:hover {
       background: rgba(220, 38, 38, 0.06);
     }
+  `,
+  uploadError: css`
+    margin: 0 16px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: ${t.danger};
+    background: rgba(220, 38, 38, 0.06);
+    border-radius: 6px;
   `
 }))
 
@@ -113,6 +122,18 @@ export default function AgentChatPage() {
   const [selected, setSelected] = useState<AgentChatSession | null>(null)
   const { data: msgData } = useAgentChatMessages(name, selected?.id ?? null)
   const stream = useChatStream()
+  const attachments = useAttachments()
+  const { data: capabilities } = useAgentChatCapabilities(name)
+  const attachmentsEnabled = capabilities?.attachmentsEnabled === true
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  // PartFile 的鉴权 fetch 以 builder 引用为 effect 依赖，必须 useMemo 稳定，
+  // 否则每次渲染都会重新拉取图片。
+  const buildAttachmentUrl = useMemo(
+    () => (selected ? (p: string) => attachmentContentUrl(name, selected.id, p) : undefined),
+    [name, selected]
+  )
+
   const isStreaming = stream.state.phase === 'sending' || stream.state.phase === 'streaming'
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -153,6 +174,14 @@ export default function AgentChatPage() {
     const base = history.filter((m) => m.id !== STREAMING_MSG_ID)
     return [...base, transientMessage]
   }, [history, transientMessage])
+
+  // attachment_missing（runtime 容器重建）：丢弃失效描述符，恢复本地文件供重传
+  const invalidateAttachments = attachments.invalidate
+  useEffect(() => {
+    if (stream.state.phase === 'error' && stream.state.errorCode === 'attachment_missing') {
+      invalidateAttachments()
+    }
+  }, [stream.state.phase, stream.state.errorCode, invalidateAttachments])
 
   // Sticky-bottom auto-scroll: pause when user scrolls up, resume when they
   // scroll back to the bottom (within 80px tolerance).
@@ -246,18 +275,35 @@ export default function AgentChatPage() {
     }
   }, [stream.state.phase, stream.state.sessionId, name, queryClient, stream])
 
-  const handleSend = async (content: string) => {
-    if (!selected) return
+  const handleSend = async (content: string): Promise<boolean> => {
+    if (!selected) return false
+    setUploadError(null)
 
-    // Optimistic update: show user message immediately in the history list.
-    // The real message (with server-generated id/timestamps) replaces this
-    // after the stream finishes via queryClient.invalidateQueries.
+    // 1. 上传本地附件（失败：保留文本与本地文件，返回 false 让 ChatInput 不清空）
+    let descriptors: AttachmentDesc[] = []
+    if (attachments.items.length > 0) {
+      try {
+        descriptors = await attachments.upload(name, selected.id)
+      } catch (err) {
+        setUploadError(`附件上传失败：${err instanceof Error ? err.message : '未知错误'}`)
+        return false
+      }
+    }
+
+    // 2. Optimistic update：file parts 在前 + 可选 text part（与持久化顺序一致）。
+    //    真实消息（服务端 id/时间戳）在流结束后经 invalidateQueries 重取替换。
+    const parts: Record<string, unknown>[] = [
+      ...descriptors.map((d) => ({
+        type: 'file', id: d.id, name: d.name, mime: d.mime, size: d.size, path: d.path,
+      })),
+      ...(content ? [{ type: 'text', text: content }] : []),
+    ]
     const optimisticMsg: ChatMessage = {
       user_id: '',
       id: `optimistic-${Date.now()}`,
       session_id: selected.id,
       role: 'user',
-      content: JSON.stringify([{ type: 'text', text: content }]),
+      content: JSON.stringify(parts),
       created_at: new Date().toISOString(),
       hidden: false,
       token_usage: '',
@@ -271,7 +317,12 @@ export default function AgentChatPage() {
       })
     )
 
-    await stream.send(name, selected.id, content)
+    // 3. 发起 SSE。onEstablished（fetch 200 后）才清空附件与本地 blob URL；
+    //    attachment_missing 等前置失败不触发清空，本地文件仍在可重传。
+    void stream.send(name, selected.id, content, descriptors, () => {
+      attachments.clearAll()
+    })
+    return true
   }
 
   return (
@@ -306,7 +357,7 @@ export default function AgentChatPage() {
                   <SceneWelcome
                     agentName={name}
                     disabled={isStreaming}
-                    onPick={(scene) => handleSend(scene.prompt)}
+                    onPick={(scene) => { void handleSend(scene.prompt) }}
                   />
                 ) : (
                   displayMessages.map((msg) => (
@@ -314,6 +365,7 @@ export default function AgentChatPage() {
                       key={msg.id}
                       message={msg}
                       enableStream={msg.id === STREAMING_MSG_ID}
+                      buildAttachmentUrl={buildAttachmentUrl ?? undefined}
                     />
                   ))
                 )}
@@ -325,7 +377,13 @@ export default function AgentChatPage() {
                   <StreamingMessage
                     parts={stream.state.parts}
                     phase="error"
-                    error={stream.state.error}
+                    error={
+                      stream.state.errorCode === 'attachment_missing'
+                        ? '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送'
+                        : stream.state.errorCode === 'runtime_attachment_unsupported'
+                          ? '当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent'
+                          : stream.state.error
+                    }
                   />
                 )}
                 {/* runtime 内部自动重试（system/retry，如限流退避等待）期间，
@@ -345,7 +403,20 @@ export default function AgentChatPage() {
                   </button>
                 </div>
               )}
-              <ChatInput disabled={isStreaming} onSend={handleSend} />
+              {uploadError && (
+                <div className={styles.uploadError}>{uploadError}</div>
+              )}
+              <ChatInput
+                disabled={isStreaming}
+                onSend={handleSend}
+                attachments={{
+                  enabled: attachmentsEnabled,
+                  items: attachments.items,
+                  uploading: attachments.uploading,
+                  add: attachments.add,
+                  remove: attachments.remove,
+                }}
+              />
               <AigcHint />
             </>
           ) : (

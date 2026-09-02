@@ -56,3 +56,13 @@ export function useDeleteAgentChatSession(agentName: string) {
     onError: (err) => message.error(parseApiError(err)),
   })
 }
+
+export function useAgentChatCapabilities(agentName: string) {
+  return useQuery({
+    queryKey: ['agent-chat-capabilities', agentName],
+    queryFn: () => agentChatApi.getCapabilities(agentName),
+    enabled: !!agentName,
+    staleTime: 60_000,
+    retry: 1,
+  })
+}
