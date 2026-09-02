@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+// RuntimeHTTPError is returned by client methods when the runtime responds
+// with a non-2xx status. It carries the status and body so handlers can map
+// runtime domain error codes (e.g. attachment_missing) to their own envelope.
+type RuntimeHTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *RuntimeHTTPError) Error() string {
+	return fmt.Sprintf("runtime returned HTTP %d: %s", e.Status, e.Body)
+}
+
 // Client is an HTTP client for an open-agent-runtime container.
 type Client struct {
 	httpClient *http.Client
@@ -70,7 +82,7 @@ func (c *Client) StreamRun(ctx context.Context, baseURL, agentName, apiKey strin
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, fmt.Errorf("runtime returned HTTP %d: %s", resp.StatusCode, string(buf))
+		return nil, &RuntimeHTTPError{Status: resp.StatusCode, Body: string(buf)}
 	}
 
 	return resp.Body, nil

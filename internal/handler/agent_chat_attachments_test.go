@@ -3,8 +3,10 @@ package handler
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"control-panel/internal/application/services"
@@ -120,7 +122,7 @@ func setupAttachmentDB(t *testing.T, hostPort int) {
 		RuntimePort: hostPort, RuntimeToken: "rt-secret",
 	}).Error)
 	require.NoError(t, db.Create(&chat.Session{
-		UserID: "u1", TenantID: chatTestTenant, ID: "s-att", Title: "t", AgentID: "min",
+		UserID: "u1", TenantID: chatTestTenant, ID: "s-att", AgentID: "min",
 	}).Error)
 	require.NoError(t, db.Create(&chat.Session{
 		UserID: "u2", TenantID: chatTestTenant, ID: "s-u2", Title: "t", AgentID: "min",
@@ -158,4 +160,87 @@ func TestCapabilities_DisabledWhenHealthUnreachable(t *testing.T) {
 	w := doCapabilities(t, env)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"attachmentsEnabled":false`)
+}
+
+func sendMessageForAttachments(t *testing.T, env *attachmentChatEnv, body string, name, sessionID, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", userID)
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: name}, {Key: "id", Value: sessionID}}
+	env.handler.SendMessage(c)
+	return w
+}
+
+func TestSendMessage_RejectsEmptyMessage(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	w := sendMessageForAttachments(t, env, `{"content":""}`, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+}
+
+func TestSendMessage_RejectsUnsafeAttachmentPath(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	body := `{"content":"x","attachments":[{"id":"f","name":"n","mime":"text/plain","size":1,"path":"/etc/passwd"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+}
+
+func TestSendMessage_RejectsTooManyAttachments(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	atts := `[` + strings.Repeat(`{"id":"f","name":"n","mime":"text/plain","size":1,"path":".zerone-uploads/n.txt"},`, 11)
+	atts = strings.TrimSuffix(atts, ",") + `]`
+	w := sendMessageForAttachments(t, env, `{"content":"x","attachments":`+atts+`}`, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSendMessage_PassesAttachmentsToRuntimeRun(t *testing.T) {
+	var gotBody []byte
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: result\ndata: {\"type\":\"result\",\"subtype\":\"success\"}\n\n"))
+		},
+	})
+	body := `{"content":"总结","attachments":[{"id":"f-1","name":"r.pdf","mime":"application/pdf","size":3,"path":".zerone-uploads/r.pdf"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, string(gotBody), `"attachments":[{`)
+	require.Contains(t, string(gotBody), `.zerone-uploads/r.pdf`)
+	require.Contains(t, string(gotBody), `"message":"总结"`)
+}
+
+func TestSendMessage_TitleFromFirstAttachmentName(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"report.pdf","mime":"application/pdf","size":3,"path":".zerone-uploads/report.pdf"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	var sess chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-att").First(&sess).Error)
+	require.Equal(t, "report.pdf", sess.Title)
+}
+
+func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"Attachment not found: .zerone-uploads/x.txt","code":"attachment_missing","path":".zerone-uploads/x.txt"}`))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"x.txt","mime":"text/plain","size":1,"path":".zerone-uploads/x.txt"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"attachment_missing"`)
+	var errCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&errCount).Error)
+	require.Zero(t, errCount, "attachment_missing must NOT be persisted as a system error message")
 }

@@ -147,6 +147,17 @@ type contentPart struct {
 	Text string `json:"text"`
 }
 
+// filePart is the canonical attachment shape persisted in Message.Content.
+// Ordered BEFORE the optional text part (issue #94).
+type filePart struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Mime string `json:"mime"`
+	Size int64  `json:"size"`
+	Path string `json:"path"`
+}
+
 // GetMessages returns messages for a session owned by userID.
 func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
@@ -163,16 +174,24 @@ func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) err
 	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }
 
-// SaveUserMessage persists a user message in the given session.
-// content is wrapped into the canonical JSON array format.
-func (s *AgentChatService) SaveUserMessage(tenantID, userID, sessionID, content string) (*chat.Message, error) {
+// SaveUserMessage persists a user message in the given session. content and
+// attachments are wrapped into the canonical JSON array format: file parts
+// first, then the optional text part (empty content adds no text part).
+func (s *AgentChatService) SaveUserMessage(tenantID, userID, sessionID, content string, attachments []AttachmentDesc) (*chat.Message, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
-	wrapped, _ := json.Marshal([]contentPart{
-		{Type: "text", Text: content},
-	})
+	parts := make([]interface{}, 0, len(attachments)+1)
+	for _, a := range attachments {
+		parts = append(parts, filePart{
+			Type: "file", ID: a.ID, Name: a.Name, Mime: a.Mime, Size: a.Size, Path: a.Path,
+		})
+	}
+	if content != "" {
+		parts = append(parts, contentPart{Type: "text", Text: content})
+	}
+	wrapped, _ := json.Marshal(parts)
 
 	msg := &chat.Message{
 		UserID:    userID,

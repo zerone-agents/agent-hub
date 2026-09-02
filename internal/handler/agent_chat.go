@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/tenant"
+	"control-panel/internal/infrastructure/runtime"
 
 	"github.com/gin-gonic/gin"
 )
@@ -104,7 +107,16 @@ func (h *AgentChatHandler) Capabilities(c *gin.Context) {
 }
 
 type sendMessageReq struct {
-	Content string `json:"content" binding:"required"`
+	Content     string                    `json:"content"`
+	Attachments []services.AttachmentDesc `json:"attachments"`
+}
+
+// runRequestBody is the POST /v1/agents/{key}/runs JSON body. attachments
+// are relayed verbatim (runtime re-validates name/size/path).
+type runRequestBody struct {
+	Message     string                    `json:"message"`
+	SessionID   string                    `json:"sessionId,omitempty"`
+	Attachments []services.AttachmentDesc `json:"attachments,omitempty"`
 }
 
 // SendMessage is the SSE streaming endpoint.
@@ -116,7 +128,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 
 	var req sendMessageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "content is required")
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "content or attachments required")
+		return
+	}
+	if err := services.ValidateAttachmentDescs(req.Attachments); err != nil {
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, err.Error())
 		return
 	}
 
@@ -132,12 +152,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
 	}
-	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content); err != nil {
+	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments); err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
-	// Name a new session after the first user message (truncated to 50 runes).
-	_ = h.svc.AutoTitleSession(tenantID, sessionID, req.Content)
+	// 会话标题：优先文本；纯附件消息取第一个文件名（issue #94）。
+	titleSeed := req.Content
+	if titleSeed == "" && len(req.Attachments) > 0 {
+		titleSeed = req.Attachments[0].Name
+	}
+	_ = h.svc.AutoTitleSession(tenantID, sessionID, titleSeed)
 
 	// 2. Resolve runtime URL and API key
 	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
@@ -149,9 +173,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 
 	// 3. Build runtime request body. Re-use the runtime SDK session id if this
 	// control-panel session has already been bound to one.
-	body := map[string]string{"message": req.Content}
+	body := runRequestBody{Message: req.Content}
 	if sess.RuntimeSessionID != "" {
-		body["sessionId"] = sess.RuntimeSessionID
+		body.SessionID = sess.RuntimeSessionID
+	}
+	if len(req.Attachments) > 0 {
+		body.Attachments = req.Attachments
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -160,6 +187,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// runtime 注册名为部署键（DeployKey(tenantID, name)），需用限定名寻址，裸名会 404。
 	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.DeployKey(tenantID, agentName), apiKey, bodyBytes)
 	if err != nil {
+		// Runtime run-attachment domain errors (attachment_missing etc.) are
+		// pre-run failures: surface the code so the frontend can retry from
+		// local files instead of persisting a system error message.
+		var httpErr *runtime.RuntimeHTTPError
+		if errors.As(err, &httpErr) {
+			if code, ok := runtimeAttachmentCode(httpErr.Body); ok {
+				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(httpErr.Body))
+				return
+			}
+		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
 		return

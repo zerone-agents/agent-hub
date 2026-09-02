@@ -145,7 +145,7 @@ func TestSaveUserMessage_StoresContent(t *testing.T) {
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
 	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
-	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "hello")
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "hello", nil)
 	if err != nil {
 		t.Fatalf("SaveUserMessage failed: %v", err)
 	}
@@ -200,5 +200,43 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	}
 	if _, ok := repo.sessions[sess.ID]; ok {
 		t.Errorf("session still present after delete")
+	}
+}
+
+func TestSaveUserMessage_FilePartsBeforeText(t *testing.T) {
+	repo := newMockChatRepo()
+	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
+	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
+
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	atts := []AttachmentDesc{{
+		ID: "f-1", Name: "report.pdf", Mime: "application/pdf", Size: 123, Path: ".zerone-uploads/report.pdf",
+	}}
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "请总结", atts)
+	if err != nil {
+		t.Fatalf("SaveUserMessage failed: %v", err)
+	}
+	want := `[{"type":"file","id":"f-1","name":"report.pdf","mime":"application/pdf","size":123,"path":".zerone-uploads/report.pdf"},` +
+		`{"type":"text","text":"请总结"}]`
+	if msg.Content != want {
+		t.Errorf("Content = %q\nwant %q", msg.Content, want)
+	}
+}
+
+func TestSaveUserMessage_PureAttachmentHasNoTextPart(t *testing.T) {
+	repo := newMockChatRepo()
+	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
+	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
+
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	atts := []AttachmentDesc{{
+		ID: "f-1", Name: "a.png", Mime: "image/png", Size: 5, Path: ".zerone-uploads/a.png",
+	}}
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "", atts)
+	if err != nil {
+		t.Fatalf("SaveUserMessage failed: %v", err)
+	}
+	if msg.Content != `[{"type":"file","id":"f-1","name":"a.png","mime":"image/png","size":5,"path":".zerone-uploads/a.png"}]` {
+		t.Errorf("Content = %q", msg.Content)
 	}
 }
