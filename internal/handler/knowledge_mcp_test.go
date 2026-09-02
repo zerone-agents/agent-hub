@@ -228,6 +228,13 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 			if got := p["type"]; got != wantType {
 				t.Fatalf("%s.%s type = %v, want %s", name, param, got, wantType)
 			}
+			// page_size 超上限由服务端钳制（不报错），schema 不得声明 maximum：
+			// 做 schema 校验的客户端会在发请求前拒绝 >50 的值，钳制永远走不到。
+			if param == "page_size" {
+				if _, hasMax := p["maximum"]; hasMax {
+					t.Fatalf("%s.page_size must not declare maximum in inputSchema (server clamps instead of rejecting)", name)
+				}
+			}
 		}
 	}
 }
