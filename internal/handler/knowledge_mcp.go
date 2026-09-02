@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -17,6 +18,9 @@ import (
 // KnowledgeMcpService abstracts the knowledge operations needed by the MCP handler.
 type KnowledgeMcpService interface {
 	Retrieval(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
+	GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error)
+	ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error)
+	ListChunks(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error)
 }
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
@@ -49,12 +53,49 @@ type toolCallParams struct {
 }
 
 type knowledgeSearchArgs struct {
+	Query string `json:"query"`
+	// Question 是已废弃的旧参数名，仅作兼容回退：缓存了旧 tools/list
+	// schema 的已部署 runtime 容器升级 hub 后仍会发 question，直到
+	// 重新部署/重启才会拿到只广播 query 的新 schema。
 	Question               string   `json:"question"`
 	DatasetIDs             []string `json:"dataset_ids"`
 	TopK                   *int     `json:"top_k"`
 	SimilarityThreshold    *float64 `json:"similarity_threshold"`
 	VectorSimilarityWeight *float64 `json:"vector_similarity_weight"`
 	Highlight              *bool    `json:"highlight"`
+}
+
+const (
+	mcpDefaultPageSize = 20
+	mcpMaxPageSize     = 50
+)
+
+type listDocumentsArgs struct {
+	DatasetID string `json:"dataset_id"`
+	Page      *int   `json:"page"`
+	PageSize  *int   `json:"page_size"`
+}
+
+type listChunksArgs struct {
+	DatasetID  string `json:"dataset_id"`
+	DocumentID string `json:"document_id"`
+	Page       *int   `json:"page"`
+	PageSize   *int   `json:"page_size"`
+}
+
+// normalizePaging 应用默认值并把 page_size 钳制到上限（钳制不报错）。
+func normalizePaging(page, pageSize *int) (int, int) {
+	p, ps := 1, mcpDefaultPageSize
+	if page != nil && *page > 0 {
+		p = *page
+	}
+	if pageSize != nil && *pageSize > 0 {
+		ps = *pageSize
+	}
+	if ps > mcpMaxPageSize {
+		ps = mcpMaxPageSize
+	}
+	return p, ps
 }
 
 // KnowledgeMcpHandler implements the JSON-RPC MCP protocol for knowledge retrieval.
@@ -140,9 +181,9 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
-							"question": map[string]interface{}{
+							"query": map[string]interface{}{
 								"type":        "string",
-								"description": "A search-optimized question for the knowledge base. Keep core entities, keywords, and intent; remove conversational filler words to retrieve more relevant snippets.",
+								"description": "A search-optimized query for the knowledge base. Keep core entities, keywords, and intent; remove conversational filler words to retrieve more relevant snippets.",
 							},
 							"dataset_ids": map[string]interface{}{
 								"type":        "array",
@@ -150,7 +191,7 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"description": "Optional. Restrict retrieval to specific knowledge bases. Valid dataset IDs can be found in the <datasets> block of the system prompt. If omitted, all knowledge bases bound to this agent are used automatically.",
 							},
 							"top_k": map[string]interface{}{
-								"type":        "number",
+								"type":        "integer",
 								"description": "Maximum number of relevant text snippets to return. Default is 8. Adjust only when you need to control the result count.",
 								"default":     8,
 								"minimum":     1,
@@ -176,7 +217,71 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"default":     false,
 							},
 						},
-						"required": []string{"question"},
+						"required": []string{"query"},
+					},
+				},
+				{
+					"name":        "knowledge_datasets",
+					"description": "List the knowledge bases bound to this agent, with live metadata (document_count, chunk_count). Call this first to decide which dataset to browse, then use knowledge_documents / knowledge_chunks.",
+					"inputSchema": map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
+				},
+				{
+					"name":        "knowledge_documents",
+					"description": "List documents in a knowledge base, paginated like a table of contents. Returns metadata only (id, name, chunk_count, progress, run, create_time). Use knowledge_chunks to read a document's content.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"dataset_id": map[string]interface{}{
+								"type":        "string",
+								"description": "Target knowledge base ID. Must be one of the datasets bound to this agent (see knowledge_datasets).",
+							},
+							"page": map[string]interface{}{
+								"type":        "integer",
+								"description": "Page number, starting from 1.",
+								"default":     1,
+								"minimum":     1,
+							},
+							"page_size": map[string]interface{}{
+								"type":        "integer",
+								"description": "Documents per page. Default 20, maximum 50 (values above 50 are clamped).",
+								"default":     20,
+								"minimum":     1,
+							},
+						},
+						"required": []string{"dataset_id"},
+					},
+				},
+				{
+					"name":        "knowledge_chunks",
+					"description": "Read a document's chunks page by page, like reading a book chapter by chapter. Control your pace with page and page_size (1-50 chunks per call). This is the only tool that returns full chunk content.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"dataset_id": map[string]interface{}{
+								"type":        "string",
+								"description": "Knowledge base ID the document belongs to. Must be bound to this agent.",
+							},
+							"document_id": map[string]interface{}{
+								"type":        "string",
+								"description": "Target document ID, from knowledge_documents.",
+							},
+							"page": map[string]interface{}{
+								"type":        "integer",
+								"description": "Page number, starting from 1.",
+								"default":     1,
+								"minimum":     1,
+							},
+							"page_size": map[string]interface{}{
+								"type":        "integer",
+								"description": "Chunks to read per call. Default 20, maximum 50 (values above 50 are clamped). Read fewer for careful study, more for a quick scan.",
+								"default":     20,
+								"minimum":     1,
+							},
+						},
+						"required": []string{"dataset_id", "document_id"},
 					},
 				},
 			},
@@ -187,20 +292,34 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var p toolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid params: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
 
-	if p.Name != "knowledge_search" {
-		return jsonRPCResponse{}, fmt.Errorf("tool not found: %s", p.Name)
+	switch p.Name {
+	case "knowledge_search":
+		return h.handleKnowledgeSearch(ctx, c, id, p.Arguments)
+	case "knowledge_datasets":
+		return h.handleKnowledgeDatasets(ctx, c, id)
+	case "knowledge_documents":
+		return h.handleKnowledgeDocuments(ctx, c, id, p.Arguments)
+	case "knowledge_chunks":
+		return h.handleKnowledgeChunks(ctx, c, id, p.Arguments)
+	default:
+		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", p.Name)
 	}
+}
 
+func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var args knowledgeSearchArgs
-	if err := json.Unmarshal(p.Arguments, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
+	if err := json.Unmarshal(params, &args); err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 	}
-	args.Question = strings.TrimSpace(args.Question)
-	if args.Question == "" {
-		return jsonRPCResponse{}, fmt.Errorf("question is required")
+	args.Query = strings.TrimSpace(args.Query)
+	if args.Query == "" {
+		args.Query = strings.TrimSpace(args.Question)
+	}
+	if args.Query == "" {
+		return jsonRPCResponse{}, fmt.Errorf("query 不能为空")
 	}
 
 	// Apply defaults that match the inputSchema advertised in tools/list.
@@ -221,33 +340,12 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		*args.Highlight = false
 	}
 
-	agentCfg, ok := middleware.AgentFromContext(c)
-	if !ok {
-		return jsonRPCResponse{}, fmt.Errorf("agent not found in context")
-	}
-
-	tenantID := tenant.GetTenantID(c)
-	if tenantID == "" {
-		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
-		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
-		return jsonRPCResponse{}, fmt.Errorf("tenant context missing on knowledge MCP request")
-	}
-
-	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	allowedDatasetIDs, err := h.resolveAgentContext(c)
 	if err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
+		return jsonRPCResponse{}, err
 	}
 	if len(allowedDatasetIDs) == 0 {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": "当前 Agent 未启用知识库 MCP"},
-				},
-				"isError": true,
-			},
-		}, nil
+		return mcpErrorResult(id, "当前 Agent 未启用知识库 MCP"), nil
 	}
 
 	datasetIDs := args.DatasetIDs
@@ -255,20 +353,12 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		datasetIDs = allowedDatasetIDs
 	}
 	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": "无权访问部分知识库 dataset"},
-				},
-				"isError": true,
-			},
-		}, nil
+		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
 	}
 
 	req := knowledge.RetrievalRequest{
-		"question":                 args.Question,
+		// 下游 multirag /api/v1/retrieval 的契约 key 仍是 question，仅 MCP 入参改名 query。
+		"question":                 args.Query,
 		"dataset_ids":              datasetIDs,
 		"top_k":                    *args.TopK,
 		"similarity_threshold":     *args.SimilarityThreshold,
@@ -278,16 +368,9 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 
 	result, err := h.knowledgeService.Retrieval(ctx, req)
 	if err != nil {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": fmt.Sprintf("知识库检索失败: %v", err)},
-				},
-				"isError": true,
-			},
-		}, nil
+		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
+		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
+		return mcpErrorResult(id, "知识库检索失败，请稍后重试"), nil
 	}
 
 	text := formatRetrievalResult(result)
@@ -301,6 +384,193 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 			"isError": false,
 		},
 	}, nil
+}
+
+func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gin.Context, id interface{}) (jsonRPCResponse, error) {
+	allowed, err := h.resolveAgentContext(c)
+	if err != nil {
+		return jsonRPCResponse{}, err
+	}
+	datasets := make([]map[string]any, 0, len(allowed))
+	for _, dsID := range allowed {
+		ds, err := h.knowledgeService.GetDataset(ctx, dsID)
+		if err != nil || ds == nil {
+			// 单库元数据读取失败（或上游违反契约返回 nil）不阻断整体，降级为仅 id。
+			if err != nil {
+				log.Printf("knowledge-mcp: get dataset %s metadata failed: %v", dsID, err)
+			}
+			datasets = append(datasets, map[string]any{"id": dsID})
+			continue
+		}
+		// NormalizeDataset 出口的计数键为 canonical doc_num/chunk_num，需映射回对外键名。
+		m := map[string]any(*ds)
+		item := pickFields(m, "id", "name", "description")
+		if v, ok := m["doc_num"]; ok {
+			item["document_count"] = v
+		}
+		if v, ok := m["chunk_num"]; ok {
+			item["chunk_count"] = v
+		}
+		datasets = append(datasets, item)
+	}
+	return mcpJSONResult(id, map[string]any{"datasets": datasets})
+}
+
+func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
+	var args listDocumentsArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+	}
+	datasetID, deny, err := h.requireDatasetAccess(c, id, args.DatasetID)
+	if err != nil {
+		return jsonRPCResponse{}, err
+	}
+	if deny != nil {
+		return *deny, nil
+	}
+	page, pageSize := normalizePaging(args.Page, args.PageSize)
+	result, err := h.knowledgeService.ListDocuments(ctx, datasetID, knowledge.DocumentListRequest{Page: page, PageSize: pageSize})
+	if err != nil {
+		log.Printf("knowledge-mcp: list documents failed (dataset=%s page=%d page_size=%d): %v", datasetID, page, pageSize, err)
+		return mcpErrorResult(id, "知识库文档列表获取失败，请稍后重试"), nil
+	}
+	docs := make([]map[string]any, 0, len(result.Documents))
+	for _, d := range result.Documents {
+		// NormalizeDocument 出口的计数键为 canonical chunk_num，映射回对外 chunk_count。
+		item := pickFields(map[string]any(d), "id", "name", "progress", "run", "create_time")
+		if v, ok := map[string]any(d)["chunk_num"]; ok {
+			item["chunk_count"] = v
+		}
+		docs = append(docs, item)
+	}
+	return mcpJSONResult(id, map[string]any{
+		"total": result.Total, "page": page, "page_size": pageSize, "documents": docs,
+	})
+}
+
+func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
+	var args listChunksArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+	}
+	datasetID, deny, err := h.requireDatasetAccess(c, id, args.DatasetID)
+	if err != nil {
+		return jsonRPCResponse{}, err
+	}
+	if deny != nil {
+		return *deny, nil
+	}
+	args.DocumentID = strings.TrimSpace(args.DocumentID)
+	if args.DocumentID == "" {
+		return jsonRPCResponse{}, fmt.Errorf("document_id 不能为空")
+	}
+	page, pageSize := normalizePaging(args.Page, args.PageSize)
+	result, err := h.knowledgeService.ListChunks(ctx, datasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
+	if err != nil {
+		log.Printf("knowledge-mcp: list chunks failed (dataset=%s document=%s page=%d page_size=%d): %v", datasetID, args.DocumentID, page, pageSize, err)
+		return mcpErrorResult(id, "知识库分块读取失败，请稍后重试"), nil
+	}
+	chunks := make([]map[string]any, 0, len(result.Chunks))
+	for _, ch := range result.Chunks {
+		m := map[string]any(ch)
+		item := map[string]any{}
+		if v, ok := m["id"]; ok {
+			item["chunk_id"] = v
+		}
+		if v, ok := m["content"]; ok {
+			item["content"] = v
+		}
+		chunks = append(chunks, item)
+	}
+	docName := ""
+	if result.Document != nil {
+		if v, ok := map[string]any(result.Document)["name"].(string); ok {
+			docName = v
+		}
+	}
+	return mcpJSONResult(id, map[string]any{
+		"total": result.Total, "page": page, "page_size": pageSize,
+		"document_name": docName, "chunks": chunks,
+	})
+}
+
+// resolveAgentContext 抽取 agent/tenant 提取与绑定 dataset 反查。
+// 返回错误即 JSON-RPC -32603（由调用方决定文案透传）。
+func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, error) {
+	agentCfg, ok := middleware.AgentFromContext(c)
+	if !ok {
+		return nil, fmt.Errorf("上下文中未找到 Agent 身份")
+	}
+	tenantID := tenant.GetTenantID(c)
+	if tenantID == "" {
+		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
+		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
+		return nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
+	}
+	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	if err != nil {
+		log.Printf("knowledge-mcp: get agent knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
+	}
+	return allowed, nil
+}
+
+// requireDatasetAccess 是遍历工具的统一 dataset 入口：TrimSpace + 非空校验
+// （-32603）、agent/租户上下文解析、绑定子集校验（越权 → isError 中性文案）。
+// 授权先于工具自有参数细节校验，未授权调用方拿不到参数校验细节。
+// err 由调用方原样上抛（走 -32603）；deny 非 nil 时直接返回 *deny；皆零值即放行。
+// 新增遍历工具必须经此入口，防止授权步骤在手写编排中漂移。
+func (h *KnowledgeMcpHandler) requireDatasetAccess(c *gin.Context, id interface{}, rawDatasetID string) (datasetID string, deny *jsonRPCResponse, err error) {
+	datasetID = strings.TrimSpace(rawDatasetID)
+	if datasetID == "" {
+		return "", nil, fmt.Errorf("dataset_id 不能为空")
+	}
+	allowed, err := h.resolveAgentContext(c)
+	if err != nil {
+		return "", nil, err
+	}
+	if !isStringSubset([]string{datasetID}, allowed) {
+		resp := mcpErrorResult(id, "无权访问部分知识库 dataset")
+		return datasetID, &resp, nil
+	}
+	return datasetID, nil, nil
+}
+
+// pickFields 白名单拷贝，上游缺失的键直接省略。
+func pickFields(obj map[string]any, keys ...string) map[string]any {
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		if v, ok := obj[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("结果序列化失败: %w", err)
+	}
+	return jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(raw)}},
+			"isError": false,
+		},
+	}, nil
+}
+
+func mcpErrorResult(id interface{}, msg string) jsonRPCResponse {
+	return jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": msg}},
+			"isError": true,
+		},
+	}
 }
 
 func isStringSubset(subset, superset []string) bool {

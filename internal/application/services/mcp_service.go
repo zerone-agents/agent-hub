@@ -393,6 +393,28 @@ var builtinKnowledgeTools = []McpTool{
 		Name:        "knowledge_search",
 		Description: "检索 Agent 已绑定的知识库，为文档问答提供相关文本片段",
 	},
+	{
+		Name:        "knowledge_datasets",
+		Description: "列出 Agent 绑定的知识库及实时元数据（文档数、分块数）",
+	},
+	{
+		Name:        "knowledge_documents",
+		Description: "分页列出知识库内文档（目录），仅返回元数据",
+	},
+	{
+		Name:        "knowledge_chunks",
+		Description: "按页读取文档分块原文，page/page_size 自控节奏",
+	},
+}
+
+// BuiltinKnowledgeToolNames 返回内置 knowledge MCP 种子的工具名集合，
+// 供 handler 层测试跨检 tools/list 广播与种子不漂移（两份手写副本）。
+func BuiltinKnowledgeToolNames() []string {
+	names := make([]string, 0, len(builtinKnowledgeTools))
+	for _, t := range builtinKnowledgeTools {
+		names = append(names, t.Name)
+	}
+	return names
 }
 
 func mustMarshalMcpTools(tools []McpTool) string {
