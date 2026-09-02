@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/chat"
@@ -233,5 +234,68 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 			return
 		}
 		respondError(c, http.StatusBadGateway, fmt.Sprintf("runtime upload failed: HTTP %d", resp.StatusCode))
+	}
+}
+
+// AttachmentContent streams an attachment's bytes from the runtime through a
+// session-scoped authenticated proxy (history image preview / file download).
+// GET /api/v1/agents/:name/chat/sessions/:id/attachments/content?path=...
+//
+// runtime /v1/files/content 本身能读整个工作区——本端点因此必须做双层
+// 收敛：path 语法限定 .zerone-uploads/ 扁平 + 交叉核验该 path 曾在本
+// session 的消息里持久化过。
+func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
+	agentName := services.NormalizeAgentName(c.Param("name"))
+	sessionID := c.Param("id")
+	userID := c.MustGet("user_id").(string)
+	tenantID := tenant.GetTenantID(c)
+	pathParam := c.Query("path")
+
+	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, "session not found")
+		return
+	}
+	if sess.AgentID != agentName {
+		respondError(c, http.StatusNotFound, "session not found")
+		return
+	}
+	if err := services.ValidateUploadsPath(pathParam); err != nil {
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, err.Error())
+		return
+	}
+	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam)
+	if err != nil || !known {
+		respondError(c, http.StatusNotFound, "attachment not found")
+		return
+	}
+	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	if err != nil {
+		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		return
+	}
+
+	resp, err := h.svc.RuntimeClient().ProxyFiles(c.Request.Context(), http.MethodGet, baseURL, apiKey,
+		"/v1/files/content?path="+url.QueryEscape(pathParam), "")
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		for _, h2 := range []string{"Content-Type", "Content-Length", "Content-Disposition"} {
+			if v := resp.Header.Get(h2); v != "" {
+				c.Header(h2, v)
+			}
+		}
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, resp.Body)
+	case resp.StatusCode == http.StatusNotFound:
+		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
+		respondError(c, http.StatusNotFound, "temporary file no longer available")
+	default:
+		respondError(c, http.StatusBadGateway, fmt.Sprintf("runtime file fetch failed: HTTP %d", resp.StatusCode))
 	}
 }

@@ -369,3 +369,41 @@ func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, a
 	s.probeMu.Unlock()
 	return ok
 }
+
+// SessionHasAttachment reports whether path appears as a file part in any
+// user message of the session (all pages scanned; chat sessions are small —
+// performance is a watch item, not a blocker). This is the cross-check that
+// keeps the user-facing content proxy from becoming an arbitrary workspace
+// file read: runtime /v1/files/content can read the whole cwd.
+func (s *AgentChatService) SessionHasAttachment(tenantID, userID, sessionID, path string) (bool, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return false, fmt.Errorf("session not found: %w", err)
+	}
+	const pageSize = 200
+	for page := 1; ; page++ {
+		msgs, _, err := s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
+		if err != nil {
+			return false, err
+		}
+		for _, m := range msgs {
+			if m.Role != "user" {
+				continue
+			}
+			var parts []struct {
+				Type string `json:"type"`
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(m.Content), &parts); err != nil {
+				continue
+			}
+			for _, p := range parts {
+				if p.Type == "file" && p.Path == path {
+					return true, nil
+				}
+			}
+		}
+		if len(msgs) < pageSize {
+			return false, nil
+		}
+	}
+}

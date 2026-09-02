@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -501,4 +502,93 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+}
+
+func seedAttachmentMessage(t *testing.T, sessionID, path string) {
+	t.Helper()
+	require.NoError(t, database.DB.Create(&chat.Message{
+		UserID: "u1", TenantID: chatTestTenant, ID: "m-" + path, SessionID: sessionID,
+		Role:    "user",
+		Content: `[{"type":"file","id":"f-1","name":"a.png","mime":"image/png","size":3,"path":"` + path + `"},{"type":"text","text":"看图"}]`,
+	}).Error)
+}
+
+func doGetAttachmentContent(t *testing.T, env *attachmentChatEnv, rawPath, sessionID, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/content?path="+url.QueryEscape(rawPath), nil)
+	c.Set("user_id", userID)
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: sessionID}}
+	env.handler.AttachmentContent(c)
+	return w
+}
+
+func TestAttachmentContent_StreamsKnownAttachment(t *testing.T) {
+	var gotAuth, gotQuery string
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("x-api-key")
+			gotQuery = r.URL.Query().Get("path")
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Content-Disposition", `attachment; filename*=UTF-8''a.png`)
+			_, _ = w.Write([]byte("png!"))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "png!", w.Body.String())
+	require.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	require.Equal(t, "rt-secret", gotAuth)
+	require.Equal(t, ".zerone-uploads/a.png", gotQuery)
+}
+
+func TestAttachmentContent_NonOwner404(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("x")) },
+	})
+	seedAttachmentMessage(t, "s-u2", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-u2", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestAttachmentContent_RejectsPathOutsideUploadsDir(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	w := doGetAttachmentContent(t, env, "package.json", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+}
+
+// 交叉核验：合法前缀但未在该 session 消息中出现过的 path 一律 404——
+// runtime /v1/files/content 能读整个工作区，不能把该能力透给用户态。
+func TestAttachmentContent_UnknownPathInSession404(t *testing.T) {
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			_, _ = w.Write([]byte("x"))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/other.png", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.False(t, runtimeHit, "runtime must not be dialed for unregistered paths")
+}
+
+func TestAttachmentContent_RuntimeFileGone404(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
