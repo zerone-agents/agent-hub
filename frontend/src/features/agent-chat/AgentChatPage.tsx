@@ -10,7 +10,7 @@ import { useAgentChatCapabilities, useAgentChatMessages } from '@/queries/useAge
 import { tokens as t } from '@/styles/tokens'
 import MessageBubble from '@/features/chat/MessageBubble'
 import ChatSessionList from './ChatSessionList'
-import ChatInput from './ChatInput'
+import ChatInput, { type ChatInputHandle } from './ChatInput'
 import SceneWelcome from './SceneWelcome'
 import StreamingMessage from './StreamingMessage'
 import AgentDetailBar from './AgentDetailBar'
@@ -126,12 +126,18 @@ export default function AgentChatPage() {
   const { data: capabilities } = useAgentChatCapabilities(name)
   const attachmentsEnabled = capabilities?.attachmentsEnabled === true
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // attachment_missing 重试路径（fix round 1，人裁定方案 1）：刚发送的文本暂存
+  // lastSentRef，invalidate 时经 chatInputRef.restoreText 写回输入框，
+  // 让「可直接重试发送」承诺成立（ChatInput 在 handleSend resolve true 时已清空文本）。
+  const chatInputRef = useRef<ChatInputHandle>(null)
+  const lastSentRef = useRef('')
 
-  // PartFile 的鉴权 fetch 以 builder 引用为 effect 依赖，必须 useMemo 稳定，
-  // 否则每次渲染都会重新拉取图片。
+  // memo 依赖用标量 id（对齐 MessageViewer [session.agent_id] 先例）：
+  // session 列表 refetch 产生新对象会换 builder 引用，导致 PartFile 图片重拉
+  const selectedId = selected?.id
   const buildAttachmentUrl = useMemo(
-    () => (selected ? (p: string) => attachmentContentUrl(name, selected.id, p) : undefined),
-    [name, selected]
+    () => (selectedId ? (p: string) => attachmentContentUrl(name, selectedId, p) : undefined),
+    [name, selectedId]
   )
 
   const isStreaming = stream.state.phase === 'sending' || stream.state.phase === 'streaming'
@@ -175,10 +181,13 @@ export default function AgentChatPage() {
     return [...base, transientMessage]
   }, [history, transientMessage])
 
-  // attachment_missing（runtime 容器重建）：丢弃失效描述符，恢复本地文件供重传
+  // attachment_missing（runtime 容器重建）：丢弃失效描述符，恢复本地文件供重传；
+  // 同时把刚发送的文本写回输入框（fix round 1 方案 1——否则 ChatInput 已清空
+  // 文本、error effect 又清掉 optimistic 气泡，用户重试需要重新输入）
   const invalidateAttachments = attachments.invalidate
   useEffect(() => {
     if (stream.state.phase === 'error' && stream.state.errorCode === 'attachment_missing') {
+      if (lastSentRef.current) chatInputRef.current?.restoreText(lastSentRef.current)
       invalidateAttachments()
     }
   }, [stream.state.phase, stream.state.errorCode, invalidateAttachments])
@@ -319,6 +328,7 @@ export default function AgentChatPage() {
 
     // 3. 发起 SSE。onEstablished（fetch 200 后）才清空附件与本地 blob URL；
     //    attachment_missing 等前置失败不触发清空，本地文件仍在可重传。
+    lastSentRef.current = content
     void stream.send(name, selected.id, content, descriptors, () => {
       attachments.clearAll()
     })
@@ -365,7 +375,7 @@ export default function AgentChatPage() {
                       key={msg.id}
                       message={msg}
                       enableStream={msg.id === STREAMING_MSG_ID}
-                      buildAttachmentUrl={buildAttachmentUrl ?? undefined}
+                      buildAttachmentUrl={buildAttachmentUrl}
                     />
                   ))
                 )}
@@ -407,6 +417,7 @@ export default function AgentChatPage() {
                 <div className={styles.uploadError}>{uploadError}</div>
               )}
               <ChatInput
+                ref={chatInputRef}
                 disabled={isStreaming}
                 onSend={handleSend}
                 attachments={{

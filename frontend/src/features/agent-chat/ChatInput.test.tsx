@@ -1,9 +1,9 @@
 // frontend/src/features/agent-chat/ChatInput.test.tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatInput from './ChatInput'
-import type { ChatInputAttachments } from './ChatInput'
+import type { ChatInputAttachments, ChatInputHandle } from './ChatInput'
 
 function makeAttachments(overrides: Partial<ChatInputAttachments> = {}): ChatInputAttachments {
   return {
@@ -113,5 +113,19 @@ describe('ChatInput attachments', () => {
     expect(screen.getByText(/a.txt/)).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText('移除 a.txt'))
     expect(remove).toHaveBeenCalledWith('att-1')
+  })
+
+  it('restoreText (ref handle) writes text back into the input', () => {
+    const handle = { current: null as ChatInputHandle | null }
+    render(
+      <ChatInput
+        ref={(h: ChatInputHandle | null) => { handle.current = h; }}
+        disabled={false}
+        onSend={vi.fn()}
+        attachments={makeAttachments()}
+      />
+    )
+    act(() => { handle.current?.restoreText('回归文本'); })
+    expect(screen.getByRole('textbox')).toHaveValue('回归文本')
   })
 })

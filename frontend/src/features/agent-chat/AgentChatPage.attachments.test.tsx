@@ -44,7 +44,7 @@ vi.mock('@/api/agent-chat', () => ({
     }
   },
 }))
-import { agentChatApi } from '@/api/agent-chat'
+import { agentChatApi, ApiError } from '@/api/agent-chat'
 
 vi.mock('./AgentDetailBar', () => ({ default: () => <div /> }))
 vi.mock('./ChatSessionList', () => {
@@ -115,6 +115,7 @@ describe('AgentChatPage attachments flow', () => {
     await waitFor(() => {
       expect(uploadFiles).toHaveBeenCalledWith('min', 's1', [file])
     })
+    expect(uploadFiles).toHaveBeenCalledTimes(1)
     await waitFor(() => {
       expect(sendMessageStream).toHaveBeenCalled()
     })
@@ -127,6 +128,12 @@ describe('AgentChatPage attachments flow', () => {
       const optimistic = bubbles.find((b) => b.textContent.includes('.zerone-uploads/a.txt'))
       expect(optimistic?.textContent).toContain('"type":"file"')
       expect(optimistic?.textContent).toContain('"type":"text"')
+      // file part 在 text part 之前（与持久化顺序一致）
+      const content = optimistic?.textContent ?? ''
+      const fileIdx = content.indexOf('"type":"file"')
+      const textIdx = content.indexOf('"type":"text"')
+      expect(fileIdx).toBeGreaterThanOrEqual(0)
+      expect(fileIdx).toBeLessThan(textIdx)
     })
   })
 
@@ -146,5 +153,30 @@ describe('AgentChatPage attachments flow', () => {
     expect(screen.getByRole('textbox')).toHaveValue('重试场景') // 文本保留
     expect(screen.getByText(/a.txt/)).toBeInTheDocument() // 本地文件保留
     expect(sendMessageStream).not.toHaveBeenCalled()
+  })
+
+  it('restores sent text into the input on attachment_missing (retry contract, fix round 1)', async () => {
+    uploadFiles.mockResolvedValue([
+      { id: 'r1', name: 'a.txt', mime: 'text/plain', size: 3, path: '.zerone-uploads/a.txt' },
+    ])
+    sendMessageStream.mockRejectedValueOnce(
+      new ApiError('Attachment not found', 400, 'attachment_missing')
+    )
+    renderPage()
+
+    const file = new File(['abc'], 'a.txt', { type: 'text/plain' })
+    const input = await waitFor(() =>
+      document.querySelector('input[type="file"]') as HTMLInputElement
+    )
+    await userEvent.upload(input, file)
+    await userEvent.type(screen.getByRole('textbox'), '重发这段')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => expect(screen.getByText(/附件已过期/)).toBeInTheDocument())
+    // 文本写回输入框 + 本地文件恢复：可直接重试发送。
+    // tray chip 用移除按钮的 aria-label 唯一定位：optimistic 气泡（cache-aware
+    // mock 下不被 refetch 替换）也含 a.txt 字样，getByText(/a.txt/) 会多元素。
+    expect(screen.getByRole('textbox')).toHaveValue('重发这段')
+    expect(screen.getByLabelText('移除 a.txt')).toBeInTheDocument()
   })
 })

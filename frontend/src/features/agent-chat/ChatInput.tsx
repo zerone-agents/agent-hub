@@ -1,5 +1,5 @@
 // frontend/src/features/agent-chat/ChatInput.tsx
-import { useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
+import { useState, useImperativeHandle, type ClipboardEvent, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 import { Input, Upload } from 'antd'
 import { PaperPlaneRightIcon, PaperclipIcon, XIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -101,7 +101,13 @@ export interface ChatInputAttachments {
   remove: (id: string) => void
 }
 
+/** imperative 接口：attachment_missing 重试路径由页面写回文本（Task 11 fix round 1） */
+export interface ChatInputHandle {
+  restoreText: (text: string) => void
+}
+
 interface ChatInputProps {
+  ref?: Ref<ChatInputHandle>
   disabled: boolean
   /** resolve false 时保留输入文本（上传失败重试路径，issue #94） */
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- spec contract: void keeps existing Promise<void> callers assignable; rule's allowInUnionAsReturn covers top-level union only, not nested Promise<void | boolean>
@@ -109,12 +115,13 @@ interface ChatInputProps {
   attachments?: ChatInputAttachments
 }
 
-export default function ChatInput({ disabled, onSend, attachments }: ChatInputProps) {
+export default function ChatInput({ ref, disabled, onSend, attachments }: ChatInputProps) {
   const { styles } = useStyles()
   const [value, setValue] = useState('')
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [sending, setSending] = useState(false)
+  useImperativeHandle(ref, () => ({ restoreText: (text: string) => { setValue(text); } }), [])
 
   const hasAttachments = (attachments?.items.length ?? 0) > 0
   const inputDisabled = disabled || sending
