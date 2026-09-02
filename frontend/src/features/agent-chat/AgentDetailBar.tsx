@@ -58,7 +58,7 @@ export default function AgentDetailBar({ agentName }: Props) {
           datasets={data.datasets}
           availableSkills={data.availableSkills}
           maxTurns={data.maxTurns}
-          maxSessionTurns={data.maxSessionTurns}
+          maxSessionQueries={data.maxSessionQueries}
         />
       )}
     </div>

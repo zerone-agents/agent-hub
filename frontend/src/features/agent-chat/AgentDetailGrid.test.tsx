@@ -11,7 +11,7 @@ function renderWith(ui: React.ReactElement) {
 
 const fullDetail: Pick<
   AgentDetail,
-  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionTurns'
+  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionQueries'
 > = {
   maxTurns: 10,
   allowedTools: ['Bash', 'Read', 'Write'],
@@ -98,22 +98,22 @@ describe('AgentDetailGrid', () => {
     expect(screen.getByText('this is a …')).toBeInTheDocument()
   })
 
-  it('renders Limits row with maxTurns and maxSessionTurns when maxSessionTurns is set', () => {
-    renderWith(<AgentDetailGrid {...fullDetail} maxTurns={50} maxSessionTurns={20} />)
+  it('renders Limits row with maxTurns and maxSessionQueries when maxSessionQueries is set', () => {
+    renderWith(<AgentDetailGrid {...fullDetail} maxTurns={50} maxSessionQueries={20} />)
 
     expect(screen.getByText('Limits')).toBeInTheDocument()
     expect(screen.getByText('maxTurns: 50')).toBeInTheDocument()
-    expect(screen.getByText('maxSessionTurns: 20')).toBeInTheDocument()
+    expect(screen.getByText('maxSessionQueries: 20')).toBeInTheDocument()
   })
 
-  it('hides Limits row when maxSessionTurns is undefined', () => {
+  it('hides Limits row when maxSessionQueries is undefined', () => {
     renderWith(<AgentDetailGrid {...fullDetail} />)
 
     expect(screen.queryByText('Limits')).not.toBeInTheDocument()
     expect(screen.queryByText(/^maxTurns:/)).not.toBeInTheDocument()
   })
 
-  it('renders Limits row alone when only maxSessionTurns is set', () => {
+  it('renders Limits row alone when only maxSessionQueries is set', () => {
     renderWith(
       <AgentDetailGrid
         allowedTools={[]}
@@ -122,13 +122,13 @@ describe('AgentDetailGrid', () => {
         datasets={undefined}
         availableSkills={[]}
         maxTurns={10}
-        maxSessionTurns={30}
+        maxSessionQueries={30}
       />
     )
 
     expect(screen.getByText('Limits')).toBeInTheDocument()
     expect(screen.getByText('maxTurns: 10')).toBeInTheDocument()
-    expect(screen.getByText('maxSessionTurns: 30')).toBeInTheDocument()
+    expect(screen.getByText('maxSessionQueries: 30')).toBeInTheDocument()
     expect(screen.queryByText('Tools')).not.toBeInTheDocument()
   })
 })

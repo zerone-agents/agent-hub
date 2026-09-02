@@ -40,7 +40,7 @@ const useStyles = createStyles(({ css }) => ({
 
 type Props = Pick<
   AgentDetail,
-  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionTurns'
+  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionQueries'
 >
 
 export default function AgentDetailGrid(props: Props) {
@@ -57,11 +57,11 @@ export default function AgentDetailGrid(props: Props) {
   const hasSubagents = !!subagents && Object.keys(subagents).length > 0
   const hasDatasets = !!datasets && Object.keys(datasets).length > 0
   const hasSkills = !!availableSkills && availableSkills.length > 0
-  // Limits row keys off maxSessionTurns (the optional one). maxTurns always
+  // Limits row keys off maxSessionQueries (the optional one). maxTurns always
   // has a runtime default, so rendering on maxTurns alone would force the
   // grid to never return null for bare agents and break the existing
   // hide-when-empty behavior.
-  const hasLimits = props.maxSessionTurns !== undefined
+  const hasLimits = props.maxSessionQueries !== undefined
 
   if (!hasTools && !hasMcps && !hasSubagents && !hasDatasets && !hasSkills && !hasLimits) {
     return null
@@ -74,7 +74,7 @@ export default function AgentDetailGrid(props: Props) {
           <div className={styles.rowLabel} id="agent-detail-limits-label">Limits</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-limits-label">
             <Tag>maxTurns: {props.maxTurns}</Tag>
-            <Tag>maxSessionTurns: {props.maxSessionTurns}</Tag>
+            <Tag>maxSessionQueries: {props.maxSessionQueries}</Tag>
           </div>
         </div>
       )}

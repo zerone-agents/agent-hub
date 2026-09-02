@@ -7,7 +7,7 @@ export interface AgentConfig {
   systemPrompt?: string
   permissionMode?: string
   maxTurns?: number
-  maxSessionTurns?: number
+  maxSessionQueries?: number
   title?: Record<string, string>
   description?: Record<string, string>
   icon?: string
@@ -148,7 +148,7 @@ export interface AgentDetail {
   maxTurns: number
   hasSystemPrompt: boolean
   // Optional (only present when configured)
-  maxSessionTurns?: number
+  maxSessionQueries?: number
   permissionMode?: string
   allowedTools?: string[]
   disallowedTools?: string[]
