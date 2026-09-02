@@ -398,7 +398,16 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gi
 			datasets = append(datasets, map[string]any{"id": dsID})
 			continue
 		}
-		datasets = append(datasets, pickFields(map[string]any(*ds), "id", "name", "description", "document_count", "chunk_count"))
+		// NormalizeDataset 出口的计数键为 canonical doc_num/chunk_num，需映射回对外键名。
+		item := pickFields(map[string]any(*ds), "id", "name", "description")
+		m := map[string]any(*ds)
+		if v, ok := m["doc_num"]; ok {
+			item["document_count"] = v
+		}
+		if v, ok := m["chunk_num"]; ok {
+			item["chunk_count"] = v
+		}
+		datasets = append(datasets, item)
 	}
 	return mcpJSONResult(id, map[string]any{"datasets": datasets})
 }
@@ -426,7 +435,12 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 	}
 	docs := make([]map[string]any, 0, len(result.Documents))
 	for _, d := range result.Documents {
-		docs = append(docs, pickFields(map[string]any(d), "id", "name", "chunk_count", "progress", "run", "create_time"))
+		// NormalizeDocument 出口的计数键为 canonical chunk_num，映射回对外 chunk_count。
+		item := pickFields(map[string]any(d), "id", "name", "progress", "run", "create_time")
+		if v, ok := map[string]any(d)["chunk_num"]; ok {
+			item["chunk_count"] = v
+		}
+		docs = append(docs, item)
 	}
 	return mcpJSONResult(id, map[string]any{
 		"total": result.Total, "page": page, "page_size": pageSize, "documents": docs,
@@ -492,6 +506,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, err
 	tenantID := tenant.GetTenantID(c)
 	if tenantID == "" {
 		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
+		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
 		return nil, fmt.Errorf("tenant context missing on knowledge MCP request")
 	}
 	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)

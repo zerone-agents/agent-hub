@@ -295,9 +295,10 @@ func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
 func TestKnowledgeMcpHandler_ToolsCall_Datasets(t *testing.T) {
 	knowledgeSvc := &fakeKnowledgeMcpService{
 		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			// 模拟 NormalizeDataset 出口形状：计数键为 canonical doc_num/chunk_num。
 			ds := knowledge.Dataset{
 				"id": id, "name": "产品知识库", "description": "产品文档",
-				"document_count": 3, "chunk_count": 42,
+				"doc_num": 3, "chunk_num": 42,
 				"tenant_id": "internal-should-not-leak", // 白名单外字段必须被丢弃
 			}
 			return &ds, nil
@@ -333,6 +334,9 @@ func TestKnowledgeMcpHandler_ToolsCall_Datasets(t *testing.T) {
 	got := payload.Datasets[0]
 	if got["id"] != "ds-1" || got["name"] != "产品知识库" {
 		t.Fatalf("unexpected dataset entry: %v", got)
+	}
+	if got["document_count"] != float64(3) || got["chunk_count"] != float64(42) {
+		t.Fatalf("count fields not mapped from doc_num/chunk_num: %v", got)
 	}
 	if _, leaked := got["tenant_id"]; leaked {
 		t.Fatalf("whitelist violated: tenant_id leaked in %v", got)
@@ -579,7 +583,10 @@ func TestKnowledgeMcpHandler_ToolsCall_Documents_Pagination(t *testing.T) {
 			return &knowledge.DocumentListResult{
 				Total: 57,
 				Documents: []knowledge.Document{
-					{"id": "doc-1", "name": "使用手册.pdf", "chunk_count": 12, "progress": 1.0, "run": "DONE", "create_time": 1700000000.0, "storage_path": "/secret"},
+					// 模拟 NormalizeDocument 出口形状：计数键为 canonical chunk_num；
+					// doc-2 故意缺 run 键，锁定缺键省略（而非置零）语义。
+					{"id": "doc-1", "name": "使用手册.pdf", "chunk_num": 12, "progress": 1.0, "run": "DONE", "create_time": 1700000000.0, "storage_path": "/secret"},
+					{"id": "doc-2", "name": "FAQ.md", "chunk_num": 7, "progress": 0.5, "create_time": 1700000001.0},
 				},
 			}, nil
 		},
@@ -602,8 +609,26 @@ func TestKnowledgeMcpHandler_ToolsCall_Documents_Pagination(t *testing.T) {
 		t.Fatalf("expected success, got %v", resp.Result)
 	}
 	text := resultText(resp.Result)
-	if !strings.Contains(text, `"total":57`) || !strings.Contains(text, "使用手册.pdf") {
-		t.Fatalf("unexpected payload: %s", text)
+	var payload struct {
+		Total     int                      `json:"total"`
+		Page      int                      `json:"page"`
+		PageSize  int                      `json:"page_size"`
+		Documents []map[string]interface{} `json:"documents"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("result text is not JSON: %v; text=%s", err, text)
+	}
+	if payload.Total != 57 || payload.Page != 2 || payload.PageSize != 30 {
+		t.Fatalf("payload echo wrong: total=%d page=%d page_size=%d; text=%s", payload.Total, payload.Page, payload.PageSize, text)
+	}
+	if len(payload.Documents) != 2 {
+		t.Fatalf("documents len = %d, want 2; text=%s", len(payload.Documents), text)
+	}
+	if payload.Documents[0]["chunk_count"] != float64(12) {
+		t.Fatalf("chunk_count not mapped from chunk_num: %v", payload.Documents[0])
+	}
+	if _, exists := payload.Documents[1]["run"]; exists {
+		t.Fatalf("missing source key should be omitted, got run=%v", payload.Documents[1]["run"])
 	}
 	if strings.Contains(text, "storage_path") {
 		t.Fatalf("whitelist violated: %s", text)
