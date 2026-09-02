@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -85,10 +86,27 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	relayErr := relayMultipart(multipart.NewReader(c.Request.Body, params["boundary"]), mw)
 	if relayErr != nil {
 		_ = pw.CloseWithError(relayErr) // 中断出站请求体
-		if res := <-done; res.err == nil {
+		res := <-done
+		if res.err == nil && res.resp != nil {
 			_ = res.resp.Body.Close()
 		}
-		respondAttachmentError(c, relayErr)
+		// 错误分类：域错误（限额/客户端 multipart 解析）→ 原样映射；
+		// 传输失败（runtime 断连/超时/中途终止）→ 502；
+		// runtime 已响应（如 413）→ 透传响应。
+		var attErr *chat.AttachmentError
+		if errors.As(relayErr, &attErr) {
+			respondAttachmentError(c, relayErr)
+			return
+		}
+		if res.err != nil {
+			respondError(c, http.StatusBadGateway, "runtime unreachable: "+res.err.Error())
+			return
+		}
+		if res.resp != nil {
+			h.respondUploadResult(c, res.resp)
+			return
+		}
+		respondError(c, http.StatusBadGateway, "runtime unreachable")
 		return
 	}
 	_ = pw.Close()
@@ -138,12 +156,18 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 		}
 		dst, err := mw.CreatePart(hdr)
 		if err != nil {
-			return chat.NewAttachmentError(chat.ErrCodeInvalidMultipart, "create part: "+err.Error())
+			// 写目标（出站 pipe）错误 = transport 已中断请求体（runtime 不可达/
+			// 中途终止），不是客户端 multipart 域错误：原样返回，由
+			// UploadAttachments 按 res.err/res.resp 分类（502 或透传）。
+			return err
 		}
 		// LimitReader MAX+1 探测：多读一个字节即超限（tool_artifact.go 同款技巧）
 		n, err := io.Copy(dst, io.LimitReader(part, uploadMaxFileBytes+1))
 		if err != nil {
-			return chat.NewAttachmentError(chat.ErrCodeInvalidMultipart, "read part: "+err.Error())
+			// 同上：io.Copy 的错误可能来自读源（客户端断开）或写目标
+			// （runtime 断连/提前关闭 body）；两者都不是客户端 multipart
+			// 解析错误，原样返回避免被误映射成 400 invalid_multipart。
+			return err
 		}
 		if n > uploadMaxFileBytes {
 			return chat.NewAttachmentError(chat.ErrCodeUploadLimitExceeded,
@@ -156,7 +180,8 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 		}
 	}
 	if err := mw.Close(); err != nil {
-		return chat.NewAttachmentError(chat.ErrCodeInvalidMultipart, "close multipart: "+err.Error())
+		// 同上：收尾 boundary 写入 pipe 失败是传输层错误，非客户端域错误。
+		return err
 	}
 	return nil
 }
@@ -184,9 +209,20 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
 			"runtime does not support attachments (requires >= 2.5.0)")
 	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		if code, ok := runtimeAttachmentCode(string(body)); ok {
-			respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(string(body)))
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		body := string(bodyBytes)
+		if code, ok := runtimeAttachmentCode(body); ok {
+			respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(body))
+			return
+		}
+		// mid-stream abort（runtime 未排空 body 即回响应后关闭连接）：
+		// transport 在请求体写失败时会把已收到的响应体标记为关闭
+		// （"http: read on closed response body"），code 无法从 body 解析。
+		// runtime 契约中 413 唯一对应 upload_limit_exceeded（见
+		// attachmentHTTPStatus 的双向映射），按状态码兜底保持透传语义。
+		if readErr != nil && resp.StatusCode == http.StatusRequestEntityTooLarge {
+			respondErrorCode(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded,
+				"runtime upload rejected the request (limit exceeded)")
 			return
 		}
 		respondError(c, http.StatusBadGateway, fmt.Sprintf("runtime upload failed: HTTP %d", resp.StatusCode))

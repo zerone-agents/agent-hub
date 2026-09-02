@@ -461,3 +461,44 @@ func TestUploadAttachments_StreamsPartByPart(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 	require.Equal(t, 2, <-filesReceived)
 }
+
+// runtime 在连接建立后、响应前断开（Hijack 后立即关闭）→ 传输失败应映射 502，
+// 而不是把 pipe 写错误误判为客户端 multipart 解析错误（400 invalid_multipart）。
+func TestUploadAttachments_RuntimeUnreachable502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, err := hj.Hijack()
+				if err == nil {
+					_ = conn.Close()
+				}
+			}
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+// runtime 读少量 body 后直接回 413 不排空（>256KB 请求体迫使 net/http 服务端
+// 丢弃剩余 body 关闭连接 → 触发 hub 侧 mid-stream 中断）→ hub 必须透传 runtime
+// 的 413 upload_limit_exceeded，而不是 400 invalid_multipart。
+func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			buf := make([]byte, 64)
+			_, _ = r.Body.Read(buf) // 只读一点，不排空 → 触发 mid-stream 中断
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"File limit","code":"upload_limit_exceeded"}`))
+		},
+	})
+	// 20MB body 远大于 net/http 服务端 handler 返回后的排空上限（256KB）
+	// 和 loopback 内核缓冲：服务端放弃排空关闭连接 → hub 的 io.Copy 必然在
+	// pipe 写处失败（确定性命中 relay-fail 分支，而非服务端把整个小 body
+	// 缓冲掉）、恰好等于单文件限额上限（20MB）不会触发 hub 侧限额检查。
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+}
