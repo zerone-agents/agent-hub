@@ -5,6 +5,7 @@ import { tokens as t } from '@/styles/tokens'
 import ChatMarkdown from './ChatMarkdown'
 import ToolCallBlock from './ToolCallBlock'
 import LegacyToolResult from './LegacyToolResult'
+import PartFile, { type AttachmentUrlBuilder } from './PartFile'
 
 // 单段内容：text / reasoning / tool_use / tool_result / 默认 fallback
 export interface ContentPart {
@@ -159,7 +160,11 @@ function pairParts(parts: ContentPart[]): PairablePart[] {
   return out
 }
 
-export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; enableStream?: boolean }) {
+export function ContentParts({ parts, enableStream, buildAttachmentUrl }: {
+  parts: ContentPart[]
+  enableStream?: boolean
+  buildAttachmentUrl?: AttachmentUrlBuilder
+}) {
   const { styles } = useStyles()
   const paired = pairParts(parts)
   return (
@@ -178,6 +183,9 @@ export function ContentParts({ parts, enableStream }: { parts: ContentPart[]; en
                 duration={part.duration}
               />
             )
+          }
+          if (part.type === 'file') {
+            return <PartFile key={i} part={part} buildAttachmentUrl={buildAttachmentUrl} />
           }
           if (part.type === 'error') {
             return <PartError key={i} message={part.message as string} />

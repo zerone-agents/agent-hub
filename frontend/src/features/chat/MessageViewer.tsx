@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Spin, Pagination } from 'antd'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
+import { adminFileContentUrl } from '@/api/agent-files'
 import { useChatMessages } from '@/queries/useChat'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -59,6 +60,11 @@ export default function MessageViewer({ session }: MessageViewerProps) {
   const messages = data?.items ?? []
   const total = data?.total ?? 0
 
+  const buildAttachmentUrl = useMemo(
+    () => (session.agent_id ? (p: string) => adminFileContentUrl(session.agent_id, p) : undefined),
+    [session.agent_id]
+  )
+
   // Scroll to top when messages change (same as Vue version)
   useEffect(() => {
     if (scrollRef.current && !isLoading) {
@@ -93,7 +99,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
         ) : messages.length === 0 ? (
           <div className={styles.msgEmpty}>该会话暂无消息</div>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          messages.map((msg) => <MessageBubble key={msg.id} message={msg} buildAttachmentUrl={buildAttachmentUrl} />)
         )}
       </div>
 
