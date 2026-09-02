@@ -94,7 +94,10 @@ beforeEach(() => {
   sendMessageStream.mockReset()
 })
 
-describe('AgentChatPage attachments flow', () => {
+// 全量并发跑 64 个测试文件时机器负载放大 3-5x，本用例（upload+type+SSE 三段
+// waitFor）在默认 5s 下两度确定性超时（单独跑仅 1.4s）；沿用同页
+// AgentChatPage.test.tsx 的 describe 级 15s 惯例。
+describe('AgentChatPage attachments flow', { timeout: 15000 }, () => {
   it('uploads then sends, optimistic message carries file parts', async () => {
     uploadFiles.mockResolvedValue([
       { id: 'r1', name: 'a.txt', mime: 'text/plain', size: 3, path: '.zerone-uploads/a.txt' },
