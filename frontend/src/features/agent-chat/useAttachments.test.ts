@@ -106,4 +106,48 @@ describe('useAttachments', () => {
     expect(result.current.items[0]?.status).toBe('local')
     expect(result.current.items[0]?.descriptor).toBeUndefined()
   })
+
+  it('freezes queue mutations while upload is in flight (queue-freeze contract)', async () => {
+    let resolveUpload: (
+      descs: { id: string; name: string; mime: string; size: number; path: string }[]
+    ) => void = () => undefined
+    uploadFiles.mockReturnValue(new Promise((res) => { resolveUpload = res }))
+    const { result } = renderHook(() => useAttachments())
+    act(() => {
+      result.current.add([txt('a.txt')])
+    })
+    const inFlight = act(() => result.current.upload('min', 's1'))
+    // 冻结期：add 拒绝并给文案、remove 静默拒绝、条目不复活不泄漏。
+    // 两处均为「无状态变更」的调用（add 被拒 / remove no-op），直接裸调、不包 act：
+    // React 19 不支持 act 作用域重叠（inFlight 的 act 还开着，再开嵌套 act 会打乱
+    // 作用域栈并泄漏 actScopeDepth，毒化后续所有渲染）。
+    const addErr = result.current.add([txt('b.txt')])
+    expect(addErr).toContain('上传进行中')
+    expect(result.current.items).toHaveLength(1)
+    const firstId = result.current.items[0]?.id as string
+    result.current.remove(firstId)
+    expect(result.current.items).toHaveLength(1)
+    // 在根层级 await 在途 act（不与其它 act 嵌套），完成后再做变更队列的调用
+    resolveUpload([
+      { id: 'r1', name: 'a.txt', mime: 'text/plain', size: 10, path: '.zerone-uploads/a.txt' },
+    ])
+    await inFlight
+    // 解冻后 remove 恢复正常
+    act(() => {
+      result.current.remove(firstId)
+    })
+    expect(result.current.items).toHaveLength(0)
+  })
+
+  it('upload() rejects a short descriptor list and resets queue to local', async () => {
+    uploadFiles.mockResolvedValue([
+      { id: 'r1', name: 'a.txt', mime: 'text/plain', size: 10, path: '.zerone-uploads/a.txt' },
+    ])
+    const { result } = renderHook(() => useAttachments())
+    act(() => {
+      result.current.add([txt('a.txt'), txt('b.txt')])
+    })
+    await expect(act(() => result.current.upload('min', 's1'))).rejects.toThrow('响应异常')
+    expect(result.current.items.every((i) => i.status === 'local')).toBe(true)
+  })
 })

@@ -24,6 +24,8 @@ export function useAttachments() {
   const [uploading, setUploading] = useState(false)
   // ref 是同步真值来源：add() 需要立读当前队列做累计校验
   const itemsRef = useRef<AttachmentItem[]>([])
+  // uploadingRef 与 uploading 同步镜像：队列变更入口据此冻结（见 Global Constraints）
+  const uploadingRef = useRef(false)
   const seq = useRef(0)
 
   const commit = useCallback((next: AttachmentItem[]) => {
@@ -40,10 +42,12 @@ export function useAttachments() {
     }
   }, [])
 
-  /** 批量校验并加入本地队列；返回错误文案（null = 成功）。 */
+  /** 批量校验并加入本地队列；返回错误文案（null = 成功）。
+   *  uploading 冻结：拒绝新增（见 Global Constraints 队列冻结契约）。 */
   const add = useCallback(
     (files: File[]): string | null => {
       if (files.length === 0) return null
+      if (uploadingRef.current) return '上传进行中，请稍候再添加'
       const current = itemsRef.current
       const merged = [...current.map((i) => i.file), ...files]
       if (merged.length > ATTACHMENT_LIMITS.maxFiles) {
@@ -75,6 +79,7 @@ export function useAttachments() {
 
   const remove = useCallback(
     (id: string) => {
+      if (uploadingRef.current) return // uploading 冻结：静默拒绝
       const target = itemsRef.current.find((i) => i.id === id)
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
       commit(itemsRef.current.filter((i) => i.id !== id))
@@ -82,16 +87,18 @@ export function useAttachments() {
     [commit]
   )
 
-  /** 发送成功（SSE 建立后）清空全部条目。 */
+  /** 发送成功（SSE 建立后）清空全部条目。uploading 冻结：静默拒绝。 */
   const clearAll = useCallback(() => {
+    if (uploadingRef.current) return
     for (const it of itemsRef.current) {
       if (it.previewUrl) URL.revokeObjectURL(it.previewUrl)
     }
     commit([])
   }, [commit])
 
-  /** attachment_missing 重试路径：丢弃已上传描述符，恢复为本地文件。 */
+  /** attachment_missing 重试路径：丢弃已上传描述符，恢复为本地文件。uploading 冻结：静默拒绝。 */
   const invalidate = useCallback(() => {
+    if (uploadingRef.current) return
     commit(itemsRef.current.map((i) => ({ ...i, status: 'local' as const, descriptor: undefined })))
   }, [commit])
 
@@ -102,6 +109,7 @@ export function useAttachments() {
    */
   const upload = useCallback(
     async (agentName: string, sessionId: string): Promise<AttachmentDesc[]> => {
+      if (uploadingRef.current) throw new Error('上传进行中，请稍候')
       const current = itemsRef.current
       if (current.length === 0) return []
       // 不变式：status==='uploaded' 必然带 descriptor；用类型谓词收窄（repo lint 同时禁 as 去空与 !）
@@ -112,16 +120,23 @@ export function useAttachments() {
       if (cached.length === current.length) {
         return cached.map((i) => i.descriptor)
       }
+      uploadingRef.current = true
       setUploading(true)
       commit(current.map((i) => ({ ...i, status: 'uploading' as const })))
       try {
         const descs = await agentChatApi.uploadFiles(agentName, sessionId, current.map((i) => i.file))
+        // 描述符数量必须与提交数一一对应（runtime 按 multipart 流序返回）。
+        // 数量异常若不拦截，多余条目会静默丢附件。
+        if (descs.length !== current.length) {
+          throw new Error(`上传响应异常：期望 ${current.length} 个附件描述，得到 ${descs.length} 个`)
+        }
         commit(current.map((i, idx) => ({ ...i, status: 'uploaded' as const, descriptor: descs[idx] })))
         return descs
       } catch (err) {
         commit(current.map((i) => ({ ...i, status: 'local' as const })))
         throw err
       } finally {
+        uploadingRef.current = false
         setUploading(false)
       }
     },
