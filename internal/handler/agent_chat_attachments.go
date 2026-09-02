@@ -87,23 +87,30 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	if relayErr != nil {
 		_ = pw.CloseWithError(relayErr) // 中断出站请求体
 		res := <-done
-		if res.err == nil && res.resp != nil {
-			_ = res.resp.Body.Close()
-		}
-		// 错误分类：域错误（限额/客户端 multipart 解析）→ 原样映射；
-		// 传输失败（runtime 断连/超时/中途终止）→ 502；
-		// runtime 已响应（如 413）→ 透传响应。
+		// 域错误（限额/客户端 multipart 解析）优先分类：无论 runtime 是否
+		// 已响应，响应都不是给客户端的——若已收到则关闭 body（不再读取），
+		// 按域错误原样映射。
 		var attErr *chat.AttachmentError
 		if errors.As(relayErr, &attErr) {
+			if res.err == nil && res.resp != nil {
+				_ = res.resp.Body.Close()
+			}
 			respondAttachmentError(c, relayErr)
 			return
 		}
-		if res.err != nil {
-			respondError(c, http.StatusBadGateway, "runtime unreachable: "+res.err.Error())
+		if res.err == nil && res.resp != nil {
+			// 传输类裸错误但 runtime 已响应（如 413 mid-stream）：
+			// body 保持可读并交由 respondUploadResult 消费（它从中解析
+			// runtime code），这里只延迟关闭。切勿提前 Close——否则 body
+			// 解析路径变成死代码，非 413 的可解析状态码（如 404→501、
+			// 400/500 域码）全部退化为泛化 502。
+			defer res.resp.Body.Close()
+			h.respondUploadResult(c, res.resp)
 			return
 		}
-		if res.resp != nil {
-			h.respondUploadResult(c, res.resp)
+		// runtime 未产生可透传的响应（连接失败/超时等传输错误）。
+		if res.err != nil {
+			respondError(c, http.StatusBadGateway, "runtime unreachable: "+res.err.Error())
 			return
 		}
 		respondError(c, http.StatusBadGateway, "runtime unreachable")
