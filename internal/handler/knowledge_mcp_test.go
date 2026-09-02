@@ -20,7 +20,8 @@ import (
 const testValidToken = "valid-token"
 
 type fakeKnowledgeMcpService struct {
-	retrievalFunc func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
+	retrievalFunc  func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
+	getDatasetFunc func(ctx context.Context, id string) (*knowledge.Dataset, error)
 }
 
 func (f *fakeKnowledgeMcpService) Retrieval(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
@@ -28,6 +29,13 @@ func (f *fakeKnowledgeMcpService) Retrieval(ctx context.Context, req knowledge.R
 		return f.retrievalFunc(ctx, req)
 	}
 	return &knowledge.RetrievalResult{}, nil
+}
+
+func (f *fakeKnowledgeMcpService) GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error) {
+	if f.getDatasetFunc != nil {
+		return f.getDatasetFunc(ctx, id)
+	}
+	return &knowledge.Dataset{}, nil
 }
 
 type fakeAgentMcpService struct {
@@ -122,8 +130,8 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 		t.Fatalf("result is not an object: %v", resp.Result)
 	}
 	tools, ok := result["tools"].([]interface{})
-	if !ok || len(tools) != 1 {
-		t.Fatalf("expected 1 tool, got %v", result["tools"])
+	if !ok || len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %v", result["tools"])
 	}
 	tool, ok := tools[0].(map[string]interface{})
 	if !ok {
@@ -158,6 +166,17 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("required should contain query, got %v", required)
+	}
+	names := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		if m, ok := t.(map[string]interface{}); ok {
+			names[m["name"].(string)] = true
+		}
+	}
+	for _, want := range []string{"knowledge_search", "knowledge_datasets"} {
+		if !names[want] {
+			t.Fatalf("tools/list missing tool %s, got %v", want, names)
+		}
 	}
 }
 
@@ -254,6 +273,73 @@ func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
 	text := resultText(resp.Result)
 	if !strings.Contains(text, "doc1") || !strings.Contains(text, "relevant content") {
 		t.Fatalf("response text missing expected content: %s", text)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Datasets(t *testing.T) {
+	knowledgeSvc := &fakeKnowledgeMcpService{
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			ds := knowledge.Dataset{
+				"id": id, "name": "产品知识库", "description": "产品文档",
+				"document_count": 3, "chunk_count": 42,
+				"tenant_id": "internal-should-not-leak", // 白名单外字段必须被丢弃
+			}
+			return &ds, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(
+		knowledgeSvc,
+		&fakeAgentMcpService{datasets: []string{"ds-1"}},
+	)
+	params := json.RawMessage(`{"name":"knowledge_datasets","arguments":{}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("expected isError=false, got result = %v", resp.Result)
+	}
+	text := resultText(resp.Result)
+	var payload struct {
+		Datasets []map[string]interface{} `json:"datasets"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("result text is not JSON: %v; text=%s", err, text)
+	}
+	if len(payload.Datasets) != 1 {
+		t.Fatalf("datasets len = %d, want 1", len(payload.Datasets))
+	}
+	got := payload.Datasets[0]
+	if got["id"] != "ds-1" || got["name"] != "产品知识库" {
+		t.Fatalf("unexpected dataset entry: %v", got)
+	}
+	if _, leaked := got["tenant_id"]; leaked {
+		t.Fatalf("whitelist violated: tenant_id leaked in %v", got)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Datasets_NoBindings(t *testing.T) {
+	router := setupKnowledgeMcpRouter(
+		&fakeKnowledgeMcpService{},
+		&fakeAgentMcpService{datasets: []string{}},
+	)
+	params := json.RawMessage(`{"name":"knowledge_datasets","arguments":{}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("no bindings should return empty list, not error: %v", resp.Result)
+	}
+	if !strings.Contains(resultText(resp.Result), `"datasets":[]`) {
+		t.Fatalf("expected empty datasets array, got %s", resultText(resp.Result))
 	}
 }
 

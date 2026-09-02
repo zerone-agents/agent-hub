@@ -17,6 +17,7 @@ import (
 // KnowledgeMcpService abstracts the knowledge operations needed by the MCP handler.
 type KnowledgeMcpService interface {
 	Retrieval(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
+	GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error)
 }
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
@@ -183,6 +184,14 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 						"required": []string{"query"},
 					},
 				},
+				{
+					"name":        "knowledge_datasets",
+					"description": "List the knowledge bases bound to this agent, with live metadata (document_count, chunk_count). Call this first to decide which dataset to browse, then use knowledge_documents / knowledge_chunks.",
+					"inputSchema": map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
+				},
 			},
 		},
 	}
@@ -194,12 +203,19 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		return jsonRPCResponse{}, fmt.Errorf("invalid params: %w", err)
 	}
 
-	if p.Name != "knowledge_search" {
+	switch p.Name {
+	case "knowledge_search":
+		return h.handleKnowledgeSearch(ctx, c, id, p.Arguments)
+	case "knowledge_datasets":
+		return h.handleKnowledgeDatasets(ctx, c, id)
+	default:
 		return jsonRPCResponse{}, fmt.Errorf("tool not found: %s", p.Name)
 	}
+}
 
+func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var args knowledgeSearchArgs
-	if err := json.Unmarshal(p.Arguments, &args); err != nil {
+	if err := json.Unmarshal(params, &args); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
@@ -228,33 +244,12 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		*args.Highlight = false
 	}
 
-	agentCfg, ok := middleware.AgentFromContext(c)
-	if !ok {
-		return jsonRPCResponse{}, fmt.Errorf("agent not found in context")
-	}
-
-	tenantID := tenant.GetTenantID(c)
-	if tenantID == "" {
-		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
-		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
-		return jsonRPCResponse{}, fmt.Errorf("tenant context missing on knowledge MCP request")
-	}
-
-	allowedDatasetIDs, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	allowedDatasetIDs, err := h.resolveAgentContext(c)
 	if err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
+		return jsonRPCResponse{}, err
 	}
 	if len(allowedDatasetIDs) == 0 {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": "当前 Agent 未启用知识库 MCP"},
-				},
-				"isError": true,
-			},
-		}, nil
+		return mcpErrorResult(id, "当前 Agent 未启用知识库 MCP"), nil
 	}
 
 	datasetIDs := args.DatasetIDs
@@ -262,16 +257,7 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		datasetIDs = allowedDatasetIDs
 	}
 	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": "无权访问部分知识库 dataset"},
-				},
-				"isError": true,
-			},
-		}, nil
+		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
 	}
 
 	req := knowledge.RetrievalRequest{
@@ -286,16 +272,7 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 
 	result, err := h.knowledgeService.Retrieval(ctx, req)
 	if err != nil {
-		return jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": fmt.Sprintf("知识库检索失败: %v", err)},
-				},
-				"isError": true,
-			},
-		}, nil
+		return mcpErrorResult(id, fmt.Sprintf("知识库检索失败: %v", err)), nil
 	}
 
 	text := formatRetrievalResult(result)
@@ -309,6 +286,80 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 			"isError": false,
 		},
 	}, nil
+}
+
+func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gin.Context, id interface{}) (jsonRPCResponse, error) {
+	allowed, err := h.resolveAgentContext(c)
+	if err != nil {
+		return jsonRPCResponse{}, err
+	}
+	datasets := make([]map[string]any, 0, len(allowed))
+	for _, dsID := range allowed {
+		ds, err := h.knowledgeService.GetDataset(ctx, dsID)
+		if err != nil {
+			// 单库元数据读取失败不阻断整体，降级为仅 id。
+			datasets = append(datasets, map[string]any{"id": dsID})
+			continue
+		}
+		datasets = append(datasets, pickFields(map[string]any(*ds), "id", "name", "description", "document_count", "chunk_count"))
+	}
+	return mcpJSONResult(id, map[string]any{"datasets": datasets})
+}
+
+// resolveAgentContext 抽取 agent/tenant 提取与绑定 dataset 反查。
+// 返回错误即 JSON-RPC -32603（由调用方决定文案透传）。
+func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, error) {
+	agentCfg, ok := middleware.AgentFromContext(c)
+	if !ok {
+		return nil, fmt.Errorf("agent not found in context")
+	}
+	tenantID := tenant.GetTenantID(c)
+	if tenantID == "" {
+		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
+		return nil, fmt.Errorf("tenant context missing on knowledge MCP request")
+	}
+	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
+	}
+	return allowed, nil
+}
+
+// pickFields 白名单拷贝，上游缺失的键直接省略。
+func pickFields(obj map[string]any, keys ...string) map[string]any {
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		if v, ok := obj[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("marshal result failed: %w", err)
+	}
+	return jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(raw)}},
+			"isError": false,
+		},
+	}, nil
+}
+
+func mcpErrorResult(id interface{}, msg string) jsonRPCResponse {
+	return jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": msg}},
+			"isError": true,
+		},
+	}
 }
 
 func isStringSubset(subset, superset []string) bool {
