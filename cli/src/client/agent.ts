@@ -13,7 +13,7 @@ export interface Agent {
     description?: { zh?: string; en?: string };
     permissionMode?: string;
     maxTurns?: number;
-    maxSessionTurns?: number;
+    maxSessionQueries?: number;
     iconName?: string;
     iconColor?: string;
     iconBgColor?: string;
