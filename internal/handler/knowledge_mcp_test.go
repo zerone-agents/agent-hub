@@ -23,6 +23,7 @@ type fakeKnowledgeMcpService struct {
 	retrievalFunc  func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
 	getDatasetFunc func(ctx context.Context, id string) (*knowledge.Dataset, error)
 	listDocsFunc   func(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error)
+	listChunksFunc func(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error)
 }
 
 func (f *fakeKnowledgeMcpService) Retrieval(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
@@ -44,6 +45,13 @@ func (f *fakeKnowledgeMcpService) ListDocuments(ctx context.Context, datasetID s
 		return f.listDocsFunc(ctx, datasetID, req)
 	}
 	return &knowledge.DocumentListResult{}, nil
+}
+
+func (f *fakeKnowledgeMcpService) ListChunks(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+	if f.listChunksFunc != nil {
+		return f.listChunksFunc(ctx, datasetID, documentID, req)
+	}
+	return &knowledge.ChunkListResult{}, nil
 }
 
 type fakeAgentMcpService struct {
@@ -138,8 +146,8 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 		t.Fatalf("result is not an object: %v", resp.Result)
 	}
 	tools, ok := result["tools"].([]interface{})
-	if !ok || len(tools) != 3 {
-		t.Fatalf("expected 3 tools, got %v", result["tools"])
+	if !ok || len(tools) != 4 {
+		t.Fatalf("expected 4 tools, got %v", result["tools"])
 	}
 	tool, ok := tools[0].(map[string]interface{})
 	if !ok {
@@ -181,7 +189,7 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 			names[m["name"].(string)] = true
 		}
 	}
-	for _, want := range []string{"knowledge_search", "knowledge_datasets", "knowledge_documents"} {
+	for _, want := range []string{"knowledge_search", "knowledge_datasets", "knowledge_documents", "knowledge_chunks"} {
 		if !names[want] {
 			t.Fatalf("tools/list missing tool %s, got %v", want, names)
 		}
@@ -645,5 +653,72 @@ func TestKnowledgeMcpHandler_ToolsCall_Documents_Unauthorized(t *testing.T) {
 	}
 	if resp2.Error == nil || !strings.Contains(resp2.Error.Message, "dataset_id is required") {
 		t.Fatalf("expected dataset_id required error, got %+v", resp2)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Chunks_ReadPage(t *testing.T) {
+	var gotDS, gotDoc string
+	var gotReq knowledge.ChunkListRequest
+	knowledgeSvc := &fakeKnowledgeMcpService{
+		listChunksFunc: func(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+			gotDS, gotDoc, gotReq = datasetID, documentID, req
+			return &knowledge.ChunkListResult{
+				Total: 12,
+				Chunks: []knowledge.Chunk{
+					{"id": "ck-1", "content": "第一章内容", "image_id": "internal"},
+				},
+				Document: knowledge.Document{"name": "使用手册.pdf"},
+			}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(knowledgeSvc, &fakeAgentMcpService{datasets: []string{"ds-1"}})
+	params := json.RawMessage(`{"name":"knowledge_chunks","arguments":{"dataset_id":"ds-1","document_id":"doc-1","page":1,"page_size":5}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if gotDS != "ds-1" || gotDoc != "doc-1" || gotReq.Page != 1 || gotReq.PageSize != 5 {
+		t.Fatalf("args passthrough wrong: ds=%q doc=%q req=%+v", gotDS, gotDoc, gotReq)
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("expected success, got %v", resp.Result)
+	}
+	text := resultText(resp.Result)
+	if !strings.Contains(text, `"chunk_id":"ck-1"`) || !strings.Contains(text, "第一章内容") {
+		t.Fatalf("unexpected payload: %s", text)
+	}
+	if !strings.Contains(text, `"document_name":"使用手册.pdf"`) {
+		t.Fatalf("missing document_name: %s", text)
+	}
+	if strings.Contains(text, "image_id") {
+		t.Fatalf("whitelist violated: %s", text)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Chunks_RequiredArgs(t *testing.T) {
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{datasets: []string{"ds-1"}})
+	// 缺 document_id → JSON-RPC error
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_chunks","arguments":{"dataset_id":"ds-1"}}`), testValidToken)
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "document_id is required") {
+		t.Fatalf("expected document_id required error, got %+v", resp)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Chunks_Unauthorized(t *testing.T) {
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{datasets: []string{"ds-1"}})
+	params := json.RawMessage(`{"name":"knowledge_chunks","arguments":{"dataset_id":"other","document_id":"doc-1"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
+		t.Fatalf("expected unauthorized isError, got %v", resp.Result)
 	}
 }

@@ -19,6 +19,7 @@ type KnowledgeMcpService interface {
 	Retrieval(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
 	GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error)
 	ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error)
+	ListChunks(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error)
 }
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
@@ -72,6 +73,13 @@ type listDocumentsArgs struct {
 	DatasetID string `json:"dataset_id"`
 	Page      *int   `json:"page"`
 	PageSize  *int   `json:"page_size"`
+}
+
+type listChunksArgs struct {
+	DatasetID  string `json:"dataset_id"`
+	DocumentID string `json:"document_id"`
+	Page       *int   `json:"page"`
+	PageSize   *int   `json:"page_size"`
 }
 
 // normalizePaging 应用默认值并把 page_size 钳制到上限（钳制不报错）。
@@ -246,6 +254,37 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 						"required": []string{"dataset_id"},
 					},
 				},
+				{
+					"name":        "knowledge_chunks",
+					"description": "Read a document's chunks page by page, like reading a book chapter by chapter. Control your pace with page and page_size (1-50 chunks per call). This is the only tool that returns full chunk content.",
+					"inputSchema": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"dataset_id": map[string]interface{}{
+								"type":        "string",
+								"description": "Knowledge base ID the document belongs to. Must be bound to this agent.",
+							},
+							"document_id": map[string]interface{}{
+								"type":        "string",
+								"description": "Target document ID, from knowledge_documents.",
+							},
+							"page": map[string]interface{}{
+								"type":        "number",
+								"description": "Page number, starting from 1.",
+								"default":     1,
+								"minimum":     1,
+							},
+							"page_size": map[string]interface{}{
+								"type":        "number",
+								"description": "Chunks to read per call. Default 20, maximum 50 (values above 50 are clamped). Read fewer for careful study, more for a quick scan.",
+								"default":     20,
+								"minimum":     1,
+								"maximum":     50,
+							},
+						},
+						"required": []string{"dataset_id", "document_id"},
+					},
+				},
 			},
 		},
 	}
@@ -264,6 +303,8 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 		return h.handleKnowledgeDatasets(ctx, c, id)
 	case "knowledge_documents":
 		return h.handleKnowledgeDocuments(ctx, c, id, p.Arguments)
+	case "knowledge_chunks":
+		return h.handleKnowledgeChunks(ctx, c, id, p.Arguments)
 	default:
 		return jsonRPCResponse{}, fmt.Errorf("tool not found: %s", p.Name)
 	}
@@ -389,6 +430,55 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 	}
 	return mcpJSONResult(id, map[string]any{
 		"total": result.Total, "page": page, "page_size": pageSize, "documents": docs,
+	})
+}
+
+func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
+	var args listChunksArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return jsonRPCResponse{}, fmt.Errorf("invalid arguments: %w", err)
+	}
+	args.DatasetID = strings.TrimSpace(args.DatasetID)
+	args.DocumentID = strings.TrimSpace(args.DocumentID)
+	if args.DatasetID == "" {
+		return jsonRPCResponse{}, fmt.Errorf("dataset_id is required")
+	}
+	if args.DocumentID == "" {
+		return jsonRPCResponse{}, fmt.Errorf("document_id is required")
+	}
+	allowed, err := h.resolveAgentContext(c)
+	if err != nil {
+		return jsonRPCResponse{}, err
+	}
+	if !isStringSubset([]string{args.DatasetID}, allowed) {
+		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
+	}
+	page, pageSize := normalizePaging(args.Page, args.PageSize)
+	result, err := h.knowledgeService.ListChunks(ctx, args.DatasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
+	if err != nil {
+		return mcpErrorResult(id, fmt.Sprintf("知识库分块读取失败: %v", err)), nil
+	}
+	chunks := make([]map[string]any, 0, len(result.Chunks))
+	for _, ch := range result.Chunks {
+		m := map[string]any(ch)
+		item := map[string]any{}
+		if v, ok := m["id"]; ok {
+			item["chunk_id"] = v
+		}
+		if v, ok := m["content"]; ok {
+			item["content"] = v
+		}
+		chunks = append(chunks, item)
+	}
+	docName := ""
+	if result.Document != nil {
+		if v, ok := map[string]any(result.Document)["name"].(string); ok {
+			docName = v
+		}
+	}
+	return mcpJSONResult(id, map[string]any{
+		"total": result.Total, "page": page, "page_size": pageSize,
+		"document_name": docName, "chunks": chunks,
 	})
 }
 
