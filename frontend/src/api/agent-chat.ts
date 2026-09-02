@@ -167,6 +167,6 @@ export function attachmentContentUrl(agentName: string, sessionId: string, path:
 /** 鉴权 fetch → blob。URL 本身不携带 token（spec：Token 不写入 URL）。 */
 export async function authFetchBlob(url: string, signal?: AbortSignal): Promise<Blob> {
   const resp = await fetch(url, { headers: { ...authHeaders() }, signal })
-  if (!resp.ok) throw new ApiError(`HTTP ${resp.status}`, resp.status)
+  if (!resp.ok) throw await apiErrorFromResponse(resp)
   return resp.blob()
 }

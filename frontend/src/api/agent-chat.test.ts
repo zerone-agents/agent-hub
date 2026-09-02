@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { agentChatApi, attachmentContentUrl } from './agent-chat'
+import { agentChatApi, attachmentContentUrl, authFetchBlob } from './agent-chat'
 
 const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)
@@ -48,5 +48,24 @@ describe('attachmentContentUrl', () => {
     expect(attachmentContentUrl('my agent', 's 1', '.zerone-uploads/a b.png')).toBe(
       '/api/v1/agents/my%20agent/chat/sessions/s%201/attachments/content?path=.zerone-uploads%2Fa%20b.png'
     )
+  })
+})
+
+describe('authFetchBlob', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+    localStorage.setItem('access_token', 'tok')
+  })
+
+  it('surfaces the backend error code on failure', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: false, error: 'attachment gone', code: 'attachment_missing' }),
+        { status: 400 }
+      )
+    )
+    await expect(
+      authFetchBlob('/api/v1/agents/min/chat/sessions/s1/attachments/content?path=x')
+    ).rejects.toMatchObject({ code: 'attachment_missing', status: 400 })
   })
 })
