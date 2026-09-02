@@ -483,6 +483,126 @@ func TestKnowledgeMcpHandler_ToolsCall_ServiceError(t *testing.T) {
 	}
 }
 
+// upstreamLeakMarker 模拟 multirag 错误里会携带的内网拓扑信息，
+// 用于断言：上游细节只进服务端日志，绝不进 MCP 响应文本（LLM 可见）。
+const upstreamLeakMarker = `Get "http://10.0.0.1:9380/api/v1": dial tcp 10.0.0.1:9380: i/o timeout`
+
+func TestKnowledgeMcpHandler_ToolsCall_ServiceErrorsNeutralized(t *testing.T) {
+	leakErr := errors.New(upstreamLeakMarker)
+	cases := []struct {
+		name    string
+		svc     *fakeKnowledgeMcpService
+		params  string
+		wantMsg string
+	}{
+		{
+			name: "search",
+			svc: &fakeKnowledgeMcpService{retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+				return nil, leakErr
+			}},
+			params:  `{"name":"knowledge_search","arguments":{"query":"hello"}}`,
+			wantMsg: "知识库检索失败",
+		},
+		{
+			name: "documents",
+			svc: &fakeKnowledgeMcpService{listDocsFunc: func(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error) {
+				return nil, leakErr
+			}},
+			params:  `{"name":"knowledge_documents","arguments":{"dataset_id":"allowed-dataset"}}`,
+			wantMsg: "知识库文档列表获取失败",
+		},
+		{
+			name: "chunks",
+			svc: &fakeKnowledgeMcpService{listChunksFunc: func(ctx context.Context, datasetID, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+				return nil, leakErr
+			}},
+			params:  `{"name":"knowledge_chunks","arguments":{"dataset_id":"allowed-dataset","document_id":"doc-1"}}`,
+			wantMsg: "知识库分块读取失败",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := setupKnowledgeMcpRouter(tc.svc, &fakeAgentMcpService{datasets: []string{"allowed-dataset"}})
+			rec := postJSONRPC(t, router, "tools/call", json.RawMessage(tc.params), testValidToken)
+			var resp jsonRPCResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !isErrorResult(resp.Result) {
+				t.Fatalf("expected isError=true, got %v", resp.Result)
+			}
+			text := resultText(resp.Result)
+			if !strings.Contains(text, tc.wantMsg) {
+				t.Fatalf("expected neutral message %q, got %q", tc.wantMsg, text)
+			}
+			if strings.Contains(text, "10.0.0.1") || strings.Contains(text, "9380") {
+				t.Fatalf("upstream detail leaked to client: %q", text)
+			}
+		})
+	}
+}
+
+func TestKnowledgeMcpHandler_DatasetsLookupErrorNeutralized(t *testing.T) {
+	router := setupKnowledgeMcpRouter(
+		&fakeKnowledgeMcpService{},
+		&fakeAgentMcpService{err: errors.New(`Error 1146: Table 'hub.agent_knowledge_datasets' doesn't exist; SELECT * FROM agents WHERE tenant_id='default'`)},
+	)
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_datasets","arguments":{}}`), testValidToken)
+
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatalf("expected JSON-RPC error, got %+v", resp)
+	}
+	if !strings.Contains(resp.Error.Message, "failed to get agent knowledge datasets") {
+		t.Fatalf("expected neutral error message, got %q", resp.Error.Message)
+	}
+	if strings.Contains(resp.Error.Message, "SELECT") || strings.Contains(resp.Error.Message, "tenant_id") {
+		t.Fatalf("internal error detail leaked: %q", resp.Error.Message)
+	}
+}
+
+func TestKnowledgeMcpHandler_ToolsCall_Datasets_DegradeOnErrorOrNil(t *testing.T) {
+	// 错误分支与 (nil,nil) 契约违反分支都必须降级为仅 id，不得 panic、不得泄漏上游细节。
+	knowledgeSvc := &fakeKnowledgeMcpService{
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			if id == "bad" {
+				return nil, errors.New("upstream boom " + upstreamLeakMarker)
+			}
+			return nil, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(knowledgeSvc, &fakeAgentMcpService{datasets: []string{"bad", "nil-contract"}})
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_datasets","arguments":{}}`), testValidToken)
+
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("expected degrade-not-fail, got %v", resp.Result)
+	}
+	var payload struct {
+		Datasets []map[string]any `json:"datasets"`
+	}
+	if err := json.Unmarshal([]byte(resultText(resp.Result)), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload.Datasets) != 2 {
+		t.Fatalf("datasets len = %d, want 2", len(payload.Datasets))
+	}
+	for _, ds := range payload.Datasets {
+		if len(ds) != 1 || ds["id"] == "" {
+			t.Fatalf("expected id-only degrade entries, got %v", payload.Datasets)
+		}
+	}
+	if strings.Contains(resultText(resp.Result), "10.0.0.1") {
+		t.Fatalf("degrade path leaked upstream detail: %s", resultText(resp.Result))
+	}
+}
+
 func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 	// 理论不可达（middleware 命中 agents 行必写 tenant），防御性验证：
 	// 无 tenant 时必须返回明确错误，而非用空串静默查询全表。

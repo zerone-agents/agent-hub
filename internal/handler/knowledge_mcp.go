@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -369,7 +370,9 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 
 	result, err := h.knowledgeService.Retrieval(ctx, req)
 	if err != nil {
-		return mcpErrorResult(id, fmt.Sprintf("知识库检索失败: %v", err)), nil
+		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
+		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
+		return mcpErrorResult(id, "知识库检索失败，请稍后重试"), nil
 	}
 
 	text := formatRetrievalResult(result)
@@ -393,14 +396,17 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gi
 	datasets := make([]map[string]any, 0, len(allowed))
 	for _, dsID := range allowed {
 		ds, err := h.knowledgeService.GetDataset(ctx, dsID)
-		if err != nil {
-			// 单库元数据读取失败不阻断整体，降级为仅 id。
+		if err != nil || ds == nil {
+			// 单库元数据读取失败（或上游违反契约返回 nil）不阻断整体，降级为仅 id。
+			if err != nil {
+				log.Printf("knowledge-mcp: get dataset %s metadata failed: %v", dsID, err)
+			}
 			datasets = append(datasets, map[string]any{"id": dsID})
 			continue
 		}
 		// NormalizeDataset 出口的计数键为 canonical doc_num/chunk_num，需映射回对外键名。
-		item := pickFields(map[string]any(*ds), "id", "name", "description")
 		m := map[string]any(*ds)
+		item := pickFields(m, "id", "name", "description")
 		if v, ok := m["doc_num"]; ok {
 			item["document_count"] = v
 		}
@@ -431,7 +437,8 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
 	result, err := h.knowledgeService.ListDocuments(ctx, args.DatasetID, knowledge.DocumentListRequest{Page: page, PageSize: pageSize})
 	if err != nil {
-		return mcpErrorResult(id, fmt.Sprintf("知识库文档列表获取失败: %v", err)), nil
+		log.Printf("knowledge-mcp: list documents failed (dataset=%s page=%d page_size=%d): %v", args.DatasetID, page, pageSize, err)
+		return mcpErrorResult(id, "知识库文档列表获取失败，请稍后重试"), nil
 	}
 	docs := make([]map[string]any, 0, len(result.Documents))
 	for _, d := range result.Documents {
@@ -470,7 +477,8 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
 	result, err := h.knowledgeService.ListChunks(ctx, args.DatasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
 	if err != nil {
-		return mcpErrorResult(id, fmt.Sprintf("知识库分块读取失败: %v", err)), nil
+		log.Printf("knowledge-mcp: list chunks failed (dataset=%s document=%s page=%d page_size=%d): %v", args.DatasetID, args.DocumentID, page, pageSize, err)
+		return mcpErrorResult(id, "知识库分块读取失败，请稍后重试"), nil
 	}
 	chunks := make([]map[string]any, 0, len(result.Chunks))
 	for _, ch := range result.Chunks {
@@ -511,7 +519,8 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, err
 	}
 	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get agent knowledge datasets: %w", err)
+		log.Printf("knowledge-mcp: get agent knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+		return nil, fmt.Errorf("failed to get agent knowledge datasets")
 	}
 	return allowed, nil
 }
