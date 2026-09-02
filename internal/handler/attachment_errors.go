@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"control-panel/internal/domain/chat"
@@ -30,6 +31,9 @@ func respondAttachmentError(c *gin.Context, err error) {
 		respondErrorCode(c, attachmentHTTPStatus(attErr.Code), attErr.Code, attErr.Message)
 		return
 	}
+	// Details of non-domain errors stay out of the response body but are
+	// logged at this aggregation point so production 500s remain diagnosable.
+	log.Printf("attachment upload failed: %v", err)
 	respondError(c, http.StatusInternalServerError, "upload failed")
 }
 
