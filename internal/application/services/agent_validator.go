@@ -89,8 +89,18 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
-	if v, ok := config["maxTurns"].(float64); ok && v < 0 {
-		return fmt.Errorf("maxTurns 不能为负数")
+	// maxTurnsUpperBound is the shared upper limit for maxTurns; the frontend
+	// form (AgentForm InputNumber) enforces the same value. 0 keeps the
+	// runtime default, so only the negative range and values above the bound
+	// are rejected.
+	const maxTurnsUpperBound = 500
+	if v, ok := config["maxTurns"].(float64); ok {
+		if v < 0 {
+			return fmt.Errorf("maxTurns 不能为负数")
+		}
+		if v > maxTurnsUpperBound {
+			return fmt.Errorf("maxTurns 不能超过 %d", maxTurnsUpperBound)
+		}
 	}
 
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
