@@ -176,7 +176,7 @@ func (c *Client) Health(ctx context.Context, baseURL string) (*HealthInfo, error
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("runtime health returned HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("runtime health returned HTTP %d", resp.StatusCode)
 	}
 	var info HealthInfo
 	if err := json.Unmarshal(body, &info); err != nil {
