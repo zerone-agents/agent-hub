@@ -25,7 +25,11 @@ type KnowledgeMcpService interface {
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
 type AgentMcpService interface {
-	GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error)
+	// GetAgentKnowledgeClosureDatasets 返回部署闭包并集授权的 dataset IDs
+	// （agent 自身 + 直接挂载的 subagents）。graph 化后 child 与 root 共用
+	// 同一 runtime token，授权集必须覆盖整个部署闭包，否则 root token 请求
+	// child 绑定的 dataset 会被拒。
+	GetAgentKnowledgeClosureDatasets(tenantID, agentName string) ([]string, error)
 }
 
 type jsonRPCRequest struct {
@@ -507,9 +511,9 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, err
 		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
 		return nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
 	}
-	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	allowed, err := h.agentService.GetAgentKnowledgeClosureDatasets(tenantID, agentCfg.Name)
 	if err != nil {
-		log.Printf("knowledge-mcp: get agent knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+		log.Printf("knowledge-mcp: resolve knowledge closure datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
 		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
 	}
 	return allowed, nil

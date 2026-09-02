@@ -60,7 +60,7 @@ type fakeAgentMcpService struct {
 	err      error
 }
 
-func (f *fakeAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
+func (f *fakeAgentMcpService) GetAgentKnowledgeClosureDatasets(tenantID, agentName string) ([]string, error) {
 	return f.datasets, f.err
 }
 
@@ -282,6 +282,58 @@ func TestKnowledgeMcpHandler_ToolsCall_UnauthorizedDataset(t *testing.T) {
 	}
 	if !strings.Contains(resultText(resp.Result), "无权访问") {
 		t.Fatalf("expected unauthorized message, got %v", resp.Result)
+	}
+}
+
+// issue #111 部署闭包授权：graph 化后 child 与 root 共用同一 runtime token，
+// 授权集 = root 自身绑定 ∪ 直接挂载 subagents 的绑定。root token 请求 child
+// 绑定的 dataset 必须放行。
+func TestKnowledgeMcpHandler_ToolsCall_ClosureAuthorizesChildDataset(t *testing.T) {
+	var gotDatasetIDs []string
+	knowledgeSvc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			gotDatasetIDs, _ = req["dataset_ids"].([]string)
+			return &knowledge.RetrievalResult{}, nil
+		},
+	}
+	// 闭包视角：root 绑 ds-root，child 绑 ds-child（并集由 service 层保证）。
+	router := setupKnowledgeMcpRouter(knowledgeSvc, &fakeAgentMcpService{datasets: []string{"ds-child", "ds-root"}})
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if isErrorResult(resp.Result) {
+		t.Fatalf("child dataset must be authorized via deploy closure, got %v", resp.Result)
+	}
+	if len(gotDatasetIDs) != 1 || gotDatasetIDs[0] != "ds-child" {
+		t.Fatalf("retrieval dataset_ids = %v, want [ds-child]", gotDatasetIDs)
+	}
+}
+
+// 闭包外 dataset 仍须拒绝（deny 断言沿用现有 unauthorized 测试方式）。
+func TestKnowledgeMcpHandler_ToolsCall_ClosureDeniesDatasetOutsideClosure(t *testing.T) {
+	router := setupKnowledgeMcpRouter(
+		&fakeKnowledgeMcpService{},
+		&fakeAgentMcpService{datasets: []string{"ds-child", "ds-root"}},
+	)
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-other"]}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
+		t.Fatalf("expected unauthorized isError for dataset outside closure, got %v", resp.Result)
 	}
 }
 
@@ -703,7 +755,7 @@ type tenantAwareAgentMcpService struct {
 	fn func(tenantID, agentName string) ([]string, error)
 }
 
-func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
+func (f *tenantAwareAgentMcpService) GetAgentKnowledgeClosureDatasets(tenantID, agentName string) ([]string, error) {
 	return f.fn(tenantID, agentName)
 }
 
