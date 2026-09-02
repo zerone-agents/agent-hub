@@ -120,19 +120,24 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	// 1. Persist user message and load session metadata
-	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content); err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
-		return
-	}
-	// Name a new session after the first user message (truncated to 20 chars).
-	_ = h.svc.AutoTitleSession(tenantID, sessionID, req.Content)
-
+	// 1. Load session FIRST and verify the agent binding before persisting
+	// anything (issue #94: session.AgentID must match :name — a mismatch
+	// 404s without leaking existence).
 	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
+	if sess.AgentID != agentName {
+		respondError(c, http.StatusNotFound, "session not found")
+		return
+	}
+	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content); err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	// Name a new session after the first user message (truncated to 50 runes).
+	_ = h.svc.AutoTitleSession(tenantID, sessionID, req.Content)
 
 	// 2. Resolve runtime URL and API key
 	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)

@@ -153,3 +153,30 @@ func TestSendMessage_AddressesRuntimeWithDeployKey(t *testing.T) {
 	// The SSE stream was piped through to the client.
 	require.Contains(t, w.Body.String(), `"subtype":"success"`)
 }
+
+// Session-bound-to-other-agent requests must 404 BEFORE persisting anything
+// or dialing the runtime (issue #94 acceptance #1; previously :name was only
+// used for runtime addressing, so a message could land in A's session while
+// streaming from B's runtime).
+func TestSendMessage_RejectsSessionBoundToOtherAgent(t *testing.T) {
+	var runtimePath string
+	h := newAgentChatHandlerWithFakes(t, &runtimePath)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"content":"hi"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	// s-run is bound to agent "min"; address it under a different agent name.
+	c.Params = gin.Params{{Key: "name", Value: "other"}, {Key: "id", Value: "s-run"}}
+
+	h.SendMessage(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Empty(t, runtimePath, "runtime must not be dialed")
+	var count int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ?", "s-run").Count(&count).Error)
+	require.Zero(t, count, "no message may be persisted for a binding mismatch")
+}
