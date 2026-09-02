@@ -437,7 +437,9 @@ const agentRuntimeTokenPlaceholder = "$agent_runtime_token"
 // Header maps are rebuilt rather than mutated in place so the MCP DTOs
 // returned by the MCP service are never modified.
 func (s *AgentDeployerService) resolveMcpHeaders(req *deployer.CreateAgentRequest, token string) {
-	for name, mcp := range req.Agent.McpServers {
+	// TODO(issue #111 task-3): iterate every Agents[i] once the graph is
+	// built; root-only requests carry all MCP servers on Agents[0].
+	for name, mcp := range req.Agents[0].McpServers {
 		if len(mcp.Headers) == 0 {
 			continue
 		}
@@ -446,7 +448,7 @@ func (s *AgentDeployerService) resolveMcpHeaders(req *deployer.CreateAgentReques
 			headers[k] = strings.ReplaceAll(v, agentRuntimeTokenPlaceholder, token)
 		}
 		mcp.Headers = headers
-		req.Agent.McpServers[name] = mcp
+		req.Agents[0].McpServers[name] = mcp
 	}
 }
 
@@ -748,17 +750,10 @@ func (s *AgentDeployerService) buildCreateRequest(
 	subagents []agent.AgentConfig,
 	mcpServers map[string]*McpClientDTO,
 ) (*deployer.CreateAgentRequest, error) {
-	// Build subagent definitions
-	subagentDefs := make([]deployer.SubagentDefinition, 0, len(subagents))
-	for _, sub := range subagents {
-		desc := firstNonEmpty(sub.Description["zh"], sub.Description["en"], sub.Name)
-		subagentDefs = append(subagentDefs, deployer.SubagentDefinition{
-			Name:        sub.Name,
-			Description: desc,
-			Prompt:      sub.SystemPrompt,
-			MaxTurns:    intPtr(sub.MaxTurns),
-		})
-	}
+	// TODO(issue #111 task-3): graph construction — child AgentDefinitions
+	// and the root's subagent id references are assembled here. Until then
+	// the request stays root-only and the parameter is unused.
+	_ = subagents
 
 	// Custom tool artifacts (issue #88): Tools stays the complete allow-list;
 	// CustomTools only carries source=custom && ready rows, sorted by name so
@@ -861,33 +856,33 @@ func (s *AgentDeployerService) buildCreateRequest(
 		agentDatasets[id] = desc
 	}
 
-	// NOTE: settingSources is intentionally left unset. The deployer owns the
-	// decision of when to scan the user skill directory based on the skills
-	// list above; control-panel populating ["user"] here used to race with
-	// that and produced confusing "skill registered twice / not at all"
-	// symptoms. The field stays in the schema (AgentDefinition.SettingSources)
-	// so external clients can still override when needed.
+	// NOTE: settingSources stays unset in this intermediate state (issue
+	// #111): the deployer v3 validation requires ["user"] for agents that
+	// declare skills, and graph construction (task-3) will populate it
+	// accordingly.
+	rootDef := deployer.AgentDefinition{
+		// The deployer container key is the tenant-scoped deploy key
+		// (<org>-<name>) so same-name agents across tenants never collide;
+		// child agents (task-3) keep bare names (runtime-internal logic
+		// names).
+		Name:         DeployKey(tenantID, cfg.Name),
+		Description:  firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
+		Model:        cfg.ModelID,
+		SystemPrompt: cfg.SystemPrompt,
+		MaxTurns:     intPtr(cfg.MaxTurns),
+		// MaxSessionQueries is not populated yet: the domain field is still
+		// named MaxSessionTurns until issue #111 task-2 renames it.
+		PermissionMode: cfg.PermissionMode,
+		Tools:          toolNames,
+		CustomTools:    customToolSources,
+		Skills:         skillSources,
+		McpServers:     mcpServerConfigs,
+		Datasets:       agentDatasets,
+	}
 	req := &deployer.CreateAgentRequest{
-		Agent: deployer.AgentDefinition{
-			// The deployer container key is the tenant-scoped deploy key
-			// (<org>-<name>) so same-name agents across tenants never collide;
-			// subagent definitions above keep bare names (runtime-internal
-			// logic names).
-			Name:            DeployKey(tenantID, cfg.Name),
-			Description:     firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
-			Model:           cfg.ModelID,
-			SystemPrompt:    cfg.SystemPrompt,
-			MaxTurns:        intPtr(cfg.MaxTurns),
-			MaxSessionTurns: cfg.MaxSessionTurns,
-			PermissionMode:  cfg.PermissionMode,
-			Tools:           toolNames,
-			CustomTools:     customToolSources,
-			Skills:          skillSources,
-			Subagents:       subagentDefs,
-			McpServers:      mcpServerConfigs,
-			Datasets:        agentDatasets,
-		},
-		Provider: providerConfig,
+		RootAgentID: rootDef.Name,
+		Agents:      []deployer.AgentDefinition{rootDef},
+		Provider:    providerConfig,
 	}
 
 	if err := s.applyAigc(req, tenantID); err != nil {

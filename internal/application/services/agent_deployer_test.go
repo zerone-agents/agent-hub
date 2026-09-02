@@ -572,15 +572,18 @@ func buildReqWithTools(t *testing.T, tools []*agent.Tool, cdnHost string) (*depl
 func TestBuildCreateRequest_CustomToolsSortedAndToolsFull(t *testing.T) {
 	req, err := buildReqWithTools(t, customToolRecordsFixture(), "https://cdn.example.com")
 	require.NoError(t, err)
+	// v3 graph shape: rootAgentId must match the (single) root definition.
+	require.Equal(t, "t-general", req.RootAgentID)
+	require.Len(t, req.Agents, 1)
 	// Tools = 全量关联名（含 builtin），排序
-	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agent.Tools)
+	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agents[0].Tools)
 	// CustomTools = custom+ready 子集，按名排序，URL=CDN+key
-	require.Len(t, req.Agent.CustomTools, 2)
-	require.Equal(t, "Alpha", req.Agent.CustomTools[0].Name)
-	require.Equal(t, "https://cdn.example.com/tools/t/Alpha/h2.ts", req.Agent.CustomTools[0].URL)
-	require.Equal(t, "h2", req.Agent.CustomTools[0].Hash)
-	require.Equal(t, "a.ts", req.Agent.CustomTools[0].FileName)
-	require.Equal(t, "Zeta", req.Agent.CustomTools[1].Name)
+	require.Len(t, req.Agents[0].CustomTools, 2)
+	require.Equal(t, "Alpha", req.Agents[0].CustomTools[0].Name)
+	require.Equal(t, "https://cdn.example.com/tools/t/Alpha/h2.ts", req.Agents[0].CustomTools[0].URL)
+	require.Equal(t, "h2", req.Agents[0].CustomTools[0].Hash)
+	require.Equal(t, "a.ts", req.Agents[0].CustomTools[0].FileName)
+	require.Equal(t, "Zeta", req.Agents[0].CustomTools[1].Name)
 }
 
 func TestBuildCreateRequest_MissingCustomToolFailsFast(t *testing.T) {
