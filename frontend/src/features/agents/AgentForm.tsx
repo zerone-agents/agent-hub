@@ -344,7 +344,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         {/* 能力配置 */}
         <div className={styles.section} style={{ marginTop: 20 }}>能力配置</div>
         <Form.Item label="最大轮次" name="maxTurns">
-          <InputNumber min={1} max={100} style={{ width: '100%' }} />
+          <InputNumber min={1} max={500} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item label="会话上下文轮次" name="maxSessionTurns" tooltip="控制发送给 LLM 的历史会话轮次数，留空表示无限制">
           <InputNumber min={1} placeholder="无限制" style={{ width: '100%' }} />

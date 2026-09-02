@@ -193,6 +193,35 @@ func setupAgentValidatorTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// TestValidateConfig_MaxTurnsBounds pins the maxTurns range contract shared
+// with the frontend form (1..500). 0/negative and >500 must be rejected;
+// the boundary value 500 and an absent field must pass.
+func TestValidateConfig_MaxTurnsBounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		turns   float64
+		wantErr string
+	}{
+		{"boundary max ok", 500, ""},
+		{"above max rejected", 501, "maxTurns 不能超过 500"},
+		{"negative rejected", -1, "maxTurns 不能为负数"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateConfig(map[string]interface{}{"maxTurns": tc.turns})
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+
+	// Absent field is not validated (legacy payloads may omit it).
+	require.NoError(t, ValidateConfig(map[string]interface{}{}))
+}
+
 // TestValidateConfig_RejectsNonLLMModel is the Task 6 regression: the
 // validator must check the bound model's type via provider_models, not
 // the provider's top-level type. Under the old validator, binding an
