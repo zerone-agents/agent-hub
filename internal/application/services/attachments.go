@@ -15,7 +15,13 @@ const (
 	maxAttachmentNameLen     = 255
 	maxAttachmentMimeLen     = 127
 	MaxAttachmentFileBytes   = 20 << 20
-	uploadsDirPrefix         = ".zerone-uploads/"
+
+	// MaxAttachmentTotalBytes caps the aggregate payload of a single upload
+	// request; the handler's request-body ceiling keeps a separate margin
+	// above it for boundary/headers.
+	MaxAttachmentTotalBytes int64 = 50 << 20
+
+	uploadsDirPrefix = ".zerone-uploads/"
 )
 
 // AttachmentDesc describes a runtime-hosted uploaded file. It is the exact

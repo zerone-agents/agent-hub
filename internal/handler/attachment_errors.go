@@ -34,7 +34,7 @@ func respondAttachmentError(c *gin.Context, err error) {
 	// Details of non-domain errors stay out of the response body but are
 	// logged at this aggregation point so production 500s remain diagnosable.
 	log.Printf("attachment upload failed: %v", err)
-	respondError(c, http.StatusInternalServerError, "upload failed")
+	respondError(c, http.StatusInternalServerError, "上传失败，请稍后重试")
 }
 
 // runtimeAttachmentCode parses a runtime error body {"error","code"} and
@@ -54,17 +54,19 @@ func runtimeAttachmentCode(body string) (string, bool) {
 	return "", false
 }
 
-// runtimeErrorMessage extracts the human-readable message from a runtime
-// error body, falling back to the raw body (truncated).
-func runtimeErrorMessage(body string) string {
-	var payload struct {
-		Error string `json:"error"`
+// runtimeErrorMessage maps a runtime attachment domain code onto a neutral
+// Chinese user-facing message (CONTRIBUTING Standards 1: raw runtime text
+// never reaches the response envelope). The function stays pure — callers
+// log the raw body first and then use the return value; the SendMessage
+// relay and the upload-result mapping share it so both surfaces stay in
+// sync.
+func runtimeErrorMessage(code string) string {
+	switch code {
+	case chat.ErrCodeAttachmentMissing:
+		return "附件已失效，请重新上传"
+	case chat.ErrCodeUploadLimitExceeded:
+		return "附件数量或大小超出限制"
+	default: // invalid_attachment 等其余附件域码
+		return "附件信息无效"
 	}
-	if err := json.Unmarshal([]byte(body), &payload); err != nil || payload.Error == "" {
-		if len(body) > 200 {
-			body = body[:200]
-		}
-		return body
-	}
-	return payload.Error
 }

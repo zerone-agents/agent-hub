@@ -56,8 +56,9 @@ func TestRuntimeAttachmentCode(t *testing.T) {
 }
 
 func TestRuntimeErrorMessage(t *testing.T) {
-	require.Equal(t, "Attachment not found", runtimeErrorMessage(`{"error":"Attachment not found","code":"attachment_missing"}`))
-	require.NotEmpty(t, runtimeErrorMessage(`garbage`))
+	require.Equal(t, "附件已失效，请重新上传", runtimeErrorMessage(chat.ErrCodeAttachmentMissing))
+	require.Equal(t, "附件数量或大小超出限制", runtimeErrorMessage(chat.ErrCodeUploadLimitExceeded))
+	require.Equal(t, "附件信息无效", runtimeErrorMessage(chat.ErrCodeInvalidAttachment))
 }
 
 type assertErr string

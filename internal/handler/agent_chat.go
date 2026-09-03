@@ -137,11 +137,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "content or attachments required")
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请输入文本或添加附件")
 		return
 	}
 	if err := services.ValidateAttachmentDescs(req.Attachments); err != nil {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, err.Error())
+		log.Printf("[chat] rejected attachment descriptors: session=%s err=%v", sessionID, err)
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
 
@@ -150,11 +151,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 404s without leaking existence).
 	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		log.Printf("[chat] send message session lookup failed: tenant=%s session=%s user=%s err=%v",
+			tenantID, sessionID, userID, err)
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	// Upload-record binding (issue #94 review F1)：每个描述符必须与服务端在
@@ -171,7 +174,9 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	msg, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		log.Printf("[chat] save user message failed: tenant=%s session=%s user=%s err=%v",
+			tenantID, sessionID, userID, err)
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	// 会话标题：优先文本；纯附件消息取第一个文件名（issue #94）。
@@ -184,8 +189,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 2. Resolve runtime URL and API key
 	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
+		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）；
+		// 会话历史里的系统错误消息沿用既有模式保留原因。
+		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
+			tenantID, agentName, sessionID, err)
 		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 暂不可用："+err.Error())
-		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
 
@@ -193,6 +202,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// attachments 字段静默忽略——宁可拒绝也不静默丢附件。与 UploadAttachments
 	// 同款无缓存探测。
 	if len(req.Attachments) > 0 && !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
+		// Run 前拒绝与 attachment_missing 同类（Wave A F2 同款回滚）：删除已
+		// 落库的 user message，避免留下无 assistant 回复的孤儿 user turn。
+		// 删除失败仅日志——不该阻塞错误上报。
+		if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
+			log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
+				tenantID, sessionID, msg.ID, delErr)
+		}
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
 			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
 		return
@@ -227,12 +243,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 					log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
 						tenantID, sessionID, msg.ID, delErr)
 				}
-				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(httpErr.Body))
+				log.Printf("[chat] runtime rejected run (pre-run failure): tenant=%s session=%s code=%s body=%s",
+					tenantID, sessionID, code, httpErr.Body)
+				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(code))
 				return
 			}
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
-		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
+		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
+		respondError(c, http.StatusBadGateway, "Runtime 连接失败，请稍后重试")
 		return
 	}
 	defer rc.Close()

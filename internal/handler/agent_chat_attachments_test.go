@@ -272,6 +272,11 @@ func TestSendMessage_AttachmentsRequireNewRuntime(t *testing.T) {
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusNotImplemented, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+	// B3（Wave A F3 遗留）：版本门控拒绝必须回滚已落库的 user message，
+	// 否则历史里留下没有 assistant 回复的孤儿 user turn（与 F2 attachment_missing 同款）。
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "runtime_attachment_unsupported must roll back the persisted user message")
 
 	w = sendMessageForAttachments(t, env, `{"content":"hi"}`, "min", "s-att", "u1")
 	require.Equal(t, http.StatusOK, w.Code, "text-only messages must not be gated")
@@ -300,6 +305,7 @@ func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"attachment_missing"`)
+	require.Contains(t, w.Body.String(), "附件已失效，请重新上传")
 	var errCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&errCount).Error)
 	require.Zero(t, errCount, "attachment_missing must NOT be persisted as a system error message")
@@ -591,6 +597,7 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
+	require.Contains(t, w.Body.String(), "附件数量或大小超出限制")
 }
 
 // seedUploadRecords inserts server-side upload records (the authorization

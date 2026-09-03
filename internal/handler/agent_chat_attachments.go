@@ -20,15 +20,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Hub-side upload limits, enforced INDEPENDENTLY of the runtime (issue #94
-// acceptance: hub 不依赖 runtime 的限额；两边保持同值 10 / 20MB / 50MB）。
-const (
-	uploadMaxFiles      = 10
-	uploadMaxFileBytes  = 20 << 20
-	uploadMaxTotalBytes = 50 << 20
-)
+// 领域限额（附件 10 个 / 单文件 20MB / 总量 50MB）复用 services 包常量——
+// 单一事实来源，与 runtime uploads.ts 保持同值（issue #94 acceptance：hub
+// 独立执行限额，不依赖 runtime；两边只是数值一致）。
 
-// 整个 multipart 请求体硬上限（50MB payload + boundary/headers 余量）；
+// 整个 multipart 请求体硬上限（services.MaxAttachmentTotalBytes 之上留
+// boundary/headers 余量；请求体工程上限非领域限额，故留在 handler）；
 // MaxBytesReader 超限时读错误经 relayMultipart 落 invalid_multipart 400。
 var uploadMaxRequestBytes int64 = 60 << 20
 
@@ -46,31 +43,35 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 
 	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
 	if err != nil {
-		respondError(c, http.StatusNotFound, "session not found")
+		log.Printf("[chat] upload session lookup failed: tenant=%s session=%s user=%s err=%v",
+			tenantID, sessionID, userID, err)
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
-		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		log.Printf("[chat] upload resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
+		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
 	if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-			"runtime does not support attachments (requires >= 2.5.0)")
+			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
 		return
 	}
 
 	mediaType, params, err := mime.ParseMediaType(c.Request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidMultipart, "Content-Type must be multipart/form-data")
+		log.Printf("[chat] upload rejected content-type: %q err=%v", c.Request.Header.Get("Content-Type"), err)
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidMultipart, "上传请求格式错误（需 multipart/form-data）")
 		return
 	}
 	if params["boundary"] == "" {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidMultipart, "missing multipart boundary")
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidMultipart, "上传请求缺少 boundary")
 		return
 	}
 	// 整个请求体总量上限：非 file part 虽被 relayMultipart 跳过，但必须读穿
@@ -120,17 +121,19 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		}
 		// runtime 未产生可透传的响应（连接失败/超时等传输错误）。
 		if res.err != nil {
-			respondError(c, http.StatusBadGateway, "runtime unreachable: "+res.err.Error())
+			log.Printf("[chat] upload relay aborted, transport error: session=%s err=%v", sessionID, res.err)
+			respondError(c, http.StatusBadGateway, "上传服务暂时不可用")
 			return
 		}
-		respondError(c, http.StatusBadGateway, "runtime unreachable")
+		respondError(c, http.StatusBadGateway, "上传服务暂时不可用")
 		return
 	}
 	_ = pw.Close()
 
 	res := <-done
 	if res.err != nil {
-		respondError(c, http.StatusBadGateway, "runtime unreachable: "+res.err.Error())
+		log.Printf("[chat] upload runtime transport error: session=%s err=%v", sessionID, res.err)
+		respondError(c, http.StatusBadGateway, "上传服务暂时不可用")
 		return
 	}
 	defer res.resp.Body.Close()
@@ -149,15 +152,16 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 			break
 		}
 		if err != nil {
-			return chat.NewAttachmentError(chat.ErrCodeInvalidMultipart, "malformed multipart: "+err.Error())
+			log.Printf("[chat] malformed multipart body: %v", err)
+			return chat.NewAttachmentError(chat.ErrCodeInvalidMultipart, "上传数据格式错误")
 		}
 		if part.FileName() == "" {
 			continue // 非文件字段：忽略
 		}
 		files++
-		if files > uploadMaxFiles {
+		if files > services.MaxAttachmentsPerMessage {
 			return chat.NewAttachmentError(chat.ErrCodeUploadLimitExceeded,
-				fmt.Sprintf("too many files: limit is %d", uploadMaxFiles))
+				fmt.Sprintf("附件最多 %d 个", services.MaxAttachmentsPerMessage))
 		}
 
 		hdr := make(textproto.MIMEHeader)
@@ -179,21 +183,21 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 			return err
 		}
 		// LimitReader MAX+1 探测：多读一个字节即超限（tool_artifact.go 同款技巧）
-		n, err := io.Copy(dst, io.LimitReader(part, uploadMaxFileBytes+1))
+		n, err := io.Copy(dst, io.LimitReader(part, services.MaxAttachmentFileBytes+1))
 		if err != nil {
 			// 同上：io.Copy 的错误可能来自读源（客户端断开）或写目标
 			// （runtime 断连/提前关闭 body）；两者都不是客户端 multipart
 			// 解析错误，原样返回避免被误映射成 400 invalid_multipart。
 			return err
 		}
-		if n > uploadMaxFileBytes {
+		if n > services.MaxAttachmentFileBytes {
 			return chat.NewAttachmentError(chat.ErrCodeUploadLimitExceeded,
-				fmt.Sprintf("file %q exceeds the 20MB single-file limit", part.FileName()))
+				fmt.Sprintf("「%s」超过单文件 %dMB 上限", part.FileName(), services.MaxAttachmentFileBytes>>20))
 		}
 		totalBytes += n
-		if totalBytes > uploadMaxTotalBytes {
+		if totalBytes > services.MaxAttachmentTotalBytes {
 			return chat.NewAttachmentError(chat.ErrCodeUploadLimitExceeded,
-				"total upload size exceeds the 50MB request limit")
+				fmt.Sprintf("附件总大小超过 %dMB 上限", services.MaxAttachmentTotalBytes>>20))
 		}
 	}
 	if err := mw.Close(); err != nil {
@@ -214,13 +218,15 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		var parsed struct {
 			Files []services.AttachmentDesc `json:"files"`
 		}
-		if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Files) == 0 || len(parsed.Files) > uploadMaxFiles {
-			respondError(c, http.StatusBadGateway, "unexpected runtime upload response")
+		if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Files) == 0 || len(parsed.Files) > services.MaxAttachmentsPerMessage {
+			log.Printf("[chat] unparseable runtime upload response: session=%s body=%s", sessionID, body)
+			respondError(c, http.StatusBadGateway, "上传服务响应异常")
 			return
 		}
 		for _, f := range parsed.Files {
 			if err := services.ValidateAttachmentDesc(f); err != nil {
-				respondError(c, http.StatusBadGateway, "unexpected runtime upload response")
+				log.Printf("[chat] invalid descriptor in runtime upload response: session=%s err=%v", sessionID, err)
+				respondError(c, http.StatusBadGateway, "上传服务响应异常")
 				return
 			}
 		}
@@ -233,12 +239,14 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		respondCreated(c, gin.H{"files": parsed.Files})
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-			"runtime does not support attachments (requires >= 2.5.0)")
+			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
 	default:
 		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		body := string(bodyBytes)
 		if code, ok := runtimeAttachmentCode(body); ok {
-			respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(body))
+			log.Printf("[chat] runtime upload rejected: session=%s status=%d code=%s body=%s",
+				sessionID, resp.StatusCode, code, body)
+			respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(code))
 			return
 		}
 		// mid-stream abort（runtime 未排空 body 即回响应后关闭连接）：
@@ -247,11 +255,13 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		// runtime 契约中 413 唯一对应 upload_limit_exceeded（见
 		// attachmentHTTPStatus 的双向映射），按状态码兜底保持透传语义。
 		if readErr != nil && resp.StatusCode == http.StatusRequestEntityTooLarge {
+			log.Printf("[chat] runtime 413 body unreadable (mid-stream abort): session=%s readErr=%v", sessionID, readErr)
 			respondErrorCode(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded,
-				"runtime upload rejected the request (limit exceeded)")
+				"附件数量或大小超出限制")
 			return
 		}
-		respondError(c, http.StatusBadGateway, fmt.Sprintf("runtime upload failed: HTTP %d", resp.StatusCode))
+		log.Printf("[chat] runtime upload failed: session=%s status=%d", sessionID, resp.StatusCode)
+		respondError(c, http.StatusBadGateway, "上传服务暂时不可用")
 	}
 }
 
@@ -271,32 +281,40 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 
 	sess, err := h.svc.GetSession(tenantID, userID, sessionID)
 	if err != nil {
-		respondError(c, http.StatusNotFound, "session not found")
+		log.Printf("[chat] attachment content session lookup failed: tenant=%s session=%s user=%s err=%v",
+			tenantID, sessionID, userID, err)
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
 	if err := services.ValidateUploadsPath(pathParam); err != nil {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, err.Error())
+		log.Printf("[chat] attachment content rejected path: session=%s path=%q err=%v", sessionID, pathParam, err)
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
 	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam)
+	if err != nil {
+		log.Printf("[chat] attachment record lookup failed: session=%s path=%q err=%v", sessionID, pathParam, err)
+	}
 	if err != nil || !known {
-		respondError(c, http.StatusNotFound, "attachment not found")
+		respondError(c, http.StatusNotFound, "附件不存在")
 		return
 	}
 	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
-		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
+		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
 
 	resp, err := h.svc.RuntimeClient().ProxyFiles(c.Request.Context(), http.MethodGet, baseURL, apiKey,
 		"/v1/files/content?path="+url.QueryEscape(pathParam), "")
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
+		log.Printf("[chat] attachment content transport error: session=%s path=%q err=%v", sessionID, pathParam, err)
+		respondError(c, http.StatusBadGateway, "附件服务暂时不可用")
 		return
 	}
 	defer resp.Body.Close()
@@ -312,8 +330,10 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		_, _ = io.Copy(c.Writer, resp.Body)
 	case resp.StatusCode == http.StatusNotFound:
 		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
-		respondError(c, http.StatusNotFound, "temporary file no longer available")
+		respondError(c, http.StatusNotFound, "临时文件已不可用")
 	default:
-		respondError(c, http.StatusBadGateway, fmt.Sprintf("runtime file fetch failed: HTTP %d", resp.StatusCode))
+		log.Printf("[chat] attachment content runtime error: session=%s path=%q status=%d",
+			sessionID, pathParam, resp.StatusCode)
+		respondError(c, http.StatusBadGateway, "附件服务暂时不可用")
 	}
 }
