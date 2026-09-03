@@ -103,7 +103,7 @@ func newProxyEngine(port int) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// httptest.Server 固定绑定 127.0.0.1，upstreamHost 即本机回环地址。
-	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), false)
+	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), services.ModeCasdoor)
 	return r
 }
 
@@ -112,7 +112,7 @@ func newProxyEngine(port int) *gin.Engine {
 func newBuiltinProxyEngine(port int) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), true)
+	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), services.ModeBuiltin)
 	return r
 }
 

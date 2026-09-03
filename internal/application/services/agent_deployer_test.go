@@ -717,7 +717,7 @@ func preRegisterKongRoute(fk *fakeKong, key string) {
 func attachFakeKong(s *AgentDeployerService, key string) *fakeKong {
 	fk := newFakeKong()
 	preRegisterKongRoute(fk, key)
-	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, false)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, ModeCasdoor)
 	return fk
 }
 
@@ -801,7 +801,7 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		f := &deployFailureFixture{postStatus: http.StatusInternalServerError}
 		srv := newDeployFailureServer(t, f)
 		defer srv.Close()
-		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+	s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
 	key := DeployKey("default", "general")
 	fk := attachFakeKong(s, key)
 
@@ -907,7 +907,7 @@ func TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute(t *testing.T) 
 	fk := newFakeKong()
 	key := DeployKey("default", "general")
 	preRegisterKongRoute(fk, key)
-	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, false)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, ModeCasdoor)
 
 	// force=true skips the existing-container GET probe; the deploy must die
 	// inside buildCreateRequest on the dangling subagent reference.

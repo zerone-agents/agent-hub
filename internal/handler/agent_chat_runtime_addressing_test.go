@@ -109,7 +109,7 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		"",          // runtimeAPIKey
 		nil, nil, nil,
 		"", "", // chat push key / public URL: 未配置 = 不下发回传段
-		false, // builtinAuth: casdoor-shaped addressing fixture
+		services.ModeCasdoor, // casdoor-shaped addressing fixture
 	)
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),

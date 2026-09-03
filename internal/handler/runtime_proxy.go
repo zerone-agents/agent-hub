@@ -36,13 +36,13 @@ func NewRuntimeProxyHandler(svc *services.RuntimeProxyService) *RuntimeProxyHand
 
 // RegisterRuntimeProxyRoutes mounts the proxy. Called only when Kong is NOT
 // configured (cmd/server/main.go); Kong mode keeps its own route chain.
-// builtinAuth (issue #114) mounts the single-segment public form
+// ModeBuiltin (issue #114) mounts the single-segment public form
 // "/runtime/<agent>" — the implicit default tenant never appears in the URL.
 // The two shapes can't be mounted together: gin forbids conflicting wildcard
 // names at the same prefix position.
-func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService, builtinAuth bool) {
+func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService, authMode services.AuthMode) {
 	h := NewRuntimeProxyHandler(svc)
-	if builtinAuth {
+	if authMode == services.ModeBuiltin {
 		rg := r.Group("/runtime/:agent")
 		rg.Any("/*path", h.ProxyBuiltin)
 		return

@@ -55,7 +55,7 @@ var agentNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // and may contain hyphens — matching both agentNameRe and the defensive
 // orgSlug folding, which can produce hyphenated orgs for legacy tenant rows
 // (registration-side validation restricts new orgs further). Since Task 2
-// every caller passes URLPath(tenantID, name); single-segment bare-name paths
+// every caller passes the scoped public path; single-segment bare-name paths
 // are rejected so no route can claim a cross-tenant bare path.
 var pathRe = regexp.MustCompile(`^/[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+$`)
 
@@ -85,9 +85,33 @@ func DeployKey(tenantID, agentName string) string {
 	return orgSlug(tenantID) + "-" + NormalizeAgentName(agentName)
 }
 
-// URLPath returns the public URL path segment for an agent:
-// "/<org>/<NormalizeAgentName(name)>".
-func URLPath(tenantID, agentName string) string {
+// AuthMode distinguishes the hub's user system and the public-path policy
+// that follows from it (issue #114): ModeBuiltin is the single-tenant system
+// serving bare "/<name>" public paths (the implicit default tenant never
+// surfaces); ModeCasdoor is the multi-org system serving tenant-scoped
+// "/<org>/<name>" paths.
+type AuthMode int
+
+const (
+	// ModeCasdoor is the zero value so zero-initialized constructions and
+	// omitted arguments keep the pre-#114 (scoped) behavior.
+	ModeCasdoor AuthMode = iota
+	ModeBuiltin
+)
+
+// AuthModeFromConfig reports the AuthMode corresponding to the config
+// layer's boolean (cfg.Auth.IsBuiltin()).
+func AuthModeFromConfig(builtin bool) AuthMode {
+	if builtin {
+		return ModeBuiltin
+	}
+	return ModeCasdoor
+}
+
+// ScopedPublicPath returns the tenant-scoped public URL path for an agent:
+// "/<org>/<NormalizeAgentName(name)>". The builtin-mode bare variant is
+// selected by PublicPath (issue #114).
+func ScopedPublicPath(tenantID, agentName string) string {
 	return "/" + orgSlug(tenantID) + "/" + NormalizeAgentName(agentName)
 }
 
@@ -96,11 +120,11 @@ func URLPath(tenantID, agentName string) string {
 // implicit default tenant never leaks into public URLs — while casdoor
 // (multi-org) mode keeps the tenant-scoped "/<org>/<name>" so same-name
 // agents across orgs can never claim each other's path.
-func PublicPath(builtinAuth bool, tenantID, agentName string) string {
-	if builtinAuth {
+func PublicPath(mode AuthMode, tenantID, agentName string) string {
+	if mode == ModeBuiltin {
 		return "/" + NormalizeAgentName(agentName)
 	}
-	return URLPath(tenantID, agentName)
+	return ScopedPublicPath(tenantID, agentName)
 }
 
 // kongAgentRepo is the minimal repository surface needed by KongGatewayService.
@@ -119,16 +143,16 @@ type KongGatewayService struct {
 	routeHost    string // Kong Route host / public URL host
 	repo         kongAgentRepo
 	reconcileSec int
-	// builtinAuth marks the single-tenant auth mode, where public paths are
-	// bare "/<name>" and the implicit default tenant never surfaces (issue
-	// #114). casdoor (multi-org) keeps tenant-scoped "/<org>/<name>".
-	builtinAuth bool
-	logger      *log.Logger
+	// authMode selects the public-path policy (issue #114): ModeBuiltin
+	// serves bare "/<name>" and never surfaces the implicit default tenant;
+	// ModeCasdoor keeps tenant-scoped "/<org>/<name>".
+	authMode AuthMode
+	logger   *log.Logger
 }
 
 // NewKongGatewayService creates a new gateway service. reconcileSec defaults to
 // 300 seconds when non-positive.
-func NewKongGatewayService(client kongClient, serviceHost, routeHost string, repo kongAgentRepo, reconcileSec int, builtinAuth bool) *KongGatewayService {
+func NewKongGatewayService(client kongClient, serviceHost, routeHost string, repo kongAgentRepo, reconcileSec int, authMode AuthMode) *KongGatewayService {
 	if reconcileSec <= 0 {
 		reconcileSec = 300
 	}
@@ -148,7 +172,7 @@ func NewKongGatewayService(client kongClient, serviceHost, routeHost string, rep
 		routeHost:    routeHost,
 		repo:         repo,
 		reconcileSec: reconcileSec,
-		builtinAuth:  builtinAuth,
+		authMode:     authMode,
 		logger:       log.Default(),
 	}
 }
@@ -158,7 +182,7 @@ func (s *KongGatewayService) enabled() bool { return s != nil && s.client != nil
 // publicPath is this service's mode-aware view of an agent's public path
 // (issue #114): builtin "/<name>", casdoor "/<org>/<name>".
 func (s *KongGatewayService) publicPath(tenantID, agentName string) string {
-	return PublicPath(s.builtinAuth, tenantID, agentName)
+	return PublicPath(s.authMode, tenantID, agentName)
 }
 
 func svcName(agentName string) string   { return "agent-" + agentName }
@@ -238,7 +262,7 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath strin
 	// casdoor requires two+ segments (pathRe); builtin mode additionally
 	// admits the single-segment "/<name>" form (issue #114) — single-tenant,
 	// so no cross-tenant bare-path claim can exist.
-	if !pathRe.MatchString(publicPath) && !(s.builtinAuth && barePathRe.MatchString(publicPath)) {
+	if !pathRe.MatchString(publicPath) && !(s.authMode == ModeBuiltin && barePathRe.MatchString(publicPath)) {
 		s.logger.Printf("kong: skip register %s, invalid public path %q", key, publicPath)
 		return nil
 	}

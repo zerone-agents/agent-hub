@@ -186,7 +186,7 @@ func main() {
 		cfg.Deployer.PublicHost,
 		repository.NewAgentRepository(),
 		cfg.Kong.ReconcileSec,
-		cfg.Auth.IsBuiltin(),
+		services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
 	)
 
 	var knowledgeEngine knowledgedomain.KnowledgeEngine
@@ -218,7 +218,7 @@ func main() {
 		aigcConfigSvc,
 		cfg.ChatPush.APIKey,
 		cfg.ChatPush.PublicURL,
-		cfg.Auth.IsBuiltin(),
+		services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
 	)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
@@ -618,7 +618,7 @@ func main() {
 	// register /runtime/* (falls to NoRoute → 302 /static).
 	if cfg.Kong.AdminURL == "" {
 		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
-		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, cfg.Auth.IsBuiltin())
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()))
 	}
 
 	// 未匹配路由重定向到前端 SPA

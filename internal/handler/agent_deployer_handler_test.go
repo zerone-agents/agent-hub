@@ -58,7 +58,7 @@ func deployHandlerForTest(dep deployerForTest) gin.HandlerFunc {
 
 		resp, err := dep.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 		if err != nil {
-			respondError(c, deployerErrorStatus(err), err.Error())
+			respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 			return
 		}
 		respondSuccess(c, resp)
@@ -158,16 +158,18 @@ func TestDeployAgent_DeployerHTTPErrorMapping(t *testing.T) {
 			wantBody:   "agent not found",
 		},
 		{
-			name:       "capability gate: legacy deployer sentinel maps to 503",
+			// User-facing copy is Chinese (CONTRIBUTING.md); the English
+			// sentinel stays in the log via deployerErrorMessage.
+			name:       "capability gate: legacy deployer sentinel maps to 503 with Chinese copy",
 			deployErr:  fmt.Errorf("deploy agent failed: %w", services.ErrDeployerNoDeploymentKey),
 			wantStatus: http.StatusServiceUnavailable,
-			wantBody:   "deploymentKey",
+			wantBody:   "版本过低",
 		},
 		{
-			name:       "capability gate: probe transport failure maps to 502",
+			name:       "capability gate: probe transport failure maps to 502 with Chinese copy",
 			deployErr:  fmt.Errorf("deployer capability check failed: dial tcp 127.0.0.1:8080: connection refused"),
 			wantStatus: http.StatusBadGateway,
-			wantBody:   "deployer capability check failed",
+			wantBody:   "能力校验",
 		},
 		{
 			name:       "legacy fallback: unknown error still 500",
@@ -199,3 +201,26 @@ func TestDeployAgent_DeployerHTTPErrorMapping(t *testing.T) {
 // Compile-time assertion that the production service satisfies the seam used
 // by this test, so the test stays faithful to the real Deploy signature.
 var _ deployerForTest = (*services.AgentDeployerService)(nil)
+
+// TestDeployAgent_CapabilityGateErrorsAreChinese pins the CONTRIBUTING.md
+// contract for the issue #114 capability gate: user-facing errors in
+// Chinese — the English sentinel / wrapped technical detail must stay out
+// of the response body (it lives in the server log).
+func TestDeployAgent_CapabilityGateErrorsAreChinese(t *testing.T) {
+	for _, deployErr := range []error{
+		fmt.Errorf("deploy agent failed: %w", services.ErrDeployerNoDeploymentKey),
+		fmt.Errorf("deployer capability check failed: dial tcp 127.0.0.1:8080: connection refused"),
+	} {
+		fake := &fakeDeployer{err: deployErr}
+		router := setupDeployRouter(fake)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents/demo/deploy", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		body := rec.Body.String()
+		if strings.Contains(body, "deploymentKey") || strings.Contains(body, "capability check") {
+			t.Fatalf("English technical detail leaked to the API response: %s", body)
+		}
+	}
+}

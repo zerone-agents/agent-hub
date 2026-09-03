@@ -374,7 +374,7 @@ func TestGatewayHealthCache_ScopedByTenant(t *testing.T) {
 func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 	s := &AgentDeployerService{
 		publicHost: "10.0.0.1",
-		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60, false),
+		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60, ModeCasdoor),
 	}
 	dto := s.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
 	want := "https://deploy.example.com/zerone/assistant"
@@ -394,7 +394,7 @@ func TestToDTO_NoKongRunningReturnsRelativeRuntimeURL(t *testing.T) {
 func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
 	// builtin mode omits the implicit default tenant from public URLs
 	// (issue #114): /runtime/<name>, not /runtime/default/<name>.
-	s := &AgentDeployerService{publicHost: "203.0.113.10", builtinAuth: true}
+	s := &AgentDeployerService{publicHost: "203.0.113.10", authMode: ModeBuiltin}
 	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/test", dto.RuntimeURL)
@@ -425,7 +425,7 @@ func registerWhenHealthyFixture(t *testing.T) (*AgentDeployerService, *fakeKong)
 		publicHost:    "10.0.0.1",
 		healthProbe:   func(ctx context.Context, host string, port int) bool { return false },
 		gatewayHealth: &sync.Map{},
-		kongSvc:       NewKongGatewayService(fk, "agent-runtime", "", newMemRepo(nil), 60, false),
+		kongSvc:       NewKongGatewayService(fk, "agent-runtime", "", newMemRepo(nil), 60, ModeCasdoor),
 	}, fk
 }
 
