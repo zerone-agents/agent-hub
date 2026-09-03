@@ -434,6 +434,12 @@ func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, key stri
 // substitutes the real token before sending the create request.
 const agentRuntimeTokenPlaceholder = "$agent_runtime_token"
 
+// agentIdentityHeader mirrors the handler-side constant of the same name
+// (internal/handler knowledge_mcp.go): the deployment-trusted per-agent
+// identity carried on the built-in knowledge MCP's connection headers.
+// Both packages hold their own copy — changes must stay in sync.
+const agentIdentityHeader = "X-Agent-Id"
+
 // resolveMcpHeaders replaces the $agent_runtime_token placeholder in MCP
 // server header values with the actual runtime token being deployed, across
 // every agent node of the graph — mounted agents carry their own MCP servers
@@ -454,6 +460,30 @@ func (s *AgentDeployerService) resolveMcpHeaders(req *deployer.CreateAgentReques
 			req.Agents[i].McpServers[name] = mcp
 		}
 	}
+}
+
+// knowledgeMcpHeaders returns the connection headers for one MCP server,
+// injecting the deployment-trusted per-agent identity on the built-in
+// knowledge MCP (issue #111 review P1-1). The hub-side authorizer resolves
+// the identity tenant-scoped and grants only that node's own dataset
+// bindings, so every graph node — root included — carries its DB bare name
+// (never the root's deploy key). The runtime can only call knowledge_search
+// with dataset_ids arguments and cannot forge connection headers, which is
+// what makes this header deployment-trusted. The key is owned exclusively
+// by the deployment: a same-named key configured on the MCP server is
+// overridden. The map is rebuilt rather than mutated so the MCP service
+// DTO stays untouched, mirroring resolveMcpHeaders (which in turn preserves
+// this key — its value carries no placeholder).
+func knowledgeMcpHeaders(mcpName string, src map[string]string, agentName string) map[string]string {
+	if mcpName != "knowledge" {
+		return src
+	}
+	headers := make(map[string]string, len(src)+1)
+	for k, v := range src {
+		headers[k] = v
+	}
+	headers[agentIdentityHeader] = agentName
+	return headers
 }
 
 // generateRuntimeToken returns a cryptographically random 32-char hex token,
@@ -826,7 +856,7 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		mcpServerConfigs[name] = deployer.McpServerConfig{
 			Type:    mcp.Type,
 			URL:     mcp.URL,
-			Headers: mcp.Headers,
+			Headers: knowledgeMcpHeaders(name, mcp.Headers, cfg.Name),
 		}
 	}
 	def.McpServers = mcpServerConfigs

@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +14,6 @@ import (
 	"control-panel/internal/domain/provider"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/database"
-	"log"
 )
 
 // AgentService provides business logic for managing agent configurations.
@@ -874,57 +875,38 @@ func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]
 	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 }
 
-// GetAgentKnowledgeClosureDatasets 返回 agent 部署闭包授权的 dataset IDs：
-// agent 自身绑定 ∪ 直接挂载 subagents 的绑定（UpdateSubagents 不变式保证
-// 部署图只有 root + 直接 children 两层，一层展开即与部署闭包一致）。
-// 并集去重后排序，便于调用方缓存与测试断言稳定。
-// subagent 名字 tenant-scoped 解析失败（存量脏数据；新数据由部署校验拦截）
-// 时跳过该成员并记日志——单个坏引用不能让整个 root 的知识检索失败。
+// GetAgentKnowledgeDatasetsForRequest resolves the dataset ids the requesting
+// identity may access. tokenAgentName is the agent whose runtime token was
+// presented; requestingID is the deployment-trusted X-Agent-Id (falls back
+// to tokenAgentName itself when absent). requestingID must be the token
+// agent itself or one of its direct subagents; the granted set is the
+// requesting agent's OWN bindings only — never a closure union.
 // 日志不含 token/headers。
-func (s *AgentService) GetAgentKnowledgeClosureDatasets(tenantID, agentName string) ([]string, error) {
-	agentCfg, err := s.repo.GetByName(tenantID, agentName)
+func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+	agentCfg, err := s.repo.GetByName(tenantID, tokenAgentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
+		return nil, fmt.Errorf("Agent '%s' 不存在: %w", tokenAgentName, err)
 	}
-
-	seen := make(map[string]struct{})
-	closure := make([]string, 0, 8)
-	add := func(datasetIDs []string) {
-		for _, id := range datasetIDs {
-			if _, dup := seen[id]; !dup {
-				seen[id] = struct{}{}
-				closure = append(closure, id)
-			}
-		}
+	if requestingID == "" {
+		requestingID = tokenAgentName
 	}
-
-	own, err := s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
-	if err != nil {
-		return nil, fmt.Errorf("查询 Agent '%s' 知识库绑定失败: %w", agentName, err)
-	}
-	add(own)
-
-	subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
-	if err != nil {
-		return nil, fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", agentName, err)
-	}
-	for _, subName := range subagentNames {
-		subCfg, err := s.repo.GetByName(tenantID, subName)
+	if requestingID != tokenAgentName {
+		subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
 		if err != nil {
-			// 存量脏数据（跨租户/悬空引用）：部署时已有显式校验兜底，
-			// 授权路径跳过该成员，保证 root 其余闭包成员仍可用。
-			log.Printf("knowledge closure: skip unresolvable subagent %q (agent=%s tenant=%s): %v", subName, agentName, tenantID, err)
-			continue
+			return nil, fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", tokenAgentName, err)
 		}
-		subDatasets, err := s.repo.GetKnowledgeDatasetIDsByAgent(subCfg.ID)
-		if err != nil {
-			return nil, fmt.Errorf("查询子代理 '%s' 知识库绑定失败: %w", subName, err)
+		// 先 tenant-scoped 解析（悬空/跨租户引用在此暴露），再比对直接挂载
+		// 成员；任一失败都 fail-closed，与「非成员」保持同一对外语义。
+		reqCfg, resolveErr := s.repo.GetByName(tenantID, requestingID)
+		if resolveErr != nil {
+			log.Printf("knowledge auth: resolve requesting identity %q failed (agent=%s tenant=%s): %v", requestingID, tokenAgentName, tenantID, resolveErr)
 		}
-		add(subDatasets)
+		if resolveErr != nil || !slices.Contains(subagentNames, requestingID) {
+			return nil, fmt.Errorf("请求身份 %q 不属于 Agent %q 的部署图", requestingID, tokenAgentName)
+		}
+		agentCfg = reqCfg
 	}
-
-	sort.Strings(closure)
-	return closure, nil
+	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 }
 
 // UpdateAgentKnowledgeDatasets replaces the dataset bindings for an agent and

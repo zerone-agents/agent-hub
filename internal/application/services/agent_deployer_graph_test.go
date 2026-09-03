@@ -56,6 +56,22 @@ func (m *graphKnowledgeSvc) GetDataset(ctx context.Context, id string) (*knowled
 	return nil, fmt.Errorf("dataset %s not found", id)
 }
 
+// graphKnowledgeMcp mimics the built-in knowledge MCP as GetClientMcpsByAgent
+// serves it per-agent (headers already decrypted). The stale X-Agent-Id decoy
+// mimics a same-named key configured on the MCP server — the deployment owns
+// that key exclusively and must override it with the node's own identity
+// (issue #111 review F1).
+func graphKnowledgeMcp() *McpClientDTO {
+	return &McpClientDTO{
+		Name: "knowledge", Type: "http", URL: "https://hub.example.com/api/v1/knowledge/mcp",
+		Headers: map[string]string{
+			"Authorization": BuiltinKnowledgeAuthHeader,
+			"X-Agent-Id":    "stale-configured-identity",
+		},
+		Tools: builtinKnowledgeTools,
+	}
+}
+
 // ── fixture universe ──────────────────────────────────────────────────────
 
 // graphWorld is the in-memory tenant-isolated agent universe: agents keyed by
@@ -182,6 +198,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 	w.mcps["tenant-a/parent"] = map[string]*McpClientDTO{
 		"parent-mcp": {Name: "parent-mcp", Type: "http", URL: "https://mcp.example.com/parent",
 			Tools: []McpTool{{Name: "parent_lookup"}}},
+		"knowledge": graphKnowledgeMcp(),
 	}
 	w.skills[parent.ID] = []*skill.Skill{
 		{Name: "parent-skill", URL: "skills/tenant-a/parent-skill/phash", FileHash: "2222222222222222222222222222222222222222222222222222222222222222"},
@@ -199,6 +216,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 	w.mcps["tenant-a/child-a"] = map[string]*McpClientDTO{
 		"child-a-mcp": {Name: "child-a-mcp", Type: "sse", URL: "https://mcp.example.com/child-a",
 			Tools: []McpTool{{Name: "child_lookup"}}},
+		"knowledge": graphKnowledgeMcp(),
 	}
 	w.skills[childA.ID] = []*skill.Skill{
 		{Name: "child-a-skill", URL: "skills/tenant-a/child-a-skill/chash", FileHash: "4444444444444444444444444444444444444444444444444444444444444444"},
@@ -275,7 +293,8 @@ func graphSourceNames(t *testing.T, node map[string]any, key string) []string {
 
 // TestDeploy_AgentGraph is the happy-path matrix (brief Step 1 assertions
 // 1-6 and 8). Assertion 7 lives in TestLoadAgentGraph_ValidationMatrix and
-// assertion 9 in TestUpdateSubagents_OneLevelInvariants.
+// assertion 9 in TestUpdateSubagents_OneLevelInvariants. Assertion 10 (review
+// F1) locks the per-node deployment identity on the knowledge MCP headers.
 func TestDeploy_AgentGraph(t *testing.T) {
 	t.Run("1: body is rootAgentId + agents[] with no legacy top-level keys", func(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
@@ -373,6 +392,35 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
 		root := graphAgents(t, body)[0]
 		require.Equal(t, float64(42), root["maxSessionQueries"])
+	})
+
+	t.Run("10: knowledge MCP headers carry each node's deployment identity", func(t *testing.T) {
+		body, f := deployGraphParent(t, buildGraphFixture(t))
+		nodes := graphAgents(t, body)
+		require.Len(t, nodes, 3)
+
+		knowledgeHeaders := func(t *testing.T, node map[string]any) map[string]any {
+			t.Helper()
+			servers, ok := node["mcpServers"].(map[string]any)
+			require.True(t, ok, "node should carry mcpServers, got %T", node["mcpServers"])
+			knowledge, ok := servers["knowledge"].(map[string]any)
+			require.True(t, ok, "knowledge MCP should be mounted, got %T", servers["knowledge"])
+			headers, ok := knowledge["headers"].(map[string]any)
+			require.True(t, ok, "knowledge MCP should carry headers, got %T", knowledge["headers"])
+			return headers
+		}
+
+		// Root carries its DB bare name — NOT the tenant-scoped deploy key
+		// "tenant-a-parent": the hub authorizer resolves X-Agent-Id with a
+		// tenant-scoped GetByName, and the deploy key is not a DB name.
+		// Equality against "parent" also proves the stale same-named key
+		// configured on the MCP server (fixture decoy) was overridden.
+		require.Equal(t, "parent", knowledgeHeaders(t, nodes[0])["X-Agent-Id"])
+		// Child carries its own bare name, never the root's.
+		require.Equal(t, "child-a", knowledgeHeaders(t, nodes[1])["X-Agent-Id"])
+		// resolveMcpHeaders must preserve the injected identity key while
+		// substituting the Authorization placeholder with the real token.
+		require.Equal(t, "Bearer "+f.sentToken(t), knowledgeHeaders(t, nodes[0])["Authorization"])
 	})
 }
 

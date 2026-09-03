@@ -76,11 +76,11 @@ func TestMaxSessionQueriesConfigKeys(t *testing.T) {
 	})
 }
 
-// setupAgentKnowledgeClosureTestDB 起 sqlite 内存库，建齐
-// GetAgentKnowledgeClosureDatasets 触碰的三张表：agents、agent_subagents、
+// setupAgentKnowledgeAuthTestDB 起 sqlite 内存库，建齐
+// GetAgentKnowledgeDatasetsForRequest 触碰的三张表：agents、agent_subagents、
 // agent_knowledge_datasets。与 setupSubagentToolsTestDB 同款裸 SQL 方案
 // （sqlite 索引名全局唯一，AutoMigrate 会撞 uk_name）。
-func setupAgentKnowledgeClosureTestDB(t *testing.T) *gorm.DB {
+func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -149,65 +149,105 @@ func mustCreateAgent(t *testing.T, tenantID, name string) *agent.AgentConfig {
 	return cfg
 }
 
-// 部署闭包并集：root 自身绑定 ∪ 直接 children 绑定，去重 + 排序稳定化；
-// 同时锁定原 GetAgentKnowledgeDatasets 语义未动（detail 展示用自身绑定）。
-func TestGetAgentKnowledgeClosureDatasets_UnionDedupSorted(t *testing.T) {
-	setupAgentKnowledgeClosureTestDB(t)
-	agentRepo := repository.NewAgentRepository()
-	root := mustCreateAgent(t, "default", "root")
-	child := mustCreateAgent(t, "default", "child")
-	require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{child.ID}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-shared", "ds-root"}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(child.ID, []string{"ds-child", "ds-shared"}))
+// GetAgentKnowledgeDatasetsForRequest 按「部署时受信的请求身份」授权：
+// requestingID 必须是 token agent 自身或其直接挂载的 subagent，授权集
+// 永远只是该身份自己的绑定（issue #111 review P1-1：部署闭包并集语义
+// 已废弃——child 不得访问 parent/sibling 的 dataset，root 也不得访问
+// child 的）。
+func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
+	newFixture := func(t *testing.T) (*AgentService, *repository.AgentRepository) {
+		t.Helper()
+		setupAgentKnowledgeAuthTestDB(t)
+		agentRepo := repository.NewAgentRepository()
+		root := mustCreateAgent(t, "default", "root")
+		childA := mustCreateAgent(t, "default", "child-a")
+		childB := mustCreateAgent(t, "default", "child-b")
+		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{childA.ID, childB.ID}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root", "ds-shared"}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childA.ID, []string{"ds-child", "ds-shared"}))
+		return NewAgentService("test-encryption-key"), agentRepo
+	}
 
-	svc := NewAgentService("test-encryption-key")
-	got, err := svc.GetAgentKnowledgeClosureDatasets("default", "root")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"ds-child", "ds-root", "ds-shared"}, got)
+	t.Run("token agent 自身 → 仅自身绑定", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "root")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"ds-root", "ds-shared"}, got)
+		assert.NotContains(t, got, "ds-child", "root must not reach child datasets under identity auth")
+	})
 
-	// 原函数保持"自身绑定"语义：不含 child 的 dataset。
-	selfOnly, err := svc.GetAgentKnowledgeDatasets("default", "root")
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"ds-root", "ds-shared"}, selfOnly)
-}
+	t.Run("直接 child 身份 → 仅 child 自身绑定（parent/sibling 均不可达）", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "child-a")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"ds-child", "ds-shared"}, got)
+		assert.NotContains(t, got, "ds-root", "child must not reach parent datasets")
 
-// 存量脏引用（agent_subagents 指向别租户 agent）不得让 root 的知识检索整体
-// 失败：跳过该成员回退自身绑定，别租户 dataset 不进并集。新数据由部署
-// 校验拦截，鉴权路径 fail-safe。
-func TestGetAgentKnowledgeClosureDatasets_SkipsUnresolvableSubagent(t *testing.T) {
-	setupAgentKnowledgeClosureTestDB(t)
-	agentRepo := repository.NewAgentRepository()
-	root := mustCreateAgent(t, "default", "root")
-	ghost := mustCreateAgent(t, "tenant-b", "ghost")
-	// repo 层 ReplaceSubagents 不做租户校验（校验在 service UpdateSubagents），
-	// 直接种入脏引用模拟存量数据：GetSubagents 的 JOIN 能取到名字，但
-	// default 租户下 GetByName 解析失败。
-	require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{ghost.ID}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(ghost.ID, []string{"ds-ghost"}))
+		// 挂载但无绑定的 sibling：空集而非并集。
+		gotB, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "child-b")
+		require.NoError(t, err)
+		assert.Empty(t, gotB, "mounted child with no bindings grants nothing")
+	})
 
-	svc := NewAgentService("test-encryption-key")
-	got, err := svc.GetAgentKnowledgeClosureDatasets("default", "root")
-	require.NoError(t, err, "single bad reference must not fail the whole closure")
-	assert.Equal(t, []string{"ds-root"}, got)
-}
+	t.Run("未挂载的同租户 agent 身份 → 拒绝", func(t *testing.T) {
+		svc, agentRepo := newFixture(t)
+		outsider := mustCreateAgent(t, "default", "outsider")
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(outsider.ID, []string{"ds-outsider"}))
 
-// 同名 agent 跨租户隔离：闭包成员解析全部 tenant-scoped，tenant-b 同名
-// agent 的 dataset 不得混入 default 租户 root 的授权集。
-func TestGetAgentKnowledgeClosureDatasets_TenantScopedResolution(t *testing.T) {
-	setupAgentKnowledgeClosureTestDB(t)
-	agentRepo := repository.NewAgentRepository()
-	root := mustCreateAgent(t, "default", "root")
-	childDefault := mustCreateAgent(t, "default", "shared-name")
-	childTenantB := mustCreateAgent(t, "tenant-b", "shared-name")
-	require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{childDefault.ID}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childDefault.ID, []string{"ds-child"}))
-	require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childTenantB.ID, []string{"ds-tenant-b"}))
+		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "outsider")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "不属于")
+	})
 
-	svc := NewAgentService("test-encryption-key")
-	got, err := svc.GetAgentKnowledgeClosureDatasets("default", "root")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"ds-child", "ds-root"}, got)
-	assert.NotContains(t, got, "ds-tenant-b")
+	t.Run("跨租户脏引用 → fail-closed 拒绝", func(t *testing.T) {
+		setupAgentKnowledgeAuthTestDB(t)
+		agentRepo := repository.NewAgentRepository()
+		root := mustCreateAgent(t, "default", "root")
+		ghost := mustCreateAgent(t, "tenant-b", "ghost")
+		// repo 层 ReplaceSubagents 不做租户校验（校验在 service UpdateSubagents），
+		// 直接种入脏引用模拟存量数据：GetSubagents 的 JOIN 能取到名字，但
+		// default 租户下 GetByName 解析失败——必须是明确拒绝而非旧闭包的
+		// 跳过语义。
+		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{ghost.ID}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(ghost.ID, []string{"ds-ghost"}))
+
+		svc := NewAgentService("test-encryption-key")
+		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "ghost")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "不属于")
+	})
+
+	t.Run("同名跨租户身份解析 tenant-scoped", func(t *testing.T) {
+		setupAgentKnowledgeAuthTestDB(t)
+		agentRepo := repository.NewAgentRepository()
+		root := mustCreateAgent(t, "default", "root")
+		childDefault := mustCreateAgent(t, "default", "shared-name")
+		childTenantB := mustCreateAgent(t, "tenant-b", "shared-name")
+		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{childDefault.ID}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childDefault.ID, []string{"ds-child"}))
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childTenantB.ID, []string{"ds-tenant-b"}))
+
+		svc := NewAgentService("test-encryption-key")
+		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "shared-name")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"ds-child"}, got)
+		assert.NotContains(t, got, "ds-tenant-b")
+	})
+
+	t.Run("requestingID 为空回退 token agent 自身", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"ds-root", "ds-shared"}, got)
+	})
+
+	t.Run("token agent 不存在", func(t *testing.T) {
+		setupAgentKnowledgeAuthTestDB(t)
+		svc := NewAgentService("test-encryption-key")
+		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "no-such-agent", "no-such-agent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "不存在")
+	})
 }
