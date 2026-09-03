@@ -186,8 +186,9 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       permissionMode: v.permissionMode,
       maxTurns: v.maxTurns,
       maxSessionQueries: v.maxSessionQueries ?? undefined,
-      // 空数组不下发——与 hub 侧「未配置」语义对齐，避免存 '[]'
-      disallowedTools: v.disallowedTools?.length ? v.disallowedTools : undefined,
+      // undefined（新建未触碰）→ 不下发 key（hub 视为未配置）；编辑态清空后 antd Select 值为 []，
+      // 必须显式发空数组——hub applyUpdateConfig 对 absent key 不变更，丢 key 会让清空静默失效
+      disallowedTools: v.disallowedTools ?? undefined,
       title: v.titleZh ? { zh: v.titleZh, ...(v.titleEn ? { en: v.titleEn } : {}) } : undefined,
       description: v.descriptionZh
         ? { zh: v.descriptionZh, ...(v.descriptionEn ? { en: v.descriptionEn } : {}) }
