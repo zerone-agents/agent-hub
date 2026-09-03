@@ -61,6 +61,16 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
+	// 空 containerID fail-closed（issue #94 review R4 P1-2）：deployer 未报告
+	// 容器代次 ⇒ 不发起上传、不落记录。空代次记录会在发送侧对「历史空
+	// 记录 + 当前空 ID」判相等放行（fail-open），源头拒绝才能让三个附件
+	// 入口语义一致：当前代次未知 ⇒ 附件一律不可用。
+	if containerID == "" {
+		log.Printf("[chat] upload rejected, empty container generation: tenant=%s agent=%s session=%s",
+			tenantID, agentName, sessionID)
+		respondError(c, http.StatusServiceUnavailable, "部署状态异常，附件暂不可用，请稍后重试")
+		return
+	}
 	if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
 			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
@@ -305,6 +315,15 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
 		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
+		return
+	}
+	// 空 containerID 显式早退（issue #94 review R4 P1-2）：SessionHasAttachment
+	// 对空代次已失败关闭（下方 known=false → 404），这里在 handler 层显式化，
+	// 使三个附件入口的空代次策略一致可见。
+	if containerID == "" {
+		log.Printf("[chat] attachment content rejected, empty container generation: tenant=%s agent=%s session=%s",
+			tenantID, agentName, sessionID)
+		respondError(c, http.StatusNotFound, "临时文件已不可用")
 		return
 	}
 	// 部署代次绑定（issue #94 review R3）：上传记录只授权创建它的容器代次

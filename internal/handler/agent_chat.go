@@ -182,6 +182,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// 空 containerID fail-closed（issue #94 review R4 P1-2）：deployer 未报告
+	// 容器代次 ⇒ 代次授权锚点缺失。若放行到记录校验，「历史空代记录 + 当前
+	// 空 ID」会判相等通过（fail-open）——入口统一拒绝；纯文本消息不受影响。
+	if len(req.Attachments) > 0 && containerID == "" {
+		log.Printf("[chat] send rejected, empty container generation: tenant=%s agent=%s session=%s",
+			tenantID, agentName, sessionID)
+		respondError(c, http.StatusServiceUnavailable, "部署状态异常，附件暂不可用，请稍后重试")
+		return
+	}
+
 	// 3. 附件能力门控（issue #94 review F3）：/health 版本探测。旧 runtime
 	//（< 2.5.0）对 run 请求的 attachments 字段静默忽略——宁可拒绝也不静默
 	// 丢附件。探测先于持久化：拒绝时还没有任何已落库内容需要回滚。纯文本
@@ -201,10 +211,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 路径，旧代记录不能再授权（否则读到的是新上传者的字节）。`.zerone-uploads`
 	// 是同 Agent runtime 容器内所有用户共享的目录——仅做语法校验就落库的
 	// 话，伪造描述符即可把他人 path 写进自己会话再经内容代理下载。
+	// rec.ContainerID == "" 恒拒（review R4 P1-2）：升级前落库的历史空代
+	// 记录一律无效——空对空判相等的放行口子从记录侧也封死。
 	for _, a := range req.Attachments {
 		rec, err := h.svc.GetUploadRecord(tenantID, userID, sessionID, a.ID)
 		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path ||
-			rec.ContainerID != containerID {
+			rec.ContainerID == "" || rec.ContainerID != containerID {
 			respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
 				"附件信息无效或已失效，请重新上传")
 			return

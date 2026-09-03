@@ -861,3 +861,82 @@ func TestUploadRecords_RecreateBetweenUploadAndUseRejected(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 	require.False(t, runtimeHit, "stale-generation record must fail closed before dialing the runtime")
 }
+
+// R4 P1-2（空代次统一失败关闭）：deployer 未报告容器代次（containerId 空）
+// 时上传入口失败关闭——503、不发起上传（runtime 零拨号）、不落任何记录
+// （空代次记录会让后续代次判等出现「空对空」放行的 fail-open 口子）。
+func TestUploadAttachments_EmptyContainerIDRejected(t *testing.T) {
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			fakeUploadOK(w, r)
+		},
+	})
+	*env.containerID = ""
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "部署状态异常")
+	require.False(t, runtimeHit, "upload must not be relayed when the container generation is unknown")
+	var recCount int64
+	require.NoError(t, database.DB.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-att").Count(&recCount).Error)
+	require.Zero(t, recCount, "no upload record may be persisted for an unknown generation")
+}
+
+// R4 P1-2（空代次统一失败关闭，SendMessage 两段）：
+// ① deployer 报告 containerId 空 + 手插 container_id="" 的历史空代记录，
+// 发送带描述符 → 入口先拒 503（版本探测/记录校验之前），零 user message；
+// ② deployer 报告非空代次但记录是空代 → 记录校验恒拒 400 invalid_attachment
+// （历史空代记录一律无效，「空对空」判相等的放行口子从记录侧也封死）。
+func TestSendMessage_EmptyContainerIDAndLegacyEmptyRecordFailClosed(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+
+	// ① 当前代次未知：手插升级前落库的历史空代记录，入口 503。
+	*env.containerID = ""
+	require.NoError(t, database.DB.Create(&chat.UploadRecord{
+		ID: "f-legacy", TenantID: chatTestTenant, SessionID: "s-att", UserID: "u1",
+		Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt",
+		ContainerID: "", // 历史空代记录（升级前落库）
+		CreatedAt:   time.Now(),
+	}).Error)
+	body := `{"content":"","attachments":[{"id":"f-legacy","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "部署状态异常")
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "unknown generation must not persist a user message")
+
+	// ② 当前代次已知（ctr-gen-1）但记录仍是空代 → 400，历史空记录恒无效。
+	*env.containerID = attachmentContainerGen1
+	w = sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "legacy empty-generation records must never authorize a send")
+}
+
+// R4 P1-2（下载侧直达回归）：空 containerID + 手插空代记录 → 404 且不拨号
+// runtime。SessionHasAttachment 对空代次本就失败关闭，此测试把「空对空不判
+// 相等」钉成显式契约，并覆盖 handler 层显式早退路径。
+func TestAttachmentContent_EmptyContainerID404(t *testing.T) {
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			_, _ = w.Write([]byte("bytes"))
+		},
+	})
+	require.NoError(t, database.DB.Create(&chat.UploadRecord{
+		ID: "f-legacy", TenantID: chatTestTenant, SessionID: "s-att", UserID: "u1",
+		Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt",
+		ContainerID: "", // 空代记录 + 当前空代：不得判相等放行
+		CreatedAt:   time.Now(),
+	}).Error)
+	*env.containerID = ""
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.txt", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.False(t, runtimeHit, "unknown generation must fail closed before dialing the runtime")
+}
