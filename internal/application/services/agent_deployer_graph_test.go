@@ -508,6 +508,68 @@ func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 	}
 }
 
+// TestDeploy_FailFastOnCapabilityArtifacts is review F4 (issue #111): a node
+// whose bound skill lacks artifact metadata, or whose bound dataset metadata
+// cannot be resolved, must fail the deploy explicitly instead of silently
+// deploying a partial capability closure — and the deployer create call must
+// never fire. Errors must name the offending agent's DB bare name plus the
+// missing artifact (position placeholder when the skill name itself is empty).
+func TestDeploy_FailFastOnCapabilityArtifacts(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(fx *graphFixture)
+		errPart string
+		comment string
+	}{
+		{
+			name: "child skill missing file hash",
+			mutate: func(fx *graphFixture) {
+				fx.world.skills[fx.childA.ID] = append(fx.world.skills[fx.childA.ID], &skill.Skill{
+					Name: "child-a-broken-skill",
+					URL:  "skills/tenant-a/child-a-broken-skill/dirty",
+				})
+			},
+			errPart: `Agent "child-a" 挂载的技能 "child-a-broken-skill" 缺少制品元数据`,
+			comment: "incomplete skill artifact must fail naming the child agent and the skill",
+		},
+		{
+			name: "nameless skill reported by position",
+			mutate: func(fx *graphFixture) {
+				fx.world.skills[fx.parent.ID] = append(fx.world.skills[fx.parent.ID], &skill.Skill{
+					URL:      "skills/tenant-a/nameless/dirty",
+					FileHash: "6666666666666666666666666666666666666666666666666666666666666666",
+				})
+			},
+			errPart: `Agent "parent" 挂载的技能 "第 2 个技能" 缺少制品元数据`,
+			comment: "skill with empty name must be identified by its 1-based position",
+		},
+		{
+			name: "root dataset metadata unavailable",
+			mutate: func(fx *graphFixture) {
+				fx.world.datasets[fx.parent.ID] = append(fx.world.datasets[fx.parent.ID], "ds-ghost")
+			},
+			errPart: `Agent "parent" 绑定的知识库 ds-ghost 不存在或元数据不可用`,
+			comment: "unresolvable dataset must fail naming the agent and the dataset id",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := buildGraphFixture(t)
+			tc.mutate(fx)
+
+			f := &deployTokenFixture{}
+			srv := newDeployTokenServer(t, false, f)
+			t.Cleanup(srv.Close)
+			s := fx.world.service(t, srv.URL)
+
+			_, err := s.Deploy("tenant-a", "parent", false, false)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errPart, tc.comment)
+			require.False(t, f.postCalled, "deployer create must not be called on incomplete capability metadata")
+		})
+	}
+}
+
 // TestUpdateSubagents_OneLevelInvariants is brief assertion 9: the mount
 // entrypoint keeps the persisted graph within one delegation level.
 func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {

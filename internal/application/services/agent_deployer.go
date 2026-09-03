@@ -846,10 +846,17 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		return nil, nil, fmt.Errorf("load skills failed: %w", err)
 	}
 	skillSources := make([]deployer.SkillSource, 0, len(skills))
-	for _, sk := range skills {
+	for i, sk := range skills {
+		// Review F4 (issue #111): incomplete artifact metadata must fail the
+		// deploy instead of silently shipping a partial capability closure —
+		// same fail-fast contract as custom tools above. A nameless dirty row
+		// is identified by its 1-based position.
 		if sk.Name == "" || sk.URL == "" || sk.FileHash == "" {
-			log.Printf("buildAgentDefinition: skip skill %s: missing name/url/hash", sk.Name)
-			continue
+			label := sk.Name
+			if label == "" {
+				label = fmt.Sprintf("第 %d 个技能", i+1)
+			}
+			return nil, nil, fmt.Errorf("Agent %q 挂载的技能 %q 缺少制品元数据（name/url/hash 不完整），无法部署。请先在技能页补传文件或解除挂载", cfg.Name, label)
 		}
 		skillSources = append(skillSources, deployer.SkillSource{
 			Name: sk.Name,
@@ -885,8 +892,9 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 	for _, id := range datasetIDs {
 		ds, err := s.knowledgeSvc.GetDataset(ctx, id)
 		if err != nil {
-			log.Printf("skip dataset %s metadata for agent %s: %v", id, cfg.Name, err)
-			continue
+			// Review F4 (issue #111): unavailable dataset metadata must fail
+			// the deploy instead of silently shipping a partial closure.
+			return nil, nil, fmt.Errorf("Agent %q 绑定的知识库 %s 不存在或元数据不可用，无法部署。请解除绑定后重试", cfg.Name, id)
 		}
 		desc := strings.TrimSpace(stringOrEmpty((*ds)["description"]))
 		if desc == "" {
