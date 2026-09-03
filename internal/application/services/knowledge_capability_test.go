@@ -4,7 +4,7 @@ package services
 // knowledge capability at the crypto layer: HKDF-SHA256 key derivation with
 // RFC 5869 vectors, token fingerprint, issue/verify round trip, and the
 // attack matrix — tamper (payload/sig/case), cross-tenant, cross-root,
-// token rotation, closure escape, malformed input, and the empty-key
+// token rotation, closure escape, malformed input, and the empty-secret
 // fail-closed policy. Handler-level plumbing and deploy-time injection are
 // covered by knowledge_mcp_test.go and agent_deployer_graph_test.go.
 
@@ -24,12 +24,13 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// testKnowledgeEncKey mirrors a production provider.encryption_key (hex
-// string, 32 bytes = 64 hex chars). Both the deployer-side issuer and the
-// service-side verifier derive the signing key from the same value. Must
-// stay valid hex: the deploy path also AES-encrypts the runtime token with
-// it (providerdomain.Encrypt hex-decodes).
-const testKnowledgeEncKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+// testCapabilitySecret mirrors a provisioned knowledge capability secret
+// (systemsetting.EnsureKnowledgeCapabilitySecret generates 32 random bytes,
+// hex-encoded to 64 chars; explicit config may be any opaque string). Both
+// the deployer-side issuer and the service-side verifier derive the signing
+// key from the same value — independent from the provider credential
+// encryption key.
+const testCapabilitySecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // TestKnowledgeCapabilityKey_HKDFRFC5869Vectors pins our hkdf usage against
 // the RFC 5869 SHA-256 test vectors (TC1 basic + TC2 longer inputs). The
@@ -91,26 +92,26 @@ func TestKnowledgeCapabilityKey_HKDFRFC5869Vectors(t *testing.T) {
 // 32 bytes, deterministic for a given encKey, and different for different
 // encKeys (or info strings) — never the raw encKey itself.
 func TestKnowledgeCapabilityKey_Properties(t *testing.T) {
-	enc := []byte(testKnowledgeEncKey)
-	k1 := knowledgeCapabilityKey(enc)
-	k2 := knowledgeCapabilityKey(enc)
+	secret := []byte(testCapabilitySecret)
+	k1 := knowledgeCapabilityKey(secret)
+	k2 := knowledgeCapabilityKey(secret)
 	require.Len(t, k1, 32)
 	require.Equal(t, k1, k2, "derivation must be deterministic")
-	require.NotEqual(t, enc, k1, "derived key must not be the raw encKey")
+	require.NotEqual(t, secret, k1, "derived key must not be the raw secret")
 	other := knowledgeCapabilityKey([]byte("0f1e2d3c4b5a69788796a5b4c3d2e1f0" + "0f1e2d3c4b5a69788796a5b4c3d2e1f0"))
-	require.NotEqual(t, k1, other, "different encKeys must derive different keys")
+	require.NotEqual(t, k1, other, "different secrets must derive different keys")
 	// The info string is domain separation: changing it changes the key.
-	r := hkdf.New(sha256.New, enc, nil, []byte("some-other-info/v2"))
+	r := hkdf.New(sha256.New, secret, nil, []byte("some-other-info/v2"))
 	alt := make([]byte, 32)
 	_, err := io.ReadFull(r, alt)
 	require.NoError(t, err)
 	require.NotEqual(t, k1, alt)
 }
 
-// TestKnowledgeCapabilityKey_EmptyKeyFailsClosed: with no server-held secret
+// TestKnowledgeCapabilityKey_EmptySecretFailsClosed: with no server-held secret
 // the derivation must fail closed (nil key) — an HKDF(empty) key would be
 // publicly computable and capabilities forgeable.
-func TestKnowledgeCapabilityKey_EmptyKeyFailsClosed(t *testing.T) {
+func TestKnowledgeCapabilityKey_EmptySecretFailsClosed(t *testing.T) {
 	require.Nil(t, knowledgeCapabilityKey(nil))
 	require.Nil(t, knowledgeCapabilityKey([]byte{}))
 }
@@ -132,7 +133,7 @@ func TestTokenFingerprint(t *testing.T) {
 // tenant-a/root with child-a + child-b mounted, deployment key
 // "tenant-a-root", and one runtime token.
 type capabilityFixture struct {
-	encKey  []byte
+	secret  []byte
 	tenant  string
 	dep     string
 	token   string
@@ -141,7 +142,7 @@ type capabilityFixture struct {
 
 func newCapabilityFixture() *capabilityFixture {
 	return &capabilityFixture{
-		encKey: []byte(testKnowledgeEncKey),
+		secret: []byte(testCapabilitySecret),
 		tenant: "tenant-a",
 		dep:    "tenant-a-root",
 		token:  "0123456789abcdef0123456789abcdef",
@@ -169,9 +170,9 @@ func (f *capabilityFixture) payloadFor(agent string) knowledgeCapabilityPayload 
 func TestKnowledgeCapabilityRoundTrip(t *testing.T) {
 	f := newCapabilityFixture()
 	for _, agent := range []string{"root", "child-a", "child-b"} {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor(agent))
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor(agent))
 		require.True(t, strings.HasPrefix(cap, "v1."), "capability must carry the v1. prefix: %q", cap)
-		name, err := verifyKnowledgeCapability(f.encKey, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
+		name, err := verifyKnowledgeCapability(f.secret, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
 		require.NoError(t, err, "agent %s round trip", agent)
 		require.Equal(t, agent, name)
 	}
@@ -183,7 +184,7 @@ func TestKnowledgeCapabilityRoundTrip(t *testing.T) {
 // pinned JSON field names (v/t/d/a/f).
 func TestKnowledgeCapabilityFormat(t *testing.T) {
 	f := newCapabilityFixture()
-	cap := issueKnowledgeCapability(f.encKey, f.payloadFor("child-a"))
+	cap := issueKnowledgeCapability(f.secret, f.payloadFor("child-a"))
 	parts := strings.Split(cap, ".")
 	require.Len(t, parts, 3)
 	require.Equal(t, "v1", parts[0])
@@ -208,12 +209,12 @@ func TestKnowledgeCapabilityFormat(t *testing.T) {
 // rejected (version is an explicit failure domain, not cosmetic).
 func TestKnowledgeCapabilityTamperRejected(t *testing.T) {
 	f := newCapabilityFixture()
-	good := issueKnowledgeCapability(f.encKey, f.payloadFor("child-a"))
+	good := issueKnowledgeCapability(f.secret, f.payloadFor("child-a"))
 	parts := strings.Split(good, ".")
 
 	tamperCase := func(name, capability string) {
 		t.Helper()
-		_, err := verifyKnowledgeCapability(f.encKey, capability, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
+		_, err := verifyKnowledgeCapability(f.secret, capability, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
 		require.Error(t, err, "%s must be rejected", name)
 	}
 
@@ -259,7 +260,7 @@ func TestKnowledgeCapabilityTamperRejected(t *testing.T) {
 	// even with a valid signature (a future v2 must not verify as v1).
 	p := f.payloadFor("root")
 	p.Version = 2
-	tamperCase("signed but wrong version", issueKnowledgeCapability(f.encKey, p))
+	tamperCase("signed but wrong version", issueKnowledgeCapability(f.secret, p))
 }
 
 func flipCase(b byte) byte {
@@ -281,57 +282,57 @@ func TestKnowledgeCapabilityBindingMatrix(t *testing.T) {
 	f := newCapabilityFixture()
 
 	t.Run("cross tenant", func(t *testing.T) {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("root"))
-		_, err := verifyKnowledgeCapability(f.encKey, cap, "tenant-b", f.dep, tokenFingerprint(f.token), f.allowed)
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("root"))
+		_, err := verifyKnowledgeCapability(f.secret, cap, "tenant-b", f.dep, tokenFingerprint(f.token), f.allowed)
 		require.Error(t, err)
 	})
 
 	t.Run("cross root deployment", func(t *testing.T) {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("child-a"))
-		_, err := verifyKnowledgeCapability(f.encKey, cap, f.tenant, "tenant-b-root", tokenFingerprint(f.token), f.allowed)
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("child-a"))
+		_, err := verifyKnowledgeCapability(f.secret, cap, f.tenant, "tenant-b-root", tokenFingerprint(f.token), f.allowed)
 		require.Error(t, err)
 	})
 
 	t.Run("token rotation invalidates old capability", func(t *testing.T) {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("root"))
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("root"))
 		newToken := "ffffffffffffffffffffffffffffffff"
 		require.NotEqual(t, f.token, newToken)
-		_, err := verifyKnowledgeCapability(f.encKey, cap, f.tenant, f.dep, tokenFingerprint(newToken), f.allowed)
+		_, err := verifyKnowledgeCapability(f.secret, cap, f.tenant, f.dep, tokenFingerprint(newToken), f.allowed)
 		require.Error(t, err)
 	})
 
 	t.Run("agent outside the token agent closure", func(t *testing.T) {
 		// Correctly signed for "stranger", but the allowed set is
 		// {root, child-a, child-b}.
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("stranger"))
-		_, err := verifyKnowledgeCapability(f.encKey, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("stranger"))
+		_, err := verifyKnowledgeCapability(f.secret, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
 		require.Error(t, err)
 	})
 
 	t.Run("empty allowed set denies even the token agent itself", func(t *testing.T) {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("root"))
-		_, err := verifyKnowledgeCapability(f.encKey, cap, f.tenant, f.dep, tokenFingerprint(f.token), map[string]struct{}{})
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("root"))
+		_, err := verifyKnowledgeCapability(f.secret, cap, f.tenant, f.dep, tokenFingerprint(f.token), map[string]struct{}{})
 		require.Error(t, err)
 	})
 
-	t.Run("different encKey cannot verify", func(t *testing.T) {
-		cap := issueKnowledgeCapability(f.encKey, f.payloadFor("root"))
+	t.Run("different secret cannot verify", func(t *testing.T) {
+		cap := issueKnowledgeCapability(f.secret, f.payloadFor("root"))
 		_, err := verifyKnowledgeCapability([]byte("0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"), cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
 		require.Error(t, err)
 	})
 }
 
-// TestKnowledgeCapabilityVerifyEmptyKeyFailsClosed: with no server-held
+// TestKnowledgeCapabilityVerifyEmptySecretFailsClosed: with no server-held
 // secret, verification must deny every presented capability — a publicly
 // computable HKDF(empty) key would make capabilities forgeable, so the
 // primitive refuses to verify rather than degrade to a public key.
-func TestKnowledgeCapabilityVerifyEmptyKeyFailsClosed(t *testing.T) {
+func TestKnowledgeCapabilityVerifyEmptySecretFailsClosed(t *testing.T) {
 	f := newCapabilityFixture()
-	cap := issueKnowledgeCapability(f.encKey, f.payloadFor("root"))
+	cap := issueKnowledgeCapability(f.secret, f.payloadFor("root"))
 	_, err := verifyKnowledgeCapability(nil, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
-	require.Error(t, err, "empty encKey must fail closed")
+	require.Error(t, err, "empty secret must fail closed")
 	_, err = verifyKnowledgeCapability([]byte{}, cap, f.tenant, f.dep, tokenFingerprint(f.token), f.allowed)
-	require.Error(t, err, "empty encKey must fail closed")
+	require.Error(t, err, "empty secret must fail closed")
 }
 
 // capabilityRequestFixture builds a two-node create request (root +
@@ -379,7 +380,7 @@ func capabilityRequestFixture() *deployer.CreateAgentRequest {
 // different agent binding), and the issued values verify against the
 // deployment's tenant/key/token triple. X-Agent-Id is never injected.
 func TestAttachKnowledgeCapabilities(t *testing.T) {
-	s := &AgentDeployerService{encryptionKey: testKnowledgeEncKey}
+	s := &AgentDeployerService{capabilitySecret: testCapabilitySecret}
 	req := capabilityRequestFixture()
 	token := "0123456789abcdef0123456789abcdef"
 
@@ -410,26 +411,29 @@ func TestAttachKnowledgeCapabilities(t *testing.T) {
 
 	// The issued values carry the full binding triple.
 	allowed := map[string]struct{}{"root": {}, "child-a": {}}
-	name, err := verifyKnowledgeCapability([]byte(testKnowledgeEncKey), rootCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
+	name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
 	require.NoError(t, err)
 	require.Equal(t, "root", name)
-	name, err = verifyKnowledgeCapability([]byte(testKnowledgeEncKey), childCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
+	name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
 	require.NoError(t, err)
 	require.Equal(t, "child-a", name)
 }
 
-// TestAttachKnowledgeCapabilities_RequiresEncryptionKey: issuing needs a
-// server-held secret — a graph with a knowledge MCP and no configured
-// provider.encryption_key fails the deploy instead of shipping publicly
-// forgeable capabilities.
-func TestAttachKnowledgeCapabilities_RequiresEncryptionKey(t *testing.T) {
+// TestAttachKnowledgeCapabilities_EmptySecretFailsClosed: the capability
+// secret is provisioned at startup via systemsetting.
+// EnsureKnowledgeCapabilitySecret and is never empty in production — an
+// empty one can only mean the service was constructed without injection
+// (constructor omission). Issuing must fail closed instead of shipping
+// publicly forgeable (empty-key) capabilities, and the error must not
+// point at the provider credential encryption key (decoupled concern).
+func TestAttachKnowledgeCapabilities_EmptySecretFailsClosed(t *testing.T) {
 	s := &AgentDeployerService{}
 	req := capabilityRequestFixture()
 	err := s.attachKnowledgeCapabilities(req, "tenant-a", "tenant-a-root", "token")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "encryption_key")
+	require.NotContains(t, err.Error(), "encryption_key")
 
-	// Without any knowledge MCP the empty key is irrelevant (nothing to sign).
+	// Without any knowledge MCP the empty secret is irrelevant (nothing to sign).
 	noKnowledge := &deployer.CreateAgentRequest{
 		DeploymentKey: "tenant-a-root",
 		Agents: []deployer.AgentDefinition{

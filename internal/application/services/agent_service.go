@@ -23,17 +23,26 @@ type AgentService struct {
 	mcpRepo       *repository.McpRepository
 	providerSvc   *ProviderService
 	encryptionKey string
+	// capabilitySecret verifies the per-agent knowledge MCP capabilities
+	// (issue #111 reopened). Independent from encryptionKey: provisioned
+	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
+	// injected by main.go with the same value the deployer-side issuer
+	// (AgentDeployerService) holds.
+	capabilitySecret string
 }
 
 // NewAgentService creates a new AgentService with default repositories.
-func NewAgentService(encryptionKey string) *AgentService {
+// capabilitySecret 是 knowledge capability 的验证 secret（与 encryptionKey
+// 解耦的独立 secret，须与 AgentDeployerService 注入的签发值同源同值）。
+func NewAgentService(encryptionKey, capabilitySecret string) *AgentService {
 	return &AgentService{
-		repo:          repository.NewAgentRepository(),
-		toolRepo:      repository.NewToolRepository(),
-		skillRepo:     repository.NewSkillRepository(),
-		mcpRepo:       repository.NewMcpRepository(),
-		providerSvc:   NewProviderService(encryptionKey),
-		encryptionKey: encryptionKey,
+		repo:             repository.NewAgentRepository(),
+		toolRepo:         repository.NewToolRepository(),
+		skillRepo:        repository.NewSkillRepository(),
+		mcpRepo:          repository.NewMcpRepository(),
+		providerSvc:      NewProviderService(encryptionKey),
+		encryptionKey:    encryptionKey,
+		capabilitySecret: capabilitySecret,
 	}
 }
 
@@ -920,11 +929,11 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 		}
 		return datasets, agentCfg.Name, nil
 	}
-	if len(s.encryptionKey) == 0 {
-		// Fail-closed：无服务端密钥时拒绝一切已呈现的 capability——
-		// HKDF(empty) 公开可算，继续验签等于接受伪造。回退仅适用于
-		// 缺失 header，不适用于校验失败。
-		log.Printf("knowledge capability: server encryption key missing, presented capability denied (tenant=%s agent=%s)", tenantID, tokenAgentName)
+	if s.capabilitySecret == "" {
+		// Fail-closed 防御纵深：secret 经启动 Ensure 恒非空，空值只可能是
+		// 构造遗漏。此时拒绝一切已呈现的 capability——HKDF(empty) 公开可算，
+		// 继续验签等于接受伪造。回退仅适用于缺失 header，不适用于校验失败。
+		log.Printf("knowledge capability: capability secret not injected, presented capability denied (tenant=%s agent=%s)", tenantID, tokenAgentName)
 		return nil, "", fmt.Errorf("%w: 服务端未配置签名密钥", ErrKnowledgeCapabilityDenied)
 	}
 	subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
@@ -937,7 +946,7 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 		allowedAgents[n] = struct{}{}
 	}
 	agentName, err := verifyKnowledgeCapability(
-		[]byte(s.encryptionKey), capabilityHeader,
+		[]byte(s.capabilitySecret), capabilityHeader,
 		tenantID, DeployKey(tenantID, agentCfg.Name), tokenFingerprint(bearerToken),
 		allowedAgents,
 	)

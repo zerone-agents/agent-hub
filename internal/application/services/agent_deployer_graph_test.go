@@ -142,8 +142,9 @@ func (w *graphWorld) service(t *testing.T, deployerURL string) *AgentDeployerSer
 	s.knowledgeSvc = &graphKnowledgeSvc{byID: w.datasetMeta}
 	s.cdnHost = "https://cdn.example.com"
 	// The knowledge capability issuer needs a server-held secret (the graph
-	// mounts the built-in knowledge MCP); production never runs without one.
-	s.encryptionKey = testKnowledgeEncKey
+	// mounts the built-in knowledge MCP); production provisions one at
+	// startup via systemsetting.EnsureKnowledgeCapabilitySecret.
+	s.capabilitySecret = testCapabilitySecret
 	return s
 }
 
@@ -439,10 +440,10 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		// of the token actually sent in the same request.
 		token := f.sentToken(t)
 		allowed := map[string]struct{}{"parent": {}, "child-a": {}, "child-b": {}}
-		name, err := verifyKnowledgeCapability([]byte(testKnowledgeEncKey), rootCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
 		require.NoError(t, err)
 		require.Equal(t, "parent", name)
-		name, err = verifyKnowledgeCapability([]byte(testKnowledgeEncKey), childCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
 		require.NoError(t, err)
 		require.Equal(t, "child-a", name)
 
@@ -634,7 +635,7 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, agentRepo.ReplaceSubagents(grand.ID, []uint64{parent.ID}))
 
-		svc := NewAgentService("test-encryption-key")
+		svc := NewAgentService("test-encryption-key", "")
 		err = svc.UpdateSubagents("default", "parent", []string{"child"})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "已被其他 Agent 挂载")
@@ -656,7 +657,7 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, agentRepo.ReplaceSubagents(child.ID, []uint64{grandchild.ID}))
 
-		svc := NewAgentService("test-encryption-key")
+		svc := NewAgentService("test-encryption-key", "")
 		err = svc.UpdateSubagents("default", "parent", []string{"child"})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "自身已挂载子 Agent")
@@ -678,7 +679,7 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceSubagents(grand.ID, []uint64{parent.ID}))
 		require.NoError(t, agentRepo.ReplaceSubagents(parent.ID, []uint64{child.ID}))
 
-		svc := NewAgentService("test-encryption-key")
+		svc := NewAgentService("test-encryption-key", "")
 		require.NoError(t, svc.UpdateSubagents("default", "parent", []string{}))
 
 		subs, err := agentRepo.GetSubagents(parent.ID)

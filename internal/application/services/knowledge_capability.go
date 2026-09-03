@@ -5,10 +5,12 @@ package services
 // replaces the spoofable bare identity header: the hub now issues an
 // HMAC-signed capability per graph node at deploy time, binding tenant ID,
 // root deployment identity, requesting agent identity, and the runtime
-// token's fingerprint. Only the hub holds the signing key (derived from
-// provider.encryption_key), so a leaked token alone can no longer claim a
-// sibling's or child's identity — the capability never leaves the
-// deployment boundary and rotates with the token.
+// token's fingerprint. Only the hub holds the signing key (derived from the
+// dedicated knowledge capability secret — see
+// systemsetting.EnsureKnowledgeCapabilitySecret, decoupled from the
+// provider credential encryption key), so a leaked token alone can no
+// longer claim a sibling's or child's identity — the capability never
+// leaves the deployment boundary and rotates with the token.
 //
 // Wire format: "v1." + base64url(payloadJSON) + "." + base64url(hmac).
 // The HMAC covers the exact payload JSON bytes, so any content change —
@@ -48,8 +50,8 @@ const (
 	knowledgeCapabilityPrefix = "v1"
 
 	// knowledgeCapabilityInfo is the HKDF info string: domain separation
-	// so the capability key is a distinct secret from every other use of
-	// provider.encryption_key.
+	// so the capability key is a distinct secret from every other HKDF
+	// use of the capability secret.
 	knowledgeCapabilityInfo = "agent-hub/knowledge-capability/v1"
 
 	// knowledgeCapabilityKeyLen is the HKDF output size (SHA-256).
@@ -66,17 +68,20 @@ type knowledgeCapabilityPayload struct {
 }
 
 // knowledgeCapabilityKey derives the capability signing key:
-// HKDF-SHA256(encKey, salt=nil, info="agent-hub/knowledge-capability/v1"),
-// 32 bytes. With no server-held secret (empty encKey) it returns nil —
-// callers must fail closed, because HKDF(empty) is publicly computable and
-// would make capabilities forgeable. Reading 32 bytes from hkdf.New cannot
-// fail (SHA-256 expands to 255 blocks); the error branch is defensive.
-func knowledgeCapabilityKey(encKey []byte) []byte {
-	if len(encKey) == 0 {
+// HKDF-SHA256(capabilitySecret, salt=nil, info="agent-hub/knowledge-capability/v1"),
+// 32 bytes. The secret comes from
+// systemsetting.EnsureKnowledgeCapabilitySecret (explicit config or a
+// persisted random value) and is never empty in production. With no
+// server-held secret (empty) it returns nil — callers must fail closed,
+// because HKDF(empty) is publicly computable and would make capabilities
+// forgeable. Reading 32 bytes from hkdf.New cannot fail (SHA-256 expands
+// to 255 blocks); the error branch is defensive.
+func knowledgeCapabilityKey(secret []byte) []byte {
+	if len(secret) == 0 {
 		return nil
 	}
 	key := make([]byte, knowledgeCapabilityKeyLen)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, encKey, nil, []byte(knowledgeCapabilityInfo)), key); err != nil {
+	if _, err := io.ReadFull(hkdf.New(sha256.New, secret, nil, []byte(knowledgeCapabilityInfo)), key); err != nil {
 		return nil
 	}
 	return key
@@ -92,12 +97,12 @@ func tokenFingerprint(token string) string {
 }
 
 // issueKnowledgeCapability signs a payload and returns the wire string
-// "v1.<payload>.<hmac>". Callers must guard against an empty encKey first
+// "v1.<payload>.<hmac>". Callers must guard against an empty secret first
 // (a nil derived key yields a value that verification always rejects, so
 // the failure stays closed on the verify side as well). The returned value
 // is a credential: never persist it, never log it.
-func issueKnowledgeCapability(encKey []byte, p knowledgeCapabilityPayload) string {
-	key := knowledgeCapabilityKey(encKey)
+func issueKnowledgeCapability(secret []byte, p knowledgeCapabilityPayload) string {
+	key := knowledgeCapabilityKey(secret)
 	if key == nil {
 		return ""
 	}
@@ -119,10 +124,12 @@ func issueKnowledgeCapability(encKey []byte, p knowledgeCapabilityPayload) strin
 // deployment key, token fingerprint, and payload.Agent ∈ allowedAgents
 // (the token agent itself plus its direct subagents). Any failure denies;
 // there is deliberately no fallback for a presented-but-invalid capability.
-// Errors describe the rejection reason for server-side logs and never
-// contain the capability value.
-func verifyKnowledgeCapability(encKey []byte, cap string, expectTenant, expectDep, expectTokenFp string, allowedAgents map[string]struct{}) (string, error) {
-	key := knowledgeCapabilityKey(encKey)
+// An empty capabilitySecret always denies (defense in depth — the secret
+// is provisioned at startup and never empty in production). Errors
+// describe the rejection reason for server-side logs and never contain
+// the capability value.
+func verifyKnowledgeCapability(secret []byte, cap string, expectTenant, expectDep, expectTokenFp string, allowedAgents map[string]struct{}) (string, error) {
+	key := knowledgeCapabilityKey(secret)
 	if key == nil {
 		return "", errors.New("服务端未配置签名密钥，capability 校验拒绝")
 	}

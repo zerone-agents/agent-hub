@@ -124,7 +124,7 @@ func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingSubagent(t *testing.
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
-	svc := NewAgentService("test-encryption-key")
+	svc := NewAgentService("test-encryption-key", "")
 	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"}))
 
 	parent, err := agentRepo.GetByName("default", "parent")
@@ -140,7 +140,7 @@ func TestUpdateSubagents_AttachesTaskAndMultiTaskWhenBindingMultipleSubagents(t 
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child2"}))
 
-	svc := NewAgentService("test-encryption-key")
+	svc := NewAgentService("test-encryption-key", "")
 	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1", "child2"}))
 
 	parent, err := agentRepo.GetByName("default", "parent")
@@ -159,7 +159,7 @@ func TestUpdateSubagents_RemovesTaskAndMultiTaskWhenClearingSubagents(t *testing
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
-	svc := NewAgentService("test-encryption-key")
+	svc := NewAgentService("test-encryption-key", "")
 	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"})) // attach
 	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{}))         // clear
 
@@ -178,7 +178,7 @@ func TestUpdateSubagents_ReattachesAfterManualRemoval(t *testing.T) {
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child1"}))
 
-	svc := NewAgentService("test-encryption-key")
+	svc := NewAgentService("test-encryption-key", "")
 	require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child1"}))
 
 	// Simulate manual removal via the repository (bypassing UpdateSubagents).
@@ -200,7 +200,7 @@ func TestUpdateSubagents_RejectsSelfReferenceAndDoesNotTouchBindings(t *testing.
 	agentRepo := repository.NewAgentRepository()
 	require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 
-	svc := NewAgentService("test-encryption-key")
+	svc := NewAgentService("test-encryption-key", "")
 	err := svc.UpdateSubagents("default", "parent", []string{"parent"})
 	require.Error(t, err)
 

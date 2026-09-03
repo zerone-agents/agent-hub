@@ -255,13 +255,17 @@ func mustCreateAgent(t *testing.T, tenantID, name string) *agent.AgentConfig {
 // root 也不得访问 child 的）。缺失 capability 回退 token agent 自身。
 func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 	const (
-		facadeEncKey = "test-encryption-key"
+		// capSecret 模拟 Ensure 解析出的独立 capability secret；构造
+		// AgentService 时 provider 加密密钥恒留空——坐实两种密钥解耦
+		// （空 provider 密钥环境下 capability 授权照常工作，即 ECS 实测
+		// 暴露的缺陷场景）。
+		capSecret    = "test-capability-secret-0123456789abcdef"
 		runtimeToken = "0123456789abcdef0123456789abcdef"
 	)
 	// issueCap 按 facade 期望的绑定三元组签发 capability（tenant=default，
 	// dep=DeployKey("default","root")，token 指纹默认取 runtimeToken）。
 	issueCap := func(agentName, token string) string {
-		return issueKnowledgeCapability([]byte(facadeEncKey), knowledgeCapabilityPayload{
+		return issueKnowledgeCapability([]byte(capSecret), knowledgeCapabilityPayload{
 			Version: 1,
 			Tenant:  "default",
 			Dep:     DeployKey("default", "root"),
@@ -279,7 +283,7 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{childA.ID, childB.ID}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root", "ds-shared"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childA.ID, []string{"ds-child", "ds-shared"}))
-		return NewAgentService(facadeEncKey), agentRepo
+		return NewAgentService("", capSecret), agentRepo
 	}
 
 	t.Run("root capability → 仅自身绑定", func(t *testing.T) {
@@ -329,7 +333,7 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(ghost.ID, []string{"ds-ghost"}))
 
-		svc := NewAgentService(facadeEncKey)
+		svc := NewAgentService("", capSecret)
 		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("ghost", runtimeToken), runtimeToken)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
@@ -346,7 +350,7 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childDefault.ID, []string{"ds-child"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childTenantB.ID, []string{"ds-tenant-b"}))
 
-		svc := NewAgentService(facadeEncKey)
+		svc := NewAgentService("", capSecret)
 		got, requesting, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("shared-name", runtimeToken), runtimeToken)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"ds-child"}, got)
@@ -389,7 +393,7 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 
 	t.Run("跨部署 capability（dep 绑定他人）→ 拒绝", func(t *testing.T) {
 		svc, _ := newFixture(t)
-		crossDep := issueKnowledgeCapability([]byte(facadeEncKey), knowledgeCapabilityPayload{
+		crossDep := issueKnowledgeCapability([]byte(capSecret), knowledgeCapabilityPayload{
 			Version: 1, Tenant: "default", Dep: DeployKey("default", "another-root"),
 			Agent: "root", TokenFp: tokenFingerprint(runtimeToken),
 		})
@@ -398,13 +402,13 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
 	})
 
-	t.Run("服务端未配置签名密钥：呈现 capability 一律拒绝（不回退）", func(t *testing.T) {
+	t.Run("服务端 capability secret 未注入（构造遗漏）：呈现 capability 一律拒绝（不回退）", func(t *testing.T) {
 		setupAgentKnowledgeAuthTestDB(t)
 		agentRepo := repository.NewAgentRepository()
 		root := mustCreateAgent(t, "default", "root")
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
 
-		svc := NewAgentService("") // dev-mode 无密钥
+		svc := NewAgentService("", "") // 防御纵深用例：secret 经 Ensure 恒非空，空值只可能是构造遗漏
 		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("root", runtimeToken), runtimeToken)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
@@ -417,7 +421,7 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 
 	t.Run("token agent 不存在", func(t *testing.T) {
 		setupAgentKnowledgeAuthTestDB(t)
-		svc := NewAgentService(facadeEncKey)
+		svc := NewAgentService("", capSecret)
 		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "no-such-agent", issueCap("no-such-agent", runtimeToken), runtimeToken)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "不存在")

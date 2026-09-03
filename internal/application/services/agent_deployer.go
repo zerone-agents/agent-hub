@@ -95,15 +95,20 @@ type AgentDeployerService struct {
 	upstreamHost  string // cfg.Deployer.DeployerURLHost; strict, no PublicHost fallback
 	cdnHost       string
 	encryptionKey string
-	runtimeAPIKey string
-	agentRepo     agentRepository
-	toolRepo      toolRepository
-	skillRepo     skillRepository
-	providerSvc   providerService
-	mcpSvc        mcpService
-	knowledgeSvc  knowledgeService
-	kongSvc       *KongGatewayService
-	aigcSvc       aigcConfigProvider
+	// capabilitySecret signs the per-agent knowledge MCP capabilities
+	// (issue #111 reopened). Independent from encryptionKey: provisioned
+	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
+	// never empty in production.
+	capabilitySecret string
+	runtimeAPIKey    string
+	agentRepo        agentRepository
+	toolRepo         toolRepository
+	skillRepo        skillRepository
+	providerSvc      providerService
+	mcpSvc           mcpService
+	knowledgeSvc     knowledgeService
+	kongSvc          *KongGatewayService
+	aigcSvc          aigcConfigProvider
 	// chatPushAPIKey / chatPushPublicURL 同时非空时，部署请求注入 hub 段
 	// （runtime 聊天记录回传配置）；任一为空则不注入 = 回传关闭。
 	chatPushAPIKey    string
@@ -246,13 +251,18 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, authMode AuthMode) *AgentDeployerService {
+// capabilitySecret 是 knowledge capability 的签名 secret（issue #111 重开：
+// 与 encryptionKey 解耦的独立 secret，main.go 经
+// systemsetting.EnsureKnowledgeCapabilitySecret 解析后注入；验证侧
+// AgentService 必须注入同一值）。
+func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey, capabilitySecret string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, authMode AuthMode) *AgentDeployerService {
 	s := &AgentDeployerService{
 		client:            client,
 		publicHost:        publicHost,
 		upstreamHost:      upstreamHost,
 		cdnHost:           cdnHost,
 		encryptionKey:     encryptionKey,
+		capabilitySecret:  capabilitySecret,
 		runtimeAPIKey:     runtimeAPIKey,
 		agentRepo:         repository.NewAgentRepository(),
 		toolRepo:          repository.NewToolRepository(),
@@ -498,9 +508,12 @@ const agentRuntimeTokenPlaceholder = "$agent_runtime_token"
 // rather than mutated so the MCP DTOs from the MCP service stay untouched,
 // mirroring resolveMcpHeaders (run before this, so the Authorization
 // placeholder is already substituted). Capabilities are credentials: they
-// must never be persisted or logged. Fail-closed: a graph with a knowledge
-// MCP and no provider.encryption_key cannot ship publicly forgeable
-// capabilities — the deploy fails with guidance instead.
+// must never be persisted or logged. The signing secret is the dedicated
+// capability secret (systemsetting.EnsureKnowledgeCapabilitySecret,
+// decoupled from the provider credential encryption key): startup
+// provisioning fails the boot before any deploy can, so the empty-secret
+// branch below is defense-in-depth against constructor omissions only —
+// issuing with an empty secret would ship publicly forgeable capabilities.
 func (s *AgentDeployerService) attachKnowledgeCapabilities(req *deployer.CreateAgentRequest, tenantID, deploymentKey, token string) error {
 	hasKnowledge := false
 	for i := range req.Agents {
@@ -512,10 +525,13 @@ func (s *AgentDeployerService) attachKnowledgeCapabilities(req *deployer.CreateA
 	if !hasKnowledge {
 		return nil
 	}
-	if s.encryptionKey == "" {
-		return fmt.Errorf("Agent 绑定了内置 knowledge MCP 但 Hub 未配置 provider.encryption_key，无法签发 per-agent capability。请配置加密密钥后重启 Hub 并重新部署")
+	if s.capabilitySecret == "" {
+		// 防御纵深：secret 经启动 Ensure 恒非空，走到这里只可能是构造
+		// 遗漏（直接构造 service 绕过 main.go 注入的调用方）。拒绝签发，
+		// 不注入空 capability。
+		return fmt.Errorf("knowledge capability secret 未注入（AgentDeployerService 构造遗漏），拒绝签发 per-agent capability")
 	}
-	encKey := []byte(s.encryptionKey)
+	secret := []byte(s.capabilitySecret)
 	fp := tokenFingerprint(token)
 	for i := range req.Agents {
 		a := &req.Agents[i]
@@ -527,7 +543,7 @@ func (s *AgentDeployerService) attachKnowledgeCapabilities(req *deployer.CreateA
 		for k, v := range mcp.Headers {
 			headers[k] = v
 		}
-		headers[knowledgeCapabilityHeader] = issueKnowledgeCapability(encKey, knowledgeCapabilityPayload{
+		headers[knowledgeCapabilityHeader] = issueKnowledgeCapability(secret, knowledgeCapabilityPayload{
 			Version: 1,
 			Tenant:  tenantID,
 			Dep:     deploymentKey,
