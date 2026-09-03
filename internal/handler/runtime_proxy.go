@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,19 +36,43 @@ func NewRuntimeProxyHandler(svc *services.RuntimeProxyService) *RuntimeProxyHand
 
 // RegisterRuntimeProxyRoutes mounts the proxy. Called only when Kong is NOT
 // configured (cmd/server/main.go); Kong mode keeps its own route chain.
-func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService) {
+// builtinAuth (issue #114) mounts the single-segment public form
+// "/runtime/<agent>" — the implicit default tenant never appears in the URL.
+// The two shapes can't be mounted together: gin forbids conflicting wildcard
+// names at the same prefix position.
+func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService, builtinAuth bool) {
 	h := NewRuntimeProxyHandler(svc)
+	if builtinAuth {
+		rg := r.Group("/runtime/:agent")
+		rg.Any("/*path", h.ProxyBuiltin)
+		return
+	}
 	rg := r.Group("/runtime/:org/:agent")
 	rg.Any("/*path", h.Proxy)
 }
 
 func (h *RuntimeProxyHandler) Proxy(c *gin.Context) {
-	start := time.Now()
 	org := c.Param("org")
 	agentName := c.Param("agent")
 	decoded := c.Param("path") // leading "/" included by gin
-	escaped := escapedRemainder(c.Request.URL.EscapedPath())
+	h.proxyResolved(c, org, agentName, escapedRemainder(c.Request.URL.EscapedPath()), decoded)
+}
 
+// ProxyBuiltin serves the single-segment builtin form "/runtime/<agent>"
+// (issue #114): the tenant resolves internally to the implicit default
+// tenant and never surfaces in the public URL (it does appear in the audit
+// log, which is internal-only).
+func (h *RuntimeProxyHandler) ProxyBuiltin(c *gin.Context) {
+	agentName := c.Param("agent")
+	decoded := c.Param("path")
+	h.proxyResolved(c, tenant.DefaultID, agentName, escapedRemainderBuiltin(c.Request.URL.EscapedPath()), decoded)
+}
+
+// proxyResolved is the shared proxy tail for both public shapes: Resolve
+// preconditions, the stripped reverse proxy, and the audit line. start is
+// taken here so both shapes measure the full request.
+func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, escaped, decoded string) {
+	start := time.Now()
 	decision, perr := h.svc.Resolve(org, agentName, c.Request.Method, escaped, decoded)
 	if perr != nil {
 		respondError(c, perr.Code, perr.Reason)
@@ -125,6 +150,18 @@ func escapedRemainder(escapedPath string) string {
 		return ""
 	}
 	return "/" + parts[3]
+}
+
+// escapedRemainderBuiltin is the single-segment variant for the builtin route
+// shape "/runtime/{agent}/{path}": SplitN depth 3 keeps the agent segment
+// inside parts[2] so the %2f/%2e containment superset scan sees the same
+// agent+path span as the two-segment form.
+func escapedRemainderBuiltin(escapedPath string) string {
+	parts := strings.SplitN(escapedPath, "/", 3)
+	if len(parts) < 3 || parts[1] != "runtime" {
+		return ""
+	}
+	return "/" + parts[2]
 }
 
 func classifyUpstreamErr(e error) string {

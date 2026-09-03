@@ -618,7 +618,7 @@ func main() {
 	// register /runtime/* (falls to NoRoute → 302 /static).
 	if cfg.Kong.AdminURL == "" {
 		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
-		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc)
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, cfg.Auth.IsBuiltin())
 	}
 
 	// 未匹配路由重定向到前端 SPA

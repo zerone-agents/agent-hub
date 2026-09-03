@@ -103,7 +103,16 @@ func newProxyEngine(port int) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// httptest.Server 固定绑定 127.0.0.1，upstreamHost 即本机回环地址。
-	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"))
+	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), false)
+	return r
+}
+
+// newBuiltinProxyEngine 挂 builtin 模式的单段路由（issue #114）：公开 URL
+// 形态 /runtime/<agent>，隐式 default 租户不出现在路径里。
+func newBuiltinProxyEngine(port int) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterRuntimeProxyRoutes(r, services.NewRuntimeProxyService(&inlineRepo{port: port}, "127.0.0.1"), true)
 	return r
 }
 
@@ -389,5 +398,46 @@ func TestNoRegistrationFallsToNoRoute(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/default/test/health", nil))
 	if w.Code != http.StatusFound || w.Header().Get("Location") != "/static" {
 		t.Fatalf("want 302 /static, got %d %q", w.Code, w.Header().Get("Location"))
+	}
+}
+
+// builtin 单段路由（issue #114）：/runtime/<agent>/<path>，租户在 handler
+// 内部解析为隐式 default，公开 URL 不暴露租户段。
+func TestProxyBuiltinSingleSegmentResolvesImplicitTenant(t *testing.T) {
+	f := newFakeRuntime(t)
+	r := newBuiltinProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/test/v1/agents?include=all", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	// 前缀剥离语义不变：upstream 收到 /v1/agents。
+	if f.lastPath != "/v1/agents" {
+		t.Fatalf("upstream path = %q, want /v1/agents", f.lastPath)
+	}
+	if f.lastQuery != "include=all" {
+		t.Fatalf("query lost: %q", f.lastQuery)
+	}
+}
+
+func TestProxyBuiltinUnknownAgent404(t *testing.T) {
+	f := newFakeRuntime(t)
+	r := newBuiltinProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/nope/health", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestProxyBuiltinEscapedTraversalRejected(t *testing.T) {
+	// containment 超集扫描在单段变体下仍生效：%2f/%2e 编码逃逸 404。
+	f := newFakeRuntime(t)
+	r := newBuiltinProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/test/v1/%2e%2e/etc", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }
