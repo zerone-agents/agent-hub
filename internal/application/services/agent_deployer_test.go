@@ -684,6 +684,31 @@ func preRegisterKongRoute(fk *fakeKong, key string) {
 	fk.routes[legacyRouteName(key)] = &kong.Route{Name: legacyRouteName(key)}
 }
 
+// attachFakeKong wires a fake gateway pre-registered with the deployment's
+// service and routes onto the service, so Deploy tests can assert whether a
+// Deregister ran (entries gone) or not (entries intact).
+func attachFakeKong(s *AgentDeployerService, key string) *fakeKong {
+	fk := newFakeKong()
+	preRegisterKongRoute(fk, key)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0)
+	return fk
+}
+
+// assertKongEntriesIntact asserts that no Deregister happened: the route,
+// legacy route and service seeded via attachFakeKong are all still present.
+func assertKongEntriesIntact(t *testing.T, fk *fakeKong, key string) {
+	t.Helper()
+	if _, ok := fk.routes[routeName(key)]; !ok {
+		t.Errorf("Kong route %s must survive (Deregister must not run)", routeName(key))
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; !ok {
+		t.Errorf("legacy Kong route %s must survive (Deregister must not run)", legacyRouteName(key))
+	}
+	if _, ok := fk.services[svcName(key)]; !ok {
+		t.Errorf("Kong service %s must survive (Deregister must not run)", svcName(key))
+	}
+}
+
 // TestDeploy_CreateAgentFailure_CleanupPolicy pins the post-review contract:
 // pre-rejections (deployer 4xx protocol validation / 503 runtime floor, both
 // decided before the deployer touches Docker) must leave the existing
@@ -692,7 +717,7 @@ func preRegisterKongRoute(fk *fakeKong, key string) {
 // the deployment errored.
 func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 	// The stored token keeps resolveRuntimeToken from probing the deployer,
-	// so the flow under test is: build request → deregister → create.
+	// so the flow under test is: build request → create.
 	const storedToken = "0123456789abcdef0123456789abcdef"
 
 	run := func(t *testing.T, f *deployFailureFixture) error {
@@ -703,9 +728,15 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		return err
 	}
 
-	t.Run("400 pre-rejected keeps container and DB status", func(t *testing.T) {
+	t.Run("400 pre-rejected keeps container, DB status and route", func(t *testing.T) {
 		f := &deployFailureFixture{postStatus: http.StatusBadRequest}
-		err := run(t, f)
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
+
+		_, err := s.Deploy("default", "general", false, false)
 		if err == nil || !strings.Contains(err.Error(), "deploy agent failed") || !strings.Contains(err.Error(), "400") {
 			t.Fatalf("expected wrapped HTTP 400 deploy failure, got %v", err)
 		}
@@ -715,11 +746,18 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		if len(f.updates) != 0 {
 			t.Errorf("pre-rejected (400) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
 		}
+		assertKongEntriesIntact(t, fk, key)
 	})
 
-	t.Run("503 pre-rejected keeps container and DB status", func(t *testing.T) {
+	t.Run("503 pre-rejected keeps container, DB status and route", func(t *testing.T) {
 		f := &deployFailureFixture{postStatus: http.StatusServiceUnavailable}
-		err := run(t, f)
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
+
+		_, err := s.Deploy("default", "general", false, false)
 		if err == nil || !strings.Contains(err.Error(), "503") {
 			t.Fatalf("expected HTTP 503 deploy failure, got %v", err)
 		}
@@ -729,17 +767,16 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		if len(f.updates) != 0 {
 			t.Errorf("pre-rejected (503) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
 		}
+		assertKongEntriesIntact(t, fk, key)
 	})
 
-	t.Run("500 mid-flight failure still archives and errors", func(t *testing.T) {
+	t.Run("500 mid-flight failure still archives, errors and drops route", func(t *testing.T) {
 		f := &deployFailureFixture{postStatus: http.StatusInternalServerError}
 		srv := newDeployFailureServer(t, f)
 		defer srv.Close()
 		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
-		fk := newFakeKong()
 		key := DeployKey("default", "general")
-		preRegisterKongRoute(fk, key)
-		s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0)
+		fk := attachFakeKong(s, key)
 
 		_, err := s.Deploy("default", "general", false, false)
 		if err == nil || !strings.Contains(err.Error(), "500") {
@@ -751,10 +788,14 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		if len(f.updates) != 1 || f.updates[0].DeploymentStatus != "error" {
 			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
 		}
-		// Positive control for the Deregister assertion in the graph test
-		// below: the route really is deregistered before the create attempt.
+		// The archived container leaves the route without a backend: the
+		// mid-flight cleanup must drop it (and this doubles as the positive
+		// control proving Deregister really removes the seeded entries).
 		if _, ok := fk.routes[routeName(key)]; ok {
-			t.Error("expected Kong route to be deregistered before recreate")
+			t.Error("mid-flight (500) failure must deregister the backend-less Kong route")
+		}
+		if _, ok := fk.services[svcName(key)]; ok {
+			t.Error("mid-flight (500) failure must deregister the backend-less Kong service")
 		}
 	})
 
@@ -774,6 +815,38 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
 		}
 	})
+}
+
+// TestDeploy_Success_DeregistersStaleRouteAfterCreate pins the route-switch
+// ordering: the stale Kong route (pointing at the previous container's port)
+// is only dropped after the deployer confirms the create succeeded, and the
+// async registerWhenHealthy later re-registers against the new container.
+// The fixture's status endpoint never reports health "healthy" and the test
+// service's active probe always fails, so the async goroutine cannot
+// re-register during the test — the assertions below pin exactly the
+// synchronous post-create Deregister, with no timing dependency.
+func TestDeploy_Success_DeregistersStaleRouteAfterCreate(t *testing.T) {
+	const storedToken = "0123456789abcdef0123456789abcdef"
+	f := &deployTokenFixture{}
+	srv := newDeployTokenServer(t, true, f)
+	defer srv.Close()
+
+	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
+	key := DeployKey("tenant-a", "general")
+	fk := attachFakeKong(s, key)
+
+	if _, err := s.Deploy("tenant-a", "general", false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := fk.routes[routeName(key)]; ok {
+		t.Error("stale Kong route must be dropped after a successful create")
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; ok {
+		t.Error("stale legacy Kong route must be dropped after a successful create")
+	}
+	if _, ok := fk.services[svcName(key)]; ok {
+		t.Error("stale Kong service must be dropped after a successful create")
+	}
 }
 
 // TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute pins the

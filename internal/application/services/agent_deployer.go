@@ -347,28 +347,39 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, fmt.Errorf("build create request failed: %w", err)
 	}
 
-	// Deregister any existing Kong route before recreating. This is idempotent
-	// (no-op if the agent was never registered) and avoids serving 502s while
-	// the container is being rebuilt.
-	if s.kongSvc != nil {
-		_ = s.kongSvc.Deregister(ctx, key)
-	}
 	req.RuntimeToken = token
 	s.resolveMcpHeaders(req, token)
 
-	// Call deployer
+	// Call deployer. Nothing is deregistered from Kong before this point: a
+	// pre-rejection (4xx protocol validation, 503 runtime floor) must leave a
+	// currently healthy deployment fully intact — container, DB status and
+	// gateway route alike.
 	resp, err := s.client.CreateAgent(ctx, req, force)
 	if err != nil {
 		// Mid-flight failures (5xx, network) may have left a half-created
-		// container behind: archive it and mark the deployment errored.
-		// Pre-rejections (4xx protocol validation, 503 runtime floor) happen
-		// before the deployer touches Docker, so any existing container is
-		// still healthy and must stay exactly as is.
+		// container behind: archive it, drop the now backend-less Kong route
+		// (a lingering route would only serve 503s) and mark the deployment
+		// errored. Pre-rejections (4xx protocol validation, 503 runtime
+		// floor) happen before the deployer touches Docker, so any existing
+		// container is still healthy and must stay exactly as is.
 		if !deployerPreRejected(err) {
 			_ = s.client.DeleteAgent(ctx, key, false)
+			if s.kongSvc != nil {
+				_ = s.kongSvc.Deregister(ctx, key)
+			}
 			_ = s.updateStatus(tenantID, agentCfg, "error", 0, nil)
 		}
 		return nil, fmt.Errorf("deploy agent failed: %w", err)
+	}
+
+	// The create succeeded, so the previous container is gone (or, on an
+	// idempotent return, the existing container stays put): drop the old Kong
+	// route so it cannot keep pointing at the old port. registerWhenHealthy
+	// below re-registers against the new container once healthy; for the
+	// idempotent case this deregister→re-register window is far shorter than
+	// deregistering before the create call would be.
+	if s.kongSvc != nil {
+		_ = s.kongSvc.Deregister(ctx, key)
 	}
 
 	// Update DB with deployment info and persist the runtime token encrypted.
