@@ -100,18 +100,13 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 	}))
 	t.Cleanup(deployerSrv.Close)
 
-	deployerSvc := services.NewAgentDeployerService(
-		deployer.NewClient(deployerSrv.URL, ""),
-		"127.0.0.1", // publicHost
-		"127.0.0.1", // upstreamHost: no-Kong fallback host (fake runtime)
-		"",          // cdnHost
-		"",          // encryptionKey: RuntimeToken stays plaintext
-		"",          // runtimeAPIKey
-		"",          // capabilitySecret: no knowledge MCP in this fixture
-		nil, nil, nil,
-		"", "", // chat push key / public URL: 未配置 = 不下发回传段
-		services.ModeCasdoor, // casdoor-shaped addressing fixture
-	)
+	deployerSvc := services.NewAgentDeployerService(services.AgentDeployerConfig{
+		Client:     deployer.NewClient(deployerSrv.URL, ""),
+		PublicHost: "127.0.0.1", // no-Kong fallback host (fake runtime)
+		// UpstreamHost/CDNHost/EncryptionKey/RuntimeAPIKey/
+		// CapabilitySecret/chat push 均留空：无 knowledge MCP、无 agent graph
+		AuthMode: services.ModeCasdoor, // casdoor-shaped addressing fixture
+	})
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),
 		repository.NewAgentRepository(),

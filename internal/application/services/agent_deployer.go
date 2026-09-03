@@ -255,30 +255,51 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // 与 encryptionKey 解耦的独立 secret，main.go 经
 // systemsetting.EnsureKnowledgeCapabilitySecret 解析后注入；验证侧
 // AgentService 必须注入同一值）。
-func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey, capabilitySecret string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, authMode AuthMode) *AgentDeployerService {
+// AgentDeployerConfig bundles the deployer service's construction
+// dependencies (Std-3: the 13-parameter constructor became a config
+// object). AuthMode is ModeBuiltin or ModeCasdoor; capabilitySecret is the
+// dedicated knowledge-capability signing secret (Ensure pattern, decoupled
+// from encryptionKey).
+type AgentDeployerConfig struct {
+	Client            *deployer.Client
+	PublicHost        string
+	UpstreamHost      string
+	CDNHost           string
+	EncryptionKey     string
+	RuntimeAPIKey     string
+	CapabilitySecret  string
+	KnowledgeSvc      *KnowledgeService
+	KongSvc           *KongGatewayService
+	AigcSvc           *AigcConfigService
+	ChatPushAPIKey    string
+	ChatPushPublicURL string
+	AuthMode          AuthMode
+}
+
+func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 	s := &AgentDeployerService{
-		client:            client,
-		publicHost:        publicHost,
-		upstreamHost:      upstreamHost,
-		cdnHost:           cdnHost,
-		encryptionKey:     encryptionKey,
-		capabilitySecret:  capabilitySecret,
-		runtimeAPIKey:     runtimeAPIKey,
+		client:            cfg.Client,
+		publicHost:        cfg.PublicHost,
+		upstreamHost:      cfg.UpstreamHost,
+		cdnHost:           cfg.CDNHost,
+		encryptionKey:     cfg.EncryptionKey,
+		capabilitySecret:  cfg.CapabilitySecret,
+		runtimeAPIKey:     cfg.RuntimeAPIKey,
 		agentRepo:         repository.NewAgentRepository(),
 		toolRepo:          repository.NewToolRepository(),
 		skillRepo:         repository.NewSkillRepository(),
-		providerSvc:       NewProviderService(encryptionKey),
-		mcpSvc:            NewMcpService(encryptionKey),
-		knowledgeSvc:      knowledgeSvc,
-		kongSvc:           kongSvc,
-		authMode:          authMode,
-		chatPushAPIKey:    chatPushAPIKey,
-		chatPushPublicURL: chatPushPublicURL,
+		providerSvc:       NewProviderService(cfg.EncryptionKey),
+		mcpSvc:            NewMcpService(cfg.EncryptionKey),
+		knowledgeSvc:      cfg.KnowledgeSvc,
+		kongSvc:           cfg.KongSvc,
+		authMode:          cfg.AuthMode,
+		chatPushAPIKey:    cfg.ChatPushAPIKey,
+		chatPushPublicURL: cfg.ChatPushPublicURL,
 		healthProbe:       defaultHealthProbe,
 		gatewayHealth:     &sync.Map{},
 	}
-	if aigcSvc != nil {
-		s.aigcSvc = aigcSvc
+	if cfg.AigcSvc != nil {
+		s.aigcSvc = cfg.AigcSvc
 	}
 	return s
 }
