@@ -46,6 +46,7 @@ describe('AppHeader 页眉链接', () => {
     const site = screen.getByRole('link', { name: '官方网站' })
     expect(site).toHaveAttribute('href', 'https://www.zerone.run/')
     expect(site).toHaveAttribute('target', '_blank')
+    expect(site).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })
 
