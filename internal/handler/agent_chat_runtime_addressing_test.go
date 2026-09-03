@@ -21,11 +21,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// This file verifies the runtime addressing contract after tenant-scoped
-// deploy keys (PR #61): the runtime container registers agents under
-// DeployKey(tenantID, name) (e.g. "tenant-a-min"), so the chat handler must
-// call StreamRun with the deploy key, not the bare agent name — otherwise the
-// runtime returns 404 "Agent not found".
+// This file verifies the runtime addressing contract after the v3.1
+// deploymentKey split (issue #114): the runtime container registers agents
+// under their bare agent id (e.g. "min"), so the chat handler must call
+// StreamRun with the bare name; the tenant-scoped deploy key is a deployer
+// resource id only (the deployer fake below keeps scoped lifecycle paths).
 //
 // The test wires the REAL AgentChatService + AgentDeployerService +
 // runtime.Client against:
@@ -109,6 +109,7 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		"",          // runtimeAPIKey
 		nil, nil, nil,
 		"", "", // chat push key / public URL: 未配置 = 不下发回传段
+		services.ModeCasdoor, // casdoor-shaped addressing fixture
 	)
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),
@@ -131,7 +132,7 @@ func portOfServerURL(t *testing.T, rawURL string) int {
 	return port
 }
 
-func TestSendMessage_AddressesRuntimeWithDeployKey(t *testing.T) {
+func TestSendMessage_AddressesRuntimeWithBareAgentID(t *testing.T) {
 	var runtimePath string
 	h := newAgentChatHandlerWithFakes(t, &runtimePath)
 
@@ -147,9 +148,9 @@ func TestSendMessage_AddressesRuntimeWithDeployKey(t *testing.T) {
 	h.SendMessage(c)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	// The runtime must be addressed by the tenant-scoped deploy key, not the
-	// bare name (which registers in the runtime as 404 "Agent not found").
-	require.Equal(t, "/v1/agents/tenant-a-min/runs", runtimePath)
+	// The runtime must be addressed by the bare agent id (issue #114); the
+	// scoped deploy key never appears in runtime API paths.
+	require.Equal(t, "/v1/agents/min/runs", runtimePath)
 	// The SSE stream was piped through to the client.
 	require.Contains(t, w.Body.String(), `"subtype":"success"`)
 }

@@ -97,7 +97,8 @@ interface FormValues {
   iconColor: string
   iconBgColor: string
   maxTurns: number
-  maxSessionTurns?: number
+  maxSessionQueries?: number
+  disallowedTools?: string[]
   systemPrompt: string
   desktopEnabled: boolean
   mobileEnabled: boolean
@@ -144,7 +145,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           iconColor: editingAgent.config.iconColor ?? '',
           iconBgColor: editingAgent.config.iconBgColor ?? '',
           maxTurns: editingAgent.config.maxTurns ?? 50,
-          maxSessionTurns: editingAgent.config.maxSessionTurns,
+          maxSessionQueries: editingAgent.config.maxSessionQueries,
+          disallowedTools: editingAgent.config.disallowedTools ?? [],
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
@@ -155,7 +157,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionTurns: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
         })
       }
     }
@@ -183,7 +185,10 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       systemPrompt: v.systemPrompt,
       permissionMode: v.permissionMode,
       maxTurns: v.maxTurns,
-      maxSessionTurns: v.maxSessionTurns ?? undefined,
+      maxSessionQueries: v.maxSessionQueries ?? undefined,
+      // undefined（新建未触碰）→ 不下发 key（hub 视为未配置）；编辑态清空后 antd Select 值为 []，
+      // 必须显式发空数组——hub applyUpdateConfig 对 absent key 不变更，丢 key 会让清空静默失效
+      disallowedTools: v.disallowedTools ?? undefined,
       title: v.titleZh ? { zh: v.titleZh, ...(v.titleEn ? { en: v.titleEn } : {}) } : undefined,
       description: v.descriptionZh
         ? { zh: v.descriptionZh, ...(v.descriptionEn ? { en: v.descriptionEn } : {}) }
@@ -346,8 +351,11 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         <Form.Item label="最大轮次" name="maxTurns">
           <InputNumber min={1} max={500} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item label="会话上下文轮次" name="maxSessionTurns" tooltip="控制发送给 LLM 的历史会话轮次数，留空表示无限制">
+        <Form.Item label="会话查询数上限" name="maxSessionQueries" tooltip="控制单个会话内的最大查询次数，留空表示无限制">
           <InputNumber min={1} placeholder="无限制" style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label="禁用工具" name="disallowedTools" tooltip="在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名">
+          <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
         </Form.Item>
 
         {/* 系统提示词 */}

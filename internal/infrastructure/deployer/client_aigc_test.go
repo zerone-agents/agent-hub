@@ -10,8 +10,9 @@ import (
 func TestCreateAgentBody_OmitsAigcWhenNil(t *testing.T) {
 	body, err := json.Marshal(createAgentBody{
 		CreateAgentRequest: &CreateAgentRequest{
-			Agent:    AgentDefinition{Name: "a", Model: "glm-4.5"},
-			Provider: ProviderConfig{Protocol: "anthropic-messages", BaseURL: "https://x", LockedAPIKey: "k"},
+			RootAgentID: "a",
+			Agents:      []AgentDefinition{{Name: "a", Model: "glm-4.5"}},
+			Provider:    ProviderConfig{Protocol: "anthropic-messages", BaseURL: "https://x", LockedAPIKey: "k"},
 		},
 	})
 	require.NoError(t, err)
@@ -21,8 +22,9 @@ func TestCreateAgentBody_OmitsAigcWhenNil(t *testing.T) {
 func TestCreateAgentBody_IncludesAigc(t *testing.T) {
 	body, err := json.Marshal(createAgentBody{
 		CreateAgentRequest: &CreateAgentRequest{
-			Agent:    AgentDefinition{Name: "a", Model: "glm-4.5"},
-			Provider: ProviderConfig{Protocol: "anthropic-messages", BaseURL: "https://x", LockedAPIKey: "k"},
+			RootAgentID: "a",
+			Agents:      []AgentDefinition{{Name: "a", Model: "glm-4.5"}},
+			Provider:    ProviderConfig{Protocol: "anthropic-messages", BaseURL: "https://x", LockedAPIKey: "k"},
 			Aigc: &AigcConfig{
 				Enabled:         true,
 				ContentProducer: "001191320118MAK93FC72D10000",

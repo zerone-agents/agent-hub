@@ -54,8 +54,9 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	// runtime 注册名为部署键（DeployKey(tenantID, name)），需用限定名寻址，裸名会 404。
-	body, err := h.svc.RuntimeClient().GetAgentDetail(ctx, baseURL, services.DeployKey(tenant.GetTenantID(c), agentName), apiKey)
+	// runtime 注册名为裸 Agent ID（issue #114）；scoped deployment key 仅是
+	// deployer 资源标识，不参与 runtime 寻址。
+	body, err := h.svc.RuntimeClient().GetAgentDetail(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey)
 	if err != nil {
 		// runtime client wraps non-2xx as "runtime returned HTTP %d: ..."
 		// We map 404 specifically; other errors are 502 (unreachable or non-2xx).

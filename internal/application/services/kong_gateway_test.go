@@ -148,11 +148,11 @@ const (
 )
 
 func newKongService(fk *fakeKong, repo *memRepo) *KongGatewayService {
-	return NewKongGatewayService(fk, testServiceHost, testRouteHost, repo, 60)
+	return NewKongGatewayService(fk, testServiceHost, testRouteHost, repo, 60, ModeCasdoor)
 }
 
 func TestRegister_Disabled_IsNoOp(t *testing.T) {
-	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, newMemRepo(nil), 60)
+	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, newMemRepo(nil), 60, ModeCasdoor)
 	if err := s.Register(context.Background(), "general", "/default/general", 3000); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -206,6 +206,73 @@ func TestRegister_SingleSegmentPath_Rejected(t *testing.T) {
 	}
 	if len(fk.services) != 0 || len(fk.routes) != 0 {
 		t.Fatalf("expected no resources for single-segment path, got %d services / %d routes", len(fk.services), len(fk.routes))
+	}
+}
+
+func TestPublicPath(t *testing.T) {
+	if got := PublicPath(ModeBuiltin, "default", "My.Agent"); got != "/my-agent" {
+		t.Fatalf("builtin PublicPath = %q, want /my-agent", got)
+	}
+	// casdoor with a tenant literally named "default" stays scoped: the auth
+	// mode, not the tenant spelling, decides (reconcile runs without request
+	// context).
+	if got := PublicPath(ModeCasdoor, "default", "My.Agent"); got != "/default/my-agent" {
+		t.Fatalf("casdoor PublicPath = %q, want /default/my-agent", got)
+	}
+}
+
+func TestRegister_BuiltinSingleSegmentAccepted(t *testing.T) {
+	// builtin (single-tenant) mode serves /<name> — the implicit default
+	// tenant never leaks into public URLs (issue #114).
+	fk := newFakeKong()
+	s := NewKongGatewayService(fk, testServiceHost, testRouteHost, newMemRepo(nil), 60, ModeBuiltin)
+	if err := s.Register(context.Background(), "default-min", "/min", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-min-route"]
+	if r == nil {
+		t.Fatal("expected route agent-default-min-route")
+	}
+	if len(r.Paths) != 1 || r.Paths[0] != "/min" {
+		t.Fatalf("route paths = %v, want [/min]", r.Paths)
+	}
+}
+
+func TestRegister_BuiltinTwoSegmentStillAccepted(t *testing.T) {
+	// The builtin exemption is a lenient superset: two-segment /<org>/<name>
+	// paths keep registering (upgrades converge to the bare form via
+	// reconcile).
+	fk := newFakeKong()
+	s := NewKongGatewayService(fk, testServiceHost, testRouteHost, newMemRepo(nil), 60, ModeBuiltin)
+	if err := s.Register(context.Background(), "default-min", "/default/min", 3000); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := fk.routes["agent-default-min-route"]
+	if r == nil || len(r.Paths) != 1 || r.Paths[0] != "/default/min" {
+		t.Fatalf("route paths = %v, want [/default/min]", r.Paths)
+	}
+}
+
+func TestReconcile_BuiltinRewritesScopedRouteToBare(t *testing.T) {
+	// Upgrade auto-migration (issue #114): a pre-existing builtin route
+	// carries the scoped /default/<name> path; the first reconcile cycle
+	// converges it to the bare /<name> form via the expectedPaths diff.
+	fk := newFakeKong()
+	repo := newMemRepo([]agent.AgentConfig{
+		{TenantID: "default", Name: "min", DeploymentStatus: "running", RuntimePort: 3000},
+	})
+	s := NewKongGatewayService(fk, testServiceHost, testRouteHost, repo, 60, ModeBuiltin)
+	_ = s.Register(context.Background(), "default-min", "/default/min", 3000)
+
+	fixes, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fixes != 1 {
+		t.Fatalf("expected 1 fix, got %d", fixes)
+	}
+	if p := fk.routes["agent-default-min-route"].Paths; len(p) != 1 || p[0] != "/min" {
+		t.Fatalf("expected path /min, got %v", p)
 	}
 }
 
@@ -538,7 +605,7 @@ func TestReconcile_Disabled_NoOp(t *testing.T) {
 	repo := newMemRepo([]agent.AgentConfig{
 		{TenantID: "zerone", Name: "general", DeploymentStatus: "running", RuntimePort: 3000},
 	})
-	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60)
+	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, repo, 60, ModeCasdoor)
 	fixes, err := s.Reconcile(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -549,7 +616,7 @@ func TestReconcile_Disabled_NoOp(t *testing.T) {
 }
 
 func TestRouteURL(t *testing.T) {
-	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, nil, 60)
+	s := NewKongGatewayService(nil, testServiceHost, testRouteHost, nil, 60, ModeCasdoor)
 	if got := s.RouteURL("/zerone/general"); got != "https://deploy.example.com/zerone/general" {
 		t.Fatalf("unexpected route url: %q", got)
 	}
@@ -557,7 +624,7 @@ func TestRouteURL(t *testing.T) {
 	if got := s.RouteURL("zerone/general"); got != "https://deploy.example.com/zerone/general" {
 		t.Fatalf("unexpected tolerant route url: %q", got)
 	}
-	if got := NewKongGatewayService(nil, testServiceHost, "", nil, 60).RouteURL("/zerone/general"); got != "" {
+	if got := NewKongGatewayService(nil, testServiceHost, "", nil, 60, ModeCasdoor).RouteURL("/zerone/general"); got != "" {
 		t.Fatalf("expected empty url, got %q", got)
 	}
 }
@@ -588,7 +655,7 @@ func TestDeployKey(t *testing.T) {
 	}
 }
 
-func TestURLPath(t *testing.T) {
+func TestScopedPublicPath(t *testing.T) {
 	cases := []struct {
 		tenant, name, want string
 	}{
@@ -597,8 +664,8 @@ func TestURLPath(t *testing.T) {
 		{"Zero_Corp!", "Assistant X", "/zero-corp/assistant-x"},
 	}
 	for _, c := range cases {
-		if got := URLPath(c.tenant, c.name); got != c.want {
-			t.Fatalf("URLPath(%q,%q) = %q, want %q", c.tenant, c.name, got, c.want)
+		if got := ScopedPublicPath(c.tenant, c.name); got != c.want {
+			t.Fatalf("ScopedPublicPath(%q,%q) = %q, want %q", c.tenant, c.name, got, c.want)
 		}
 	}
 }

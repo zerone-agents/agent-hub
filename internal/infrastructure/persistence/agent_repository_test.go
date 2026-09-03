@@ -45,7 +45,8 @@ func setupAgentRepoTestDB(t *testing.T) *gorm.DB {
 			mobile_enabled INTEGER NOT NULL DEFAULT 0,
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
-			max_session_turns INTEGER,
+			max_session_queries INTEGER,
+			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',
 			deployed_at DATETIME,
@@ -275,6 +276,35 @@ func TestAgentRepository_Create_StampsTenant(t *testing.T) {
 	require.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 }
 
+// TestAgentRepository_DisallowedToolsRoundTrip covers the issue #111 agent-
+// local deny-list storage: the serializer:json TEXT column preserves entries
+// through Create/GetByName, an explicit clear (Save writes all fields
+// including zero values) persists as nil, and pre-column NULL rows read
+// back nil.
+func TestAgentRepository_DisallowedToolsRoundTrip(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+
+	in := &agent.AgentConfig{Name: "deny-agent", DisallowedTools: []string{"Bash", "mcp__knowledge__lookup"}}
+	require.NoError(t, repo.Create("org-a", in))
+	got, err := repo.GetByName("org-a", "deny-agent")
+	require.NoError(t, err)
+	require.Equal(t, []string{"Bash", "mcp__knowledge__lookup"}, got.DisallowedTools)
+
+	// Explicit clear persists (repo.Update → Save 全字段写，nil 不会被跳过).
+	got.DisallowedTools = nil
+	require.NoError(t, repo.Update("org-a", got))
+	cleared, err := repo.GetByName("org-a", "deny-agent")
+	require.NoError(t, err)
+	require.Nil(t, cleared.DisallowedTools)
+
+	// Rows created before the column existed (NULL) read back nil.
+	require.NoError(t, db.Exec(`INSERT INTO agents (name, tenant_id) VALUES ('legacy-null', 'org-a')`).Error)
+	legacy, err := repo.GetByName("org-a", "legacy-null")
+	require.NoError(t, err)
+	require.Nil(t, legacy.DisallowedTools)
+}
+
 func TestAgentRepository_Update_CrossTenantRejected(t *testing.T) {
 	db := setupAgentRepoTestDB(t)
 	aAgent, _ := seedAgentTenantData(t, db)
@@ -325,6 +355,46 @@ func TestAgentRepository_Delete_CrossTenantRejected(t *testing.T) {
 	// org-b 的行不受影响
 	require.NoError(t, db.Model(&agent.AgentConfig{}).Where("id = ?", bAgent.ID).Count(&cnt).Error)
 	require.Equal(t, int64(1), cnt)
+}
+
+func TestAgentRepository_ExistsSubagentBinding(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	parent := &agent.AgentConfig{Name: "parent", TenantID: "org-a"}
+	child := &agent.AgentConfig{Name: "child", TenantID: "org-a"}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(child).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: child.ID}).Error)
+
+	// child is mounted by parent → true; parent is not mounted by anyone → false.
+	mounted, err := repo.ExistsSubagentBinding(child.ID)
+	require.NoError(t, err)
+	require.True(t, mounted)
+
+	mounted, err = repo.ExistsSubagentBinding(parent.ID)
+	require.NoError(t, err)
+	require.False(t, mounted)
+}
+
+func TestAgentRepository_CountSubagentsOf(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	parent := &agent.AgentConfig{Name: "parent", TenantID: "org-a"}
+	c1 := &agent.AgentConfig{Name: "child-1", TenantID: "org-a"}
+	c2 := &agent.AgentConfig{Name: "child-2", TenantID: "org-a"}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(c1).Error)
+	require.NoError(t, db.Create(c2).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: c1.ID}).Error)
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: c2.ID}).Error)
+
+	n, err := repo.CountSubagentsOf(parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+
+	n, err = repo.CountSubagentsOf(c1.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
 }
 
 func TestAgentRepository_GetAllSubagents_TenantIsolation(t *testing.T) {

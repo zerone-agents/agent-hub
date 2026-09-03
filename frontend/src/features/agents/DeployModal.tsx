@@ -26,9 +26,10 @@ import { tokens as t } from '@/styles/tokens'
 const { Text } = Typography
 
 /**
- * No-Kong mode returns a hub-relative runtime path (e.g. /runtime/default/test);
- * resolve it against the current origin for display and clipboard. Kong-mode
- * absolute URLs pass through unchanged.
+ * No-Kong mode returns a hub-relative runtime path — casdoor shape
+ * /runtime/<org>/<agent>, builtin shape /runtime/<agent> (issue #114: no
+ * default tenant segment); resolve it against the current origin for display
+ * and clipboard. Kong-mode absolute URLs pass through unchanged.
  */
 const absoluteRuntimeUrl = (url: string): string =>
   url.startsWith('/') ? `${window.location.origin}${url}` : url

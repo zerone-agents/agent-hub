@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +14,6 @@ import (
 	"control-panel/internal/domain/provider"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/database"
-	"log"
 )
 
 // AgentService provides business logic for managing agent configurations.
@@ -352,7 +353,10 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, err
 	}
 
-	cfg := s.prepareCreateConfig(input)
+	cfg, err := s.prepareCreateConfig(input)
+	if err != nil {
+		return nil, err
+	}
 
 	if cfg.IsDefault {
 		if err := s.repo.ClearAllDefault(tenantID); err != nil {
@@ -380,7 +384,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 }
 
 // prepareCreateConfig builds an AgentConfig from creation input with enabled/isDefault resolution.
-func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) *agent.AgentConfig {
+func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.AgentConfig, error) {
 	desktop := false
 	if input.DesktopEnabled != nil {
 		desktop = *input.DesktopEnabled
@@ -401,8 +405,10 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) *agent.Agent
 		MobileEnabled:  mobile,
 		IsDefault:      isDefault,
 	}
-	unpackConfigToModel(input.Config, cfg, s.encryptionKey)
-	return cfg
+	if err := unpackConfigToModel(input.Config, cfg, s.encryptionKey); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // applyCreateDefaults sets default values for permission mode and max turns.
@@ -445,7 +451,9 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 		if err := ValidateConfig(*input.Config); err != nil {
 			return err
 		}
-		unpackConfigToModel(*input.Config, cfg, s.encryptionKey)
+		if err := unpackConfigToModel(*input.Config, cfg, s.encryptionKey); err != nil {
+			return err
+		}
 	}
 
 	if input.DesktopEnabled != nil {
@@ -498,17 +506,40 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
+	resolved := make([]*agent.AgentConfig, 0, len(subagentNames))
 	for _, subName := range subagentNames {
 		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
 			return fmt.Errorf("子 Agent '%s' 不存在", subName)
 		}
 		subagentIDs = append(subagentIDs, subCfg.ID)
+		resolved = append(resolved, subCfg)
 	}
 
 	for _, subName := range subagentNames {
 		if subName == agentName {
 			return fmt.Errorf("子 Agent 不能与主 Agent 相同")
+		}
+	}
+
+	// One delegation level only (issue #111; runtime depth is fixed at one):
+	// an agent that is already mounted cannot mount others, and an agent
+	// that already mounts others cannot be mounted. Legacy states that
+	// predate this invariant still fail explicitly at deploy time
+	// (loadAgentGraph); clearing an agent's own list stays allowed so such
+	// violations remain fixable from the console.
+	if len(subagentNames) > 0 {
+		if parentIsMounted, err := s.repo.ExistsSubagentBinding(cfg.ID); err != nil {
+			return err
+		} else if parentIsMounted {
+			return fmt.Errorf("Agent %q 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）", agentName)
+		}
+		for _, subCfg := range resolved {
+			if n, err := s.repo.CountSubagentsOf(subCfg.ID); err != nil {
+				return err
+			} else if n > 0 {
+				return fmt.Errorf("Agent %q 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）", subCfg.Name)
+			}
 		}
 	}
 
@@ -522,7 +553,13 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	return syncSubagentToolBindings(s.repo, s.toolRepo, cfg.ID, len(subagentNames) > 0)
 }
 
-func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, encryptionKey string) {
+func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, encryptionKey string) error {
+	// 旧 key 哨兵：SDK 3.1.0 起 maxSessionTurns 更名为 maxSessionQueries
+	// （issue #111）。在任何字段解包前拒绝，保证调用方不会拿到部分解包的
+	// 半成品 cfg。
+	if _, exists := config["maxSessionTurns"]; exists {
+		return fmt.Errorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
+	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
 	}
@@ -566,10 +603,34 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.Group = v
 	}
 
-	// Handle maxSessionTurns field
-	if v, ok := config["maxSessionTurns"].(float64); ok {
+	// Handle maxSessionQueries field
+	if v, ok := config["maxSessionQueries"].(float64); ok {
 		n := int(v)
-		cfg.MaxSessionTurns = &n
+		cfg.MaxSessionQueries = &n
+	}
+
+	// Handle disallowedTools (issue #111 agent-local deny list): accept a
+	// string array only; non-string items fail the whole unpack (validator
+	// separately enforces per-item constraints). Each entry is trimmed here
+	// so the stored/deployed value matches the validator's trim-based
+	// dedup/emptiness semantics — runtime matches tool names exactly, so
+	// shipping an un-trimmed entry would silently fail-open the deny list.
+	// Whitespace-only entries are rejected the same way as non-strings.
+	// Absent key leaves the field untouched.
+	if v, ok := config["disallowedTools"].([]interface{}); ok {
+		items := make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
+			}
+			trimmed := strings.TrimSpace(s)
+			if trimmed == "" {
+				return fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
+			}
+			items = append(items, trimmed)
+		}
+		cfg.DisallowedTools = items
 	}
 
 	// Handle fieldOverrides
@@ -595,6 +656,7 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 			cfg.FieldOverrides = string(jsonBytes)
 		}
 	}
+	return nil
 }
 
 func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]interface{} {
@@ -609,10 +671,16 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 		"group":          cfg.Group,
 	}
 
-	if cfg.MaxSessionTurns != nil {
-		m["maxSessionTurns"] = *cfg.MaxSessionTurns
+	if cfg.MaxSessionQueries != nil {
+		m["maxSessionQueries"] = float64(*cfg.MaxSessionQueries)
 	} else {
-		m["maxSessionTurns"] = nil
+		m["maxSessionQueries"] = nil
+	}
+
+	if cfg.DisallowedTools != nil {
+		m["disallowedTools"] = cfg.DisallowedTools
+	} else {
+		m["disallowedTools"] = nil
 	}
 
 	if cfg.ProviderID != nil {
@@ -833,6 +901,40 @@ func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]
 	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
+	}
+	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
+}
+
+// GetAgentKnowledgeDatasetsForRequest resolves the dataset ids the requesting
+// identity may access. tokenAgentName is the agent whose runtime token was
+// presented; requestingID is the deployment-trusted X-Agent-Id (falls back
+// to tokenAgentName itself when absent). requestingID must be the token
+// agent itself or one of its direct subagents; the granted set is the
+// requesting agent's OWN bindings only — never a closure union.
+// 日志不含 token/headers。
+func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+	agentCfg, err := s.repo.GetByName(tenantID, tokenAgentName)
+	if err != nil {
+		return nil, fmt.Errorf("Agent '%s' 不存在: %w", tokenAgentName, err)
+	}
+	if requestingID == "" {
+		requestingID = tokenAgentName
+	}
+	if requestingID != tokenAgentName {
+		subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
+		if err != nil {
+			return nil, fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", tokenAgentName, err)
+		}
+		// 先 tenant-scoped 解析（悬空/跨租户引用在此暴露），再比对直接挂载
+		// 成员；任一失败都 fail-closed，与「非成员」保持同一对外语义。
+		reqCfg, resolveErr := s.repo.GetByName(tenantID, requestingID)
+		if resolveErr != nil {
+			log.Printf("knowledge auth: resolve requesting identity %q failed (agent=%s tenant=%s): %v", requestingID, tokenAgentName, tenantID, resolveErr)
+		}
+		if resolveErr != nil || !slices.Contains(subagentNames, requestingID) {
+			return nil, fmt.Errorf("请求身份 %q 不属于 Agent %q 的部署图", requestingID, tokenAgentName)
+		}
+		agentCfg = reqCfg
 	}
 	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 }

@@ -25,7 +25,12 @@ type KnowledgeMcpService interface {
 
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
 type AgentMcpService interface {
-	GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error)
+	// GetAgentKnowledgeDatasetsForRequest 返回「请求身份」可访问的 dataset
+	// IDs：requestingID 是部署时 hub 注入 MCP 连接头的 X-Agent-Id（缺失时
+	// 回退 token agent 自身），必须等于 token agent 本身或其直接挂载的
+	// subagent；授权集只是该身份自己的绑定——不是部署闭包并集（child 拿
+	// 不到 parent/sibling 的，root 也拿不到 child 的）。
+	GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error)
 }
 
 type jsonRPCRequest struct {
@@ -494,8 +499,18 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 	})
 }
 
-// resolveAgentContext 抽取 agent/tenant 提取与绑定 dataset 反查。
-// 返回错误即 JSON-RPC -32603（由调用方决定文案透传）。
+// agentIdentityHeader 承载 Knowledge MCP 请求的「部署时受信身份」。部署
+// 侧（agent_deployer.go）构造每个 graph 节点的 knowledge MCP 连接 headers
+// 时注入该头（值 = 该 agent 的 DB 裸名），deployer 原样写入该节点自己的
+// agents.yaml 段——模型只能调 knowledge_search 选 dataset_ids 参数，无法
+// 伪造 MCP 连接 headers，因此该头就是按节点隔离授权的受信凭据。两个包
+// 各持同名常量，改动须同步。
+const agentIdentityHeader = "X-Agent-Id"
+
+// resolveAgentContext 抽取 agent/租户/请求身份提取与绑定 dataset 反查。
+// 请求身份取 X-Agent-Id 连接头（见 agentIdentityHeader）；缺失时回退
+// token agent 自身——存量未注入身份的 agents.yaml 回到 #111 前的最严格
+// 行为。返回错误即 JSON-RPC -32603（由调用方决定文案透传）。
 func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, error) {
 	agentCfg, ok := middleware.AgentFromContext(c)
 	if !ok {
@@ -507,9 +522,14 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, err
 		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
 		return nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
 	}
-	allowed, err := h.agentService.GetAgentKnowledgeDatasets(tenantID, agentCfg.Name)
+	requestingID := strings.TrimSpace(c.GetHeader(agentIdentityHeader))
+	if requestingID == "" {
+		requestingID = agentCfg.Name
+	}
+	allowed, err := h.agentService.GetAgentKnowledgeDatasetsForRequest(tenantID, agentCfg.Name, requestingID)
 	if err != nil {
-		log.Printf("knowledge-mcp: get agent knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+		// 细节（身份解析失败原因等）只进服务端日志，客户端拿中性文案。
+		log.Printf("knowledge-mcp: resolve knowledge datasets failed (tenant=%s agent=%s requesting=%s): %v", tenantID, agentCfg.Name, requestingID, err)
 		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
 	}
 	return allowed, nil

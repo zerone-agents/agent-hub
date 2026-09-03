@@ -3,6 +3,8 @@ package deployer
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,22 +47,18 @@ func TestCreateAgent(t *testing.T) {
 	client := NewClient(server.URL, "test-key")
 
 	req := &CreateAgentRequest{
-		Agent: AgentDefinition{
-			Name:           "coder",
-			Model:          "claude-sonnet-4-6",
-			SystemPrompt:   "You are a coding assistant.",
-			MaxTurns:       intPtr(10),
-			PermissionMode: "auto",
-			Tools:          []string{"Read", "Write"},
-			Skills:         []SkillSource{{Name: "code-review", URL: "https://example.com/skills/code-review.zip", Hash: "sha256:abc123"}},
-			Subagents: []SubagentDefinition{
-				{
-					Name:        "reviewer",
-					Description: "Reviews code",
-					Prompt:      "You are a code reviewer.",
-					Tools:       []string{"Read"},
-					MaxTurns:    intPtr(10),
-				},
+		RootAgentID:   "coder",
+		DeploymentKey: "acme-coder",
+		Agents: []AgentDefinition{
+			{
+				Name:           "coder",
+				Model:          "claude-sonnet-4-6",
+				SystemPrompt:   "You are a coding assistant.",
+				MaxTurns:       intPtr(10),
+				PermissionMode: "auto",
+				Tools:          []string{"Read", "Write"},
+				Skills:         []SkillSource{{Name: "code-review", URL: "https://example.com/skills/code-review.zip", Hash: "sha256:abc123"}},
+				Subagents:      []string{"reviewer"},
 			},
 		},
 		Provider: ProviderConfig{
@@ -112,6 +110,12 @@ func TestCreateAgent(t *testing.T) {
 	if _, ok := gotBody["rotate_key"]; ok {
 		t.Errorf("rotate_key should not be present in request body, got %v", gotBody["rotate_key"])
 	}
+
+	// deploymentKey is serialized as its own top-level field (deployer v3.1,
+	// issue #114): tenant-scoped resource key, independent of rootAgentId.
+	if dk, ok := gotBody["deploymentKey"].(string); !ok || dk != "acme-coder" {
+		t.Errorf("deploymentKey = %v, want %q", gotBody["deploymentKey"], "acme-coder")
+	}
 }
 
 func TestCreateAgent_ForceFalse(t *testing.T) {
@@ -138,10 +142,9 @@ func TestCreateAgent_ForceFalse(t *testing.T) {
 
 	client := NewClient(server.URL, "test-key")
 	req := &CreateAgentRequest{
-		Agent: AgentDefinition{
-			Name:         "coder",
-			Model:        "claude-sonnet-4-6",
-			SystemPrompt: "You are a coding assistant.",
+		RootAgentID: "coder",
+		Agents: []AgentDefinition{
+			{Name: "coder", Model: "claude-sonnet-4-6", SystemPrompt: "You are a coding assistant."},
 		},
 		Provider: ProviderConfig{
 			Protocol:     "anthropic",
@@ -172,10 +175,9 @@ func TestCreateAgent_Error(t *testing.T) {
 
 	client := NewClient(server.URL, "test-key")
 	req := &CreateAgentRequest{
-		Agent: AgentDefinition{
-			Name:         "coder",
-			Model:        "claude-sonnet-4-6",
-			SystemPrompt: "You are a coding assistant.",
+		RootAgentID: "coder",
+		Agents: []AgentDefinition{
+			{Name: "coder", Model: "claude-sonnet-4-6", SystemPrompt: "You are a coding assistant."},
 		},
 		Provider: ProviderConfig{
 			Protocol:     "anthropic",
@@ -188,9 +190,16 @@ func TestCreateAgent_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	want := "deployer returned HTTP 400: {\"error\":\"invalid request\",\"success\":false}\n"
-	if err.Error() != want {
-		t.Errorf("error = %q, want %q", err.Error(), want)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("want *HTTPError, got %T: %v", err, err)
+	}
+	want := "deployer returned HTTP 400: invalid request"
+	if httpErr.Error() != want {
+		t.Errorf("error = %q, want %q", httpErr.Error(), want)
+	}
+	if httpErr.Message != "invalid request" {
+		t.Errorf("Message = %q, want %q", httpErr.Message, "invalid request")
 	}
 }
 
@@ -247,7 +256,7 @@ func TestGetAgent_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	want := "deployer returned HTTP 404: {\"error\":\"agent \\\"coder\\\": agent not found\",\"success\":false}\n"
+	want := "deployer returned HTTP 404: agent \"coder\": agent not found"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
@@ -382,4 +391,139 @@ func TestDeleteAgent_NoPurge(t *testing.T) {
 
 func intPtr(i int) *int {
 	return &i
+}
+
+func TestCreateAgent_SendsGraphProtocol(t *testing.T) {
+	var gotBody map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]interface{}{}})
+	}))
+	defer srv.Close()
+
+	maxQ := 50
+	maxTurns := 20
+	c := NewClient(srv.URL, "key")
+	_, err := c.CreateAgent(context.Background(), &CreateAgentRequest{
+		RootAgentID: "org-root",
+		Agents: []AgentDefinition{
+			{Name: "org-root", Description: "d", Model: "m", SystemPrompt: "p",
+				MaxSessionQueries: &maxQ, Subagents: []string{"child-a"}},
+			{Name: "child-a", Description: "d2", SystemPrompt: "p2",
+				MaxTurns: &maxTurns, Datasets: map[string]string{"ds1": "desc"}},
+		},
+		Provider:     ProviderConfig{Protocol: "openai", BaseURL: "http://x", LockedAPIKey: "k"},
+		RuntimeToken: "tok",
+	}, true)
+	if err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	if _, exists := gotBody["agent"]; exists {
+		t.Error("request must not contain legacy top-level \"agent\"")
+	}
+	if _, exists := gotBody["maxSessionTurns"]; exists {
+		t.Error("request must not contain legacy maxSessionTurns")
+	}
+	var rootID string
+	json.Unmarshal(gotBody["rootAgentId"], &rootID)
+	if rootID != "org-root" {
+		t.Errorf("rootAgentId = %q, want org-root", rootID)
+	}
+	var agents []map[string]json.RawMessage
+	json.Unmarshal(gotBody["agents"], &agents)
+	if len(agents) != 2 {
+		t.Fatalf("agents len = %d, want 2", len(agents))
+	}
+	var subs []string
+	json.Unmarshal(agents[0]["subagents"], &subs)
+	if len(subs) != 1 || subs[0] != "child-a" {
+		t.Errorf("root subagents = %v, want [child-a] (pure id refs)", subs)
+	}
+	// NOTE: the brief's verbatim loop ranged over gotBody["agents"] directly,
+	// which iterates the raw json.RawMessage bytes; iterate the decoded
+	// elements instead.
+	for _, m := range agents {
+		if _, exists := m["prompt"]; exists {
+			t.Error("agent definition must not contain legacy SubagentDefinition \"prompt\" field")
+		}
+	}
+}
+
+func TestCreateAgent_HTTPErrorCarriesStatusAndMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "rootAgentId not found in agents"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "key")
+	_, err := c.CreateAgent(context.Background(), &CreateAgentRequest{RootAgentID: "x", Provider: ProviderConfig{}, RuntimeToken: "t"}, false)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("want *HTTPError, got %T: %v", err, err)
+	}
+	if httpErr.StatusCode != 400 {
+		t.Errorf("StatusCode = %d, want 400", httpErr.StatusCode)
+	}
+	if httpErr.Message != "rootAgentId not found in agents" {
+		t.Errorf("Message = %q", httpErr.Message)
+	}
+}
+
+func TestSupportsDeploymentKey_V31Sentinel(t *testing.T) {
+	// v3.1.0+ validation order: rootAgentID ok → deploymentKey missing →
+	// 400 "deploymentKey is required" (before agents/provider checks).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "deploymentKey is required"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_LegacyV30(t *testing.T) {
+	// v3.0.x has no deploymentKey concept: the same probe trips the
+	// empty-agents guard instead → reported as unsupported, not an error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "agents must contain at least the root agent definition"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err != nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_TransportError(t *testing.T) {
+	client := NewClient("http://127.0.0.1:1", "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err == nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, error)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_UnexpectedSuccess(t *testing.T) {
+	// No known deployer generation accepts this invalid probe. Fail closed
+	// with an error rather than guessing support.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err == nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, error)", ok, err)
+	}
 }

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/infrastructure/deployer"
+	"control-panel/internal/infrastructure/kong"
 )
 
 func TestWaitForHealthy_DockerHealthyPath(t *testing.T) {
@@ -188,7 +190,9 @@ type deployTokenFixture struct {
 
 // newDeployTokenServer builds a mock deployer. getFound controls the GET
 // /api/v1/agents/<name> probe response (container exists or not); POST
-// /api/v1/agents always succeeds and echoes a container payload.
+// /api/v1/agents always succeeds and echoes a container payload. POSTs
+// without a deploymentKey are capability probes (issue #114) — answered with
+// the v3.1.0 sentinel and kept out of the create capture.
 func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,8 +206,17 @@ func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *h
 			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
 			return
 		}
-		f.postCalled = true
 		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			DeploymentKey string `json:"deploymentKey"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		if probe.DeploymentKey == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+			return
+		}
+		f.postCalled = true
 		f.postBody = body
 		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
 	}))
@@ -566,21 +579,27 @@ func buildReqWithTools(t *testing.T, tools []*agent.Tool, cdnHost string) (*depl
 	svc.toolRepo = &mockToolRepo{tools: tools}
 	svc.cdnHost = cdnHost
 	cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "m", SystemPrompt: "p"}
-	return svc.buildCreateRequest(context.Background(), "t", cfg, provider, tools, nil, nil, nil)
+	return svc.buildCreateRequest(context.Background(), "t", cfg, provider)
 }
 
 func TestBuildCreateRequest_CustomToolsSortedAndToolsFull(t *testing.T) {
 	req, err := buildReqWithTools(t, customToolRecordsFixture(), "https://cdn.example.com")
 	require.NoError(t, err)
+	// v3.1 split (issue #114): rootAgentId is the bare runtime id and must
+	// match the (single) root definition; the scoped key moved to the
+	// dedicated deploymentKey field.
+	require.Equal(t, "general", req.RootAgentID)
+	require.Equal(t, "t-general", req.DeploymentKey)
+	require.Len(t, req.Agents, 1)
 	// Tools = 全量关联名（含 builtin），排序
-	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agent.Tools)
+	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agents[0].Tools)
 	// CustomTools = custom+ready 子集，按名排序，URL=CDN+key
-	require.Len(t, req.Agent.CustomTools, 2)
-	require.Equal(t, "Alpha", req.Agent.CustomTools[0].Name)
-	require.Equal(t, "https://cdn.example.com/tools/t/Alpha/h2.ts", req.Agent.CustomTools[0].URL)
-	require.Equal(t, "h2", req.Agent.CustomTools[0].Hash)
-	require.Equal(t, "a.ts", req.Agent.CustomTools[0].FileName)
-	require.Equal(t, "Zeta", req.Agent.CustomTools[1].Name)
+	require.Len(t, req.Agents[0].CustomTools, 2)
+	require.Equal(t, "Alpha", req.Agents[0].CustomTools[0].Name)
+	require.Equal(t, "https://cdn.example.com/tools/t/Alpha/h2.ts", req.Agents[0].CustomTools[0].URL)
+	require.Equal(t, "h2", req.Agents[0].CustomTools[0].Hash)
+	require.Equal(t, "a.ts", req.Agents[0].CustomTools[0].FileName)
+	require.Equal(t, "Zeta", req.Agents[0].CustomTools[1].Name)
 }
 
 func TestBuildCreateRequest_MissingCustomToolFailsFast(t *testing.T) {
@@ -594,4 +613,327 @@ func TestBuildCreateRequest_CustomToolsRequireCDNHost(t *testing.T) {
 	_, err := buildReqWithTools(t, customToolRecordsFixture(), "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "OSS_CDN_HOST")
+}
+
+// deployFailureFixture captures what a fake deployer saw during a failed
+// Deploy call: create (POST), archive (DELETE) and the DB updates the
+// service performed afterwards.
+type deployFailureFixture struct {
+	postStatus   int  // HTTP status returned to the create (POST) call
+	hijackPost   bool // kill the POST at transport level (network error, not *deployer.HTTPError)
+	postCalled   bool
+	deleteCalled bool
+	updates      []*agent.AgentConfig
+}
+
+// newDeployFailureServer builds a mock deployer for Deploy failure-path
+// tests: the GET probe reports an existing running container, POST returns
+// the fixture's status (or dies at transport level when hijackPost is set),
+// DELETE records the archive call and succeeds.
+func newDeployFailureServer(t *testing.T, f *deployFailureFixture) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
+		case http.MethodPost:
+			// Capability probes (no deploymentKey, issue #114) get the v3.1.0
+			// sentinel so the gate passes; only real creates are recorded and
+			// subjected to the fixture's failure behavior.
+			body, _ := io.ReadAll(r.Body)
+			var probe struct {
+				DeploymentKey string `json:"deploymentKey"`
+			}
+			_ = json.Unmarshal(body, &probe)
+			if probe.DeploymentKey == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+				return
+			}
+			f.postCalled = true
+			if f.hijackPost {
+				// Close the connection without a response: the client sees a
+				// transport error (not *deployer.HTTPError), which is the
+				// "hub cannot know what the deployer did" cleanup case.
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Error("test server does not support hijacking")
+					return
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Errorf("hijack failed: %v", err)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			w.WriteHeader(f.postStatus)
+			w.Write([]byte(`{"success":false,"error":"boom"}`))
+		case http.MethodDelete:
+			f.deleteCalled = true
+			w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// deployFailureAgentRepo simulates a healthy, currently-running deployment
+// (stored token, status running) and records every DB update.
+func deployFailureAgentRepo(f *deployFailureFixture, runtimeToken string) *mockAgentRepo {
+	providerID := uint64(1)
+	return &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return &agent.AgentConfig{
+				ID:               1,
+				Name:             "general",
+				ProviderID:       &providerID,
+				ModelID:          "glm-5-turbo",
+				RuntimeToken:     runtimeToken,
+				DeploymentStatus: "running",
+				RuntimePort:      3000,
+			}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
+			f.updates = append(f.updates, a)
+			return nil
+		},
+	}
+}
+
+// preRegisterKongRoute seeds the fake gateway with the service and routes a
+// Deregister call would remove, so tests can tell whether it ran.
+func preRegisterKongRoute(fk *fakeKong, key string) {
+	fk.services[svcName(key)] = &kong.Service{Name: svcName(key)}
+	fk.routes[routeName(key)] = &kong.Route{Name: routeName(key)}
+	fk.routes[legacyRouteName(key)] = &kong.Route{Name: legacyRouteName(key)}
+}
+
+// attachFakeKong wires a fake gateway pre-registered with the deployment's
+// service and routes onto the service, so Deploy tests can assert whether a
+// Deregister ran (entries gone) or not (entries intact).
+func attachFakeKong(s *AgentDeployerService, key string) *fakeKong {
+	fk := newFakeKong()
+	preRegisterKongRoute(fk, key)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, ModeCasdoor)
+	return fk
+}
+
+// assertKongEntriesIntact asserts that no Deregister happened: the route,
+// legacy route and service seeded via attachFakeKong are all still present.
+func assertKongEntriesIntact(t *testing.T, fk *fakeKong, key string) {
+	t.Helper()
+	if _, ok := fk.routes[routeName(key)]; !ok {
+		t.Errorf("Kong route %s must survive (Deregister must not run)", routeName(key))
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; !ok {
+		t.Errorf("legacy Kong route %s must survive (Deregister must not run)", legacyRouteName(key))
+	}
+	if _, ok := fk.services[svcName(key)]; !ok {
+		t.Errorf("Kong service %s must survive (Deregister must not run)", svcName(key))
+	}
+}
+
+// TestDeploy_CreateAgentFailure_CleanupPolicy pins the post-review contract:
+// pre-rejections (deployer 4xx protocol validation / 503 runtime floor, both
+// decided before the deployer touches Docker) must leave the existing
+// container and the DB deployment status untouched, while mid-flight
+// failures (5xx, network) still archive the half-created container and mark
+// the deployment errored.
+func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
+	// The stored token keeps resolveRuntimeToken from probing the deployer,
+	// so the flow under test is: build request → create.
+	const storedToken = "0123456789abcdef0123456789abcdef"
+
+	run := func(t *testing.T, f *deployFailureFixture) error {
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		_, err := s.Deploy("default", "general", false, false)
+		return err
+	}
+
+	t.Run("400 pre-rejected keeps container, DB status and route", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusBadRequest}
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
+
+		_, err := s.Deploy("default", "general", false, false)
+		if err == nil || !strings.Contains(err.Error(), "deploy agent failed") || !strings.Contains(err.Error(), "400") {
+			t.Fatalf("expected wrapped HTTP 400 deploy failure, got %v", err)
+		}
+		if f.deleteCalled {
+			t.Error("pre-rejected (400) deploy must not archive the still-running container")
+		}
+		if len(f.updates) != 0 {
+			t.Errorf("pre-rejected (400) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
+		}
+		assertKongEntriesIntact(t, fk, key)
+	})
+
+	t.Run("503 pre-rejected keeps container, DB status and route", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusServiceUnavailable}
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
+
+		_, err := s.Deploy("default", "general", false, false)
+		if err == nil || !strings.Contains(err.Error(), "503") {
+			t.Fatalf("expected HTTP 503 deploy failure, got %v", err)
+		}
+		if f.deleteCalled {
+			t.Error("pre-rejected (503) deploy must not archive the still-running container")
+		}
+		if len(f.updates) != 0 {
+			t.Errorf("pre-rejected (503) deploy must not overwrite DB status; got %d update(s), first status %q", len(f.updates), f.updates[0].DeploymentStatus)
+		}
+		assertKongEntriesIntact(t, fk, key)
+	})
+
+	t.Run("500 mid-flight failure still archives, errors and drops route", func(t *testing.T) {
+		f := &deployFailureFixture{postStatus: http.StatusInternalServerError}
+		srv := newDeployFailureServer(t, f)
+		defer srv.Close()
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
+
+		_, err := s.Deploy("default", "general", false, false)
+		if err == nil || !strings.Contains(err.Error(), "500") {
+			t.Fatalf("expected HTTP 500 deploy failure, got %v", err)
+		}
+		if !f.deleteCalled {
+			t.Error("mid-flight (500) failure must archive the half-created container")
+		}
+		if len(f.updates) != 1 || f.updates[0].DeploymentStatus != "error" {
+			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
+		}
+		// The archived container leaves the route without a backend: the
+		// mid-flight cleanup must drop it (and this doubles as the positive
+		// control proving Deregister really removes the seeded entries).
+		if _, ok := fk.routes[routeName(key)]; ok {
+			t.Error("mid-flight (500) failure must deregister the backend-less Kong route")
+		}
+		if _, ok := fk.services[svcName(key)]; ok {
+			t.Error("mid-flight (500) failure must deregister the backend-less Kong service")
+		}
+	})
+
+	t.Run("network failure still archives and errors", func(t *testing.T) {
+		f := &deployFailureFixture{hijackPost: true}
+		err := run(t, f)
+		if err == nil {
+			t.Fatal("expected network deploy failure, got nil")
+		}
+		if strings.Contains(err.Error(), "deployer returned HTTP") {
+			t.Fatalf("expected transport error, got HTTPError: %v", err)
+		}
+		if !f.deleteCalled {
+			t.Error("network failure must archive the half-created container")
+		}
+		if len(f.updates) != 1 || f.updates[0].DeploymentStatus != "error" {
+			t.Fatalf("expected exactly one DB update setting status to error, got %d update(s)", len(f.updates))
+		}
+	})
+}
+
+// TestDeploy_Success_DeregistersStaleRouteAfterCreate pins the route-switch
+// ordering: the stale Kong route (pointing at the previous container's port)
+// is only dropped after the deployer confirms the create succeeded, and the
+// async registerWhenHealthy later re-registers against the new container.
+// The fixture's status endpoint never reports health "healthy" and the test
+// service's active probe always fails, so the async goroutine cannot
+// re-register during the test — the assertions below pin exactly the
+// synchronous post-create Deregister, with no timing dependency.
+func TestDeploy_Success_DeregistersStaleRouteAfterCreate(t *testing.T) {
+	const storedToken = "0123456789abcdef0123456789abcdef"
+	f := &deployTokenFixture{}
+	srv := newDeployTokenServer(t, true, f)
+	defer srv.Close()
+
+	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
+	key := DeployKey("tenant-a", "general")
+	fk := attachFakeKong(s, key)
+
+	if _, err := s.Deploy("tenant-a", "general", false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := fk.routes[routeName(key)]; ok {
+		t.Error("stale Kong route must be dropped after a successful create")
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; ok {
+		t.Error("stale legacy Kong route must be dropped after a successful create")
+	}
+	if _, ok := fk.services[svcName(key)]; ok {
+		t.Error("stale Kong service must be dropped after a successful create")
+	}
+}
+
+// TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute pins the
+// ordering fix: buildCreateRequest (graph construction + capability
+// validation, pure DB reads) runs before the Kong deregistration, so a
+// validation failure — here a dangling subagent reference — returns without
+// touching the gateway while the existing container keeps serving.
+func TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute(t *testing.T) {
+	f := &deployFailureFixture{postStatus: http.StatusOK} // create must never be reached
+	srv := newDeployFailureServer(t, f)
+	defer srv.Close()
+
+	providerID := uint64(1)
+	repo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if name != "general" {
+				return nil, fmt.Errorf("agent %q not found", name)
+			}
+			return &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo"}, nil
+		},
+		getSubagentsFunc: func(agentID uint64) ([]string, error) {
+			return []string{"missing-sub"}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error {
+			f.updates = append(f.updates, a)
+			return nil
+		},
+	}
+	s := newTestAgentDeployerService(t, srv.URL, repo, deployTokenProviderSvc())
+
+	fk := newFakeKong()
+	key := DeployKey("default", "general")
+	preRegisterKongRoute(fk, key)
+	s.kongSvc = NewKongGatewayService(fk, "upstream", "public", nil, 0, ModeCasdoor)
+
+	// force=true skips the existing-container GET probe; the deploy must die
+	// inside buildCreateRequest on the dangling subagent reference.
+	_, err := s.Deploy("default", "general", true, false)
+	if err == nil {
+		t.Fatal("expected graph validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "不存在") || !strings.Contains(err.Error(), "missing-sub") {
+		t.Errorf("expected dangling-subagent error, got: %v", err)
+	}
+	if f.postCalled {
+		t.Error("graph validation failure must not reach the deployer create call")
+	}
+	if f.deleteCalled {
+		t.Error("graph validation failure must not archive anything")
+	}
+	if len(f.updates) != 0 {
+		t.Errorf("graph validation failure must not touch DB status; got %d update(s)", len(f.updates))
+	}
+	if _, ok := fk.routes[routeName(key)]; !ok {
+		t.Error("Kong route must survive a graph validation failure (Deregister must not run)")
+	}
+	if _, ok := fk.routes[legacyRouteName(key)]; !ok {
+		t.Error("legacy Kong route must survive a graph validation failure")
+	}
+	if _, ok := fk.services[svcName(key)]; !ok {
+		t.Error("Kong service must survive a graph validation failure")
+	}
 }
