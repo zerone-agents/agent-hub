@@ -198,6 +198,24 @@ func TestCapabilities_DisabledWhenHealthUnreachable(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"attachmentsEnabled":false`)
 }
 
+// F2 回归（runtime #61 Hub 跟进契约）：附件入口 = runtime capability 声明
+// && deployer 报告非空 containerId。capability true 但 deployer 未报告
+// containerId（空代次）→ 不探测直接 false；两者齐备 → true。两个独立 env
+// 断言——AttachmentsAvailable 有 15s TTL probe cache，同一 service 实例内
+// 第二次调用会命中缓存；*env.containerID 可变，构造后置空即模拟空代次。
+func TestCapabilities_RequireNonEmptyContainerGeneration(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.7.0"})
+	*env.containerID = ""
+	w := doCapabilities(t, env)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"attachmentsEnabled":false`)
+
+	envOK := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.7.0"})
+	wOK := doCapabilities(t, envOK)
+	require.Equal(t, http.StatusOK, wOK.Code)
+	require.Contains(t, wOK.Body.String(), `"attachmentsEnabled":true`)
+}
+
 func sendMessageForAttachments(t *testing.T, env *attachmentChatEnv, body string, name, sessionID, userID string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -417,9 +435,9 @@ func TestSendMessage_GenerationMismatch412RollsBackUserMessage(t *testing.T) {
 }
 
 // generation_unavailable（503，runtime 无法确定自身容器身份）：透传 503，
-// user message 不回滚——瞬时部署状态异常，代次本身未变，恢复后原样重发即可
-// （与 412 的「附件失效需重新上传」相区分）。
-func TestSendMessage_GenerationUnavailable503KeepsUserMessage(t *testing.T) {
+// user message 回滚——review F3：所有已识别的附件 pre-run 拒绝（白名单五码）
+// 统一回滚，user turn 从未生效，历史不留注定失败的重复记录；恢复后重新发送。
+func TestSendMessage_GenerationUnavailable503RollsBackUserMessage(t *testing.T) {
 	env := newAttachmentChatEnv(t, attachmentFakeOpts{
 		runtimeVersion: "2.7.0",
 		runsHandler: func(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +454,10 @@ func TestSendMessage_GenerationUnavailable503KeepsUserMessage(t *testing.T) {
 	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
 	var userCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
-	require.Equal(t, int64(1), userCount, "generation_unavailable is transient; the user turn must be kept for a verbatim retry")
+	require.Zero(t, userCount, "generation_unavailable must roll back the persisted user message (review F3: all pre-run rejects roll back)")
+	var sysCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&sysCount).Error)
+	require.Zero(t, sysCount, "generation_unavailable must not be persisted as a system error message")
 }
 
 func uploadRequestForAttachments(t *testing.T, env *attachmentChatEnv, files []struct{ name, body string }, sessionID, userID string) *httptest.ResponseRecorder {

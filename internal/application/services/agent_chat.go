@@ -370,7 +370,9 @@ func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL s
 
 // AttachmentsAvailable reports (15s TTL cache) whether the agent's runtime
 // supports attachments. Probe failures return false — text chat is never
-// blocked by this.
+// blocked by this. The gate is conjunctive (runtime #61 Hub 跟进契约):
+// runtime capability declaration && non-empty deployer containerId — either
+// missing closes the entrance (no upload, no attachment-bearing send).
 func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, agentName string) bool {
 	key := tenantID + "\x00" + agentName
 	s.probeMu.Lock()
@@ -381,7 +383,10 @@ func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, a
 	s.probeMu.Unlock()
 
 	ok := false
-	if baseURL, _, _, err := s.ResolveRuntime(tenantID, agentName); err == nil {
+	// runtime #61 Hub 跟进契约：capability && deployer containerId 非空，二者
+	// 缺一即关闭（不探测）。containerId 在此处门控——deployer 未报告容器 id
+	//（空代次）时上传记录的代次绑定无从谈起，capability 探测通过也不能开入口。
+	if baseURL, _, containerID, err := s.ResolveRuntime(tenantID, agentName); err == nil && containerID != "" {
 		ok = s.AttachmentsSupportedAt(ctx, baseURL)
 	}
 	s.probeMu.Lock()

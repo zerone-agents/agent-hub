@@ -272,17 +272,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		var httpErr *runtime.RuntimeHTTPError
 		if errors.As(err, &httpErr) && httpErr.AttachmentCode != "" {
 			code := httpErr.AttachmentCode
-			// 附件失效可重试语义（attachment_missing / generation_mismatch，
-			// runtime v2.7.0 契约）：回滚乐观持久化的用户消息，重发（重新
-			// 上传→再发）才不会在历史里留下重复的 user turn。其余域码
-			//（generation_unavailable 等）不回滚——瞬时部署状态异常，代次
-			// 本身未变，恢复后原样重发即可。删除失败仅日志——消息重复是
-			// 体验问题，不该阻塞错误上报。
-			if code == chat.ErrCodeAttachmentMissing || code == chat.ErrCodeGenerationMismatch {
-				if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
-					log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
-						tenantID, sessionID, msg.ID, delErr)
-				}
+			// 白名单五码统一回滚（review F3：所有已识别的附件 pre-run 拒绝
+			// 都回滚）：runtime 在消费任何附件之前就拒绝，该 user turn 从未
+			// 生效——回滚乐观持久化的消息，重发（重新上传→再发）才不会在
+			// 历史里留下重复的 user turn。generation_unavailable（503 瞬时
+			// 部署异常）同样回滚：入口状态异常时保留一个「已发出」的假象
+			// 只会让用户对着注定失败的历史重试。删除失败仅日志——消息重复
+			// 是体验问题，不该阻塞错误上报。
+			if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
+				log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
+					tenantID, sessionID, msg.ID, delErr)
 			}
 			// 契约（runtime v2.7.0）：412 generation_mismatch 后禁止无 header
 			// 降级重试——去掉 X-Expected-Container-Id 重发会把代次不匹配
