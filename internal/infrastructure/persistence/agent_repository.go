@@ -171,6 +171,27 @@ func (r *AgentRepository) GetAllSubagents(tenantID string) (map[string][]string,
 	return result, nil
 }
 
+// ExistsSubagentBinding reports whether the agent is mounted as a subagent by
+// any other agent (agent_subagents.subagent_id = agentID). Backs the
+// one-delegation-level invariant in UpdateSubagents (issue #111).
+func (r *AgentRepository) ExistsSubagentBinding(agentID uint64) (bool, error) {
+	var count int64
+	err := r.db.Model(&agent.AgentSubagent{}).
+		Where("subagent_id = ?", agentID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// CountSubagentsOf returns how many subagents the agent itself mounts
+// (agent_subagents.agent_id = agentID).
+func (r *AgentRepository) CountSubagentsOf(agentID uint64) (int64, error) {
+	var count int64
+	err := r.db.Model(&agent.AgentSubagent{}).
+		Where("agent_id = ?", agentID).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *AgentRepository) ReplaceSubagents(agentID uint64, subagentIDs []uint64) error {
 	tx := r.db.Begin()
 	if tx.Error != nil {

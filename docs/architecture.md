@@ -60,7 +60,7 @@ flowchart TB
     BE -->|"Admin API"| Kong
 
     Deployer -->|"create / start / stop container"| Runtime
-    Deployer -->|"deliver agent.yaml<br/>datasets / MCP / provider"| Runtime
+    Deployer -->|"deliver agents.yaml (agent graph)<br/>datasets / MCP / provider"| Runtime
     Deployer -->|"return runtime URL / API key"| BE
 
     Runtime -->|"knowledge retrieval MCP<br/>POST /api/v1/knowledge/mcp<br/>Agent Runtime Token"| BE

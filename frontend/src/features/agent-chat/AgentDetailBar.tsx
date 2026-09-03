@@ -53,12 +53,13 @@ export default function AgentDetailBar({ agentName }: Props) {
       {expanded && (
         <AgentDetailGrid
           allowedTools={data.allowedTools}
+          disallowedTools={data.disallowedTools}
           mcpServers={data.mcpServers}
           subagents={data.subagents}
           datasets={data.datasets}
           availableSkills={data.availableSkills}
           maxTurns={data.maxTurns}
-          maxSessionTurns={data.maxSessionTurns}
+          maxSessionQueries={data.maxSessionQueries}
         />
       )}
     </div>

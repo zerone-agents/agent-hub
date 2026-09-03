@@ -8,51 +8,42 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
-// AgentDefinition defines the agent configuration.
+// AgentDefinition is one node of the deployment agent graph (deployer v3).
+// Subagents are pure id references to other entries in the same graph;
+// mounted agents never inherit or fall back to parent capabilities — an
+// empty field stays empty. Runtime-global fields (Model, MaxSessionQueries,
+// PermissionMode) are root-only: the deployer rejects them on children.
 type AgentDefinition struct {
-	Name string `json:"name"`
-	// Description is a short human/agent-readable summary of what the agent
-	// does. Required by the deployer: agent-runtime 2.0 rejects configs
-	// without it, and it is what the parent agent's Task tool shows when
-	// mounting subagents.
-	Description     string   `json:"description"`
-	Model           string   `json:"model"`
-	SystemPrompt    string   `json:"systemPrompt"`
-	MaxTurns        *int     `json:"maxTurns,omitempty"`
-	MaxSessionTurns *int     `json:"maxSessionTurns,omitempty"`
-	PermissionMode  string   `json:"permissionMode,omitempty"`
-	Tools           []string `json:"tools,omitempty"`
-	// CustomTools lists custom Tool artifacts to download and install before
-	// the container starts (issue #88). Tools above stays the complete
-	// allow-list; CustomTools only carries source=custom && ready rows.
-	CustomTools []ToolSource               `json:"customTools,omitempty"`
-	Skills      []SkillSource              `json:"skills,omitempty"`
-	Subagents   []SubagentDefinition       `json:"subagents,omitempty"`
-	McpServers  map[string]McpServerConfig `json:"mcpServers,omitempty"`
-	// Datasets maps dataset-id to description, consumed by the runtime for
-	// building the agent system prompt and knowledge tool context.
-	Datasets map[string]string `json:"datasets,omitempty"`
-
-	// SettingSources controls runtime filesystem skill scanning. The runtime
-	// SDK only loads skills via this field — `skills` above is just an
-	// allow-list filter.
-	//
-	// control-panel does NOT populate this field: the deployer decides on
-	// its own when to scan the user skill directory based on the skills
-	// list, and control-panel sending ["user"] used to race with that
-	// logic. The field is kept in the schema so external clients can still
-	// set it explicitly when they need to override the deployer's default.
-	SettingSources []string `json:"settingSources,omitempty"`
-
-	// ExtraUserSkillDirs / ExtraProjectSkillDirs let advanced users extend
-	// the runtime's search path beyond the defaults. Not currently wired
-	// through the UI; exposed here so future work only needs the DB + form
-	// layer, not the deployer schema.
-	ExtraUserSkillDirs    []string `json:"extraUserSkillDirs,omitempty"`
-	ExtraProjectSkillDirs []string `json:"extraProjectSkillDirs,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Model        string `json:"model,omitempty"`
+	SystemPrompt string `json:"systemPrompt"`
+	MaxTurns     *int   `json:"maxTurns,omitempty"`
+	// MaxSessionQueries is the session-level query cap (SDK 3.1.0 rename of
+	// maxSessionTurns; runtime >= v2.6.0). Root-only.
+	MaxSessionQueries *int     `json:"maxSessionQueries,omitempty"`
+	PermissionMode    string   `json:"permissionMode,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
+	// DisallowedTools is the agent-local deny list (issue #111): a
+	// user-configured tool-name blacklist (built-in names like "Bash" or
+	// MCP-qualified names, no referential integrity) applied on top of the
+	// Tools allow-list. Distinct from read-only restrictions such as Explore,
+	// which stay dynamic in the runtime/SDK. Root and children are
+	// isomorphic; empty omits the key.
+	DisallowedTools []string      `json:"disallowedTools,omitempty"`
+	CustomTools     []ToolSource  `json:"customTools,omitempty"`
+	Skills          []SkillSource `json:"skills,omitempty"`
+	// SettingSources is set to ["user"] when (and only when) this agent
+	// declares skills — the deployer v3 validation requires it, its storage
+	// layer defaults root to ["project"] otherwise.
+	SettingSources []string                   `json:"settingSources,omitempty"`
+	Subagents      []string                   `json:"subagents,omitempty"`
+	McpServers     map[string]McpServerConfig `json:"mcpServers,omitempty"`
+	Datasets       map[string]string          `json:"datasets,omitempty"`
 }
 
 // McpServerConfig defines the configuration for a single MCP server.
@@ -61,15 +52,6 @@ type McpServerConfig struct {
 	Type    string            `json:"type"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
-}
-
-// SubagentDefinition defines a subagent configuration.
-type SubagentDefinition struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Prompt      string   `json:"prompt"`
-	Tools       []string `json:"tools,omitempty"`
-	MaxTurns    *int     `json:"maxTurns,omitempty"`
 }
 
 // SkillSource defines a skill source for agent-deployer.
@@ -133,17 +115,17 @@ type HubConfig struct {
 	Org         string `json:"org,omitempty"`
 }
 
-// CreateAgentRequest is the request body for creating an agent.
+// CreateAgentRequest is the deployer v3 deployment payload: a complete agent
+// graph plus runtime-global provider config. RootAgentID doubles as the
+// deployment/container name and must match one Agents[].Name entry.
 type CreateAgentRequest struct {
-	Agent    AgentDefinition `json:"agent"`
-	Provider ProviderConfig  `json:"provider"`
-	// RuntimeToken is provisioned by the caller (control-panel) and injected
-	// into the container as ZERONE_AGENT_HTTP_API_KEY. The deployer no longer
-	// generates, stores, or rotates tokens — it only consumes this value.
-	RuntimeToken string      `json:"runtime_token"`
-	Force        bool        `json:"force,omitempty"`
-	Aigc         *AigcConfig `json:"aigc,omitempty"`
-	Hub          *HubConfig  `json:"hub,omitempty"`
+	RootAgentID  string            `json:"rootAgentId"`
+	Agents       []AgentDefinition `json:"agents"`
+	Provider     ProviderConfig    `json:"provider"`
+	RuntimeToken string            `json:"runtime_token"`
+	Force        bool              `json:"force,omitempty"`
+	Aigc         *AigcConfig       `json:"aigc,omitempty"`
+	Hub          *HubConfig        `json:"hub,omitempty"`
 }
 
 // createAgentBody wraps CreateAgentRequest with a separate force field to avoid
@@ -165,7 +147,11 @@ type AgentResponse struct {
 	YAMLPath      string `json:"yamlPath,omitempty"`
 	SessionDir    string `json:"sessionDir,omitempty"`
 	SkillsDir     string `json:"skillsDir,omitempty"`
-	RuntimeToken  string `json:"runtimeToken"`
+	// ContainerSkillsDir / ToolsDir are v3 additions the hub does not consume
+	// yet; defined so the DTO cannot drift from the deployer contract.
+	ContainerSkillsDir string `json:"containerSkillsDir,omitempty"`
+	ToolsDir           string `json:"toolsDir,omitempty"`
+	RuntimeToken       string `json:"runtimeToken"`
 }
 
 // AgentStatusResponse is the response for agent status queries.
@@ -216,16 +202,35 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return c.client.Do(req)
 }
 
+// HTTPError carries a non-2xx deployer response so handlers can map status
+// codes without string matching. Message comes from the deployer's
+// {"success":false,"error":...} envelope (neutral, log-safe copy).
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("deployer returned HTTP %d: %s", e.StatusCode, e.Message)
+}
+
 // decodeSuccess reads and closes resp.Body.
 // It checks the HTTP status code before decoding JSON. If the status is not 2xx,
-// it reads the body (up to a limit) and returns an error including the status
-// and body content.
+// it reads the body (up to a limit) and returns an *HTTPError carrying the
+// status code plus the envelope error message (or the raw body as fallback).
 func decodeSuccess(resp *http.Response, out interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("deployer returned HTTP %d: %s", resp.StatusCode, string(body))
+		msg := strings.TrimSpace(string(body))
+		var env struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &env) == nil && env.Error != "" {
+			msg = env.Error
+		}
+		return &HTTPError{StatusCode: resp.StatusCode, Message: msg}
 	}
 
 	var env successEnvelope

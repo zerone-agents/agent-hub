@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/tenant"
+	"control-panel/internal/infrastructure/deployer"
 
 	"github.com/gin-gonic/gin"
 )
@@ -234,7 +236,24 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 	})
 }
 
+// deployerErrorStatus maps deployer failures to hub response codes. Typed
+// deployer.HTTPError values (see decodeSuccess) win first: deployer v3 4xx
+// (protocol rejections) and 503 (runtime version floor below requirement)
+// pass through as-is, while other upstream 5xx failures surface as 502.
+// Non-HTTPError errors fall through to the legacy string matching, which
+// keeps mapping hub-side validation failures (e.g. "agent has no provider").
 func deployerErrorStatus(err error) int {
+	var httpErr *deployer.HTTPError
+	if errors.As(err, &httpErr) {
+		switch {
+		case httpErr.StatusCode >= 400 && httpErr.StatusCode < 500:
+			return httpErr.StatusCode
+		case httpErr.StatusCode == http.StatusServiceUnavailable:
+			return http.StatusServiceUnavailable
+		default:
+			return http.StatusBadGateway
+		}
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "agent has no provider") ||
 		strings.Contains(msg, "agent has no model") ||

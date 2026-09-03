@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,11 +61,11 @@ type fakeAgentMcpService struct {
 	err      error
 }
 
-func (f *fakeAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
+func (f *fakeAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
 	return f.datasets, f.err
 }
 
-func testAgentAuthMiddleware(validToken string) gin.HandlerFunc {
+func testAgentAuthMiddlewareFor(agentName, validToken string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		const prefix = "Bearer "
@@ -77,21 +78,37 @@ func testAgentAuthMiddleware(validToken string) gin.HandlerFunc {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		c.Set("agent", &agent.AgentConfig{Name: "test-agent"})
+		c.Set("agent", &agent.AgentConfig{Name: agentName})
 		tenant.SetTenantID(c, tenant.DefaultID)
 		c.Next()
 	}
 }
 
+func testAgentAuthMiddleware(validToken string) gin.HandlerFunc {
+	return testAgentAuthMiddlewareFor("test-agent", validToken)
+}
+
 func setupKnowledgeMcpRouter(knowledgeSvc KnowledgeMcpService, agentSvc AgentMcpService) *gin.Engine {
+	return setupKnowledgeMcpRouterAsAgent("test-agent", knowledgeSvc, agentSvc)
+}
+
+// setupKnowledgeMcpRouterAsAgent 与 setupKnowledgeMcpRouter 相同，但把
+// Bearer 命中的 token agent 换成指定名（按身份授权矩阵用 root）。
+func setupKnowledgeMcpRouterAsAgent(agentName string, knowledgeSvc KnowledgeMcpService, agentSvc AgentMcpService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewKnowledgeMcpHandler(knowledgeSvc, agentSvc)
 	router := gin.New()
-	router.POST("/api/v1/knowledge/mcp", testAgentAuthMiddleware(testValidToken), handler.HandleMessage)
+	router.POST("/api/v1/knowledge/mcp", testAgentAuthMiddlewareFor(agentName, testValidToken), handler.HandleMessage)
 	return router
 }
 
 func postJSONRPC(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token string) *httptest.ResponseRecorder {
+	return postJSONRPCAsAgent(t, router, method, params, token, "")
+}
+
+// postJSONRPCAsAgent 在 postJSONRPC 基础上附带 X-Agent-Id 请求头（部署时
+// hub 注入 MCP 连接头的请求身份），用于按身份授权矩阵。
+func postJSONRPCAsAgent(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token, agentID string) *httptest.ResponseRecorder {
 	body := jsonRPCRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: params}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -101,6 +118,9 @@ func postJSONRPC(t *testing.T, router *gin.Engine, method string, params json.Ra
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if agentID != "" {
+		req.Header.Set("X-Agent-Id", agentID)
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -283,6 +303,139 @@ func TestKnowledgeMcpHandler_ToolsCall_UnauthorizedDataset(t *testing.T) {
 	if !strings.Contains(resultText(resp.Result), "无权访问") {
 		t.Fatalf("expected unauthorized message, got %v", resp.Result)
 	}
+}
+
+// issue #111 review P1-1：Knowledge MCP 授权按「部署时受信的请求身份」逐
+// agent 隔离。请求身份来自 X-Agent-Id 连接头（hub 构造 MCP headers 时注入
+// agents.yaml，模型只能选 dataset_ids 参数、无法伪造连接头）；child 不得
+// 访问 parent/sibling 的 dataset，root 也不得访问 child 的。token agent
+// 固定为 root（fixture：root 绑 ds-root，child-a 绑 ds-child，child-b 无
+// 绑定——service 层行为由单测锁定，此处的 keyed fake 模拟其返回）。
+func TestKnowledgeMcpHandler_ToolsCall_PerAgentIdentityAuthorization(t *testing.T) {
+	identityBindings := func(requestingID string) ([]string, error) {
+		switch requestingID {
+		case "root":
+			return []string{"ds-root"}, nil
+		case "child-a":
+			return []string{"ds-child"}, nil
+		default:
+			return nil, fmt.Errorf("请求身份 %q 不属于 Agent %q 的部署图", requestingID, "root")
+		}
+	}
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+		return identityBindings(requestingID)
+	}}
+	newRouter := func(knowledgeSvc KnowledgeMcpService) *gin.Engine {
+		return setupKnowledgeMcpRouterAsAgent("root", knowledgeSvc, agentSvc)
+	}
+
+	t.Run("child-a 身份请求自己的 dataset → 放行", func(t *testing.T) {
+		var gotDatasetIDs []string
+		knowledgeSvc := &fakeKnowledgeMcpService{
+			retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+				gotDatasetIDs, _ = req["dataset_ids"].([]string)
+				return &knowledge.RetrievalResult{}, nil
+			},
+		}
+		rec := postJSONRPCAsAgent(t, newRouter(knowledgeSvc), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
+			testValidToken, "child-a")
+
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if isErrorResult(resp.Result) {
+			t.Fatalf("child-a requesting its own dataset must pass, got %v", resp.Result)
+		}
+		if len(gotDatasetIDs) != 1 || gotDatasetIDs[0] != "ds-child" {
+			t.Fatalf("retrieval dataset_ids = %v, want [ds-child]", gotDatasetIDs)
+		}
+	})
+
+	t.Run("child-a 身份请求 parent 的 dataset → 拒绝", func(t *testing.T) {
+		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, "child-a")
+
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
+			t.Fatalf("child-a must not reach parent datasets, got %v", resp.Result)
+		}
+	})
+
+	t.Run("root 身份请求 child 的 dataset → 拒绝", func(t *testing.T) {
+		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
+			testValidToken, "root")
+
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
+			t.Fatalf("root must not reach child datasets, got %v", resp.Result)
+		}
+	})
+
+	t.Run("无 X-Agent-Id（存量回退）→ 按 token agent 自身绑定", func(t *testing.T) {
+		var gotRequestingID string
+		fallbackSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+			gotRequestingID = requestingID
+			return identityBindings(requestingID)
+		}}
+		router := setupKnowledgeMcpRouterAsAgent("root", &fakeKnowledgeMcpService{}, fallbackSvc)
+
+		// token agent 自身绑定放行。
+		rec := postJSONRPC(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken)
+		var passResp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &passResp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if isErrorResult(passResp.Result) {
+			t.Fatalf("root requesting its own dataset (no identity header) must pass, got %v", passResp.Result)
+		}
+
+		// child 绑定的 dataset 拒绝（回到 #111 前的最严格行为）。
+		rec = postJSONRPC(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
+			testValidToken)
+		var denyResp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &denyResp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if !isErrorResult(denyResp.Result) || !strings.Contains(resultText(denyResp.Result), "无权访问") {
+			t.Fatalf("fallback identity must be token agent itself, child dataset should be denied, got %v", denyResp.Result)
+		}
+		if gotRequestingID != "root" {
+			t.Fatalf("requestingID = %q, want fallback to token agent name %q", gotRequestingID, "root")
+		}
+	})
+
+	t.Run("X-Agent-Id 非闭包成员 → 中性 -32603 错误", func(t *testing.T) {
+		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, "another-root")
+
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if resp.Error == nil {
+			t.Fatalf("identity outside the deploy graph must surface a JSON-RPC error, got %v", resp.Result)
+		}
+		if !strings.Contains(resp.Error.Message, "获取 Agent 知识库绑定关系失败") {
+			t.Fatalf("client-visible error must stay neutral, got %q", resp.Error.Message)
+		}
+		if strings.Contains(resp.Error.Message, "another-root") {
+			t.Fatalf("client-visible error must not echo the requesting identity, got %q", resp.Error.Message)
+		}
+	})
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
@@ -651,7 +804,7 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 	// 无 tenant 时必须返回明确错误，而非用空串静默查询全表。
 	gin.SetMode(gin.TestMode)
 	var gotTenantID string
-	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, agentName string) ([]string, error) {
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
 		gotTenantID = tenantID
 		return []string{"allowed-dataset"}, nil
 	}}
@@ -678,10 +831,11 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
-	// 验证 handler 把 context 里的 tenant_id 原样传给 dataset 反查。
-	var gotTenantID, gotAgentName string
-	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, agentName string) ([]string, error) {
-		gotTenantID, gotAgentName = tenantID, agentName
+	// 验证 handler 把 context 里的 tenant_id 与 token agent 名原样传给
+	// dataset 反查；无 X-Agent-Id 时 requestingID 回退 token agent 自身。
+	var gotTenantID, gotTokenAgent, gotRequestingID string
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+		gotTenantID, gotTokenAgent, gotRequestingID = tenantID, tokenAgentName, requestingID
 		return []string{"tenant-a-dataset"}, nil
 	}}
 	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
@@ -694,17 +848,20 @@ func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
 	if gotTenantID != tenant.DefaultID {
 		t.Fatalf("tenantID = %q, want %q", gotTenantID, tenant.DefaultID)
 	}
-	if gotAgentName != "test-agent" {
-		t.Fatalf("agentName = %q, want test-agent", gotAgentName)
+	if gotTokenAgent != "test-agent" {
+		t.Fatalf("tokenAgentName = %q, want test-agent", gotTokenAgent)
+	}
+	if gotRequestingID != "test-agent" {
+		t.Fatalf("requestingID = %q, want fallback to token agent %q", gotRequestingID, "test-agent")
 	}
 }
 
 type tenantAwareAgentMcpService struct {
-	fn func(tenantID, agentName string) ([]string, error)
+	fn func(tenantID, tokenAgentName, requestingID string) ([]string, error)
 }
 
-func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
-	return f.fn(tenantID, agentName)
+func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+	return f.fn(tenantID, tokenAgentName, requestingID)
 }
 
 func isErrorResult(result interface{}) bool {

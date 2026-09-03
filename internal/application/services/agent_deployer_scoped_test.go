@@ -103,21 +103,20 @@ func (rec *scopedRecorder) createdAgentNames(t *testing.T) []string {
 	var names []string
 	for _, body := range rec.postBodies {
 		var parsed struct {
-			Agent struct {
-				Name string `json:"name"`
-			} `json:"agent"`
+			RootAgentID string `json:"rootAgentId"`
 		}
 		if err := json.Unmarshal(body, &parsed); err != nil {
 			t.Fatalf("unmarshal create body: %v", err)
 		}
-		names = append(names, parsed.Agent.Name)
+		names = append(names, parsed.RootAgentID)
 	}
 	return names
 }
 
 // TestDeploy_SendsScopedKeyToDeployer asserts that every deployer call made by
 // Deploy uses the tenant-scoped key: the existence probe GET, and the create
-// payload's agent name (which becomes the container key on the deployer side).
+// payload's rootAgentId (which doubles as the container key on the deployer
+// side under protocol v3).
 func TestDeploy_SendsScopedKeyToDeployer(t *testing.T) {
 	rec := &scopedRecorder{}
 	srv := newScopedDeployerServer(t, rec, false, "running")
@@ -132,7 +131,7 @@ func TestDeploy_SendsScopedKeyToDeployer(t *testing.T) {
 		t.Errorf("existence probe should hit /api/v1/agents/%s, got %v", wantKey, rec.paths)
 	}
 	if got := rec.createdAgentName(t); got != wantKey {
-		t.Errorf("create payload agent.name = %q, want %q", got, wantKey)
+		t.Errorf("create payload rootAgentId = %q, want %q", got, wantKey)
 	}
 	if rec.hasEntry("GET /api/v1/agents/general") {
 		t.Errorf("bare-name probe must not be used anymore, got %v", rec.paths)
@@ -157,7 +156,7 @@ func TestDeploy_DualTenantSameName_DoNotInterfere(t *testing.T) {
 	}
 
 	if got := rec.createdAgentNames(t); len(got) != 2 || got[0] != "zerone-assistant" || got[1] != "ayu-assistant" {
-		t.Errorf("create payload agent names = %v, want [zerone-assistant ayu-assistant]", got)
+		t.Errorf("create payload rootAgentIds = %v, want [zerone-assistant ayu-assistant]", got)
 	}
 	if !rec.hasEntry("GET /api/v1/agents/zerone-assistant") || !rec.hasEntry("GET /api/v1/agents/ayu-assistant") {
 		t.Errorf("existence probes should hit both scoped keys, got %v", rec.paths)

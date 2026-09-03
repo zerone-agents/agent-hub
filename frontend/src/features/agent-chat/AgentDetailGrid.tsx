@@ -40,30 +40,32 @@ const useStyles = createStyles(({ css }) => ({
 
 type Props = Pick<
   AgentDetail,
-  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionTurns'
+  'allowedTools' | 'disallowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionQueries'
 >
 
 export default function AgentDetailGrid(props: Props) {
   const { styles } = useStyles()
 
   const allowedTools = props.allowedTools
+  const disallowedTools = props.disallowedTools
   const mcpServers = props.mcpServers
   const subagents = props.subagents
   const datasets = props.datasets
   const availableSkills = props.availableSkills
 
   const hasTools = !!allowedTools && allowedTools.length > 0
+  const hasDisallowed = !!disallowedTools && disallowedTools.length > 0
   const hasMcps = !!mcpServers && Object.keys(mcpServers).length > 0
   const hasSubagents = !!subagents && Object.keys(subagents).length > 0
   const hasDatasets = !!datasets && Object.keys(datasets).length > 0
   const hasSkills = !!availableSkills && availableSkills.length > 0
-  // Limits row keys off maxSessionTurns (the optional one). maxTurns always
+  // Limits row keys off maxSessionQueries (the optional one). maxTurns always
   // has a runtime default, so rendering on maxTurns alone would force the
   // grid to never return null for bare agents and break the existing
   // hide-when-empty behavior.
-  const hasLimits = props.maxSessionTurns !== undefined
+  const hasLimits = props.maxSessionQueries !== undefined
 
-  if (!hasTools && !hasMcps && !hasSubagents && !hasDatasets && !hasSkills && !hasLimits) {
+  if (!hasTools && !hasDisallowed && !hasMcps && !hasSubagents && !hasDatasets && !hasSkills && !hasLimits) {
     return null
   }
 
@@ -74,7 +76,7 @@ export default function AgentDetailGrid(props: Props) {
           <div className={styles.rowLabel} id="agent-detail-limits-label">Limits</div>
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-limits-label">
             <Tag>maxTurns: {props.maxTurns}</Tag>
-            <Tag>maxSessionTurns: {props.maxSessionTurns}</Tag>
+            <Tag>maxSessionQueries: {props.maxSessionQueries}</Tag>
           </div>
         </div>
       )}
@@ -84,6 +86,16 @@ export default function AgentDetailGrid(props: Props) {
           <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-tools-label">
             {allowedTools.map((tool) => (
               <Tag key={tool}>{tool}</Tag>
+            ))}
+          </div>
+        </div>
+      )}
+      {hasDisallowed && (
+        <div className={styles.row}>
+          <div className={styles.rowLabel} id="agent-detail-disallowed-label">Disallowed</div>
+          <div className={styles.rowTags} role="group" aria-labelledby="agent-detail-disallowed-label">
+            {disallowedTools.map((tool) => (
+              <Tag key={tool} color="red">{tool}</Tag>
             ))}
           </div>
         </div>

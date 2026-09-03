@@ -38,7 +38,7 @@ aigc.Config (aigc_configs)            # 纯 per-tenant：每运营主体一行
 
 ### agent.AgentConfig (`agents`)
 
-Single source of agent configuration. Notable columns: `name` (+ `tenant_id` composite unique), `content_hash`, `system_prompt`, i18n `title` / `description` (JSON maps), provider binding (`provider_id` / `model_id` / `model_selection_id`), `field_overrides` (JSON, secret fields AES-GCM encrypted), platform visibility (`desktop_enabled` / `mobile_enabled`), `max_session_turns`, deployment state (`runtime_port`, `deployment_status`, `deployed_at`, `runtime_token` — AES-GCM encrypted, write-only).
+Single source of agent configuration. Notable columns: `name` (+ `tenant_id` composite unique), `content_hash`, `system_prompt`, i18n `title` / `description` (JSON maps), provider binding (`provider_id` / `model_id` / `model_selection_id`), `field_overrides` (JSON, secret fields AES-GCM encrypted), platform visibility (`desktop_enabled` / `mobile_enabled`), `max_session_queries`, deployment state (`runtime_port`, `deployment_status`, `deployed_at`, `runtime_token` — AES-GCM encrypted, write-only).
 
 Association tables (`agent_subagents`, `agent_tools`, `agent_skills`) use composite PKs with `OnDelete:CASCADE`.
 

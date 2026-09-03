@@ -181,6 +181,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to migrate agent platform flags: %w", err)
 	}
 
+	if err := migrateMaxSessionQueries(); err != nil {
+		return fmt.Errorf("failed to migrate max session queries column: %w", err)
+	}
+
 	if err := migrateAigcModelCodes(DB); err != nil {
 		return fmt.Errorf("failed to migrate aigc model codes: %w", err)
 	}
@@ -454,6 +458,43 @@ func migrateAgentPlatformFlags() error {
 	}
 	if err := DB.Exec("ALTER TABLE agents DROP COLUMN enabled").Error; err != nil {
 		return fmt.Errorf("failed to drop legacy enabled column: %w", err)
+	}
+	return nil
+}
+
+// migrateMaxSessionQueries migrates the legacy max_session_turns column so
+// existing values survive the SDK 3.1.0 key rename to maxSessionQueries
+// (issue #111). MySQL-only: sqlite test schemas are created by AutoMigrate
+// with the new column already. Backfill-then-drop instead of CHANGE COLUMN:
+// AutoMigrate (which runs first in the sequence) has already added
+// max_session_queries, so a rename would always hit a duplicate-column
+// error. Idempotent: a no-op once the legacy column is gone.
+func migrateMaxSessionQueries() error {
+	// information_schema 是 MySQL 专有；sqlite（迁移测试）直接跳过——本函数
+	// 只处理遗留 max_session_turns 列的回填/删除，不影响加列与租户回填。
+	if DB.Dialector.Name() != "mysql" {
+		return nil
+	}
+	var colCount int
+	if err := DB.Raw(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agents' AND COLUMN_NAME = 'max_session_turns'",
+	).Scan(&colCount).Error; err != nil {
+		return err
+	}
+	if colCount == 0 {
+		return nil
+	}
+	log.Println("Migrating agents.max_session_turns to max_session_queries...")
+	// WHERE ... IS NOT NULL: a NULL legacy value must not overwrite a
+	// non-NULL max_session_queries from an earlier upgrade. Without the
+	// guard, a "new hub → rollback (old hub AutoMigrate recreates
+	// max_session_turns all-NULL) → upgrade again" cycle would clobber the
+	// previously backfilled values with NULL.
+	if err := DB.Exec("UPDATE agents SET max_session_queries = max_session_turns WHERE max_session_turns IS NOT NULL").Error; err != nil {
+		return fmt.Errorf("failed to backfill max_session_queries: %w", err)
+	}
+	if err := DB.Exec("ALTER TABLE agents DROP COLUMN max_session_turns").Error; err != nil {
+		return fmt.Errorf("failed to drop legacy max_session_turns column: %w", err)
 	}
 	return nil
 }

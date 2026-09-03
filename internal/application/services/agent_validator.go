@@ -103,6 +103,38 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	// disallowedTools（issue #111 agent-local deny list）: 条目是工具名
+	// （内置名如 "Bash"、MCP 限定名如 "mcp__knowledge__lookup"），刻意不做
+	// 对已挂载工具的引用完整性校验；只做形态校验：trim 后非空、单项长度、
+	// 条目数、按 trim 值去重。
+	if v, ok := config["disallowedTools"].([]interface{}); ok {
+		const (
+			maxDisallowedTools     = 64
+			maxDisallowedToolChars = 128
+		)
+		if len(v) > maxDisallowedTools {
+			return fmt.Errorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
+		}
+		seen := make(map[string]bool, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
+			}
+			trimmed := strings.TrimSpace(s)
+			if trimmed == "" {
+				return fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
+			}
+			if len(trimmed) > maxDisallowedToolChars {
+				return fmt.Errorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
+			}
+			if seen[trimmed] {
+				return fmt.Errorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
+			}
+			seen[trimmed] = true
+		}
+	}
+
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
 		return fmt.Errorf("icon URL 长度不能超过 512 个字符")
 	}

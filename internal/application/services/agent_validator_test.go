@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -220,6 +221,53 @@ func TestValidateConfig_MaxTurnsBounds(t *testing.T) {
 
 	// Absent field is not validated (legacy payloads may omit it).
 	require.NoError(t, ValidateConfig(map[string]interface{}{}))
+}
+
+// TestValidateConfig_DisallowedTools pins the issue #111 agent-local deny
+// list: each entry is trimmed and must be non-empty and ≤128 chars, the
+// array holds at most 64 entries, and entries must be duplicate-free (by
+// trimmed value). Entries deliberately carry no referential integrity —
+// built-in names (Bash) and MCP-qualified names alike are accepted without
+// checking mounted tools.
+func TestValidateConfig_DisallowedTools(t *testing.T) {
+	require.NoError(t, ValidateConfig(map[string]interface{}{
+		"disallowedTools": []interface{}{"Bash", "mcp__knowledge__lookup"},
+	}))
+	// Absent field passes (legacy payloads).
+	require.NoError(t, ValidateConfig(map[string]interface{}{}))
+
+	// Boundary values pass: exactly 64 entries, exactly 128 chars.
+	boundary := make([]interface{}, 64)
+	for i := range boundary {
+		boundary[i] = fmt.Sprintf("tool-%d", i)
+	}
+	require.NoError(t, ValidateConfig(map[string]interface{}{"disallowedTools": boundary}))
+	require.NoError(t, ValidateConfig(map[string]interface{}{
+		"disallowedTools": []interface{}{strings.Repeat("a", 128)},
+	}))
+
+	over := make([]interface{}, 65)
+	for i := range over {
+		over[i] = fmt.Sprintf("tool-%d", i)
+	}
+	cases := []struct {
+		name    string
+		value   interface{}
+		wantErr string
+	}{
+		{"non-string item rejected", []interface{}{"Bash", 42}, "disallowedTools"},
+		{"blank item rejected", []interface{}{"Bash", "   "}, "不能为空"},
+		{"oversized item rejected", []interface{}{strings.Repeat("a", 129)}, "不能超过 128"},
+		{"too many entries rejected", over, "不能超过 64"},
+		{"duplicate entries rejected", []interface{}{"Bash", " Bash "}, "重复"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateConfig(map[string]interface{}{"disallowedTools": tc.value})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
 }
 
 // TestValidateConfig_RejectsNonLLMModel is the Task 6 regression: the
