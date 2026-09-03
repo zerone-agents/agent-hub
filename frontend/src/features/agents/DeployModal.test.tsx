@@ -150,11 +150,13 @@ describe('DeployModal', () => {
     // 没有 afterEach 清理，会跨用例残留 → copyOrManual 必须走非安全分支
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
     delete (navigator as unknown as { clipboard?: unknown }).clipboard
+    // builtin 形态（issue #114）：无租户段 /runtime/<agent>——透传逻辑对两种
+    // 形态一视同仁，此用例同时钉住单段路径不被二次加工。
     vi.mocked(agentApi.getDeployment).mockResolvedValue(
-      mockResponse(makeStatus({ status: 'running', runtimeUrl: '/runtime/default/test' })) as never
+      mockResponse(makeStatus({ status: 'running', runtimeUrl: '/runtime/test' })) as never
     )
     render(<><ManualCopyHost /><DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} /></>)
-    const expected = `${window.location.origin}/runtime/default/test`
+    const expected = `${window.location.origin}/runtime/test`
     expect(await screen.findByText(expected)).toBeInTheDocument()
 
     await user.click(screen.getByTitle('复制 URL'))

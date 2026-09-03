@@ -83,7 +83,7 @@ flowchart TB
 
 - **Tenant = Casdoor org** (casdoor mode) / `default` (builtin mode). Business tables carry a `tenant_id` column; roles are managed locally in `user_identities` (Casdoor only provides identity).
 - **Multi-org login**: a second and subsequent org can log in through its own Casdoor Application, registered via the Ops API (`/api/v1/ops/tenant-clients`, guarded by the `X-Ops-Key` header). See configuration.md for the runbook.
-- **Tenant-scoped deployment keys**: runtime URL `/<org>/<name>`, Kong/deployer key `<org>-<name>`; the hub chat proxy addresses runtimes by qualified name (`/v1/agents/<org>-<name>`, bare name → 404 except subagents).
+- **Split identities (deployer v3.1, issue #114)**: runtime agents register under bare ids — the hub chat/detail proxies address `/v1/agents/<name>`; Kong entity & deployer container keys stay tenant-scoped `<org>-<name>` (all lifecycle addressing); public URLs are mode-aware — casdoor `/<org>/<name>`, builtin `/<name>` (the implicit default tenant never surfaces, deployment keys still carry `default-`).
 
 ## Recommended Configuration for Single-ECS Deployment
 
