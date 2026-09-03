@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,6 +134,14 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 			for _, hdr := range []string{"Set-Cookie2", "Server", "X-Powered-By"} {
 				resp.Header.Del(hdr)
 			}
+			// Egress redaction (issue #111: detail must not leak the
+			// capability): the agent list/detail routes echo the resolved
+			// agent config, whose MCP headers the hub armed at deploy time.
+			// Strip credentials before the bytes cross the hub boundary —
+			// the runtime's own redaction is not trusted to keep up.
+			if isAgentConfigEgress(c.Request.Method, decision.CanonicalPath) {
+				return redactProxyAgentJSON(resp)
+			}
 			return nil
 		},
 	}
@@ -162,6 +173,46 @@ func escapedRemainderBuiltin(escapedPath string) string {
 		return ""
 	}
 	return "/" + parts[2]
+}
+
+// maxRedactBodyBytes caps how much of an upstream agent-config response the
+// proxy buffers for redaction — same cap as the admin detail client
+// (runtime.Client.GetAgentDetail). A larger body fails JSON decoding and
+// fails closed (502) rather than truncating silently.
+const maxRedactBodyBytes = 1 << 20
+
+// isAgentConfigEgress reports whether the allowlisted route returns agent
+// configuration JSON (agent list/detail) — the responses that echo MCP
+// connection headers hub armed at deploy time (X-Agent-Capability "v1.*"
+// and Authorization Bearer <runtime token> on knowledge MCPs, issue #111).
+// Only GETs: the runs route is POST/SSE and carries stream content, not
+// agent config.
+func isAgentConfigEgress(method, canonicalPath string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	return canonicalPath == "/v1/agents" || strings.HasPrefix(canonicalPath, "/v1/agents/")
+}
+
+// redactProxyAgentJSON buffers the upstream agent-config JSON, strips
+// credential fields via redactAgentDetail (shared with the admin detail
+// egress), and swaps the response body in place. Any error — read failure or
+// malformed JSON — fails closed: ReverseProxy routes it to ErrorHandler's
+// stable 502, so uninspectable bytes never egress unredacted.
+func redactProxyAgentJSON(resp *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRedactBodyBytes))
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	redacted, err := redactAgentDetail(body)
+	if err != nil {
+		return err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(redacted))
+	resp.ContentLength = int64(len(redacted))
+	resp.Header.Set("Content-Length", strconv.Itoa(len(redacted)))
+	return nil
 }
 
 func classifyUpstreamErr(e error) string {
