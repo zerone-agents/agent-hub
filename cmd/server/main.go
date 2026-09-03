@@ -186,6 +186,7 @@ func main() {
 		cfg.Deployer.PublicHost,
 		repository.NewAgentRepository(),
 		cfg.Kong.ReconcileSec,
+		cfg.Auth.IsBuiltin(),
 	)
 
 	var knowledgeEngine knowledgedomain.KnowledgeEngine
@@ -217,6 +218,7 @@ func main() {
 		aigcConfigSvc,
 		cfg.ChatPush.APIKey,
 		cfg.ChatPush.PublicURL,
+		cfg.Auth.IsBuiltin(),
 	)
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)

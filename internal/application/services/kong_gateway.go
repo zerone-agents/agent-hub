@@ -59,6 +59,11 @@ var agentNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // are rejected so no route can claim a cross-tenant bare path.
 var pathRe = regexp.MustCompile(`^/[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+$`)
 
+// barePathRe validates the single-segment builtin-mode public path ("/<name>",
+// issue #114): builtin is single-tenant, so no cross-tenant bare-path claim
+// can exist; casdoor mode never accepts this shape.
+var barePathRe = regexp.MustCompile(`^/[a-z0-9][a-z0-9-]{0,63}$`)
+
 // orgSlugRe folds any run of non-alphanumeric characters into a single "-".
 var orgSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -86,6 +91,18 @@ func URLPath(tenantID, agentName string) string {
 	return "/" + orgSlug(tenantID) + "/" + NormalizeAgentName(agentName)
 }
 
+// PublicPath returns the public URL path for an agent under the active auth
+// mode (issue #114): builtin (single-tenant) mode serves "/<name>" — the
+// implicit default tenant never leaks into public URLs — while casdoor
+// (multi-org) mode keeps the tenant-scoped "/<org>/<name>" so same-name
+// agents across orgs can never claim each other's path.
+func PublicPath(builtinAuth bool, tenantID, agentName string) string {
+	if builtinAuth {
+		return "/" + NormalizeAgentName(agentName)
+	}
+	return URLPath(tenantID, agentName)
+}
+
 // kongAgentRepo is the minimal repository surface needed by KongGatewayService.
 // *repository.AgentRepository implements this interface.
 type kongAgentRepo interface {
@@ -102,12 +119,16 @@ type KongGatewayService struct {
 	routeHost    string // Kong Route host / public URL host
 	repo         kongAgentRepo
 	reconcileSec int
-	logger       *log.Logger
+	// builtinAuth marks the single-tenant auth mode, where public paths are
+	// bare "/<name>" and the implicit default tenant never surfaces (issue
+	// #114). casdoor (multi-org) keeps tenant-scoped "/<org>/<name>".
+	builtinAuth bool
+	logger      *log.Logger
 }
 
 // NewKongGatewayService creates a new gateway service. reconcileSec defaults to
 // 300 seconds when non-positive.
-func NewKongGatewayService(client kongClient, serviceHost, routeHost string, repo kongAgentRepo, reconcileSec int) *KongGatewayService {
+func NewKongGatewayService(client kongClient, serviceHost, routeHost string, repo kongAgentRepo, reconcileSec int, builtinAuth bool) *KongGatewayService {
 	if reconcileSec <= 0 {
 		reconcileSec = 300
 	}
@@ -127,11 +148,18 @@ func NewKongGatewayService(client kongClient, serviceHost, routeHost string, rep
 		routeHost:    routeHost,
 		repo:         repo,
 		reconcileSec: reconcileSec,
+		builtinAuth:  builtinAuth,
 		logger:       log.Default(),
 	}
 }
 
 func (s *KongGatewayService) enabled() bool { return s != nil && s.client != nil }
+
+// publicPath is this service's mode-aware view of an agent's public path
+// (issue #114): builtin "/<name>", casdoor "/<org>/<name>".
+func (s *KongGatewayService) publicPath(tenantID, agentName string) string {
+	return PublicPath(s.builtinAuth, tenantID, agentName)
+}
 
 func svcName(agentName string) string   { return "agent-" + agentName }
 func routeName(agentName string) string { return "agent-" + agentName + "-route" }
@@ -207,7 +235,10 @@ func (s *KongGatewayService) Register(ctx context.Context, key, publicPath strin
 	if !strings.HasPrefix(publicPath, "/") {
 		publicPath = "/" + publicPath
 	}
-	if !pathRe.MatchString(publicPath) {
+	// casdoor requires two+ segments (pathRe); builtin mode additionally
+	// admits the single-segment "/<name>" form (issue #114) — single-tenant,
+	// so no cross-tenant bare-path claim can exist.
+	if !pathRe.MatchString(publicPath) && !(s.builtinAuth && barePathRe.MatchString(publicPath)) {
 		s.logger.Printf("kong: skip register %s, invalid public path %q", key, publicPath)
 		return nil
 	}
@@ -334,7 +365,7 @@ func (s *KongGatewayService) Reconcile(ctx context.Context) (int, error) {
 	for i := range agents {
 		a := agents[i]
 		key := DeployKey(a.TenantID, a.Name)
-		publicPath := URLPath(a.TenantID, a.Name)
+		publicPath := s.publicPath(a.TenantID, a.Name)
 		byKey[key] = agentRef{key: key, publicPath: publicPath, cfg: a}
 		sn := svcName(key)
 		svc, found, err := s.client.GetService(ctx, sn)

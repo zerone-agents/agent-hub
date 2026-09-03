@@ -104,6 +104,9 @@ type AgentDeployerService struct {
 	chatPushPublicURL string
 	healthProbe       func(ctx context.Context, publicHost string, port int) bool
 	gatewayHealth     *sync.Map // deploy key (DeployKey) -> *gatewayHealthEntry
+	// builtinAuth marks the single-tenant auth mode: public URLs are bare
+	// "/<name>" and never surface the implicit default tenant (issue #114).
+	builtinAuth bool
 }
 
 // gatewayHealthEntry caches the result of a gateway health probe for an agent.
@@ -170,13 +173,21 @@ func gatewayHealthCacheKey(tenantID, name string) string {
 	return DeployKey(tenantID, name)
 }
 
-// gatewayURL returns the public gateway URL (with tenant-scoped /<org>/<name>
-// path) for an agent, or "" when Kong is disabled.
+// gatewayURL returns the public gateway URL (mode-aware public path) for an
+// agent, or "" when Kong is disabled.
 func (s *AgentDeployerService) gatewayURL(tenantID, name string) string {
 	if s == nil || s.kongSvc == nil || !s.kongSvc.enabled() {
 		return ""
 	}
-	return s.kongSvc.RouteURL(URLPath(tenantID, name))
+	return s.kongSvc.RouteURL(s.publicPath(tenantID, name))
+}
+
+// publicPath is this service's mode-aware view of an agent's public path
+// (issue #114): builtin "/<name>", casdoor "/<org>/<name>". Every public-URL
+// surface (toDTO, gateway probes, route registration) goes through here so
+// the two modes never diverge.
+func (s *AgentDeployerService) publicPath(tenantID, agentName string) string {
+	return PublicPath(s.builtinAuth, tenantID, agentName)
 }
 
 // refreshGatewayHealth probes the Kong route for an agent and caches the result.
@@ -229,7 +240,7 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
+func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, builtinAuth bool) *AgentDeployerService {
 	s := &AgentDeployerService{
 		client:            client,
 		publicHost:        publicHost,
@@ -244,6 +255,7 @@ func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, 
 		mcpSvc:            NewMcpService(encryptionKey),
 		knowledgeSvc:      knowledgeSvc,
 		kongSvc:           kongSvc,
+		builtinAuth:       builtinAuth,
 		chatPushAPIKey:    chatPushAPIKey,
 		chatPushPublicURL: chatPushPublicURL,
 		healthProbe:       defaultHealthProbe,
@@ -537,7 +549,7 @@ func (s *AgentDeployerService) registerWhenHealthy(tenantID, name string, hostPo
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	key := DeployKey(tenantID, name)
-	publicPath := URLPath(tenantID, name)
+	publicPath := s.publicPath(tenantID, name)
 	register := func(port int) {
 		_ = s.kongSvc.Register(ctx, key, publicPath, port)
 	}
@@ -1168,18 +1180,17 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	url := s.runtimeURL(port)
+	publicPath := s.publicPath(tenantID, agentName)
 	if s.kongSvc != nil && s.kongSvc.enabled() {
-		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
+		if kongURL := s.kongSvc.RouteURL(publicPath); kongURL != "" {
 			url = kongURL
 		}
 	} else if status == "running" && port > 0 {
 		// No-Kong public address is the hub-relative proxy path (issue #77);
-		// frontend resolves it against the current origin.
-		// Org identity assumption: URLPath uses orgSlug(tenantID), which
-		// equals the raw tenant_id for builtin and conforming casdoor orgs
-		// (slug is identity); legacy non-conforming tenant IDs 404 through
-		// the proxy by design (issue #77 acceptance #2).
-		url = "/runtime" + URLPath(tenantID, agentName)
+		// frontend resolves it against the current origin. The path itself is
+		// mode-aware (issue #114): builtin "/runtime/<name>", casdoor
+		// "/runtime/<org>/<name>".
+		url = "/runtime" + publicPath
 	}
 
 	return &DeploymentDTO{
