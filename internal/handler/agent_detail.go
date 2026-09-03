@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -149,13 +151,18 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 	// deployer 资源标识，不参与 runtime 寻址。
 	body, err := h.svc.RuntimeClient().GetAgentDetail(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey)
 	if err != nil {
-		// runtime client wraps non-2xx as "runtime returned HTTP %d: ..."
-		// We map 404 specifically; other errors are 502 (unreachable or non-2xx).
-		if strings.Contains(err.Error(), "HTTP 404") {
-			respondError(c, http.StatusNotFound, "Agent not found in runtime")
+		// Non-2xx upstream bodies are intentionally discarded by the
+		// runtime client (they can echo hub-armed MCP credentials, issue
+		// #111); only the status code survives. Map 404 specifically;
+		// other errors are 502 with a neutral Chinese message — the
+		// English detail goes to server-side logs only (CONTRIBUTING).
+		var httpErr *runtime.RuntimeHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			respondError(c, http.StatusNotFound, "Agent 在运行时不存在")
 			return
 		}
-		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
+		log.Printf("agent detail for %q failed: %v", agentName, err)
+		respondError(c, http.StatusBadGateway, "Agent 运行时不可用")
 		return
 	}
 
@@ -169,7 +176,8 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 	// (502, neutral message, no body echo).
 	redacted, err := redactAgentDetail(body)
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "runtime returned malformed agent detail")
+		log.Printf("agent detail for %q: redaction failed (malformed runtime JSON): %v", agentName, err)
+		respondError(c, http.StatusBadGateway, "Agent 运行时返回了无法解析的详情数据")
 		return
 	}
 

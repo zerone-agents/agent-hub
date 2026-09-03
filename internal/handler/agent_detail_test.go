@@ -265,8 +265,8 @@ func TestGetAgentDetail_RuntimeNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "not found") {
-		t.Errorf("body should mention 'not found', got: %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "Agent 在运行时不存在") {
+		t.Errorf("body should mention runtime not-found, got: %q", rec.Body.String())
 	}
 }
 
@@ -284,8 +284,40 @@ func TestGetAgentDetail_RuntimeUnreachable(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "runtime unreachable") && !strings.Contains(rec.Body.String(), "runtime detail request failed") {
+	if !strings.Contains(rec.Body.String(), "Agent 运行时不可用") {
 		t.Errorf("body should mention runtime failure, got: %q", rec.Body.String())
+	}
+}
+
+// TestGetAgentDetail_Non2xxWithCredentials is the P1 regression: a non-2xx
+// runtime response whose body echoes hub-armed MCP credentials (capability /
+// Authorization) must NOT leak them through the hub egress error path. The
+// runtime client discards upstream bodies; the handler returns a neutral
+// Chinese message only.
+func TestGetAgentDetail_Non2xxWithCredentials(t *testing.T) {
+	runtimeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom","mcpServers":{"knowledge":{"headers":{"Authorization":"Bearer sekrit-token","X-Agent-Capability":"v1.cGF5bG9hZA.s2ln"}}}}`))
+	}))
+	defer runtimeSrv.Close()
+
+	router := setupAgentDetailRouter(&fakeAgentDetailSvc{baseURL: runtimeSrv.URL, apiKey: "k"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/x/detail", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, leak := range []string{"sekrit-token", "v1.cGF5bG9hZA", "s2ln", "Bearer", "boom"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("credential leaked through non-2xx egress: %q in %s", leak, body)
+		}
+	}
+	if !strings.Contains(body, "Agent 运行时不可用") {
+		t.Errorf("body should carry the neutral Chinese message, got: %q", body)
 	}
 }
 

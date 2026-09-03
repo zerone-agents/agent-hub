@@ -18,6 +18,21 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// RuntimeHTTPError marks a non-2xx runtime response. The upstream error body
+// is deliberately NOT carried: runtime responses can echo the resolved agent
+// config, whose MCP connection headers the hub armed at deploy time
+// (X-Agent-Capability / Authorization, issue #111) — interpolating that body
+// into an error that crosses the hub egress would leak the credentials past
+// the content redaction. Handlers map the status code (404 → not found) and
+// return a neutral message; details stay in server-side logs.
+type RuntimeHTTPError struct {
+	StatusCode int
+}
+
+func (e *RuntimeHTTPError) Error() string {
+	return fmt.Sprintf("runtime returned HTTP %d", e.StatusCode)
+}
+
 // NewClient returns a runtime Client. The HTTP setup is tuned for SSE:
 //   - No whole-request Timeout: a streaming run can legitimately last tens of
 //     minutes across multiple tool calls. A blanket Timeout would kill the
@@ -103,7 +118,10 @@ func (c *Client) GetAgentDetail(ctx context.Context, baseURL, agentName, apiKey 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB cap; AgentDetail is small JSON
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("runtime returned HTTP %d: %s", resp.StatusCode, string(body))
+		// Discard the upstream body (see RuntimeHTTPError): it may echo the
+		// resolved MCP headers (capability / Authorization) which must never
+		// cross the hub egress, even inside an error string.
+		return nil, &RuntimeHTTPError{StatusCode: resp.StatusCode}
 	}
 
 	return body, nil
