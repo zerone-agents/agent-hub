@@ -31,8 +31,12 @@ import (
 // attachmentFakeOpts configures the fake runtime in newAttachmentChatEnv.
 type attachmentFakeOpts struct {
 	// runtimeVersion is what GET /health reports. Empty → 无 /health 路由
-	// （探测失败 → 附件不可用）。
+	// （探测失败 → 附件不可用）。版本号仅作展示——hub 判定只看 capabilities。
 	runtimeVersion string
+	// capabilityOff 模拟未声明附件代次校验能力的 runtime（< v2.7.0：
+	// /health 无 capabilities 字段，hub 解析为 false；显式 false 与缺字段
+	// 对 hub 等价）。默认 false（零值）→ 报 attachmentExpectedGeneration:true。
+	capabilityOff bool
 	// uploadHandler serves POST /v1/files/uploads. nil → 404（旧 runtime）。
 	uploadHandler http.HandlerFunc
 	// runsHandler serves POST /v1/agents/{key}/runs. nil → 最小成功 SSE 流。
@@ -69,7 +73,14 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 	if opts.runtimeVersion != "" {
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q}`, opts.runtimeVersion)))
+			// runtime v2.7.0 契约：/health 顶层声明
+			// capabilities.attachmentExpectedGeneration。capabilityOff 时整个
+			// capabilities 字段缺省（模拟 < v2.7.0 旧 runtime 的真实形态）。
+			caps := ""
+			if !opts.capabilityOff {
+				caps = `,"capabilities":{"attachmentExpectedGeneration":true}`
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q%s}`, opts.runtimeVersion, caps)))
 		})
 	}
 	if opts.uploadHandler != nil {
@@ -162,15 +173,18 @@ func doCapabilities(t *testing.T, env *attachmentChatEnv) *httptest.ResponseReco
 	return w
 }
 
-func TestCapabilities_AttachmentsEnabledForNewRuntime(t *testing.T) {
-	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+func TestCapabilities_EnabledWhenCapabilityDeclared(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.7.0"})
 	w := doCapabilities(t, env)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"attachmentsEnabled":true`)
 }
 
-func TestCapabilities_DisabledForOldRuntimeVersion(t *testing.T) {
-	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0"})
+// 能力缺失回归（runtime v2.7.0 契约）：版本号不再参与判定——即便 /health
+// 报一个更新的版本，未声明 attachmentExpectedGeneration（无 capabilities
+// 字段）即 false。
+func TestCapabilities_DisabledWhenCapabilityUndeclared(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "9.9.9", capabilityOff: true})
 	w := doCapabilities(t, env)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"attachmentsEnabled":false`)
@@ -278,11 +292,11 @@ func TestSendMessage_AttachmentAfterRealUpload(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
-// F3：旧 runtime（/health 报 2.4.0）上含附件 SendMessage → 501；同环境纯文本
-// 消息不受影响（200）。旧 runtime 会静默丢弃 run 的 attachments 字段——宁可
-// 拒绝也不静默丢附件。
+// F3：未声明附件能力的 runtime（< v2.7.0，/health 无 capabilities 字段）上
+// 含附件 SendMessage → 501；同环境纯文本消息不受影响（200）。旧 runtime 会
+// 静默丢弃 run 的 attachments 字段——宁可拒绝也不静默丢附件。
 func TestSendMessage_AttachmentsRequireNewRuntime(t *testing.T) {
-	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0"})
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0", capabilityOff: true})
 	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
 	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
@@ -338,6 +352,90 @@ func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
 	var userCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
 	require.Zero(t, userCount, "attachment_missing must roll back the persisted user message")
+}
+
+// runtime v2.7.0 契约（issue #94 / runtime #61）：带附件的 run 必须携带
+// X-Expected-Container-Id == 当前 deployer 报告的容器代次；纯文本 run 不携带
+// （无代次可断言，向后兼容）。
+func TestSendMessage_AttachmentRunSendsExpectedContainerIDHeader(t *testing.T) {
+	var gotGen string
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			gotGen = r.Header.Get(runtime.HeaderExpectedContainerID)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: result\ndata: {\"type\":\"result\",\"subtype\":\"success\"}\n\n"))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, attachmentContainerGen1, gotGen, "attachment-bearing run must carry the deployer-reported container generation")
+}
+
+func TestSendMessage_TextOnlyRunOmitsExpectedContainerIDHeader(t *testing.T) {
+	headerPresent := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			_, headerPresent = r.Header[runtime.HeaderExpectedContainerID]
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: result\ndata: {\"type\":\"result\",\"subtype\":\"success\"}\n\n"))
+		},
+	})
+	w := sendMessageForAttachments(t, env, `{"content":"hi"}`, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.False(t, headerPresent, "text-only runs must not carry X-Expected-Container-Id")
+}
+
+// 发送侧 412（runtime v2.7.0 原子代次校验不通过）：透传 412 + 域码 +
+// user message 回滚——与 attachment_missing 同款「附件失效可重试」语义。
+// 契约明示：412 后禁止去掉 header 降级重试（hub 只 respond，不自动重发）。
+func TestSendMessage_GenerationMismatch412RollsBackUserMessage(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"error":"container generation mismatch","code":"generation_mismatch"}`))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusPreconditionFailed, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_mismatch"`)
+	require.Contains(t, w.Body.String(), "附件已过期（部署代次变更），请重新上传")
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "generation_mismatch must roll back the persisted user message")
+	var sysCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&sysCount).Error)
+	require.Zero(t, sysCount, "generation_mismatch must not be persisted as a system error message")
+}
+
+// generation_unavailable（503，runtime 无法确定自身容器身份）：透传 503，
+// user message 不回滚——瞬时部署状态异常，代次本身未变，恢复后原样重发即可
+// （与 412 的「附件失效需重新上传」相区分）。
+func TestSendMessage_GenerationUnavailable503KeepsUserMessage(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"container identity unavailable","code":"generation_unavailable"}`))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_unavailable"`)
+	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Equal(t, int64(1), userCount, "generation_unavailable is transient; the user turn must be kept for a verbatim retry")
 }
 
 func uploadRequestForAttachments(t *testing.T, env *attachmentChatEnv, files []struct{ name, body string }, sessionID, userID string) *httptest.ResponseRecorder {
@@ -420,18 +518,72 @@ func TestUploadAttachments_AgentBindingMismatch404(t *testing.T) {
 }
 
 func TestUploadAttachments_OldRuntime501(t *testing.T) {
-	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0"}) // 版本不足
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0", capabilityOff: true}) // 能力未声明
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusNotImplemented, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+	// 501 文案（runtime v2.7.0 契约）：提示升级到支持代次校验的版本。
+	require.Contains(t, w.Body.String(), "2.7.0")
+}
+
+func TestUploadAttachments_OldRuntimeUpload404Mapped501(t *testing.T) {
+	// /health 声明能力但上传端点 404（防御性：能力探测与实际端点不一致）
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.7.0"}) // 无 uploadHandler → mux 404
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
 	require.Equal(t, http.StatusNotImplemented, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
 }
 
-func TestUploadAttachments_OldRuntimeUpload404Mapped501(t *testing.T) {
-	// /health 报 2.5.0 但上传端点 404（防御性：版本探测与实际能力不一致）
-	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"}) // 无 uploadHandler → mux 404
+// runtime v2.7.0 契约：上传必须携带 X-Expected-Container-Id == 当前
+// deployer 报告代次（runtime 在任何写入之前原子校验，不匹配 412）。
+func TestUploadAttachments_SendsExpectedContainerIDHeader(t *testing.T) {
+	var gotGen string
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			gotGen = r.Header.Get(runtime.HeaderExpectedContainerID)
+			fakeUploadOK(w, r)
+		},
+	})
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
-	require.Equal(t, http.StatusNotImplemented, w.Code)
-	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, attachmentContainerGen1, gotGen, "upload must carry the deployer-reported container generation")
+}
+
+// 上传侧 412（代次不匹配）：透传 412 + 域码 + 中文文案；412 拒绝发生在
+// runtime 写入之前 → hub 不得落任何上传记录。
+func TestUploadAttachments_GenerationMismatch412(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"error":"container generation mismatch","code":"generation_mismatch"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusPreconditionFailed, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_mismatch"`)
+	require.Contains(t, w.Body.String(), "附件已过期（部署代次变更），请重新上传")
+	var recCount int64
+	require.NoError(t, database.DB.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-att").Count(&recCount).Error)
+	require.Zero(t, recCount, "a 412-rejected upload must not persist upload records")
+}
+
+// 上传侧 503（runtime 无法确定自身容器身份）：透传 503 + 域码。
+func TestUploadAttachments_GenerationUnavailable503(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"container identity unavailable","code":"generation_unavailable"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_unavailable"`)
+	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
 }
 
 func TestUploadAttachments_RuntimeLimitExceededPassthrough(t *testing.T) {
@@ -757,6 +909,40 @@ func TestAttachmentContent_RuntimeFileGone404(t *testing.T) {
 	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
 	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// 下载侧 header 透传（runtime v2.7.0 契约）：内容代理请求携带
+// X-Expected-Container-Id == 当前代次（runtime 在文件读取之前原子校验）。
+func TestAttachmentContent_SendsExpectedContainerIDHeader(t *testing.T) {
+	var gotGen string
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			gotGen = r.Header.Get(runtime.HeaderExpectedContainerID)
+			_, _ = w.Write([]byte("bytes"))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, attachmentContainerGen1, gotGen, "content proxy must carry the deployer-reported container generation")
+}
+
+// 下载侧 412（代次不匹配）→ hub 412 + 域码 + 中文文案。
+func TestAttachmentContent_GenerationMismatch412(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"error":"container generation mismatch","code":"generation_mismatch"}`))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusPreconditionFailed, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_mismatch"`)
+	require.Contains(t, w.Body.String(), "附件已过期（部署代次变更），请重新上传")
 }
 
 // R3（部署代次绑定，ContainerID 版）：上传记录只授权创建它的容器代——

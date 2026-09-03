@@ -73,7 +73,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	}
 	if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
+			"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 		return
 	}
 
@@ -103,7 +103,10 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	}
 	done := make(chan uploadResult, 1)
 	go func() {
-		resp, err := h.svc.RuntimeClient().UploadFiles(c.Request.Context(), baseURL, apiKey, pr, mw.FormDataContentType())
+		// 上传携带 X-Expected-Container-Id（runtime v2.7.0 原子代次校验）：
+		// runtime 在任何上传写入之前核验自身容器身份，代次已变更则 412，
+		// 拒绝发生在文件落盘之前。containerID 非空由上方前置门控保证。
+		resp, err := h.svc.RuntimeClient().UploadFiles(c.Request.Context(), baseURL, apiKey, pr, mw.FormDataContentType(), containerID)
 		done <- uploadResult{resp: resp, err: err}
 	}()
 
@@ -255,7 +258,7 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		respondCreated(c, gin.H{"files": parsed.Files})
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
 		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
+			"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 	default:
 		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		body := string(bodyBytes)
@@ -339,8 +342,10 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		return
 	}
 
+	// 内容代理携带 X-Expected-Container-Id（runtime v2.7.0 原子代次校验）：
+	// 文件读取前核验容器身份，代次不匹配 412 拒绝（而非读出他人字节）。
 	resp, err := h.svc.RuntimeClient().ProxyFiles(c.Request.Context(), http.MethodGet, baseURL, apiKey,
-		"/v1/files/content?path="+url.QueryEscape(pathParam), "")
+		"/v1/files/content?path="+url.QueryEscape(pathParam), "", containerID)
 	if err != nil {
 		log.Printf("[chat] attachment content transport error: session=%s path=%q err=%v", sessionID, pathParam, err)
 		respondError(c, http.StatusBadGateway, "附件服务暂时不可用")
@@ -360,6 +365,15 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	case resp.StatusCode == http.StatusNotFound:
 		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
 		respondError(c, http.StatusNotFound, "临时文件已不可用")
+	case resp.StatusCode == http.StatusPreconditionFailed:
+		// runtime v2.7.0 原子代次校验不通过（412）：容器已重建，该 path 属于
+		// 旧代次。透传域码 + 中文文案，前端据此提示重新上传。
+		respondErrorCode(c, http.StatusPreconditionFailed, chat.ErrCodeGenerationMismatch,
+			runtimeErrorMessage(chat.ErrCodeGenerationMismatch))
+	case resp.StatusCode == http.StatusServiceUnavailable:
+		// runtime 无法确定自身容器身份（503 generation_unavailable）。
+		respondErrorCode(c, http.StatusServiceUnavailable, chat.ErrCodeGenerationUnavailable,
+			runtimeErrorMessage(chat.ErrCodeGenerationUnavailable))
 	default:
 		log.Printf("[chat] attachment content runtime error: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)

@@ -69,7 +69,9 @@ func (h *AgentFilesHandler) proxy(c *gin.Context, method, runtimePath string) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
 	defer cancel()
 
-	resp, err := h.svc.RuntimeClient().ProxyFiles(ctx, method, baseURL, apiKey, pathAndQuery, c.GetHeader("Range"))
+	// expectedContainerID 传空：工作区文件代理不是附件路径，没有服务端上传
+	// 记录/部署代次可断言，不携带 X-Expected-Container-Id（runtime 跳过校验）。
+	resp, err := h.svc.RuntimeClient().ProxyFiles(ctx, method, baseURL, apiKey, pathAndQuery, c.GetHeader("Range"), "")
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
 		return

@@ -7,6 +7,8 @@ const (
 	ErrCodeRuntimeAttachmentUnsupported = "runtime_attachment_unsupported"
 	ErrCodeAttachmentMissing            = "attachment_missing"
 	ErrCodeInvalidAttachment            = "invalid_attachment"
+	ErrCodeGenerationMismatch           = "generation_mismatch"
+	ErrCodeGenerationUnavailable        = "generation_unavailable"
 )
 
 // AttachmentError is a structured attachment-domain error carrying a stable

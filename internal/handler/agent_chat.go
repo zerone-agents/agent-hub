@@ -101,7 +101,8 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 }
 
 // Capabilities reports feature availability for the agent chat page
-// (issue #94: attachments require runtime >= 2.5.0).
+// (issue #94: attachments require the runtime to declare
+// attachmentExpectedGeneration, runtime >= 2.7.0).
 func (h *AgentChatHandler) Capabilities(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
 	ok := h.svc.AttachmentsAvailable(c.Request.Context(), tenant.GetTenantID(c), agentName)
@@ -192,14 +193,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	// 3. 附件能力门控（issue #94 review F3）：/health 版本探测。旧 runtime
-	//（< 2.5.0）对 run 请求的 attachments 字段静默忽略——宁可拒绝也不静默
+	// 3. 附件能力门控（issue #94 review F3）：/health 能力探测（runtime
+	// v2.7.0+ 以 capabilities.attachmentExpectedGeneration 声明；旧版本无该
+	// 字段恒 false，版本号不再参与判定）。未声明能力的 runtime 对 run 请求的
+	// attachments 字段可能静默忽略、且缺少代次原子校验——宁可拒绝也不静默
 	// 丢附件。探测先于持久化：拒绝时还没有任何已落库内容需要回滚。纯文本
 	// 消息跳过探测。
 	if len(req.Attachments) > 0 {
 		if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
 			respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-				"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
+				"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 			return
 		}
 	}
@@ -251,7 +254,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	ctx := c.Request.Context()
 	// runtime 注册名为裸 Agent ID（issue #114）；scoped deployment key 仅是
 	// deployer 资源标识，不参与 runtime 寻址。
-	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey, bodyBytes)
+	// 带附件的 run 携带 X-Expected-Container-Id（runtime v2.7.0 原子代次校验
+	// 契约，issue #94 / runtime #61）：runtime 在任何文件读取/写入之前核验
+	// 自身容器身份，代次已变更则 412 拒绝——TOCTOU 窗口结构性封闭。纯文本
+	// 消息不带 header（无代次可断言，向后兼容）。
+	expectedContainerID := ""
+	if len(req.Attachments) > 0 {
+		expectedContainerID = containerID
+	}
+	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey, bodyBytes, expectedContainerID)
 	if err != nil {
 		// Runtime run-attachment domain errors (attachment_missing etc.) are
 		// pre-run failures: surface the code so the frontend can retry from
@@ -259,13 +270,21 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		var httpErr *runtime.RuntimeHTTPError
 		if errors.As(err, &httpErr) {
 			if code, ok := runtimeAttachmentCode(httpErr.Body); ok {
-				// Run 前失败（attachment_missing 等）：回滚乐观持久化的用户消息，
-				// 重发（重新上传→再发）才不会在历史里留下重复的 user turn。
-				// 删除失败仅日志——消息重复是体验问题，不该阻塞错误上报。
-				if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
-					log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
-						tenantID, sessionID, msg.ID, delErr)
+				// 附件失效可重试语义（attachment_missing / generation_mismatch，
+				// runtime v2.7.0 契约）：回滚乐观持久化的用户消息，重发（重新
+				// 上传→再发）才不会在历史里留下重复的 user turn。其余域码
+				//（generation_unavailable 等）不回滚——瞬时部署状态异常，代次
+				// 本身未变，恢复后原样重发即可。删除失败仅日志——消息重复是
+				// 体验问题，不该阻塞错误上报。
+				if code == chat.ErrCodeAttachmentMissing || code == chat.ErrCodeGenerationMismatch {
+					if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
+						log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
+							tenantID, sessionID, msg.ID, delErr)
+					}
 				}
+				// 契约（runtime v2.7.0）：412 generation_mismatch 后禁止无 header
+				// 降级重试——去掉 X-Expected-Container-Id 重发会把代次不匹配
+				// 静默退化为旧的 TOCTOU 已知边界。此分支只 respond，不重试。
 				log.Printf("[chat] runtime rejected run (pre-run failure): tenant=%s session=%s code=%s body=%s",
 					tenantID, sessionID, code, httpErr.Body)
 				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(code))

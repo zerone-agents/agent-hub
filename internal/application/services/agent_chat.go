@@ -87,11 +87,6 @@ func (s *AgentChatService) PublicHost() string { return s.publicHost }
 // Source constant identifying sessions created from the Agent Chatbox page.
 const SourceAgentChatPage = "agent_chat_page"
 
-// attachmentRuntimeMinVersion is the runtime release that shipped upload +
-// rich-content Run support (PR #48 → runtime-v2.5.0; the "2.4.0" in issue
-// #94 is wrong — see the correction comment on the issue).
-const attachmentRuntimeMinVersion = "2.5.0"
-
 // attachmentProbeTTL bounds capability probe caching.
 const attachmentProbeTTL = 15 * time.Second
 
@@ -351,21 +346,23 @@ type attachmentProbe struct {
 }
 
 // ProbeAttachmentSupport probes the runtime /health endpoint (no auth) on an
-// already-resolved base URL. It returns whether the version supports chat
-// attachments (>= 2.5.0, the release that shipped runtime PR #48). Version
-// gating only — deployment-generation binding is done via the deployer-
-// reported container id from ResolveRuntime, not via /health (issue #94
-// review R3).
+// already-resolved base URL. The gate is the capability declaration, not the
+// version string: attachments require the runtime to advertise
+// attachmentExpectedGeneration (runtime >= 2.7.0, the release that shipped
+// the X-Expected-Container-Id atomic generation check — runtime PR #62 /
+// issue #61). A runtime without a capabilities field (all pre-2.7.0) parses
+// as false. Generation binding itself is done via the deployer-reported
+// container id from ResolveRuntime, not via /health (issue #94 review R3).
 func (s *AgentChatService) ProbeAttachmentSupport(ctx context.Context, baseURL string) (bool, error) {
 	info, err := s.runtimeClient.Health(ctx, baseURL)
 	if err != nil {
 		return false, err
 	}
-	return compareSemver(info.Version, attachmentRuntimeMinVersion) >= 0, nil
+	return info.Capabilities.AttachmentExpectedGeneration, nil
 }
 
 // AttachmentsSupportedAt is a thin wrapper over ProbeAttachmentSupport for
-// callers that only need the version verdict.
+// callers that only need the capability verdict.
 func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL string) bool {
 	supported, err := s.ProbeAttachmentSupport(ctx, baseURL)
 	return err == nil && supported

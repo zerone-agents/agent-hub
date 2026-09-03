@@ -116,6 +116,24 @@ const useStyles = createStyles(({ css }) => ({
 
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 
+// 发送失败错误文案（域码 → 中文提示）：attachment_missing / generation_mismatch
+// 同为「附件失效可重试」语义（runtime v2.7.0 原子代次校验不通过 = 部署代次
+// 变更，附件随旧容器销毁）；generation_unavailable 为瞬时部署状态异常。
+function sendErrorMessage(errorCode: string | undefined, fallback: string | null): string | null {
+  switch (errorCode) {
+    case 'attachment_missing':
+      return '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送'
+    case 'generation_mismatch':
+      return '附件已过期（Runtime 已更新），本地文件已恢复，可直接重试发送'
+    case 'generation_unavailable':
+      return 'Runtime 部署状态异常，请稍后重试'
+    case 'runtime_attachment_unsupported':
+      return '当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）'
+    default:
+      return fallback
+  }
+}
+
 export default function AgentChatPage() {
   const { styles } = useStyles()
   const { name = '' } = useParams<{ name: string }>()
@@ -186,11 +204,16 @@ export default function AgentChatPage() {
   // 文本、error effect 又清掉 optimistic 气泡，用户重试需要重新输入）
   const invalidateAttachments = attachments.invalidate
   useEffect(() => {
-    // sessionId 门控（与上方错误展示同款模式）：A 会话的 attachment_missing
-    // 到达时若用户已切到 B 会话，不把 A 的文本写进 B 的输入框。
+    // sessionId 门控（与上方错误展示同款模式）：A 会话的 attachment_missing /
+    // generation_mismatch 到达时若用户已切到 B 会话，不把 A 的文本写进 B 的
+    // 输入框。generation_mismatch（runtime v2.7.0 代次校验 412）与
+    // attachment_missing 同款「附件失效可重试」语义：丢弃失效描述符、恢复
+    // 本地文件与输入框文本，可直接重试发送。
+    const retryable =
+      stream.state.errorCode === 'attachment_missing' || stream.state.errorCode === 'generation_mismatch'
     if (
       stream.state.phase === 'error' &&
-      stream.state.errorCode === 'attachment_missing' &&
+      retryable &&
       stream.state.sessionId === selectedId
     ) {
       if (lastSentRef.current) chatInputRef.current?.restoreText(lastSentRef.current)
@@ -395,13 +418,7 @@ export default function AgentChatPage() {
                   <StreamingMessage
                     parts={stream.state.parts}
                     phase="error"
-                    error={
-                      stream.state.errorCode === 'attachment_missing'
-                        ? '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送'
-                        : stream.state.errorCode === 'runtime_attachment_unsupported'
-                          ? '当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent'
-                          : stream.state.error
-                    }
+                    error={sendErrorMessage(stream.state.errorCode, stream.state.error)}
                   />
                 )}
                 {/* runtime 内部自动重试（system/retry，如限流退避等待）期间，

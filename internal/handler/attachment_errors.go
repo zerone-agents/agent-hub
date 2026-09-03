@@ -18,6 +18,12 @@ func attachmentHTTPStatus(code string) int {
 		return http.StatusRequestEntityTooLarge
 	case chat.ErrCodeRuntimeAttachmentUnsupported:
 		return http.StatusNotImplemented
+	case chat.ErrCodeGenerationMismatch:
+		// runtime v2.7.0 原子代次校验不通过：容器已重建，附件随旧代销毁。
+		return http.StatusPreconditionFailed
+	case chat.ErrCodeGenerationUnavailable:
+		// runtime 无法确定自身容器身份（代次未知），与空 containerID 同语义。
+		return http.StatusServiceUnavailable
 	default: // invalid_multipart / attachment_missing / invalid_attachment
 		return http.StatusBadRequest
 	}
@@ -48,7 +54,8 @@ func runtimeAttachmentCode(body string) (string, bool) {
 		return "", false
 	}
 	switch payload.Code {
-	case chat.ErrCodeAttachmentMissing, chat.ErrCodeInvalidAttachment, chat.ErrCodeUploadLimitExceeded:
+	case chat.ErrCodeAttachmentMissing, chat.ErrCodeInvalidAttachment, chat.ErrCodeUploadLimitExceeded,
+		chat.ErrCodeGenerationMismatch, chat.ErrCodeGenerationUnavailable:
 		return payload.Code, true
 	}
 	return "", false
@@ -66,6 +73,12 @@ func runtimeErrorMessage(code string) string {
 		return "附件已失效，请重新上传"
 	case chat.ErrCodeUploadLimitExceeded:
 		return "附件数量或大小超出限制"
+	case chat.ErrCodeGenerationMismatch:
+		// runtime v2.7.0 X-Expected-Container-Id 原子校验不通过（412）：
+		// 部署代次已变更，本地文件需重新上传后再发送。
+		return "附件已过期（部署代次变更），请重新上传"
+	case chat.ErrCodeGenerationUnavailable:
+		return "Runtime 部署状态异常，请稍后重试"
 	default: // invalid_attachment 等其余附件域码
 		return "附件信息无效"
 	}
