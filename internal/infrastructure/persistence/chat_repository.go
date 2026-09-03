@@ -294,20 +294,15 @@ func (r *ChatRepository) GetUploadRecord(tenantID, sessionID, id string) (*chat.
 }
 
 // HasUploadRecordPath reports whether path was registered by a server-side
-// upload record of the session created at or after validSince (the runtime
-// container boot time minus clock-skew tolerance — records from previous
-// container generations no longer authorize; issue #94 review R2 F1).
-func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path string, validSince time.Time) (bool, error) {
+// upload record of the session created in the given runtime container
+// generation (exact container_id equality, zero tolerance — records from
+// previous container generations no longer authorize after a recreate;
+// issue #94 review R3).
+func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path, containerID string) (bool, error) {
 	var count int64
 	err := TenantOwned(r.db.Model(&chat.UploadRecord{}), tenantID).
-		Where("session_id = ? AND path = ? AND created_at >= ?", sessionID, path, validSince).Count(&count).Error
+		Where("session_id = ? AND path = ? AND container_id = ?", sessionID, path, containerID).Count(&count).Error
 	return count > 0, err
-}
-
-// DeleteUploadRecordsBySession removes all upload records of a session
-// (also invoked inside DeleteSession's transaction).
-func (r *ChatRepository) DeleteUploadRecordsBySession(tenantID, sessionID string) error {
-	return TenantOwned(r.db, tenantID).Where("session_id = ?", sessionID).Delete(&chat.UploadRecord{}).Error
 }
 
 // DeleteMessageByID deletes one message of a session (used to roll back the

@@ -90,9 +90,9 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/agents/"+deployKey && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret"}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret","containerId":"ctr-1"}}`, deployKey, port)))
 		case r.URL.Path == "/api/v1/agents/"+deployKey+"/status" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d,"containerId":"ctr-1"}}`, deployKey, port)))
 		default:
 			t.Errorf("unexpected deployer request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)

@@ -22,11 +22,11 @@ type fakeAgentDetailSvc struct {
 	err     error
 }
 
-func (f *fakeAgentDetailSvc) ResolveRuntime(tenantID, name string) (string, string, error) {
+func (f *fakeAgentDetailSvc) ResolveRuntime(tenantID, name string) (string, string, string, error) {
 	if f.err != nil {
-		return "", "", f.err
+		return "", "", "", f.err
 	}
-	return f.baseURL, f.apiKey, nil
+	return f.baseURL, f.apiKey, "", nil
 }
 func (f *fakeAgentDetailSvc) RuntimeClient() *runtime.Client { return runtime.NewClient() }
 

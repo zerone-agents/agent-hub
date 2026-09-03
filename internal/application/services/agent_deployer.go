@@ -28,10 +28,16 @@ type DeploymentDTO struct {
 	Health        string `json:"health"`
 	RuntimeURL    string `json:"runtimeUrl"`
 	ContainerName string `json:"containerName"`
-	DeployedAt    string `json:"deployedAt"`
-	Message       string `json:"message"`
-	HostPort      int    `json:"hostPort"`
-	APIKey        string `json:"apiKey"`
+	// ContainerID is the deployer-reported Docker container id — the immutable
+	// deployment-generation anchor. It changes on every recreate (redeploy)
+	// and survives in-place restarts, so callers can bind session-scoped
+	// state (e.g. chat upload records, issue #94 review R3) to the exact
+	// container instance that created it.
+	ContainerID string `json:"containerId,omitempty"`
+	DeployedAt  string `json:"deployedAt"`
+	Message     string `json:"message"`
+	HostPort    int    `json:"hostPort"`
+	APIKey      string `json:"apiKey"`
 }
 
 // agentRepository defines the methods needed from the agent repository.
@@ -382,7 +388,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, fmt.Errorf("update deployment status failed: %w", err)
 	}
 
-	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.HostPort, &deployedAt, "")
+	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.ContainerID, resp.HostPort, &deployedAt, "")
 	if resp.Status == "running" && resp.HostPort > 0 {
 		dto.APIKey = token
 		// Register Kong route asynchronously once the runtime reports healthy.
@@ -518,7 +524,7 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	statusResp, err := s.client.GetAgent(ctx, key)
 	if err != nil {
 		// If deployer says not found, return not_found status
-		return s.toDTO(tenantID, name, "not_found", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
 	}
 
 	// If status is running, also query health
@@ -569,7 +575,7 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 		}
 	}
 
-	dto := s.toDTO(tenantID, name, statusResp.Status, health, statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, gatewayMessage)
+	dto := s.toDTO(tenantID, name, statusResp.Status, health, statusResp.ContainerName, statusResp.ContainerID, statusResp.HostPort, agentCfg.DeployedAt, gatewayMessage)
 	if statusResp.Status == "running" && statusResp.HostPort > 0 {
 		apiKey := ""
 		if agentCfg.RuntimeToken != "" {
@@ -635,7 +641,7 @@ func (s *AgentDeployerService) Start(tenantID, name string) (*DeploymentDTO, err
 		return nil, fmt.Errorf("update status failed: %w", err)
 	}
 
-	dto := s.toDTO(tenantID, name, statusResp.Status, "", statusResp.ContainerName, statusResp.HostPort, agentCfg.DeployedAt, "")
+	dto := s.toDTO(tenantID, name, statusResp.Status, "", statusResp.ContainerName, statusResp.ContainerID, statusResp.HostPort, agentCfg.DeployedAt, "")
 	if statusResp.Status == "running" && statusResp.HostPort > 0 && agentCfg.RuntimeToken != "" {
 		dto.APIKey, _ = providerdomain.Decrypt(agentCfg.RuntimeToken, s.encryptionKey)
 		// Register Kong route asynchronously once the runtime reports healthy.
@@ -1007,7 +1013,9 @@ func isStableDeploymentStatus(status string) bool {
 // toDTO converts deployment information into a DeploymentDTO. The RuntimeURL
 // reflects the tenant-scoped gateway path (/<org>/<name>) when Kong is enabled,
 // or the hub-relative proxy path (/runtime/<org>/<name>) in no-Kong mode.
-func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, containerName string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
+// containerID is the deployer-reported Docker container id (empty when no
+// container exists, e.g. not_found) — the immutable deployment generation.
+func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, containerName, containerID string, port int, deployedAt *time.Time, message string) *DeploymentDTO {
 	var deployedAtStr string
 	if deployedAt != nil {
 		deployedAtStr = deployedAt.UTC().Format(time.RFC3339)
@@ -1033,6 +1041,7 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 		Health:        health,
 		RuntimeURL:    url,
 		ContainerName: containerName,
+		ContainerID:   containerID,
 		DeployedAt:    deployedAtStr,
 		Message:       message,
 		HostPort:      port,

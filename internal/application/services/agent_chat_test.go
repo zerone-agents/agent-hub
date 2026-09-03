@@ -2,7 +2,6 @@ package services
 
 import (
 	"testing"
-	"time"
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/chat"
@@ -118,22 +117,13 @@ func (m *mockChatRepo) GetUploadRecord(tenantID, sessionID, id string) (*chat.Up
 	return r, nil
 }
 
-func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path string, validSince time.Time) (bool, error) {
+func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path, containerID string) (bool, error) {
 	for _, r := range m.uploads {
-		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path && !r.CreatedAt.Before(validSince) {
+		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path && r.ContainerID == containerID {
 			return true, nil
 		}
 	}
 	return false, nil
-}
-
-func (m *mockChatRepo) DeleteUploadRecordsBySession(tenantID, sessionID string) error {
-	for id, r := range m.uploads {
-		if r.TenantID == tenantID && r.SessionID == sessionID {
-			delete(m.uploads, id)
-		}
-	}
-	return nil
 }
 
 func (m *mockChatRepo) DeleteMessageByID(tenantID, sessionID, messageID string) error {

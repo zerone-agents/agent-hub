@@ -33,11 +33,6 @@ type attachmentFakeOpts struct {
 	// runtimeVersion is what GET /health reports. Empty → 无 /health 路由
 	// （探测失败 → 附件不可用）。
 	runtimeVersion string
-	// uptime (seconds) is what GET /health reports alongside the version
-	// (issue #94 review R2 F1：容器启动时刻 = now - uptime)。nil → 86400
-	//（容器一天前启动——now 落库的记录都属于当前代）。可变指针：测试中途
-	// 改值即模拟重部署换容器代次。
-	uptime *float64
 	// uploadHandler serves POST /v1/files/uploads. nil → 404（旧 runtime）。
 	uploadHandler http.HandlerFunc
 	// runsHandler serves POST /v1/agents/{key}/runs. nil → 最小成功 SSE 流。
@@ -46,6 +41,14 @@ type attachmentFakeOpts struct {
 	contentHandler http.HandlerFunc
 }
 
+// 部署代次常量（issue #94 review R3）：fake deployer 报告的容器代。
+// Gen1 → Gen2 = 重部署换新容器（container id 必变）；改回 Gen1 = 同容器
+// 原地重启（container id 不变，文件仍在）。
+const (
+	attachmentContainerGen1 = "ctr-gen-1"
+	attachmentContainerGen2 = "ctr-gen-2"
+)
+
 // attachmentChatEnv wires the production handler against fake deployer +
 // fake runtime + in-memory sqlite（复刻 agent_chat_runtime_addressing_test.go
 // 模式）。Seeds：agent "min"（running，fake runtime 端口）、session
@@ -53,6 +56,10 @@ type attachmentFakeOpts struct {
 type attachmentChatEnv struct {
 	handler *AgentChatHandler
 	runtime *httptest.Server
+	// containerID 是 fake deployer 报告的可变容器代（issue #94 review R3：
+	// 部署代次绑定改用不可变 container id）。测试中途 *env.containerID =
+	// Gen2 即模拟重部署换容器；改回 Gen1 即模拟同容器原地重启。
+	containerID *string
 }
 
 func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChatEnv {
@@ -60,14 +67,9 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 
 	mux := http.NewServeMux()
 	if opts.runtimeVersion != "" {
-		uptimePtr := opts.uptime
-		if uptimePtr == nil {
-			def := 86400.0
-			uptimePtr = &def
-		}
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q,"uptime":%v}`, opts.runtimeVersion, *uptimePtr)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q}`, opts.runtimeVersion)))
 		})
 	}
 	if opts.uploadHandler != nil {
@@ -91,14 +93,17 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 	port := portOfServerURL(t, runtimeSrv.URL)
 	setupAttachmentDB(t, port)
 
+	// 可变容器代：deployer 对 agent/status 查询实时报告 containerID 变量
+	//（闭包捕获引用），测试中途改值即模拟重部署/原地重启换容器代次。
+	containerID := attachmentContainerGen1
 	deployKey := services.DeployKey(chatTestTenant, "min")
 	deployerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/agents/"+deployKey && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret"}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret","containerId":%q}}`, deployKey, port, containerID)))
 		case r.URL.Path == "/api/v1/agents/"+deployKey+"/status" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d,"containerId":%q}}`, deployKey, port, containerID)))
 		default:
 			t.Errorf("unexpected deployer request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -119,7 +124,7 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 		runtime.NewClient(),
 		"127.0.0.1", "", "127.0.0.1",
 	)
-	return &attachmentChatEnv{handler: NewAgentChatHandler(chatSvc), runtime: runtimeSrv}
+	return &attachmentChatEnv{handler: NewAgentChatHandler(chatSvc), runtime: runtimeSrv, containerID: &containerID}
 }
 
 func setupAttachmentDB(t *testing.T, hostPort int) {
@@ -620,13 +625,15 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 }
 
 // seedUploadRecords inserts server-side upload records (the authorization
-// anchor) for u1-owned descriptors, as the hub would after a real upload.
+// anchor) for u1-owned descriptors, as the hub would after a real upload on
+// the default container generation (attachmentContainerGen1).
 func seedUploadRecords(t *testing.T, sessionID string, descs ...services.AttachmentDesc) {
 	t.Helper()
 	for _, d := range descs {
 		require.NoError(t, database.DB.Create(&chat.UploadRecord{
 			ID: d.ID, TenantID: chatTestTenant, SessionID: sessionID, UserID: "u1",
 			Name: d.Name, Mime: d.Mime, Size: d.Size, Path: d.Path,
+			ContainerID: attachmentContainerGen1,
 		}).Error)
 	}
 }
@@ -641,6 +648,7 @@ func seedAttachmentMessage(t *testing.T, sessionID, path string) {
 	require.NoError(t, database.DB.Create(&chat.UploadRecord{
 		ID: "f-1", TenantID: chatTestTenant, SessionID: sessionID, UserID: sess.UserID,
 		Name: "a.png", Mime: "image/png", Size: 3, Path: path,
+		ContainerID: attachmentContainerGen1,
 	}).Error)
 	require.NoError(t, database.DB.Create(&chat.Message{
 		UserID: sess.UserID, TenantID: chatTestTenant, ID: "m-" + path, SessionID: sessionID,
@@ -750,16 +758,19 @@ func TestAttachmentContent_RuntimeFileGone404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// R2 F1（部署代次绑定）：上传记录只授权创建它的容器代次。重部署清空
+// R3（部署代次绑定，ContainerID 版）：上传记录只授权创建它的容器代——
+// deployer 报告的不可变 container id 精确相等，零时间容差。重部署清空
 // .zerone-uploads 后，新容器里同名文件属于新的上传者——旧代记录必须整体
-// 失效：①当前代真实上传 → 内容代理 200；②换代（uptime 变小）+ 手插旧代
-// 记录 → 404 且不拨号 runtime；③ SendMessage 对旧代记录 → 400（落库前拒绝）。
+// 失效：①当前代真实上传 → 内容代理 200；②换容器代 + 手插旧代记录
+// （CreatedAt=now，不是一小时前——证明代次判定与时间无关，直接覆盖
+// reviewer 点名的旧实现 <60s 容差窗口）→ 404 且不拨号 runtime；
+// ③ SendMessage 对旧代记录 → 400（落库前拒绝）；④切回原代（restart
+// 语义：同容器原地重启，container id 不变，文件仍在）→ ①的记录下载
+// 恢复 200（正向回归，不误伤文件确实还在的场景）。
 func TestAttachmentContent_StaleRecordAfterRuntimeRecreate404(t *testing.T) {
-	uptime := 86400.0 // 第一代容器：一天前启动
 	runtimeHit := false
 	env := newAttachmentChatEnv(t, attachmentFakeOpts{
 		runtimeVersion: "2.5.0",
-		uptime:         &uptime,
 		uploadHandler:  fakeUploadOK,
 		contentHandler: func(w http.ResponseWriter, r *http.Request) {
 			runtimeHit = true
@@ -767,28 +778,32 @@ func TestAttachmentContent_StaleRecordAfterRuntimeRecreate404(t *testing.T) {
 		},
 	})
 
-	// ① 真实上传落记录（CreatedAt=now ≥ bootAt=now-1d）→ 内容代理 200。
+	// ① 当前代（ctr-gen-1）真实上传落记录（container_id=ctr-gen-1）→
+	// 内容代理 200。
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
 	require.Equal(t, http.StatusCreated, w.Code)
 	w = doGetAttachmentContent(t, env, ".zerone-uploads/a.txt", "s-att", "u1")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.True(t, runtimeHit, "current-generation record must reach the runtime")
 
-	// ② 模拟重部署：新容器 5 秒前启动（bootAt≈now）。旧容器一小时前落库的
-	// 记录（文件已随容器销毁，路径可能已被他人同名上传复用）必须失败关闭，
+	// ② 模拟重部署：deployer 改报新容器代 ctr-gen-2。手插一条上一代
+	//（ctr-gen-1）落库的记录——CreatedAt 设为 now（不是一小时前）：
+	// 代次绑定与时间无关，即便落库时间晚于新容器启动也必须失败关闭，
 	// 且不得拨号 runtime。
-	uptime = 5
+	*env.containerID = attachmentContainerGen2
 	runtimeHit = false
 	require.NoError(t, database.DB.Create(&chat.UploadRecord{
 		ID: "f-old", TenantID: chatTestTenant, SessionID: "s-att", UserID: "u1",
 		Name: "old.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/old.txt",
-		CreatedAt: time.Now().Add(-time.Hour),
+		ContainerID: attachmentContainerGen1, // 上一代容器落库的记录
+		CreatedAt:   time.Now(),              // 时间无关性：now 也不放行
 	}).Error)
 	w = doGetAttachmentContent(t, env, ".zerone-uploads/old.txt", "s-att", "u1")
 	require.Equal(t, http.StatusNotFound, w.Code)
 	require.False(t, runtimeHit, "stale-generation record must fail closed before dialing the runtime")
 
-	// ③ SendMessage 同款：描述符与旧代记录全等也 → 400 invalid_attachment。
+	// ③ SendMessage 同款：描述符与旧代记录四字段全等也 → 400 invalid_attachment，
+	// 且零 user message 落库。
 	body := `{"content":"","attachments":[{"id":"f-old","name":"old.txt","mime":"text/plain","size":3,"path":".zerone-uploads/old.txt"}]}`
 	w = sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusBadRequest, w.Code)
@@ -796,4 +811,52 @@ func TestAttachmentContent_StaleRecordAfterRuntimeRecreate404(t *testing.T) {
 	var userCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
 	require.Zero(t, userCount, "stale descriptors must not persist a user message")
+
+	// ④ 正向回归（restart 语义）：容器原地重启——Docker container id 不变，
+	// `.zerone-uploads` 文件仍在。deployer 改回报 ctr-gen-1，①的记录下载
+	// 恢复 200。
+	*env.containerID = attachmentContainerGen1
+	runtimeHit = false
+	w = doGetAttachmentContent(t, env, ".zerone-uploads/a.txt", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, runtimeHit, "same-container restart must re-authorize the still-existing file")
+}
+
+// R3（上传→落库间重建竞态，reviewer 点名）：上传成功时记录必然标上传
+// 发起刻的容器代（ctr-gen-1，ResolveRuntime 在上传请求前取得）；随后容器
+// 重建（ctr-gen-2）——SendMessage 与 AttachmentContent 都必须拒绝（记录
+// 代次 ≠ 当前代次），即使描述符/路径与记录四字段全等、落库时间就是 now。
+// 用「真实上传 + 立即切换代」显式走通整条链路，不手插记录。
+func TestUploadRecords_RecreateBetweenUploadAndUseRejected(t *testing.T) {
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler:  fakeUploadOK,
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			_, _ = w.Write([]byte("bytes"))
+		},
+	})
+
+	// 真实上传：fake runtime 201 → hub 落记录（container_id=ctr-gen-1）。
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	// 上传成功后、使用前容器重建（新代）。
+	*env.containerID = attachmentContainerGen2
+
+	// SendMessage：描述符与记录全等，但代次不符 → 400 + 零 user message。
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	w = sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "recreate-between-upload-and-send must not persist a user message")
+
+	// AttachmentContent 同理 → 404 且不拨号 runtime。
+	runtimeHit = false
+	w = doGetAttachmentContent(t, env, ".zerone-uploads/a.txt", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.False(t, runtimeHit, "stale-generation record must fail closed before dialing the runtime")
 }

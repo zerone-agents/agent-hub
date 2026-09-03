@@ -168,11 +168,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
-	// 2. Resolve runtime URL and API key BEFORE anything is persisted: the
-	// attachment probe below needs the base URL, and a resolve failure must
-	// not leave a persisted user turn (or an orphan system error message)
-	// behind — the client keeps its input and can simply retry.
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	// 2. Resolve runtime URL, API key, and the deployer-reported container id
+	// BEFORE anything is persisted: the attachment probe below needs the base
+	// URL, and a resolve failure must not leave a persisted user turn (or an
+	// orphan system error message) behind — the client keeps its input and
+	// can simply retry.
+	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
 		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
@@ -181,24 +182,21 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	// 3. 附件能力门控 + 部署代次绑定（issue #94 review F3 + R2 F1）：一次
-	// /health 探测同时拿版本与容器启动时刻（bootAt）。旧 runtime（< 2.5.0）
-	// 对 run 请求的 attachments 字段静默忽略——宁可拒绝也不静默丢附件。
-	// 探测先于持久化：拒绝时还没有任何已落库内容需要回滚。纯文本消息跳过
-	// 探测，bootAt 保持零值（下方循环不执行，不受影响）。
-	var bootAt time.Time
+	// 3. 附件能力门控（issue #94 review F3）：/health 版本探测。旧 runtime
+	//（< 2.5.0）对 run 请求的 attachments 字段静默忽略——宁可拒绝也不静默
+	// 丢附件。探测先于持久化：拒绝时还没有任何已落库内容需要回滚。纯文本
+	// 消息跳过探测。
 	if len(req.Attachments) > 0 {
-		supported, boot, probeErr := h.svc.ProbeAttachmentSupport(c.Request.Context(), baseURL)
-		if probeErr != nil || !supported {
+		if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
 			respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
 				"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
 			return
 		}
-		bootAt = boot
 	}
 
-	// 4. Upload-record binding (issue #94 review F1 + R2 F1)：每个描述符必须
-	// 与服务端在上传时落库的记录全等，且记录必须属于当前容器代次——重部署
+	// 4. Upload-record binding (issue #94 review F1 + R3)：每个描述符必须
+	// 与服务端在上传时落库的记录全等，且记录必须属于当前容器代次——
+	// deployer 报告的不可变 container id 精确相等（零时间容差）。重部署
 	// 清空 `.zerone-uploads` 后，同名文件的新上传会拿到与旧容器完全相同的
 	// 路径，旧代记录不能再授权（否则读到的是新上传者的字节）。`.zerone-uploads`
 	// 是同 Agent runtime 容器内所有用户共享的目录——仅做语法校验就落库的
@@ -206,7 +204,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	for _, a := range req.Attachments {
 		rec, err := h.svc.GetUploadRecord(tenantID, userID, sessionID, a.ID)
 		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path ||
-			services.StaleAttachmentRecord(rec, bootAt) {
+			rec.ContainerID != containerID {
 			respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
 				"附件信息无效或已失效，请重新上传")
 			return

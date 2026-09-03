@@ -52,7 +52,10 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	// containerID 在上传请求发起前取得：记录天然绑定实际处理上传的容器
+	// 代次（上传中途重建=连接失败无记录；上传后重建=记录标旧代随后失效
+	// ——两个竞态方向都封死，issue #94 review R3）。
+	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] upload resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
 		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
@@ -116,7 +119,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 			// 解析路径变成死代码，非 413 的可解析状态码（如 404→501、
 			// 400/500 域码）全部退化为泛化 502。
 			defer res.resp.Body.Close()
-			h.respondUploadResult(c, res.resp, tenantID, userID, sessionID)
+			h.respondUploadResult(c, res.resp, tenantID, userID, sessionID, containerID)
 			return
 		}
 		// runtime 未产生可透传的响应（连接失败/超时等传输错误）。
@@ -137,7 +140,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		return
 	}
 	defer res.resp.Body.Close()
-	h.respondUploadResult(c, res.resp, tenantID, userID, sessionID)
+	h.respondUploadResult(c, res.resp, tenantID, userID, sessionID, containerID)
 }
 
 // relayMultipart copies file parts from mr into mw, enforcing the hub-side
@@ -211,7 +214,10 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 // On 201 it also persists the descriptors as server-side upload records (the
 // authorization anchor — issue #94 review F1); tenant/user/session scope the
 // records and must come from the request context, never the runtime body.
-func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Response, tenantID, userID, sessionID string) {
+// containerID is the deployer-reported generation captured before the upload
+// request was issued — records are stamped with it so later sends/downloads
+// can reject stale generations (issue #94 review R3).
+func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Response, tenantID, userID, sessionID, containerID string) {
 	switch {
 	case resp.StatusCode == http.StatusCreated:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -230,7 +236,7 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 				return
 			}
 		}
-		if err := h.svc.SaveUploadRecords(tenantID, userID, sessionID, parsed.Files); err != nil {
+		if err := h.svc.SaveUploadRecords(tenantID, userID, sessionID, containerID, parsed.Files); err != nil {
 			log.Printf("[chat] persist upload records failed: tenant=%s session=%s user=%s err=%v",
 				tenantID, sessionID, userID, err)
 			respondError(c, http.StatusBadGateway, "上传失败，请稍后重试")
@@ -295,22 +301,17 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
 		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
-	// 部署代次绑定（issue #94 review R2 F1）：内容代理前探测容器启动时刻，
-	// 只有当前代次的上传记录才可授权（旧代文件已随容器销毁，路径可能已被
-	// 他人同名上传复用）。探测失败同样失败关闭——代次未知时宁可 404 不放行。
-	_, bootAt, probeErr := h.svc.ProbeAttachmentSupport(c.Request.Context(), baseURL)
-	if probeErr != nil {
-		log.Printf("[chat] attachment content probe failed: session=%s path=%q err=%v", sessionID, pathParam, probeErr)
-		respondError(c, http.StatusNotFound, "临时文件已不可用")
-		return
-	}
-	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam, bootAt)
+	// 部署代次绑定（issue #94 review R3）：上传记录只授权创建它的容器代次
+	//（deployer 报告的 container id 精确相等，零时间容差——旧代文件已随
+	// 容器销毁，路径可能已被他人同名上传复用）。containerID 为空（deployer
+	// 未报告）同样失败关闭——代次未知时宁可 404 不放行。
+	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam, containerID)
 	if err != nil {
 		log.Printf("[chat] attachment record lookup failed: session=%s path=%q err=%v", sessionID, pathParam, err)
 	}

@@ -20,7 +20,7 @@ import (
 //
 // *services.AgentChatService implicitly satisfies this interface.
 type AgentDetailService interface {
-	ResolveRuntime(tenantID, agentName string) (string, string, error)
+	ResolveRuntime(tenantID, agentName string) (string, string, string, error)
 	RuntimeClient() *runtime.Client
 }
 
@@ -45,7 +45,7 @@ func NewAgentDetailHandler(svc AgentDetailService) *AgentDetailHandler {
 func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
 
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenant.GetTenantID(c), agentName)
+	baseURL, apiKey, _, err := h.svc.ResolveRuntime(tenant.GetTenantID(c), agentName)
 	if err != nil {
 		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
 		return
