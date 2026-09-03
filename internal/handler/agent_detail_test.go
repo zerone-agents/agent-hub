@@ -43,9 +43,9 @@ func setupAgentDetailRouter(svc AgentDetailService) *gin.Engine {
 
 func TestGetAgentDetail_Success_Minimal(t *testing.T) {
 	runtimeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Runtime registers agents under the tenant-scoped deploy key.
-		if r.URL.Path != "/v1/agents/tenant-a-min" {
-			t.Errorf("runtime path = %q, want /v1/agents/tenant-a-min", r.URL.Path)
+		// Runtime registers agents under their bare agent id (issue #114).
+		if r.URL.Path != "/v1/agents/min" {
+			t.Errorf("runtime path = %q, want /v1/agents/min", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
 			t.Errorf("runtime method = %q, want GET", r.Method)

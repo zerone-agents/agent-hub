@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -115,17 +116,21 @@ type HubConfig struct {
 	Org         string `json:"org,omitempty"`
 }
 
-// CreateAgentRequest is the deployer v3 deployment payload: a complete agent
-// graph plus runtime-global provider config. RootAgentID doubles as the
-// deployment/container name and must match one Agents[].Name entry.
+// CreateAgentRequest is the deployer v3.1 deployment payload: a complete agent
+// graph plus runtime-global provider config. RootAgentID names the runtime
+// agent graph entry (bare agent id, issue #114) and must match one
+// Agents[].Name entry; the tenant-scoped DeploymentKey keys containers,
+// directories and all lifecycle addressing on the deployer side — the two
+// identities are deliberately independent (deployer#18).
 type CreateAgentRequest struct {
-	RootAgentID  string            `json:"rootAgentId"`
-	Agents       []AgentDefinition `json:"agents"`
-	Provider     ProviderConfig    `json:"provider"`
-	RuntimeToken string            `json:"runtime_token"`
-	Force        bool              `json:"force,omitempty"`
-	Aigc         *AigcConfig       `json:"aigc,omitempty"`
-	Hub          *HubConfig        `json:"hub,omitempty"`
+	RootAgentID   string            `json:"rootAgentId"`
+	DeploymentKey string            `json:"deploymentKey"`
+	Agents        []AgentDefinition `json:"agents"`
+	Provider      ProviderConfig    `json:"provider"`
+	RuntimeToken  string            `json:"runtime_token"`
+	Force         bool              `json:"force,omitempty"`
+	Aigc          *AigcConfig       `json:"aigc,omitempty"`
+	Hub           *HubConfig        `json:"hub,omitempty"`
 }
 
 // createAgentBody wraps CreateAgentRequest with a separate force field to avoid
@@ -249,6 +254,45 @@ func decodeSuccess(resp *http.Response, out interface{}) error {
 	}
 
 	return nil
+}
+
+// deploymentKeyProbeRoot is a sanitized rootAgentId so both deployer
+// generations pass the name-pattern guard and reject the probe at a later
+// field validation — before any docker side effect can happen.
+const deploymentKeyProbeRoot = "hub-capability-probe"
+
+// SupportsDeploymentKey reports whether the deployer implements the v3.1.0
+// deploymentKey split (deployer#18, hub#114). Probe: POST /api/v1/agents with
+// a valid rootAgentId but no deploymentKey and no agents.
+//   - v3.1.0+: 400 "deploymentKey is required" (validation order: rootAgentID
+//     → deploymentKey → agents) → supported.
+//   - v3.0.x: 400 "agents must contain at least the root agent definition"
+//     (no deploymentKey concept) → unsupported.
+//
+// Both rejections happen pre-docker, so the probe never creates containers.
+// The sentinel string is a deployer test-pinned contract (e3b0b3a); any other
+// 400 fails closed as unsupported, and transport failures surface as errors.
+func (c *Client) SupportsDeploymentKey(ctx context.Context) (bool, error) {
+	payload, err := json.Marshal(map[string]any{
+		"rootAgentId": deploymentKeyProbeRoot,
+		"agents":      []any{},
+	})
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/agents", bytes.NewReader(payload))
+	if err != nil {
+		return false, err
+	}
+	probeErr := decodeSuccess(resp, &struct{}{})
+	if probeErr == nil {
+		return false, fmt.Errorf("deployer accepted an invalid capability probe; cannot verify deploymentKey support")
+	}
+	var httpErr *HTTPError
+	if errors.As(probeErr, &httpErr) && httpErr.StatusCode == http.StatusBadRequest {
+		return strings.Contains(httpErr.Message, "deploymentKey is required"), nil
+	}
+	return false, fmt.Errorf("probe deployer capability: %w", probeErr)
 }
 
 // CreateAgent creates a new agent container.

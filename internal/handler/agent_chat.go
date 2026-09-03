@@ -144,8 +144,9 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 
 	// 4. Open runtime stream
 	ctx := c.Request.Context()
-	// runtime 注册名为部署键（DeployKey(tenantID, name)），需用限定名寻址，裸名会 404。
-	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.DeployKey(tenantID, agentName), apiKey, bodyBytes)
+	// runtime 注册名为裸 Agent ID（issue #114）；scoped deployment key 仅是
+	// deployer 资源标识，不参与 runtime 寻址。
+	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey, bodyBytes)
 	if err != nil {
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())

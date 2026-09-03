@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,8 +16,10 @@ import (
 	"control-panel/internal/infrastructure/deployer"
 )
 
-// scopedRecorder captures every deployer request so tests can assert the
-// tenant-scoped deploy key reaches the wire (URL paths and payloads).
+// scopedRecorder captures every deployer request so tests can assert both
+// deployer identities reach the wire correctly: tenant-scoped deploy keys in
+// URL paths (lifecycle), and the bare/scoped split in create payloads
+// (rootAgentId + deploymentKey, issue #114).
 type scopedRecorder struct {
 	mu         sync.Mutex
 	paths      []string
@@ -77,6 +80,18 @@ func newScopedDeployerServer(t *testing.T, rec *scopedRecorder, getFound bool, c
 		}
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents" {
 			body, _ := io.ReadAll(r.Body)
+			// Capability probe branch (issue #114): probe requests carry no
+			// deploymentKey — mimic deployer v3.1.0's sentinel rejection so
+			// the probe passes, and keep probes out of the create captures.
+			var probe struct {
+				DeploymentKey string `json:"deploymentKey"`
+			}
+			_ = json.Unmarshal(body, &probe)
+			if probe.DeploymentKey == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+				return
+			}
 			rec.mu.Lock()
 			rec.postBodies = append(rec.postBodies, body)
 			rec.mu.Unlock()
@@ -98,26 +113,42 @@ func (rec *scopedRecorder) createdAgentName(t *testing.T) string {
 
 func (rec *scopedRecorder) createdAgentNames(t *testing.T) []string {
 	t.Helper()
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	var names []string
-	for _, body := range rec.postBodies {
-		var parsed struct {
-			RootAgentID string `json:"rootAgentId"`
-		}
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			t.Fatalf("unmarshal create body: %v", err)
-		}
-		names = append(names, parsed.RootAgentID)
+	payloads := rec.createdPayloads(t)
+	names := make([]string, 0, len(payloads))
+	for _, p := range payloads {
+		names = append(names, p.RootAgentID)
 	}
 	return names
 }
 
-// TestDeploy_SendsScopedKeyToDeployer asserts that every deployer call made by
-// Deploy uses the tenant-scoped key: the existence probe GET, and the create
-// payload's rootAgentId (which doubles as the container key on the deployer
-// side under protocol v3).
-func TestDeploy_SendsScopedKeyToDeployer(t *testing.T) {
+// scopedCreatePayload captures the two identities of a create request
+// (issue #114): the bare rootAgentId (runtime agent id) and the
+// tenant-scoped deploymentKey (deployer resource id).
+type scopedCreatePayload struct {
+	RootAgentID   string `json:"rootAgentId"`
+	DeploymentKey string `json:"deploymentKey"`
+}
+
+func (rec *scopedRecorder) createdPayloads(t *testing.T) []scopedCreatePayload {
+	t.Helper()
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	out := make([]scopedCreatePayload, 0, len(rec.postBodies))
+	for _, body := range rec.postBodies {
+		var parsed scopedCreatePayload
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal create body: %v", err)
+		}
+		out = append(out, parsed)
+	}
+	return out
+}
+
+// TestDeploy_PayloadSplitsBareRootAndScopedKey asserts the create payload
+// carries the bare agent id as rootAgentId and the tenant-scoped key as the
+// dedicated deploymentKey (issue #114), while the pre-create existence probe
+// still addresses the scoped key (lifecycle stays resource-scoped).
+func TestDeploy_PayloadSplitsBareRootAndScopedKey(t *testing.T) {
 	rec := &scopedRecorder{}
 	srv := newScopedDeployerServer(t, rec, false, "running")
 	defer srv.Close()
@@ -130,8 +161,15 @@ func TestDeploy_SendsScopedKeyToDeployer(t *testing.T) {
 	if !rec.hasEntry("GET /api/v1/agents/" + wantKey) {
 		t.Errorf("existence probe should hit /api/v1/agents/%s, got %v", wantKey, rec.paths)
 	}
-	if got := rec.createdAgentName(t); got != wantKey {
-		t.Errorf("create payload rootAgentId = %q, want %q", got, wantKey)
+	payloads := rec.createdPayloads(t)
+	if len(payloads) != 1 {
+		t.Fatalf("expected exactly one create POST, got %d", len(payloads))
+	}
+	if payloads[0].RootAgentID != "general" {
+		t.Errorf("create payload rootAgentId = %q, want bare %q", payloads[0].RootAgentID, "general")
+	}
+	if payloads[0].DeploymentKey != wantKey {
+		t.Errorf("create payload deploymentKey = %q, want %q", payloads[0].DeploymentKey, wantKey)
 	}
 	if rec.hasEntry("GET /api/v1/agents/general") {
 		t.Errorf("bare-name probe must not be used anymore, got %v", rec.paths)
@@ -155,11 +193,64 @@ func TestDeploy_DualTenantSameName_DoNotInterfere(t *testing.T) {
 		t.Fatalf("deploy ayu/assistant: %v", err)
 	}
 
-	if got := rec.createdAgentNames(t); len(got) != 2 || got[0] != "zerone-assistant" || got[1] != "ayu-assistant" {
-		t.Errorf("create payload rootAgentIds = %v, want [zerone-assistant ayu-assistant]", got)
+	if got := rec.createdAgentNames(t); len(got) != 2 || got[0] != "assistant" || got[1] != "assistant" {
+		t.Errorf("create payload rootAgentIds = %v, want both bare %q", got, "assistant")
+	}
+	// Deployment keys stay tenant-scoped: same bare runtime identity, fully
+	// isolated deployer resources (the core invariant of the v3.1 split).
+	payloads := rec.createdPayloads(t)
+	if payloads[0].DeploymentKey != "zerone-assistant" || payloads[1].DeploymentKey != "ayu-assistant" {
+		t.Errorf("create payload deploymentKeys = [%s %s], want [zerone-assistant ayu-assistant]", payloads[0].DeploymentKey, payloads[1].DeploymentKey)
 	}
 	if !rec.hasEntry("GET /api/v1/agents/zerone-assistant") || !rec.hasEntry("GET /api/v1/agents/ayu-assistant") {
 		t.Errorf("existence probes should hit both scoped keys, got %v", rec.paths)
+	}
+}
+
+// TestDeploy_BlocksLegacyDeployerWithoutDeploymentKey asserts Deploy fails
+// closed against a pre-v3.1 deployer (no deploymentKey concept): the probe's
+// 400 fingerprint is the legacy "agents must contain..." error, exactly one
+// POST happens (the probe itself — no create is attempted), and the error is
+// the actionable sentinel.
+func TestDeploy_BlocksLegacyDeployerWithoutDeploymentKey(t *testing.T) {
+	var posts int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents" {
+			mu.Lock()
+			posts++
+			mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"success":false,"error":"agents must contain at least the root agent definition"}`))
+			return
+		}
+		w.Write([]byte(`{"success":true,"data":{"agentName":"scoped","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
+	}))
+	defer srv.Close()
+
+	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(&deployTokenFixture{}, ""), deployTokenProviderSvc())
+	_, err := s.Deploy("tenant-a", "general", false, false)
+	if !errors.Is(err, ErrDeployerNoDeploymentKey) {
+		t.Fatalf("Deploy error = %v, want ErrDeployerNoDeploymentKey", err)
+	}
+	if posts != 1 {
+		t.Fatalf("expected exactly one POST (the capability probe), got %d", posts)
+	}
+}
+
+// TestDeploy_ProbeTransportFailureFailsClosed asserts an unreachable deployer
+// fails the deploy with the capability-check error (mapped 502 by the
+// handler) instead of attempting a create.
+func TestDeploy_ProbeTransportFailureFailsClosed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // nothing listens anymore
+
+	s := newTestAgentDeployerService(t, url, deployTokenAgentRepo(&deployTokenFixture{}, ""), deployTokenProviderSvc())
+	_, err := s.Deploy("tenant-a", "general", false, false)
+	if !errors.Is(err, ErrDeployerCapabilityProbe) {
+		t.Fatalf("Deploy error = %v, want ErrDeployerCapabilityProbe", err)
 	}
 }
 
@@ -283,7 +374,7 @@ func TestGatewayHealthCache_ScopedByTenant(t *testing.T) {
 func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 	s := &AgentDeployerService{
 		publicHost: "10.0.0.1",
-		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60),
+		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60, ModeCasdoor),
 	}
 	dto := s.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
 	want := "https://deploy.example.com/zerone/assistant"
@@ -297,6 +388,16 @@ func TestToDTO_NoKongRunningReturnsRelativeRuntimeURL(t *testing.T) {
 	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/default/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/default/test", dto.RuntimeURL)
+	}
+}
+
+func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
+	// builtin mode omits the implicit default tenant from public URLs
+	// (issue #114): /runtime/<name>, not /runtime/default/<name>.
+	s := &AgentDeployerService{publicHost: "203.0.113.10", authMode: ModeBuiltin}
+	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
+	if dto.RuntimeURL != "/runtime/test" {
+		t.Fatalf("RuntimeURL = %q, want /runtime/test", dto.RuntimeURL)
 	}
 }
 
@@ -324,7 +425,7 @@ func registerWhenHealthyFixture(t *testing.T) (*AgentDeployerService, *fakeKong)
 		publicHost:    "10.0.0.1",
 		healthProbe:   func(ctx context.Context, host string, port int) bool { return false },
 		gatewayHealth: &sync.Map{},
-		kongSvc:       NewKongGatewayService(fk, "agent-runtime", "", newMemRepo(nil), 60),
+		kongSvc:       NewKongGatewayService(fk, "agent-runtime", "", newMemRepo(nil), 60, ModeCasdoor),
 	}, fk
 }
 

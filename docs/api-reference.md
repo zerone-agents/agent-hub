@@ -105,13 +105,13 @@ Mounted only when `OPS_API_KEY` is set. Used to register per-org Casdoor OAuth c
 | GET | `/api/v1/ops/tenant-clients` | List registered orgs (no secrets returned) |
 | DELETE | `/api/v1/ops/tenant-clients/:org` | Delete a mapping (409 if it is the default and others remain; idempotent 204) |
 
-## Tenant-Scoped Deployment Keys
+## Agent ID vs Deployment Key vs Public URL
 
-Since multi-tenancy, deployed agents are addressed by tenant-scoped keys (see configuration.md):
+Deployed agents carry three independent identities since deployer v3.1 (see configuration.md):
 
-- Runtime URL: `https://<gateway>/<org>/<name>` (builtin mode: `/default/<name>`).
-- Deployment key (Kong entity / deployer container key): `<org>-<name>`.
-- The hub chat proxy addresses runtimes by qualified name `/v1/agents/<org>-<name>` — **bare names return 404**, except subagents, which keep bare names.
+- **Agent ID** (bare `<name>`): the runtime agent graph identity; the hub chat/detail proxies address runtimes at `/v1/agents/<name>` (subagents keep bare names too).
+- **Deployment key** (`<org>-<name>`): Kong entity / deployer container key — all lifecycle addressing (get/start/stop/delete) and gateway entity naming.
+- **Public URL**: casdoor mode `https://<gateway>/<org>/<name>`; builtin mode `https://<gateway>/<name>` (no `/default` prefix; the deployment key still keeps the `default-` prefix). Without Kong, the hub proxy serves the same paths under `/runtime`.
 
 ### Provider Probe Example
 

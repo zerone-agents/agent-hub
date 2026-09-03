@@ -308,12 +308,13 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		}
 	})
 
-	t.Run("2: agents holds root(deployKey) + child-a + child-b; root.subagents are pure ids", func(t *testing.T) {
+	t.Run("2: bare rootAgentId + scoped deploymentKey; agents holds root + child-a + child-b; root.subagents are pure ids", func(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
-		require.Equal(t, "tenant-a-parent", body["rootAgentId"])
+		require.Equal(t, "parent", body["rootAgentId"])
+		require.Equal(t, "tenant-a-parent", body["deploymentKey"])
 		nodes := graphAgents(t, body)
 		require.Len(t, nodes, 3)
-		require.Equal(t, "tenant-a-parent", nodes[0]["name"])
+		require.Equal(t, "parent", nodes[0]["name"])
 		require.Equal(t, "child-a", nodes[1]["name"])
 		require.Equal(t, "child-b", nodes[2]["name"])
 		require.Equal(t, []any{"child-a", "child-b"}, nodes[0]["subagents"])
@@ -482,12 +483,14 @@ func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 			errPart: "仅支持一层委托",
 		},
 		{
-			name: "collision: child bare name equals root deploy key",
+			// The issue #114 analogue of the old deploy-key collision (see
+			// TestLoadAgentGraph_BareIDCollision): a child named exactly like
+			// the canonical root is caught by the self-mount guard above.
+			name: "collision: child bare name equals root name",
 			mutate: func(fx *graphFixture) {
-				fx.world.addAgent("tenant-a", "tenant-a-parent", nil)
-				fx.world.subagents[fx.parent.ID] = []string{"tenant-a-parent"}
+				fx.world.subagents[fx.parent.ID] = []string{"parent"}
 			},
-			errPart: "冲突",
+			errPart: "不能挂载自己",
 		},
 	}
 	for _, tc := range cases {
@@ -568,6 +571,28 @@ func TestDeploy_FailFastOnCapabilityArtifacts(t *testing.T) {
 			require.False(t, f.postCalled, "deployer create must not be called on incomplete capability metadata")
 		})
 	}
+}
+
+// TestLoadAgentGraph_BareIDCollision pins the issue #114 collision guard: a
+// legacy non-canonical root row (only reachable through MySQL's ci collation
+// in production — Deploy normalizes its input name before the exact map/SQL
+// lookup) whose bare runtime id collides with a mounted child name is
+// rejected hub-side; the deployer would otherwise see duplicate agents[]
+// entries. Called via loadAgentGraph directly to bypass the Deploy-side
+// normalization that makes this unreachable through the public entrypoint.
+func TestLoadAgentGraph_BareIDCollision(t *testing.T) {
+	fx := buildGraphFixture(t)
+	legacy := fx.world.addAgent("tenant-a", "Parent.X", func(cfg *agent.AgentConfig) {
+		cfg.ModelID = "m"
+		cfg.SystemPrompt = "p"
+	})
+	fx.world.subagents[legacy.ID] = []string{"parent-x"}
+
+	s := fx.world.service(t, "http://deployer.test")
+	_, err := s.loadAgentGraph(context.Background(), "tenant-a", legacy)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "冲突")
+	require.Contains(t, err.Error(), "parent-x")
 }
 
 // TestUpdateSubagents_OneLevelInvariants is brief assertion 9: the mount

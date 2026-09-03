@@ -23,6 +23,19 @@ import (
 	repository "control-panel/internal/infrastructure/persistence"
 )
 
+// ErrDeployerNoDeploymentKey reports that the connected agent-deployer does
+// not implement the v3.1.0 deploymentKey contract (deployer#18): it would
+// silently key deployment resources by the bare rootAgentId and reintroduce
+// cross-tenant same-name collisions. Deployment stays blocked until the
+// deployer is upgraded (upgrade order in docs/configuration.md).
+var ErrDeployerNoDeploymentKey = errors.New("agent-deployer does not support the deploymentKey contract (requires >= v3.1.0); upgrade agent-deployer and retry")
+
+// ErrDeployerCapabilityProbe marks a transport-level failure of the pre-deploy
+// capability probe (issue #114): the deployer could not be reached at all, so
+// support cannot be verified and the deploy fails closed. Handlers map it to
+// 502 via errors.Is — no string matching.
+var ErrDeployerCapabilityProbe = errors.New("deployer capability check failed")
+
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
 	Status        string `json:"status"`
@@ -97,6 +110,9 @@ type AgentDeployerService struct {
 	chatPushPublicURL string
 	healthProbe       func(ctx context.Context, publicHost string, port int) bool
 	gatewayHealth     *sync.Map // deploy key (DeployKey) -> *gatewayHealthEntry
+	// authMode selects the public-URL policy (issue #114): ModeBuiltin serves
+	// bare "/<name>" and never surfaces the implicit default tenant.
+	authMode AuthMode
 }
 
 // gatewayHealthEntry caches the result of a gateway health probe for an agent.
@@ -163,13 +179,21 @@ func gatewayHealthCacheKey(tenantID, name string) string {
 	return DeployKey(tenantID, name)
 }
 
-// gatewayURL returns the public gateway URL (with tenant-scoped /<org>/<name>
-// path) for an agent, or "" when Kong is disabled.
+// gatewayURL returns the public gateway URL (mode-aware public path) for an
+// agent, or "" when Kong is disabled.
 func (s *AgentDeployerService) gatewayURL(tenantID, name string) string {
 	if s == nil || s.kongSvc == nil || !s.kongSvc.enabled() {
 		return ""
 	}
-	return s.kongSvc.RouteURL(URLPath(tenantID, name))
+	return s.kongSvc.RouteURL(s.publicPath(tenantID, name))
+}
+
+// publicPath is this service's mode-aware view of an agent's public path
+// (issue #114): builtin "/<name>", casdoor "/<org>/<name>". Every public-URL
+// surface (toDTO, gateway probes, route registration) goes through here so
+// the two modes never diverge.
+func (s *AgentDeployerService) publicPath(tenantID, agentName string) string {
+	return PublicPath(s.authMode, tenantID, agentName)
 }
 
 // refreshGatewayHealth probes the Kong route for an agent and caches the result.
@@ -222,7 +246,7 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string) *AgentDeployerService {
+func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, authMode AuthMode) *AgentDeployerService {
 	s := &AgentDeployerService{
 		client:            client,
 		publicHost:        publicHost,
@@ -237,6 +261,7 @@ func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, 
 		mcpSvc:            NewMcpService(encryptionKey),
 		knowledgeSvc:      knowledgeSvc,
 		kongSvc:           kongSvc,
+		authMode:          authMode,
 		chatPushAPIKey:    chatPushAPIKey,
 		chatPushPublicURL: chatPushPublicURL,
 		healthProbe:       defaultHealthProbe,
@@ -326,9 +351,23 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// buildCreateRequest via loadAgentGraph; MCP servers load per-agent.
 	ctx := context.Background()
 
-	// All deployer calls address the container by the tenant-scoped deploy key
-	// (<org>-<name>); only DB lookups use the bare name.
+	// Lifecycle deployer calls (get/status/start/stop/delete, token
+	// provisioning) address the container by the tenant-scoped deploy key
+	// (<org>-<name>); only DB lookups and the runtime agent id use the bare
+	// name (issue #114).
 	key := DeployKey(tenantID, name)
+
+	// Capability gate (issue #114): the v3.1 deploymentKey split must be live
+	// before we send a bare rootAgentId — a v3.0.x deployer silently keys
+	// containers by rootAgentId, reintroducing cross-tenant collisions. Fail
+	// closed; the probe is a pre-docker 400 on both generations.
+	supported, err := s.client.SupportsDeploymentKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDeployerCapabilityProbe, err)
+	}
+	if !supported {
+		return nil, ErrDeployerNoDeploymentKey
+	}
 
 	// Decide the runtime token before building the request. control-panel is
 	// the sole generator and keeper of runtime tokens; the deployer only
@@ -516,7 +555,7 @@ func (s *AgentDeployerService) registerWhenHealthy(tenantID, name string, hostPo
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	key := DeployKey(tenantID, name)
-	publicPath := URLPath(tenantID, name)
+	publicPath := s.publicPath(tenantID, name)
 	register := func(port int) {
 		_ = s.kongSvc.Register(ctx, key, publicPath, port)
 	}
@@ -755,14 +794,12 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 }
 
 // definitionOpts carries graph-position context into buildAgentDefinition.
-// The root node is named by its tenant-scoped deploy key (<org>-<name>) so
-// same-name agents across tenants never collide, and is the only node
-// allowed to carry the runtime-global fields (Model, MaxSessionQueries,
-// PermissionMode) — the deployer v3 rejects them on children. Child nodes
-// keep bare names (runtime-internal logic names).
+// The root node is the only node allowed to carry the runtime-global fields
+// (Model, MaxSessionQueries, PermissionMode) — the deployer v3 rejects them
+// on children. Root and child nodes all carry bare runtime names (issue
+// #114); the tenant-scoped identity lives in the dedicated deploymentKey.
 type definitionOpts struct {
-	isRoot    bool
-	deployKey string // root only: tenant-scoped deploy key
+	isRoot bool
 }
 
 // buildAgentDefinition assembles one agent's complete AgentDefinition: its
@@ -775,7 +812,11 @@ type definitionOpts struct {
 func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantID string, cfg *agent.AgentConfig, opts definitionOpts) (*deployer.AgentDefinition, []string, error) {
 	name := cfg.Name
 	if opts.isRoot {
-		name = opts.deployKey
+		// Root carries the bare runtime agent id (issue #114), normalized so
+		// it satisfies the deployer's sanitized-name contract and matches
+		// RootAgentID exactly. Children keep raw DB names — subagent id
+		// references and definitions both use cfg.Name.
+		name = NormalizeAgentName(cfg.Name)
 	}
 	def := &deployer.AgentDefinition{
 		Name:         name,
@@ -919,9 +960,12 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 // one delegation level by the runtime; any deeper relation, cycle, or
 // dangling reference fails explicitly instead of being silently skipped.
 func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID string, rootCfg *agent.AgentConfig) ([]deployer.AgentDefinition, error) {
-	deployKey := DeployKey(tenantID, rootCfg.Name)
+	// The root's deployer graph identity is its bare agent id (issue #114);
+	// a subagent with the same name would collide as a duplicate agents[]
+	// entry, so guard it hub-side with a clear message.
+	rootBareID := NormalizeAgentName(rootCfg.Name)
 
-	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true, deployKey: deployKey})
+	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true})
 	if err != nil {
 		return nil, fmt.Errorf("构造根 Agent 定义失败: %w", err)
 	}
@@ -931,8 +975,8 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 		if subName == rootCfg.Name {
 			return nil, fmt.Errorf("Agent %q 不能挂载自己作为子 Agent", rootCfg.Name)
 		}
-		if subName == deployKey {
-			return nil, fmt.Errorf("子 Agent %q 与根 Agent 的部署标识 %q 冲突，请重命名", subName, deployKey)
+		if subName == rootBareID {
+			return nil, fmt.Errorf("子 Agent %q 与根 Agent 的运行时标识 %q 冲突，请重命名", subName, rootBareID)
 		}
 		if !validAgentNamePattern.MatchString(subName) { // 存量非 canonical 防御
 			return nil, fmt.Errorf("子 Agent %q 标识不合法（仅小写字母、数字、连字符），无法部署", subName)
@@ -995,9 +1039,14 @@ func (s *AgentDeployerService) buildCreateRequest(
 	}
 
 	req := &deployer.CreateAgentRequest{
-		RootAgentID: DeployKey(tenantID, cfg.Name),
-		Agents:      agents,
-		Provider:    providerConfig,
+		// v3.1 split (issue #114): rootAgentId carries only the runtime agent
+		// graph identity (bare name); the tenant-scoped DeployKey moved to
+		// the dedicated deploymentKey field, which keys containers,
+		// directories and all lifecycle addressing on the deployer side.
+		RootAgentID:   NormalizeAgentName(cfg.Name),
+		DeploymentKey: DeployKey(tenantID, cfg.Name),
+		Agents:        agents,
+		Provider:      providerConfig,
 	}
 
 	if err := s.applyAigc(req, tenantID); err != nil {
@@ -1137,18 +1186,17 @@ func (s *AgentDeployerService) toDTO(tenantID, agentName, status, health, contai
 	}
 
 	url := s.runtimeURL(port)
+	publicPath := s.publicPath(tenantID, agentName)
 	if s.kongSvc != nil && s.kongSvc.enabled() {
-		if kongURL := s.kongSvc.RouteURL(URLPath(tenantID, agentName)); kongURL != "" {
+		if kongURL := s.kongSvc.RouteURL(publicPath); kongURL != "" {
 			url = kongURL
 		}
 	} else if status == "running" && port > 0 {
 		// No-Kong public address is the hub-relative proxy path (issue #77);
-		// frontend resolves it against the current origin.
-		// Org identity assumption: URLPath uses orgSlug(tenantID), which
-		// equals the raw tenant_id for builtin and conforming casdoor orgs
-		// (slug is identity); legacy non-conforming tenant IDs 404 through
-		// the proxy by design (issue #77 acceptance #2).
-		url = "/runtime" + URLPath(tenantID, agentName)
+		// frontend resolves it against the current origin. The path itself is
+		// mode-aware (issue #114): builtin "/runtime/<name>", casdoor
+		// "/runtime/<org>/<name>".
+		url = "/runtime" + publicPath
 	}
 
 	return &DeploymentDTO{

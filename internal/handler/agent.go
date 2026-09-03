@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -243,6 +244,11 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 // Non-HTTPError errors fall through to the legacy string matching, which
 // keeps mapping hub-side validation failures (e.g. "agent has no provider").
 func deployerErrorStatus(err error) int {
+	// Capability gate (issue #114): a pre-v3.1 deployer is an environment
+	// problem, not a bad request — 503 with the actionable sentinel message.
+	if errors.Is(err, services.ErrDeployerNoDeploymentKey) {
+		return http.StatusServiceUnavailable
+	}
 	var httpErr *deployer.HTTPError
 	if errors.As(err, &httpErr) {
 		switch {
@@ -260,7 +266,29 @@ func deployerErrorStatus(err error) int {
 		strings.Contains(msg, "agent not found") {
 		return http.StatusBadRequest
 	}
+	// Capability probe transport failures (issue #114): the deployer itself
+	// could not be reached — a gateway problem, not an internal one.
+	if errors.Is(err, services.ErrDeployerCapabilityProbe) {
+		return http.StatusBadGateway
+	}
 	return http.StatusInternalServerError
+}
+
+// deployerErrorMessage maps the capability-gate errors (issue #114) to
+// stable Chinese user-facing copy (CONTRIBUTING.md: user-facing errors in
+// Chinese; internal errors in English). The English technical detail goes
+// to the log only and never reaches the API response. All other errors
+// keep their original message.
+func deployerErrorMessage(err error) string {
+	if errors.Is(err, services.ErrDeployerNoDeploymentKey) {
+		log.Printf("[Deploy] capability gate blocked deployment: %v", err)
+		return "agent-deployer 版本过低（需 ≥ v3.1.0），已阻止本次部署：请先升级 agent-deployer 后重试，升级顺序见 docs/configuration.md"
+	}
+	if errors.Is(err, services.ErrDeployerCapabilityProbe) {
+		log.Printf("[Deploy] capability probe transport failure: %v", err)
+		return "无法连接 agent-deployer 完成能力校验，已阻止本次部署：请检查 agent-deployer 服务状态后重试"
+	}
+	return err.Error()
 }
 
 func (h *AgentHandler) DeployAgent(c *gin.Context) {
@@ -270,7 +298,7 @@ func (h *AgentHandler) DeployAgent(c *gin.Context) {
 
 	resp, err := h.deployerService.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), err.Error())
+		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
 	respondSuccess(c, resp)
@@ -291,7 +319,7 @@ func (h *AgentHandler) StopDeployment(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.deployerService.Stop(tenant.GetTenantID(c), name); err != nil {
-		respondError(c, deployerErrorStatus(err), err.Error())
+		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
 	respondMessage(c, http.StatusOK, "已停止")
@@ -302,7 +330,7 @@ func (h *AgentHandler) StartDeployment(c *gin.Context) {
 
 	resp, err := h.deployerService.Start(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), err.Error())
+		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
 	respondSuccess(c, resp)
@@ -319,7 +347,7 @@ func (h *AgentHandler) DeleteDeployment(c *gin.Context) {
 		err = h.deployerService.Delete(tenant.GetTenantID(c), name)
 	}
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), err.Error())
+		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
 	if purge {
