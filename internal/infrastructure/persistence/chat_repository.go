@@ -305,7 +305,7 @@ func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path string, v
 }
 
 // DeleteUploadRecordsBySession removes all upload records of a session
-// (called by the service alongside session deletion).
+// (also invoked inside DeleteSession's transaction).
 func (r *ChatRepository) DeleteUploadRecordsBySession(tenantID, sessionID string) error {
 	return TenantOwned(r.db, tenantID).Where("session_id = ?", sessionID).Delete(&chat.UploadRecord{}).Error
 }
