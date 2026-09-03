@@ -608,26 +608,15 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MaxSessionQueries = &n
 	}
 
-	// Handle disallowedTools (issue #111 agent-local deny list): accept a
-	// string array only; non-string items fail the whole unpack (validator
-	// separately enforces per-item constraints). Each entry is trimmed here
-	// so the stored/deployed value matches the validator's trim-based
-	// dedup/emptiness semantics — runtime matches tool names exactly, so
-	// shipping an un-trimmed entry would silently fail-open the deny list.
-	// Whitespace-only entries are rejected the same way as non-strings.
-	// Absent key leaves the field untouched.
+	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
+	// trimming and boundary rules all live in parseDisallowedTools — the
+	// single source shared with ValidateConfig — so the stored/deployed
+	// value always matches the validator's semantics. Absent key leaves
+	// the field untouched.
 	if v, ok := config["disallowedTools"].([]interface{}); ok {
-		items := make([]string, 0, len(v))
-		for i, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
-			}
-			trimmed := strings.TrimSpace(s)
-			if trimmed == "" {
-				return fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
-			}
-			items = append(items, trimmed)
+		items, err := parseDisallowedTools(v)
+		if err != nil {
+			return err
 		}
 		cfg.DisallowedTools = items
 	}
