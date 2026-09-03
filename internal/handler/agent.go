@@ -268,7 +268,7 @@ func deployerErrorStatus(err error) int {
 	}
 	// Capability probe transport failures (issue #114): the deployer itself
 	// could not be reached — a gateway problem, not an internal one.
-	if strings.Contains(msg, "deployer capability check failed") {
+	if errors.Is(err, services.ErrDeployerCapabilityProbe) {
 		return http.StatusBadGateway
 	}
 	return http.StatusInternalServerError
@@ -284,7 +284,7 @@ func deployerErrorMessage(err error) string {
 		log.Printf("[Deploy] capability gate blocked deployment: %v", err)
 		return "agent-deployer 版本过低（需 ≥ v3.1.0），已阻止本次部署：请先升级 agent-deployer 后重试，升级顺序见 docs/configuration.md"
 	}
-	if strings.Contains(err.Error(), "deployer capability check failed") {
+	if errors.Is(err, services.ErrDeployerCapabilityProbe) {
 		log.Printf("[Deploy] capability probe transport failure: %v", err)
 		return "无法连接 agent-deployer 完成能力校验，已阻止本次部署：请检查 agent-deployer 服务状态后重试"
 	}

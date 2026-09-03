@@ -249,8 +249,8 @@ func TestDeploy_ProbeTransportFailureFailsClosed(t *testing.T) {
 
 	s := newTestAgentDeployerService(t, url, deployTokenAgentRepo(&deployTokenFixture{}, ""), deployTokenProviderSvc())
 	_, err := s.Deploy("tenant-a", "general", false, false)
-	if err == nil || !strings.Contains(err.Error(), "deployer capability check failed") {
-		t.Fatalf("Deploy error = %v, want capability check failure", err)
+	if !errors.Is(err, ErrDeployerCapabilityProbe) {
+		t.Fatalf("Deploy error = %v, want ErrDeployerCapabilityProbe", err)
 	}
 }
 

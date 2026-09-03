@@ -167,7 +167,7 @@ func TestDeployAgent_DeployerHTTPErrorMapping(t *testing.T) {
 		},
 		{
 			name:       "capability gate: probe transport failure maps to 502 with Chinese copy",
-			deployErr:  fmt.Errorf("deployer capability check failed: dial tcp 127.0.0.1:8080: connection refused"),
+			deployErr:  fmt.Errorf("%w: dial tcp 127.0.0.1:8080: connection refused", services.ErrDeployerCapabilityProbe),
 			wantStatus: http.StatusBadGateway,
 			wantBody:   "能力校验",
 		},
@@ -209,7 +209,7 @@ var _ deployerForTest = (*services.AgentDeployerService)(nil)
 func TestDeployAgent_CapabilityGateErrorsAreChinese(t *testing.T) {
 	for _, deployErr := range []error{
 		fmt.Errorf("deploy agent failed: %w", services.ErrDeployerNoDeploymentKey),
-		fmt.Errorf("deployer capability check failed: dial tcp 127.0.0.1:8080: connection refused"),
+		fmt.Errorf("%w: dial tcp 127.0.0.1:8080: connection refused", services.ErrDeployerCapabilityProbe),
 	} {
 		fake := &fakeDeployer{err: deployErr}
 		router := setupDeployRouter(fake)

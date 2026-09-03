@@ -801,9 +801,9 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 		f := &deployFailureFixture{postStatus: http.StatusInternalServerError}
 		srv := newDeployFailureServer(t, f)
 		defer srv.Close()
-	s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
-	key := DeployKey("default", "general")
-	fk := attachFakeKong(s, key)
+		s := newTestAgentDeployerService(t, srv.URL, deployFailureAgentRepo(f, storedToken), deployTokenProviderSvc())
+		key := DeployKey("default", "general")
+		fk := attachFakeKong(s, key)
 
 		_, err := s.Deploy("default", "general", false, false)
 		if err == nil || !strings.Contains(err.Error(), "500") {

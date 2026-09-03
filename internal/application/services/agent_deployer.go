@@ -30,6 +30,12 @@ import (
 // deployer is upgraded (upgrade order in docs/configuration.md).
 var ErrDeployerNoDeploymentKey = errors.New("agent-deployer does not support the deploymentKey contract (requires >= v3.1.0); upgrade agent-deployer and retry")
 
+// ErrDeployerCapabilityProbe marks a transport-level failure of the pre-deploy
+// capability probe (issue #114): the deployer could not be reached at all, so
+// support cannot be verified and the deploy fails closed. Handlers map it to
+// 502 via errors.Is — no string matching.
+var ErrDeployerCapabilityProbe = errors.New("deployer capability check failed")
+
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
 	Status        string `json:"status"`
@@ -357,7 +363,7 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// closed; the probe is a pre-docker 400 on both generations.
 	supported, err := s.client.SupportsDeploymentKey(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("deployer capability check failed: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDeployerCapabilityProbe, err)
 	}
 	if !supported {
 		return nil, ErrDeployerNoDeploymentKey
