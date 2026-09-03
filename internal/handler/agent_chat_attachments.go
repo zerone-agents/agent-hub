@@ -233,12 +233,17 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Response, tenantID, userID, sessionID, containerID string) {
 	switch {
 	case resp.StatusCode == http.StatusCreated:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		// 有限读取（review round 7）：合法 descriptors 响应是 ≤10 个文件 ×
+		// 小字段的量级，8192 字节足够判定；超限即截断为非法 JSON 走 502。
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		var parsed struct {
 			Files []services.AttachmentDesc `json:"files"`
 		}
 		if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Files) == 0 || len(parsed.Files) > services.MaxAttachmentsPerMessage {
-			log.Printf("[chat] unparseable runtime upload response: session=%s body=%s", sessionID, body)
+			// body 内容不进日志（main #121 凭据约束）：只记长度与解析错误
+			// 本身（json err 不含内容），session/status 足以定位。
+			log.Printf("[chat] unparseable runtime upload response: session=%s status=%d len=%d err=%v",
+				sessionID, resp.StatusCode, len(body), err)
 			respondError(c, http.StatusBadGateway, "上传服务响应异常")
 			return
 		}
@@ -261,10 +266,11 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 			"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 	default:
 		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		body := string(bodyBytes)
-		if code, ok := runtimeAttachmentCode(body); ok {
-			log.Printf("[chat] runtime upload rejected: session=%s status=%d code=%s body=%s",
-				sessionID, resp.StatusCode, code, body)
+		if code, ok := runtimeAttachmentCode(string(bodyBytes)); ok {
+			// body 只用于白名单域码解析，内容不进日志（review round 7 /
+			// main #121 凭据约束）：日志只留 session/status/code。
+			log.Printf("[chat] runtime upload rejected: session=%s status=%d code=%s",
+				sessionID, resp.StatusCode, code)
 			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
 			return
 		}
@@ -365,15 +371,23 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	case resp.StatusCode == http.StatusNotFound:
 		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
 		respondError(c, http.StatusNotFound, "临时文件已不可用")
-	case resp.StatusCode == http.StatusPreconditionFailed:
-		// runtime v2.7.0 原子代次校验不通过（412）：容器已重建，该 path 属于
-		// 旧代次。透传域码 + 中文文案，前端据此提示重新上传。
-		respondErrorCode(c, http.StatusPreconditionFailed, chat.ErrCodeGenerationMismatch,
-			attachmentCodeMessage(chat.ErrCodeGenerationMismatch))
-	case resp.StatusCode == http.StatusServiceUnavailable:
-		// runtime 无法确定自身容器身份（503 generation_unavailable）。
-		respondErrorCode(c, http.StatusServiceUnavailable, chat.ErrCodeGenerationUnavailable,
-			attachmentCodeMessage(chat.ErrCodeGenerationUnavailable))
+	case resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusServiceUnavailable:
+		// status+code 契约透传（review round 7）：有限读取、只接受白名单
+		// code 且状态码与域码契约匹配（412↔generation_mismatch、
+		// 503↔generation_unavailable）才透传；其余（含 Kong/普通不可用的
+		// 503、伪造的错配组合）一律中性 502——不凭状态码伪造域码。原始
+		// body 局部变量即弃，不进日志（main #121）。
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		if code, ok := runtimeAttachmentCode(string(buf)); ok {
+			if (resp.StatusCode == http.StatusPreconditionFailed && code == chat.ErrCodeGenerationMismatch) ||
+				(resp.StatusCode == http.StatusServiceUnavailable && code == chat.ErrCodeGenerationUnavailable) {
+				respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
+				return
+			}
+		}
+		log.Printf("[chat] attachment content rejected without contract code: session=%s path=%q status=%d",
+			sessionID, pathParam, resp.StatusCode)
+		respondError(c, http.StatusBadGateway, "附件服务暂时不可用")
 	default:
 		log.Printf("[chat] attachment content runtime error: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)

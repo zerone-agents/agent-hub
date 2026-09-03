@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -460,6 +461,27 @@ func TestSendMessage_GenerationUnavailable503RollsBackUserMessage(t *testing.T) 
 	require.Zero(t, sysCount, "generation_unavailable must not be persisted as a system error message")
 }
 
+// F2（review round 7）：自动标题只在 runtime 流成功建立后铸出——首条纯附件
+// 消息被 412 pre-run 拒绝（回滚分支）时 session 不得留下标题：被回滚的
+// user turn 在历史中从未存在，其标题来源也必须不存在。
+func TestSendMessage_PreRunRejectLeavesTitleEmpty(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"error":"container generation mismatch","code":"generation_mismatch"}`))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusPreconditionFailed, w.Code)
+	var sess chat.Session
+	require.NoError(t, database.DB.Where("id = ?", "s-att").First(&sess).Error)
+	require.Empty(t, sess.Title, "a pre-run rejected send must not mint a session title (review round 7)")
+}
+
 func uploadRequestForAttachments(t *testing.T, env *attachmentChatEnv, files []struct{ name, body string }, sessionID, userID string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
@@ -606,6 +628,71 @@ func TestUploadAttachments_GenerationUnavailable503(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"generation_unavailable"`)
 	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
+}
+
+// F1（review round 7 / Standards P1）：非 2xx 已识别分支的日志不得携带
+// runtime 原始 body——fake 响应体内嵌哨兵凭据，断言日志只含 session/
+// status/code，永不含哨兵（响应 envelope 同样不泄）。
+func TestUploadAttachments_Non2xxCodeLogOmitsBody(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			// 哨兵必须配五码白名单内的域码：invalid_multipart 不在
+			// runtimeAttachmentCode 白名单，会落入中性 502 分支，测不到
+			// 已识别分支的日志行。
+			_, _ = w.Write([]byte(`{"error":"boom X-Agent-Capability: SECRETCRED123","code":"upload_limit_exceeded"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	require.NotContains(t, w.Body.String(), "SECRETCRED123", "sentinel must not reach the client envelope")
+	logs := buf.String()
+	require.NotContains(t, logs, "SECRETCRED123", "raw runtime body must never enter logs (main #121)")
+	require.Contains(t, logs, "status=413")
+	require.Contains(t, logs, "code=upload_limit_exceeded")
+}
+
+// F1（review round 7）：201 解析失败分支同样只记 len/err，不记内容——
+// 哨兵嵌进非法 JSON 的 201 响应体，断言日志零泄露且带 status/len。
+func TestUploadAttachments_Unparseable201LogOmitsBody(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			// 排空请求体（fakeUploadOK 同款），确保走完 201 解析分支。
+			_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			mr := multipart.NewReader(r.Body, params["boundary"])
+			for {
+				p, err := mr.NextPart()
+				if err != nil {
+					break // io.EOF 或 hub 限额主动断开
+				}
+				if p.FileName() != "" {
+					_, _ = io.Copy(io.Discard, p)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"files":[SECRETCRED123`)) // 非法 JSON 内嵌哨兵
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	logs := buf.String()
+	require.NotContains(t, logs, "SECRETCRED123", "raw runtime body must never enter logs (main #121)")
+	require.Contains(t, logs, "status=201")
+	require.Contains(t, logs, "len=")
 }
 
 func TestUploadAttachments_RuntimeLimitExceededPassthrough(t *testing.T) {
@@ -965,6 +1052,60 @@ func TestAttachmentContent_GenerationMismatch412(t *testing.T) {
 	require.Equal(t, http.StatusPreconditionFailed, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"generation_mismatch"`)
 	require.Contains(t, w.Body.String(), "附件已过期（部署代次变更），请重新上传")
+}
+
+// 下载侧 503 契约透传（review round 7）：503 + generation_unavailable 逐对
+// 匹配才透传 503 + 域码（runtime 无法确定自身容器身份）。
+func TestAttachmentContent_GenerationUnavailable503(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"container identity unavailable","code":"generation_unavailable"}`))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"generation_unavailable"`)
+	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
+}
+
+// 下载侧无域码 503（Kong/网关 overloaded 等普通不可用）：中性 502——
+// 不再凭状态码伪造 generation_unavailable（review round 7）。
+func TestAttachmentContent_NoCode503Neutral502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"overloaded"}`))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code, "codeless 503 must map to a neutral 502, not a forged domain code")
+	require.NotContains(t, w.Body.String(), "generation_unavailable")
+	require.Contains(t, w.Body.String(), "附件服务暂时不可用")
+}
+
+// 下载侧状态码与域码错配（412 + generation_unavailable）：契约不匹配同样
+// 中性 502——透传只认 status+code 逐对匹配，不单凭任何一侧。
+func TestAttachmentContent_MismatchedCodeNeutral502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write([]byte(`{"error":"weird mix","code":"generation_unavailable"}`))
+		},
+	})
+	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code, "mismatched status+code must map to a neutral 502")
+	require.NotContains(t, w.Body.String(), "generation_unavailable")
+	require.NotContains(t, w.Body.String(), "generation_mismatch")
 }
 
 // R3（部署代次绑定，ContainerID 版）：上传记录只授权创建它的容器代——

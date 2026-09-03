@@ -232,12 +232,6 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
-	// 会话标题：优先文本；纯附件消息取第一个文件名（issue #94）。
-	titleSeed := req.Content
-	if titleSeed == "" && len(req.Attachments) > 0 {
-		titleSeed = req.Attachments[0].Name
-	}
-	_ = h.svc.AutoTitleSession(tenantID, sessionID, titleSeed)
 
 	// 5. Build runtime request body. Re-use the runtime SDK session id if this
 	// control-panel session has already been bound to one.
@@ -298,6 +292,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 	defer rc.Close()
+
+	// 会话标题：优先文本；纯附件消息取第一个文件名（issue #94）。时机在
+	// runtime 流成功建立之后（review round 7）：pre-run 拒绝（回滚分支）与
+	// transport 失败都不该铸出「历史中从未存在」的标题——标题只属于真正
+	// 到达 runtime 的 user turn。
+	titleSeed := req.Content
+	if titleSeed == "" && len(req.Attachments) > 0 {
+		titleSeed = req.Attachments[0].Name
+	}
+	_ = h.svc.AutoTitleSession(tenantID, sessionID, titleSeed)
 
 	// 7. SSE headers + flusher
 	flusher, ok := c.Writer.(http.Flusher)

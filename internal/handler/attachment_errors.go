@@ -65,9 +65,10 @@ func runtimeAttachmentCode(body string) (string, bool) {
 // at the runtime client boundary from StreamRun errors, or here from a raw
 // upload *http.Response) onto a fixed neutral Chinese message (CONTRIBUTING
 // Standards 1: raw runtime text never reaches the response envelope). The
-// function stays pure — callers log the raw body first and then use the
-// return value; the SendMessage relay, the upload-result mapping, and the
-// content proxy share it so all surfaces stay in sync.
+// function stays pure — callers parse at the boundary and log only the
+// allowlisted code (raw bodies never enter logs, main #121); the SendMessage
+// relay, the upload-result mapping, and the content proxy share it so all
+// surfaces stay in sync.
 func attachmentCodeMessage(code string) string {
 	switch code {
 	case chat.ErrCodeAttachmentMissing:
