@@ -113,7 +113,7 @@ type sendMessageReq struct {
 	Attachments []services.AttachmentDesc `json:"attachments"`
 }
 
-// runRequestBody is the POST /v1/agents/{key}/runs JSON body. attachments
+// runRequestBody is the POST /v1/agents/{agentId}/runs JSON body. attachments
 // are relayed verbatim (runtime re-validates name/size/path).
 type runRequestBody struct {
 	Message     string                    `json:"message"`
