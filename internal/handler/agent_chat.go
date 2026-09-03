@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -127,8 +128,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	tenantID := tenant.GetTenantID(c)
 
 	var req sendMessageReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid request body")
+	// 严格解码（issue #94 review F4）：未知字段（如伪造的 base64 内联数据）
+	// 一律 400，不静默丢弃——客户端契约错误尽早暴露。
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求包含无法识别的字段")
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
@@ -152,7 +157,20 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "session not found")
 		return
 	}
-	if _, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments); err != nil {
+	// Upload-record binding (issue #94 review F1)：每个描述符必须与服务端在
+	// 上传时落库的记录全等。`.zerone-uploads` 是同 Agent runtime 容器内所有
+	// 用户共享的目录——仅做语法校验就落库的话，伪造描述符即可把他人 path 写
+	// 进自己会话再经内容代理下载。
+	for _, a := range req.Attachments {
+		rec, err := h.svc.GetUploadRecord(tenantID, userID, sessionID, a.ID)
+		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path {
+			respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
+				"附件信息无效或已失效，请重新上传")
+			return
+		}
+	}
+	msg, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments)
+	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
@@ -168,6 +186,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 暂不可用："+err.Error())
 		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		return
+	}
+
+	// 附件能力门控（issue #94 review F3）：旧 runtime（< 2.5.0）对 run 请求的
+	// attachments 字段静默忽略——宁可拒绝也不静默丢附件。与 UploadAttachments
+	// 同款无缓存探测。
+	if len(req.Attachments) > 0 && !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
+		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
+			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
 		return
 	}
 
@@ -193,6 +220,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		var httpErr *runtime.RuntimeHTTPError
 		if errors.As(err, &httpErr) {
 			if code, ok := runtimeAttachmentCode(httpErr.Body); ok {
+				// Run 前失败（attachment_missing 等）：回滚乐观持久化的用户消息，
+				// 重发（重新上传→再发）才不会在历史里留下重复的 user turn。
+				// 删除失败仅日志——消息重复是体验问题，不该阻塞错误上报。
+				if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
+					log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
+						tenantID, sessionID, msg.ID, delErr)
+				}
 				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(httpErr.Body))
 				return
 			}

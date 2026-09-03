@@ -254,3 +254,44 @@ func (r *ChatRepository) UpdateSessionTitle(tenantID, sessionID, title string) e
 		Where("id = ? AND (title IS NULL OR title = '')", sessionID).
 		Update("title", title).Error
 }
+
+// CreateUploadRecord inserts a server-side upload record. The tenant is always
+// stamped from the tenantID argument — the caller-provided model value is not
+// trusted.
+func (r *ChatRepository) CreateUploadRecord(tenantID string, rec *chat.UploadRecord) error {
+	rec.TenantID = tenantID
+	return r.db.Create(rec).Error
+}
+
+// GetUploadRecord returns the upload record for (session, id), tenant-scoped.
+// gorm.ErrRecordNotFound when the id was never issued by an upload in the
+// session — i.e. a client-forged descriptor.
+func (r *ChatRepository) GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error) {
+	var rec chat.UploadRecord
+	err := TenantOwned(r.db, tenantID).Where("session_id = ? AND id = ?", sessionID, id).First(&rec).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// HasUploadRecordPath reports whether path was registered by a server-side
+// upload record of the session.
+func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path string) (bool, error) {
+	var count int64
+	err := TenantOwned(r.db.Model(&chat.UploadRecord{}), tenantID).
+		Where("session_id = ? AND path = ?", sessionID, path).Count(&count).Error
+	return count > 0, err
+}
+
+// DeleteUploadRecordsBySession removes all upload records of a session
+// (called by the service alongside session deletion).
+func (r *ChatRepository) DeleteUploadRecordsBySession(tenantID, sessionID string) error {
+	return TenantOwned(r.db, tenantID).Where("session_id = ?", sessionID).Delete(&chat.UploadRecord{}).Error
+}
+
+// DeleteMessageByID deletes one message of a session (used to roll back the
+// optimistic user-message persist when the runtime rejects the run).
+func (r *ChatRepository) DeleteMessageByID(tenantID, sessionID, messageID string) error {
+	return TenantOwned(r.db, tenantID).Where("session_id = ? AND id = ?", sessionID, messageID).Delete(&chat.Message{}).Error
+}

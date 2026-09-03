@@ -116,7 +116,7 @@ func setupAttachmentDB(t *testing.T, hostPort int) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &agent.AgentConfig{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}, &agent.AgentConfig{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
@@ -215,6 +215,7 @@ func TestSendMessage_PassesAttachmentsToRuntimeRun(t *testing.T) {
 		},
 	})
 	body := `{"content":"总结","attachments":[{"id":"f-1","name":"r.pdf","mime":"application/pdf","size":3,"path":".zerone-uploads/r.pdf"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "r.pdf", Mime: "application/pdf", Size: 3, Path: ".zerone-uploads/r.pdf"})
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, string(gotBody), `"attachments":[{`)
@@ -225,11 +226,64 @@ func TestSendMessage_PassesAttachmentsToRuntimeRun(t *testing.T) {
 func TestSendMessage_TitleFromFirstAttachmentName(t *testing.T) {
 	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
 	body := `{"content":"","attachments":[{"id":"f-1","name":"report.pdf","mime":"application/pdf","size":3,"path":".zerone-uploads/report.pdf"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "report.pdf", Mime: "application/pdf", Size: 3, Path: ".zerone-uploads/report.pdf"})
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusOK, w.Code)
 	var sess chat.Session
 	require.NoError(t, database.DB.Where("id = ?", "s-att").First(&sess).Error)
 	require.Equal(t, "report.pdf", sess.Title)
+}
+
+// F1：伪造描述符（无服务端上传记录）必须在落库前被拒——`.zerone-uploads` 是
+// 同 Agent runtime 容器内所有用户共享的目录，语法合法的他人 path 不能成为
+// 自己会话的授权依据。
+func TestSendMessage_RejectsForgedAttachmentDescriptors(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	body := `{"content":"x","attachments":[{"id":"f-1","name":"secret.txt","mime":"text/plain","size":3,"path":".zerone-uploads/secret.txt"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "forged descriptors must not persist a user message")
+}
+
+// F1 真实链路：fake 上传（hub 落记录）→ SendMessage 描述符与记录全等 → 200。
+func TestSendMessage_AttachmentAfterRealUpload(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0", uploadHandler: fakeUploadOK})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusCreated, w.Code)
+	var recCount int64
+	require.NoError(t, database.DB.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-att").Count(&recCount).Error)
+	require.Equal(t, int64(1), recCount, "successful upload must persist a server-side record")
+
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	w = sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// F3：旧 runtime（/health 报 2.4.0）上含附件 SendMessage → 501；同环境纯文本
+// 消息不受影响（200）。旧 runtime 会静默丢弃 run 的 attachments 字段——宁可
+// 拒绝也不静默丢附件。
+func TestSendMessage_AttachmentsRequireNewRuntime(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.4.0"})
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusNotImplemented, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"runtime_attachment_unsupported"`)
+
+	w = sendMessageForAttachments(t, env, `{"content":"hi"}`, "min", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code, "text-only messages must not be gated")
+}
+
+// F4：未知字段（如伪造的 base64 内联数据）严格解码 400，不静默接受。
+func TestSendMessage_RejectsUnknownFields(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	body := `{"content":"x","attachments":[{"id":"f","name":"n","mime":"text/plain","size":1,"path":".zerone-uploads/n.txt","base64":"..."}]}`
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
 }
 
 func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
@@ -242,12 +296,17 @@ func TestSendMessage_AttachmentMissingMappedToEnvelope(t *testing.T) {
 		},
 	})
 	body := `{"content":"","attachments":[{"id":"f-1","name":"x.txt","mime":"text/plain","size":1,"path":".zerone-uploads/x.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "x.txt", Mime: "text/plain", Size: 1, Path: ".zerone-uploads/x.txt"})
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"attachment_missing"`)
 	var errCount int64
 	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&errCount).Error)
 	require.Zero(t, errCount, "attachment_missing must NOT be persisted as a system error message")
+	// F2：乐观持久化的 user message 必须被回滚，重发才不会重复 user turn。
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "attachment_missing must roll back the persisted user message")
 }
 
 func uploadRequestForAttachments(t *testing.T, env *attachmentChatEnv, files []struct{ name, body string }, sessionID, userID string) *httptest.ResponseRecorder {
@@ -534,10 +593,31 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
 }
 
+// seedUploadRecords inserts server-side upload records (the authorization
+// anchor) for u1-owned descriptors, as the hub would after a real upload.
+func seedUploadRecords(t *testing.T, sessionID string, descs ...services.AttachmentDesc) {
+	t.Helper()
+	for _, d := range descs {
+		require.NoError(t, database.DB.Create(&chat.UploadRecord{
+			ID: d.ID, TenantID: chatTestTenant, SessionID: sessionID, UserID: "u1",
+			Name: d.Name, Mime: d.Mime, Size: d.Size, Path: d.Path,
+		}).Error)
+	}
+}
+
+// seedAttachmentMessage seeds the full legit chain for the content-proxy
+// tests: a server-side upload record (authorization) + a user message carrying
+// the file part (display-only).
 func seedAttachmentMessage(t *testing.T, sessionID, path string) {
 	t.Helper()
+	var sess chat.Session
+	require.NoError(t, database.DB.Where("id = ?", sessionID).First(&sess).Error)
+	require.NoError(t, database.DB.Create(&chat.UploadRecord{
+		ID: "f-1", TenantID: chatTestTenant, SessionID: sessionID, UserID: sess.UserID,
+		Name: "a.png", Mime: "image/png", Size: 3, Path: path,
+	}).Error)
 	require.NoError(t, database.DB.Create(&chat.Message{
-		UserID: "u1", TenantID: chatTestTenant, ID: "m-" + path, SessionID: sessionID,
+		UserID: sess.UserID, TenantID: chatTestTenant, ID: "m-" + path, SessionID: sessionID,
 		Role:    "user",
 		Content: `[{"type":"file","id":"f-1","name":"a.png","mime":"image/png","size":3,"path":"` + path + `"},{"type":"text","text":"看图"}]`,
 	}).Error)
@@ -594,7 +674,28 @@ func TestAttachmentContent_RejectsPathOutsideUploadsDir(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
 }
 
-// 交叉核验：合法前缀但未在该 session 消息中出现过的 path 一律 404——
+// F1：消息 file part 不再是授权依据——只插消息不插服务端上传记录必须 404
+// （否则伪造一条消息就能授权任意 path 的内容代理）。
+func TestAttachmentContent_MessagePartWithoutRecord404(t *testing.T) {
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			_, _ = w.Write([]byte("x"))
+		},
+	})
+	require.NoError(t, database.DB.Create(&chat.Message{
+		UserID: "u1", TenantID: chatTestTenant, ID: "m-only", SessionID: "s-att",
+		Role:    "user",
+		Content: `[{"type":"file","id":"f-1","name":"a.png","mime":"image/png","size":3,"path":".zerone-uploads/a.png"}]`,
+	}).Error)
+	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.False(t, runtimeHit, "message parts are display-only; runtime must not be dialed without an upload record")
+}
+
+// 交叉核验：合法前缀但未在该 session 上传记录中出现过的 path 一律 404——
 // runtime /v1/files/content 能读整个工作区，不能把该能力透给用户态。
 func TestAttachmentContent_UnknownPathInSession404(t *testing.T) {
 	runtimeHit := false

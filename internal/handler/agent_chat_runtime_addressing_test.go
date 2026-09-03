@@ -41,7 +41,7 @@ func setupRuntimeAddressingDB(t *testing.T, hostPort int) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &agent.AgentConfig{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}, &agent.AgentConfig{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })

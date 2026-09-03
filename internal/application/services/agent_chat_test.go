@@ -11,6 +11,7 @@ import (
 type mockChatRepo struct {
 	sessions map[string]*chat.Session
 	messages map[string]*chat.Message
+	uploads  map[string]*chat.UploadRecord
 	listSess []*chat.Session
 }
 
@@ -18,6 +19,7 @@ func newMockChatRepo() *mockChatRepo {
 	return &mockChatRepo{
 		sessions: make(map[string]*chat.Session),
 		messages: make(map[string]*chat.Message),
+		uploads:  make(map[string]*chat.UploadRecord),
 	}
 }
 
@@ -83,6 +85,45 @@ func (m *mockChatRepo) UpdateSessionTitle(tenantID, sessionID, title string) err
 		if s.Title == "" {
 			s.Title = title
 		}
+	}
+	return nil
+}
+
+func (m *mockChatRepo) CreateUploadRecord(tenantID string, r *chat.UploadRecord) error {
+	r.TenantID = tenantID
+	m.uploads[r.ID] = r
+	return nil
+}
+
+func (m *mockChatRepo) GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error) {
+	r, ok := m.uploads[id]
+	if !ok || r.TenantID != tenantID || r.SessionID != sessionID {
+		return nil, errNotFound
+	}
+	return r, nil
+}
+
+func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path string) (bool, error) {
+	for _, r := range m.uploads {
+		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *mockChatRepo) DeleteUploadRecordsBySession(tenantID, sessionID string) error {
+	for id, r := range m.uploads {
+		if r.TenantID == tenantID && r.SessionID == sessionID {
+			delete(m.uploads, id)
+		}
+	}
+	return nil
+}
+
+func (m *mockChatRepo) DeleteMessageByID(tenantID, sessionID, messageID string) error {
+	if msg, ok := m.messages[messageID]; ok && msg.TenantID == tenantID && msg.SessionID == sessionID {
+		delete(m.messages, messageID)
 	}
 	return nil
 }

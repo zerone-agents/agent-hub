@@ -26,6 +26,11 @@ type chatRepositoryForAgent interface {
 	ListMessages(tenantID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error)
 	UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error
 	UpdateSessionTitle(tenantID, sessionID, title string) error
+	CreateUploadRecord(tenantID string, r *chat.UploadRecord) error
+	GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error)
+	HasUploadRecordPath(tenantID, sessionID, path string) (bool, error)
+	DeleteUploadRecordsBySession(tenantID, sessionID string) error
+	DeleteMessageByID(tenantID, sessionID, messageID string) error
 }
 
 // agentRepoForChat is the subset of AgentRepository used by AgentChatService.
@@ -166,10 +171,15 @@ func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page,
 	return s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
 }
 
-// DeleteSession deletes a session owned by userID.
+// DeleteSession deletes a session owned by userID, including its upload
+// records (attachment descriptors are session-scoped authorization anchors —
+// they must not outlive the session).
 func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) error {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return fmt.Errorf("session not found: %w", err)
+	}
+	if err := s.chatRepo.DeleteUploadRecordsBySession(tenantID, sessionID); err != nil {
+		return fmt.Errorf("delete upload records: %w", err)
 	}
 	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }
@@ -370,40 +380,63 @@ func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, a
 	return ok
 }
 
-// SessionHasAttachment reports whether path appears as a file part in any
-// user message of the session (all pages scanned; chat sessions are small —
-// performance is a watch item, not a blocker). This is the cross-check that
-// keeps the user-facing content proxy from becoming an arbitrary workspace
-// file read: runtime /v1/files/content can read the whole cwd.
+// SessionHasAttachment reports whether path belongs to a server-side upload
+// record of the session (issue #94 review F1: records are written only by the
+// hub at upload time — the unforgeable authorization anchor for the
+// user-facing content proxy; message file parts are display-only). Runtime
+// /v1/files/content can read the whole cwd, so this cross-check must only
+// ever admit paths the runtime handed out to THIS session.
 func (s *AgentChatService) SessionHasAttachment(tenantID, userID, sessionID, path string) (bool, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return false, fmt.Errorf("session not found: %w", err)
 	}
-	const pageSize = 200
-	for page := 1; ; page++ {
-		msgs, _, err := s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
-		if err != nil {
-			return false, err
+	return s.chatRepo.HasUploadRecordPath(tenantID, sessionID, path)
+}
+
+// SaveUploadRecords persists the runtime-issued attachment descriptors after
+// a successful upload, binding them to (tenant, session, user). These records
+// — not the client-supplied message descriptors — later authorize both the
+// content proxy and SendMessage attachment acceptance.
+func (s *AgentChatService) SaveUploadRecords(tenantID, userID, sessionID string, files []AttachmentDesc) error {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	for _, f := range files {
+		rec := &chat.UploadRecord{
+			ID:        f.ID,
+			SessionID: sessionID,
+			UserID:    userID,
+			Name:      f.Name,
+			Mime:      f.Mime,
+			Size:      f.Size,
+			Path:      f.Path,
+			CreatedAt: time.Now().UTC(),
 		}
-		for _, m := range msgs {
-			if m.Role != "user" {
-				continue
-			}
-			var parts []struct {
-				Type string `json:"type"`
-				Path string `json:"path"`
-			}
-			if err := json.Unmarshal([]byte(m.Content), &parts); err != nil {
-				continue
-			}
-			for _, p := range parts {
-				if p.Type == "file" && p.Path == path {
-					return true, nil
-				}
-			}
-		}
-		if len(msgs) < pageSize {
-			return false, nil
+		if err := s.chatRepo.CreateUploadRecord(tenantID, rec); err != nil {
+			return fmt.Errorf("create upload record: %w", err)
 		}
 	}
+	return nil
+}
+
+// GetUploadRecord returns the server-side upload record for id, scoped to the
+// session owned by userID. Callers compare the record against a client-
+// supplied descriptor; a missing record means the descriptor was never issued
+// by an upload in this session (forged) and must be rejected.
+func (s *AgentChatService) GetUploadRecord(tenantID, userID, sessionID, id string) (*chat.UploadRecord, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+	return s.chatRepo.GetUploadRecord(tenantID, sessionID, id)
+}
+
+// DeleteMessageByID removes one message from a session owned by userID. Used
+// to roll back the optimistic user-message persist when the runtime rejects
+// the run pre-flight (e.g. attachment_missing after a container rebuild) so a
+// retry does not duplicate the user turn.
+func (s *AgentChatService) DeleteMessageByID(tenantID, userID, sessionID, messageID string) error {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	return s.chatRepo.DeleteMessageByID(tenantID, sessionID, messageID)
 }

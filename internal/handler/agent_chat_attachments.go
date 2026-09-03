@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -114,7 +115,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 			// 解析路径变成死代码，非 413 的可解析状态码（如 404→501、
 			// 400/500 域码）全部退化为泛化 502。
 			defer res.resp.Body.Close()
-			h.respondUploadResult(c, res.resp)
+			h.respondUploadResult(c, res.resp, tenantID, userID, sessionID)
 			return
 		}
 		// runtime 未产生可透传的响应（连接失败/超时等传输错误）。
@@ -133,7 +134,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		return
 	}
 	defer res.resp.Body.Close()
-	h.respondUploadResult(c, res.resp)
+	h.respondUploadResult(c, res.resp, tenantID, userID, sessionID)
 }
 
 // relayMultipart copies file parts from mr into mw, enforcing the hub-side
@@ -203,7 +204,10 @@ func relayMultipart(mr *multipart.Reader, mw *multipart.Writer) error {
 }
 
 // respondUploadResult maps the runtime upload response onto the hub envelope.
-func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Response) {
+// On 201 it also persists the descriptors as server-side upload records (the
+// authorization anchor — issue #94 review F1); tenant/user/session scope the
+// records and must come from the request context, never the runtime body.
+func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Response, tenantID, userID, sessionID string) {
 	switch {
 	case resp.StatusCode == http.StatusCreated:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -219,6 +223,12 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 				respondError(c, http.StatusBadGateway, "unexpected runtime upload response")
 				return
 			}
+		}
+		if err := h.svc.SaveUploadRecords(tenantID, userID, sessionID, parsed.Files); err != nil {
+			log.Printf("[chat] persist upload records failed: tenant=%s session=%s user=%s err=%v",
+				tenantID, sessionID, userID, err)
+			respondError(c, http.StatusBadGateway, "上传失败，请稍后重试")
+			return
 		}
 		respondCreated(c, gin.H{"files": parsed.Files})
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
@@ -250,8 +260,8 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 // GET /api/v1/agents/:name/chat/sessions/:id/attachments/content?path=...
 //
 // runtime /v1/files/content 本身能读整个工作区——本端点因此必须做双层
-// 收敛：path 语法限定 .zerone-uploads/ 扁平 + 交叉核验该 path 曾在本
-// session 的消息里持久化过。
+// 收敛：path 语法限定 .zerone-uploads/ 扁平 + 交叉核验该 path 存在本
+// session 的服务端上传记录（上传时落库，不可伪造；消息 file parts 仅展示）。
 func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
 	sessionID := c.Param("id")
