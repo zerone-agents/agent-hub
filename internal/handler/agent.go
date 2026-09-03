@@ -243,6 +243,11 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 // Non-HTTPError errors fall through to the legacy string matching, which
 // keeps mapping hub-side validation failures (e.g. "agent has no provider").
 func deployerErrorStatus(err error) int {
+	// Capability gate (issue #114): a pre-v3.1 deployer is an environment
+	// problem, not a bad request — 503 with the actionable sentinel message.
+	if errors.Is(err, services.ErrDeployerNoDeploymentKey) {
+		return http.StatusServiceUnavailable
+	}
 	var httpErr *deployer.HTTPError
 	if errors.As(err, &httpErr) {
 		switch {
@@ -259,6 +264,11 @@ func deployerErrorStatus(err error) int {
 		strings.Contains(msg, "agent has no model") ||
 		strings.Contains(msg, "agent not found") {
 		return http.StatusBadRequest
+	}
+	// Capability probe transport failures (issue #114): the deployer itself
+	// could not be reached — a gateway problem, not an internal one.
+	if strings.Contains(msg, "deployer capability check failed") {
+		return http.StatusBadGateway
 	}
 	return http.StatusInternalServerError
 }

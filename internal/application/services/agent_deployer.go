@@ -23,6 +23,13 @@ import (
 	repository "control-panel/internal/infrastructure/persistence"
 )
 
+// ErrDeployerNoDeploymentKey reports that the connected agent-deployer does
+// not implement the v3.1.0 deploymentKey contract (deployer#18): it would
+// silently key deployment resources by the bare rootAgentId and reintroduce
+// cross-tenant same-name collisions. Deployment stays blocked until the
+// deployer is upgraded (upgrade order in docs/configuration.md).
+var ErrDeployerNoDeploymentKey = errors.New("agent-deployer does not support the deploymentKey contract (requires >= v3.1.0); upgrade agent-deployer and retry")
+
 // DeploymentDTO represents the deployment status of an agent.
 type DeploymentDTO struct {
 	Status        string `json:"status"`
@@ -326,9 +333,23 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	// buildCreateRequest via loadAgentGraph; MCP servers load per-agent.
 	ctx := context.Background()
 
-	// All deployer calls address the container by the tenant-scoped deploy key
-	// (<org>-<name>); only DB lookups use the bare name.
+	// Lifecycle deployer calls (get/status/start/stop/delete, token
+	// provisioning) address the container by the tenant-scoped deploy key
+	// (<org>-<name>); only DB lookups and the runtime agent id use the bare
+	// name (issue #114).
 	key := DeployKey(tenantID, name)
+
+	// Capability gate (issue #114): the v3.1 deploymentKey split must be live
+	// before we send a bare rootAgentId — a v3.0.x deployer silently keys
+	// containers by rootAgentId, reintroducing cross-tenant collisions. Fail
+	// closed; the probe is a pre-docker 400 on both generations.
+	supported, err := s.client.SupportsDeploymentKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("deployer capability check failed: %w", err)
+	}
+	if !supported {
+		return nil, ErrDeployerNoDeploymentKey
+	}
 
 	// Decide the runtime token before building the request. control-panel is
 	// the sole generator and keeper of runtime tokens; the deployer only
@@ -755,14 +776,12 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 }
 
 // definitionOpts carries graph-position context into buildAgentDefinition.
-// The root node is named by its tenant-scoped deploy key (<org>-<name>) so
-// same-name agents across tenants never collide, and is the only node
-// allowed to carry the runtime-global fields (Model, MaxSessionQueries,
-// PermissionMode) — the deployer v3 rejects them on children. Child nodes
-// keep bare names (runtime-internal logic names).
+// The root node is the only node allowed to carry the runtime-global fields
+// (Model, MaxSessionQueries, PermissionMode) — the deployer v3 rejects them
+// on children. Root and child nodes all carry bare runtime names (issue
+// #114); the tenant-scoped identity lives in the dedicated deploymentKey.
 type definitionOpts struct {
-	isRoot    bool
-	deployKey string // root only: tenant-scoped deploy key
+	isRoot bool
 }
 
 // buildAgentDefinition assembles one agent's complete AgentDefinition: its
@@ -775,7 +794,11 @@ type definitionOpts struct {
 func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantID string, cfg *agent.AgentConfig, opts definitionOpts) (*deployer.AgentDefinition, []string, error) {
 	name := cfg.Name
 	if opts.isRoot {
-		name = opts.deployKey
+		// Root carries the bare runtime agent id (issue #114), normalized so
+		// it satisfies the deployer's sanitized-name contract and matches
+		// RootAgentID exactly. Children keep raw DB names — subagent id
+		// references and definitions both use cfg.Name.
+		name = NormalizeAgentName(cfg.Name)
 	}
 	def := &deployer.AgentDefinition{
 		Name:         name,
@@ -919,9 +942,12 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 // one delegation level by the runtime; any deeper relation, cycle, or
 // dangling reference fails explicitly instead of being silently skipped.
 func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID string, rootCfg *agent.AgentConfig) ([]deployer.AgentDefinition, error) {
-	deployKey := DeployKey(tenantID, rootCfg.Name)
+	// The root's deployer graph identity is its bare agent id (issue #114);
+	// a subagent with the same name would collide as a duplicate agents[]
+	// entry, so guard it hub-side with a clear message.
+	rootBareID := NormalizeAgentName(rootCfg.Name)
 
-	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true, deployKey: deployKey})
+	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true})
 	if err != nil {
 		return nil, fmt.Errorf("构造根 Agent 定义失败: %w", err)
 	}
@@ -931,8 +957,8 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 		if subName == rootCfg.Name {
 			return nil, fmt.Errorf("Agent %q 不能挂载自己作为子 Agent", rootCfg.Name)
 		}
-		if subName == deployKey {
-			return nil, fmt.Errorf("子 Agent %q 与根 Agent 的部署标识 %q 冲突，请重命名", subName, deployKey)
+		if subName == rootBareID {
+			return nil, fmt.Errorf("子 Agent %q 与根 Agent 的运行时标识 %q 冲突，请重命名", subName, rootBareID)
 		}
 		if !validAgentNamePattern.MatchString(subName) { // 存量非 canonical 防御
 			return nil, fmt.Errorf("子 Agent %q 标识不合法（仅小写字母、数字、连字符），无法部署", subName)
@@ -995,9 +1021,14 @@ func (s *AgentDeployerService) buildCreateRequest(
 	}
 
 	req := &deployer.CreateAgentRequest{
-		RootAgentID: DeployKey(tenantID, cfg.Name),
-		Agents:      agents,
-		Provider:    providerConfig,
+		// v3.1 split (issue #114): rootAgentId carries only the runtime agent
+		// graph identity (bare name); the tenant-scoped DeployKey moved to
+		// the dedicated deploymentKey field, which keys containers,
+		// directories and all lifecycle addressing on the deployer side.
+		RootAgentID:   NormalizeAgentName(cfg.Name),
+		DeploymentKey: DeployKey(tenantID, cfg.Name),
+		Agents:        agents,
+		Provider:      providerConfig,
 	}
 
 	if err := s.applyAigc(req, tenantID); err != nil {

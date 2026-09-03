@@ -190,7 +190,9 @@ type deployTokenFixture struct {
 
 // newDeployTokenServer builds a mock deployer. getFound controls the GET
 // /api/v1/agents/<name> probe response (container exists or not); POST
-// /api/v1/agents always succeeds and echoes a container payload.
+// /api/v1/agents always succeeds and echoes a container payload. POSTs
+// without a deploymentKey are capability probes (issue #114) — answered with
+// the v3.1.0 sentinel and kept out of the create capture.
 func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,8 +206,17 @@ func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *h
 			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
 			return
 		}
-		f.postCalled = true
 		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			DeploymentKey string `json:"deploymentKey"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		if probe.DeploymentKey == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+			return
+		}
+		f.postCalled = true
 		f.postBody = body
 		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
 	}))
@@ -574,8 +585,11 @@ func buildReqWithTools(t *testing.T, tools []*agent.Tool, cdnHost string) (*depl
 func TestBuildCreateRequest_CustomToolsSortedAndToolsFull(t *testing.T) {
 	req, err := buildReqWithTools(t, customToolRecordsFixture(), "https://cdn.example.com")
 	require.NoError(t, err)
-	// v3 graph shape: rootAgentId must match the (single) root definition.
-	require.Equal(t, "t-general", req.RootAgentID)
+	// v3.1 split (issue #114): rootAgentId is the bare runtime id and must
+	// match the (single) root definition; the scoped key moved to the
+	// dedicated deploymentKey field.
+	require.Equal(t, "general", req.RootAgentID)
+	require.Equal(t, "t-general", req.DeploymentKey)
 	require.Len(t, req.Agents, 1)
 	// Tools = 全量关联名（含 builtin），排序
 	require.Equal(t, []string{"Alpha", "Bash", "Zeta"}, req.Agents[0].Tools)
@@ -624,6 +638,19 @@ func newDeployFailureServer(t *testing.T, f *deployFailureFixture) *httptest.Ser
 		case http.MethodGet:
 			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
 		case http.MethodPost:
+			// Capability probes (no deploymentKey, issue #114) get the v3.1.0
+			// sentinel so the gate passes; only real creates are recorded and
+			// subjected to the fixture's failure behavior.
+			body, _ := io.ReadAll(r.Body)
+			var probe struct {
+				DeploymentKey string `json:"deploymentKey"`
+			}
+			_ = json.Unmarshal(body, &probe)
+			if probe.DeploymentKey == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+				return
+			}
 			f.postCalled = true
 			if f.hijackPost {
 				// Close the connection without a response: the client sees a

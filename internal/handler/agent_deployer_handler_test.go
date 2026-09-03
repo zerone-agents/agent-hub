@@ -158,6 +158,18 @@ func TestDeployAgent_DeployerHTTPErrorMapping(t *testing.T) {
 			wantBody:   "agent not found",
 		},
 		{
+			name:       "capability gate: legacy deployer sentinel maps to 503",
+			deployErr:  fmt.Errorf("deploy agent failed: %w", services.ErrDeployerNoDeploymentKey),
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   "deploymentKey",
+		},
+		{
+			name:       "capability gate: probe transport failure maps to 502",
+			deployErr:  fmt.Errorf("deployer capability check failed: dial tcp 127.0.0.1:8080: connection refused"),
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "deployer capability check failed",
+		},
+		{
 			name:       "legacy fallback: unknown error still 500",
 			deployErr:  errors.New("some unexpected failure"),
 			wantStatus: http.StatusInternalServerError,
