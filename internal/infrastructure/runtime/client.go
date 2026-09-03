@@ -167,10 +167,13 @@ func (c *Client) ProxyFiles(ctx context.Context, method, baseURL, apiKey, pathAn
 }
 
 // HealthInfo is the runtime GET /health response. The endpoint is
-// unauthenticated and reports the runtime version (from its package.json).
+// unauthenticated and reports the runtime version (from its package.json)
+// and the process uptime in seconds (used to derive the container boot
+// time — issue #94 review R2 F1 deployment-generation binding).
 type HealthInfo struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status  string  `json:"status"`
+	Version string  `json:"version"`
+	Uptime  float64 `json:"uptime"`
 }
 
 // Health calls GET {baseURL}/health. Capability probing only (issue #94):

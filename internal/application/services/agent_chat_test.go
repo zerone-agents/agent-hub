@@ -2,6 +2,7 @@ package services
 
 import (
 	"testing"
+	"time"
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/chat"
@@ -60,6 +61,18 @@ func (m *mockChatRepo) DeleteSession(tenantID, sessionID string) error {
 	if s, ok := m.sessions[sessionID]; ok && s.TenantID == tenantID {
 		delete(m.sessions, sessionID)
 	}
+	// Mirrors the repository transaction (issue #94 review R2 F3): messages
+	// and upload records die with the session.
+	for id, msg := range m.messages {
+		if msg.TenantID == tenantID && msg.SessionID == sessionID {
+			delete(m.messages, id)
+		}
+	}
+	for id, r := range m.uploads {
+		if r.TenantID == tenantID && r.SessionID == sessionID {
+			delete(m.uploads, id)
+		}
+	}
 	return nil
 }
 
@@ -89,9 +102,11 @@ func (m *mockChatRepo) UpdateSessionTitle(tenantID, sessionID, title string) err
 	return nil
 }
 
-func (m *mockChatRepo) CreateUploadRecord(tenantID string, r *chat.UploadRecord) error {
-	r.TenantID = tenantID
-	m.uploads[r.ID] = r
+func (m *mockChatRepo) CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error {
+	for _, r := range records {
+		r.TenantID = tenantID
+		m.uploads[r.ID] = r
+	}
 	return nil
 }
 
@@ -103,9 +118,9 @@ func (m *mockChatRepo) GetUploadRecord(tenantID, sessionID, id string) (*chat.Up
 	return r, nil
 }
 
-func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path string) (bool, error) {
+func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path string, validSince time.Time) (bool, error) {
 	for _, r := range m.uploads {
-		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path {
+		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path && !r.CreatedAt.Before(validSince) {
 			return true, nil
 		}
 	}
@@ -236,11 +251,18 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
 	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	repo.uploads["f-1"] = &chat.UploadRecord{
+		ID: "f-1", TenantID: "tenant-a", SessionID: sess.ID, Path: ".zerone-uploads/a.txt",
+	}
 	if err := svc.DeleteSession("tenant-a", "u1", sess.ID); err != nil {
 		t.Fatalf("DeleteSession failed: %v", err)
 	}
 	if _, ok := repo.sessions[sess.ID]; ok {
 		t.Errorf("session still present after delete")
+	}
+	// issue #94 review R2 F3：上传记录（授权锚点）随会话在删除事务内一并清除。
+	if len(repo.uploads) != 0 {
+		t.Errorf("upload records still present after delete: %d", len(repo.uploads))
 	}
 }
 

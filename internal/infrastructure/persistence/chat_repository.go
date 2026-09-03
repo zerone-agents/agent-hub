@@ -178,8 +178,16 @@ func (r *ChatRepository) ListMessages(tenantID, sessionID string, page, pageSize
 	return messages, total, err
 }
 
+// DeleteSession removes a session with its messages and upload records in a
+// single transaction (issue #94 review R2 F3): upload records are the
+// attachment authorization anchors — they must not outlive their session,
+// and a partial failure must never leave records behind for a deleted
+// session.
 func (r *ChatRepository) DeleteSession(tenantID, sessionID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := TenantOwned(tx, tenantID).Where("session_id = ?", sessionID).Delete(&chat.UploadRecord{}).Error; err != nil {
+			return err
+		}
 		if err := TenantOwned(tx, tenantID).Where("session_id = ?", sessionID).Delete(&chat.Message{}).Error; err != nil {
 			return err
 		}
@@ -255,12 +263,22 @@ func (r *ChatRepository) UpdateSessionTitle(tenantID, sessionID, title string) e
 		Update("title", title).Error
 }
 
-// CreateUploadRecord inserts a server-side upload record. The tenant is always
-// stamped from the tenantID argument — the caller-provided model value is not
-// trusted.
-func (r *ChatRepository) CreateUploadRecord(tenantID string, rec *chat.UploadRecord) error {
-	rec.TenantID = tenantID
-	return r.db.Create(rec).Error
+// CreateUploadRecords batch-inserts server-side upload records in a single
+// transaction (issue #94 review R2 F4): an upload response persists all of
+// its descriptors or none — the runtime has already issued the ids/files, so
+// a partial batch would leave files no record authorizes. The tenant is
+// always stamped from the tenantID argument — the caller-provided model
+// values are not trusted.
+func (r *ChatRepository) CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, rec := range records {
+			rec.TenantID = tenantID
+		}
+		return tx.Create(&records).Error
+	})
 }
 
 // GetUploadRecord returns the upload record for (session, id), tenant-scoped.
@@ -276,11 +294,13 @@ func (r *ChatRepository) GetUploadRecord(tenantID, sessionID, id string) (*chat.
 }
 
 // HasUploadRecordPath reports whether path was registered by a server-side
-// upload record of the session.
-func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path string) (bool, error) {
+// upload record of the session created at or after validSince (the runtime
+// container boot time minus clock-skew tolerance — records from previous
+// container generations no longer authorize; issue #94 review R2 F1).
+func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path string, validSince time.Time) (bool, error) {
 	var count int64
 	err := TenantOwned(r.db.Model(&chat.UploadRecord{}), tenantID).
-		Where("session_id = ? AND path = ?", sessionID, path).Count(&count).Error
+		Where("session_id = ? AND path = ? AND created_at >= ?", sessionID, path, validSince).Count(&count).Error
 	return count > 0, err
 }
 

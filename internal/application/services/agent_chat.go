@@ -26,9 +26,9 @@ type chatRepositoryForAgent interface {
 	ListMessages(tenantID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error)
 	UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error
 	UpdateSessionTitle(tenantID, sessionID, title string) error
-	CreateUploadRecord(tenantID string, r *chat.UploadRecord) error
+	CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error
 	GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error)
-	HasUploadRecordPath(tenantID, sessionID, path string) (bool, error)
+	HasUploadRecordPath(tenantID, sessionID, path string, validSince time.Time) (bool, error)
 	DeleteUploadRecordsBySession(tenantID, sessionID string) error
 	DeleteMessageByID(tenantID, sessionID, messageID string) error
 }
@@ -95,6 +95,11 @@ const attachmentRuntimeMinVersion = "2.5.0"
 
 // attachmentProbeTTL bounds capability probe caching.
 const attachmentProbeTTL = 15 * time.Second
+
+// runtimeGenerationTolerance absorbs hub/runtime clock skew and uptime
+// precision when comparing upload-record creation times against the runtime
+// container boot time (issue #94 review R2 F1).
+const runtimeGenerationTolerance = time.Minute
 
 // ListSessions returns sessions for the given (agent, user) pair.
 // source filters the session origin (e.g. "agent_chat_page"); pass empty to list all.
@@ -173,13 +178,12 @@ func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page,
 
 // DeleteSession deletes a session owned by userID, including its upload
 // records (attachment descriptors are session-scoped authorization anchors —
-// they must not outlive the session).
+// they must not outlive the session). The records are removed inside the
+// repository's DeleteSession transaction (issue #94 review R2 F3), so a
+// partial failure can never leave records behind for a deleted session.
 func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) error {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return fmt.Errorf("session not found: %w", err)
-	}
-	if err := s.chatRepo.DeleteUploadRecordsBySession(tenantID, sessionID); err != nil {
-		return fmt.Errorf("delete upload records: %w", err)
 	}
 	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }
@@ -344,15 +348,38 @@ type attachmentProbe struct {
 	at time.Time
 }
 
-// AttachmentsSupportedAt probes the runtime /health endpoint (no auth) on an
-// already-resolved base URL and reports whether the version supports chat
-// attachments (>= 2.5.0, the release that shipped runtime PR #48).
-func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL string) bool {
+// ProbeAttachmentSupport probes the runtime /health endpoint (no auth) on an
+// already-resolved base URL. It returns whether the version supports chat
+// attachments (>= 2.5.0, the release that shipped runtime PR #48) together
+// with the runtime container boot time: now - uptime. Uploads can only
+// happen after container start, so any upload record with CreatedAt < bootAt
+// belongs to a previous container generation (files gone, or the same path
+// re-issued to another user's upload after a redeploy) and must not
+// authorize (issue #94 review R2 F1).
+func (s *AgentChatService) ProbeAttachmentSupport(ctx context.Context, baseURL string) (bool, time.Time, error) {
 	info, err := s.runtimeClient.Health(ctx, baseURL)
 	if err != nil {
-		return false
+		return false, time.Time{}, err
 	}
-	return compareSemver(info.Version, attachmentRuntimeMinVersion) >= 0
+	bootAt := time.Now().Add(-time.Duration(info.Uptime * float64(time.Second)))
+	return compareSemver(info.Version, attachmentRuntimeMinVersion) >= 0, bootAt, nil
+}
+
+// AttachmentsSupportedAt is a thin wrapper over ProbeAttachmentSupport for
+// callers that only need the version verdict.
+func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL string) bool {
+	supported, _, err := s.ProbeAttachmentSupport(ctx, baseURL)
+	return err == nil && supported
+}
+
+// StaleAttachmentRecord reports whether rec predates the current runtime
+// container generation (bootAt from ProbeAttachmentSupport, minus
+// runtimeGenerationTolerance for clock skew). Stale records must not
+// authorize sends or content proxying: their files died with the old
+// container, and the same path may have been re-issued to another user's
+// same-name upload on the new one.
+func StaleAttachmentRecord(rec *chat.UploadRecord, bootAt time.Time) bool {
+	return rec.CreatedAt.Before(bootAt.Add(-runtimeGenerationTolerance))
 }
 
 // AttachmentsAvailable reports (15s TTL cache) whether the agent's runtime
@@ -381,28 +408,39 @@ func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, a
 }
 
 // SessionHasAttachment reports whether path belongs to a server-side upload
-// record of the session (issue #94 review F1: records are written only by the
-// hub at upload time — the unforgeable authorization anchor for the
-// user-facing content proxy; message file parts are display-only). Runtime
-// /v1/files/content can read the whole cwd, so this cross-check must only
-// ever admit paths the runtime handed out to THIS session.
-func (s *AgentChatService) SessionHasAttachment(tenantID, userID, sessionID, path string) (bool, error) {
+// record of the session created in the CURRENT runtime container generation
+// (bootAt from ProbeAttachmentSupport — issue #94 review F1/R2: records are
+// written only by the hub at upload time — the unforgeable authorization
+// anchor for the user-facing content proxy; message file parts are
+// display-only). Runtime /v1/files/content can read the whole cwd, so this
+// cross-check must only ever admit paths the runtime handed out to THIS
+// session in THIS container generation.
+func (s *AgentChatService) SessionHasAttachment(tenantID, userID, sessionID, path string, bootAt time.Time) (bool, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return false, fmt.Errorf("session not found: %w", err)
 	}
-	return s.chatRepo.HasUploadRecordPath(tenantID, sessionID, path)
+	if bootAt.IsZero() {
+		// Authorization path: fail closed when the generation is unknown
+		// rather than treating every record as current.
+		return false, nil
+	}
+	return s.chatRepo.HasUploadRecordPath(tenantID, sessionID, path, bootAt.Add(-runtimeGenerationTolerance))
 }
 
 // SaveUploadRecords persists the runtime-issued attachment descriptors after
 // a successful upload, binding them to (tenant, session, user). These records
 // — not the client-supplied message descriptors — later authorize both the
-// content proxy and SendMessage attachment acceptance.
+// content proxy and SendMessage attachment acceptance. All descriptors of one
+// upload persist atomically (issue #94 review R2 F4): the runtime has already
+// issued the ids/files, so a partial persist would leave files no record
+// authorizes.
 func (s *AgentChatService) SaveUploadRecords(tenantID, userID, sessionID string, files []AttachmentDesc) error {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
+	records := make([]*chat.UploadRecord, 0, len(files))
 	for _, f := range files {
-		rec := &chat.UploadRecord{
+		records = append(records, &chat.UploadRecord{
 			ID:        f.ID,
 			SessionID: sessionID,
 			UserID:    userID,
@@ -411,10 +449,10 @@ func (s *AgentChatService) SaveUploadRecords(tenantID, userID, sessionID string,
 			Size:      f.Size,
 			Path:      f.Path,
 			CreatedAt: time.Now().UTC(),
-		}
-		if err := s.chatRepo.CreateUploadRecord(tenantID, rec); err != nil {
-			return fmt.Errorf("create upload record: %w", err)
-		}
+		})
+	}
+	if err := s.chatRepo.CreateUploadRecords(tenantID, records); err != nil {
+		return fmt.Errorf("create upload records: %w", err)
 	}
 	return nil
 }

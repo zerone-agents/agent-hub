@@ -33,6 +33,11 @@ type attachmentFakeOpts struct {
 	// runtimeVersion is what GET /health reports. Empty → 无 /health 路由
 	// （探测失败 → 附件不可用）。
 	runtimeVersion string
+	// uptime (seconds) is what GET /health reports alongside the version
+	// (issue #94 review R2 F1：容器启动时刻 = now - uptime)。nil → 86400
+	//（容器一天前启动——now 落库的记录都属于当前代）。可变指针：测试中途
+	// 改值即模拟重部署换容器代次。
+	uptime *float64
 	// uploadHandler serves POST /v1/files/uploads. nil → 404（旧 runtime）。
 	uploadHandler http.HandlerFunc
 	// runsHandler serves POST /v1/agents/{key}/runs. nil → 最小成功 SSE 流。
@@ -55,9 +60,14 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 
 	mux := http.NewServeMux()
 	if opts.runtimeVersion != "" {
+		uptimePtr := opts.uptime
+		if uptimePtr == nil {
+			def := 86400.0
+			uptimePtr = &def
+		}
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q}`, opts.runtimeVersion)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":%q,"uptime":%v}`, opts.runtimeVersion, *uptimePtr)))
 		})
 	}
 	if opts.uploadHandler != nil {
@@ -287,6 +297,15 @@ func TestSendMessage_RejectsUnknownFields(t *testing.T) {
 	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
 	body := `{"content":"x","attachments":[{"id":"f","name":"n","mime":"text/plain","size":1,"path":".zerone-uploads/n.txt","base64":"..."}]}`
 	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+}
+
+// R2 F2：首个 JSON 值之后的尾随对象（拼接 body）必须 400——严格解码不能
+// 静默取首个值放过剩余字节。
+func TestSendMessage_RejectsTrailingJsonValue(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{runtimeVersion: "2.5.0"})
+	w := sendMessageForAttachments(t, env, `{"content":"hi"}{"base64":"x"}`, "min", "s-att", "u1")
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
 }
@@ -729,4 +748,52 @@ func TestAttachmentContent_RuntimeFileGone404(t *testing.T) {
 	seedAttachmentMessage(t, "s-att", ".zerone-uploads/a.png")
 	w := doGetAttachmentContent(t, env, ".zerone-uploads/a.png", "s-att", "u1")
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// R2 F1（部署代次绑定）：上传记录只授权创建它的容器代次。重部署清空
+// .zerone-uploads 后，新容器里同名文件属于新的上传者——旧代记录必须整体
+// 失效：①当前代真实上传 → 内容代理 200；②换代（uptime 变小）+ 手插旧代
+// 记录 → 404 且不拨号 runtime；③ SendMessage 对旧代记录 → 400（落库前拒绝）。
+func TestAttachmentContent_StaleRecordAfterRuntimeRecreate404(t *testing.T) {
+	uptime := 86400.0 // 第一代容器：一天前启动
+	runtimeHit := false
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uptime:         &uptime,
+		uploadHandler:  fakeUploadOK,
+		contentHandler: func(w http.ResponseWriter, r *http.Request) {
+			runtimeHit = true
+			_, _ = w.Write([]byte("bytes"))
+		},
+	})
+
+	// ① 真实上传落记录（CreatedAt=now ≥ bootAt=now-1d）→ 内容代理 200。
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusCreated, w.Code)
+	w = doGetAttachmentContent(t, env, ".zerone-uploads/a.txt", "s-att", "u1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, runtimeHit, "current-generation record must reach the runtime")
+
+	// ② 模拟重部署：新容器 5 秒前启动（bootAt≈now）。旧容器一小时前落库的
+	// 记录（文件已随容器销毁，路径可能已被他人同名上传复用）必须失败关闭，
+	// 且不得拨号 runtime。
+	uptime = 5
+	runtimeHit = false
+	require.NoError(t, database.DB.Create(&chat.UploadRecord{
+		ID: "f-old", TenantID: chatTestTenant, SessionID: "s-att", UserID: "u1",
+		Name: "old.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/old.txt",
+		CreatedAt: time.Now().Add(-time.Hour),
+	}).Error)
+	w = doGetAttachmentContent(t, env, ".zerone-uploads/old.txt", "s-att", "u1")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.False(t, runtimeHit, "stale-generation record must fail closed before dialing the runtime")
+
+	// ③ SendMessage 同款：描述符与旧代记录全等也 → 400 invalid_attachment。
+	body := `{"content":"","attachments":[{"id":"f-old","name":"old.txt","mime":"text/plain","size":3,"path":".zerone-uploads/old.txt"}]}`
+	w = sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), `"code":"invalid_attachment"`)
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Zero(t, userCount, "stale descriptors must not persist a user message")
 }

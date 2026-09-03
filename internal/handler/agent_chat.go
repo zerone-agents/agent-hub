@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -136,6 +137,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求包含无法识别的字段")
 		return
 	}
+	// 尾随值（issue #94 review R2 F2）：首个 JSON 值之后必须直接 EOF——
+	// `{"content":"hi"}{"base64":...}` 这类拼接 body 一律 400，不静默取首值。
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
+		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求格式错误")
+		return
+	}
 	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
 		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请输入文本或添加附件")
 		return
@@ -160,13 +168,45 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
-	// Upload-record binding (issue #94 review F1)：每个描述符必须与服务端在
-	// 上传时落库的记录全等。`.zerone-uploads` 是同 Agent runtime 容器内所有
-	// 用户共享的目录——仅做语法校验就落库的话，伪造描述符即可把他人 path 写
-	// 进自己会话再经内容代理下载。
+	// 2. Resolve runtime URL and API key BEFORE anything is persisted: the
+	// attachment probe below needs the base URL, and a resolve failure must
+	// not leave a persisted user turn (or an orphan system error message)
+	// behind — the client keeps its input and can simply retry.
+	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	if err != nil {
+		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
+		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
+			tenantID, agentName, sessionID, err)
+		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
+		return
+	}
+
+	// 3. 附件能力门控 + 部署代次绑定（issue #94 review F3 + R2 F1）：一次
+	// /health 探测同时拿版本与容器启动时刻（bootAt）。旧 runtime（< 2.5.0）
+	// 对 run 请求的 attachments 字段静默忽略——宁可拒绝也不静默丢附件。
+	// 探测先于持久化：拒绝时还没有任何已落库内容需要回滚。纯文本消息跳过
+	// 探测，bootAt 保持零值（下方循环不执行，不受影响）。
+	var bootAt time.Time
+	if len(req.Attachments) > 0 {
+		supported, boot, probeErr := h.svc.ProbeAttachmentSupport(c.Request.Context(), baseURL)
+		if probeErr != nil || !supported {
+			respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
+				"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
+			return
+		}
+		bootAt = boot
+	}
+
+	// 4. Upload-record binding (issue #94 review F1 + R2 F1)：每个描述符必须
+	// 与服务端在上传时落库的记录全等，且记录必须属于当前容器代次——重部署
+	// 清空 `.zerone-uploads` 后，同名文件的新上传会拿到与旧容器完全相同的
+	// 路径，旧代记录不能再授权（否则读到的是新上传者的字节）。`.zerone-uploads`
+	// 是同 Agent runtime 容器内所有用户共享的目录——仅做语法校验就落库的
+	// 话，伪造描述符即可把他人 path 写进自己会话再经内容代理下载。
 	for _, a := range req.Attachments {
 		rec, err := h.svc.GetUploadRecord(tenantID, userID, sessionID, a.ID)
-		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path {
+		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path ||
+			services.StaleAttachmentRecord(rec, bootAt) {
 			respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
 				"附件信息无效或已失效，请重新上传")
 			return
@@ -186,35 +226,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	_ = h.svc.AutoTitleSession(tenantID, sessionID, titleSeed)
 
-	// 2. Resolve runtime URL and API key
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
-	if err != nil {
-		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）；
-		// 会话历史里的系统错误消息沿用既有模式保留原因。
-		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
-			tenantID, agentName, sessionID, err)
-		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 暂不可用："+err.Error())
-		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
-		return
-	}
-
-	// 附件能力门控（issue #94 review F3）：旧 runtime（< 2.5.0）对 run 请求的
-	// attachments 字段静默忽略——宁可拒绝也不静默丢附件。与 UploadAttachments
-	// 同款无缓存探测。
-	if len(req.Attachments) > 0 && !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
-		// Run 前拒绝与 attachment_missing 同类（Wave A F2 同款回滚）：删除已
-		// 落库的 user message，避免留下无 assistant 回复的孤儿 user turn。
-		// 删除失败仅日志——不该阻塞错误上报。
-		if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
-			log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
-				tenantID, sessionID, msg.ID, delErr)
-		}
-		respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
-			"当前 Runtime 版本不支持附件（需 ≥ 2.5.0），请升级 Runtime 并重新部署 Agent")
-		return
-	}
-
-	// 3. Build runtime request body. Re-use the runtime SDK session id if this
+	// 5. Build runtime request body. Re-use the runtime SDK session id if this
 	// control-panel session has already been bound to one.
 	body := runRequestBody{Message: req.Content}
 	if sess.RuntimeSessionID != "" {
@@ -225,7 +237,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	bodyBytes, _ := json.Marshal(body)
 
-	// 4. Open runtime stream
+	// 6. Open runtime stream
 	ctx := c.Request.Context()
 	// runtime 注册名为部署键（DeployKey(tenantID, name)），需用限定名寻址，裸名会 404。
 	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.DeployKey(tenantID, agentName), apiKey, bodyBytes)
@@ -256,7 +268,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	defer rc.Close()
 
-	// 5. SSE headers + flusher
+	// 7. SSE headers + flusher
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		respondError(c, http.StatusInternalServerError, "streaming unsupported")
@@ -270,7 +282,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	c.Writer.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// 6. Pipe byte-for-byte, buffer for aggregation. A heartbeat goroutine
+	// 8. Pipe byte-for-byte, buffer for aggregation. A heartbeat goroutine
 	// emits SSE comments (": ping\n\n") every 15s to keep intermediate proxies
 	// (nginx/Kong/Cloudflare) from killing the connection during long tool
 	// executions, where the runtime stream is otherwise silent for minutes.

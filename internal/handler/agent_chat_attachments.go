@@ -295,18 +295,27 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
-	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam)
+	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
+	if err != nil {
+		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
+		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
+		return
+	}
+	// 部署代次绑定（issue #94 review R2 F1）：内容代理前探测容器启动时刻，
+	// 只有当前代次的上传记录才可授权（旧代文件已随容器销毁，路径可能已被
+	// 他人同名上传复用）。探测失败同样失败关闭——代次未知时宁可 404 不放行。
+	_, bootAt, probeErr := h.svc.ProbeAttachmentSupport(c.Request.Context(), baseURL)
+	if probeErr != nil {
+		log.Printf("[chat] attachment content probe failed: session=%s path=%q err=%v", sessionID, pathParam, probeErr)
+		respondError(c, http.StatusNotFound, "临时文件已不可用")
+		return
+	}
+	known, err := h.svc.SessionHasAttachment(tenantID, userID, sessionID, pathParam, bootAt)
 	if err != nil {
 		log.Printf("[chat] attachment record lookup failed: session=%s path=%q err=%v", sessionID, pathParam, err)
 	}
 	if err != nil || !known {
 		respondError(c, http.StatusNotFound, "附件不存在")
-		return
-	}
-	baseURL, apiKey, err := h.svc.ResolveRuntime(tenantID, agentName)
-	if err != nil {
-		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
-		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
 		return
 	}
 
