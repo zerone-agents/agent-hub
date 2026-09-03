@@ -47,7 +47,8 @@ func TestCreateAgent(t *testing.T) {
 	client := NewClient(server.URL, "test-key")
 
 	req := &CreateAgentRequest{
-		RootAgentID: "coder",
+		RootAgentID:   "coder",
+		DeploymentKey: "acme-coder",
 		Agents: []AgentDefinition{
 			{
 				Name:           "coder",
@@ -108,6 +109,12 @@ func TestCreateAgent(t *testing.T) {
 	}
 	if _, ok := gotBody["rotate_key"]; ok {
 		t.Errorf("rotate_key should not be present in request body, got %v", gotBody["rotate_key"])
+	}
+
+	// deploymentKey is serialized as its own top-level field (deployer v3.1,
+	// issue #114): tenant-scoped resource key, independent of rootAgentId.
+	if dk, ok := gotBody["deploymentKey"].(string); !ok || dk != "acme-coder" {
+		t.Errorf("deploymentKey = %v, want %q", gotBody["deploymentKey"], "acme-coder")
 	}
 }
 
@@ -463,5 +470,60 @@ func TestCreateAgent_HTTPErrorCarriesStatusAndMessage(t *testing.T) {
 	}
 	if httpErr.Message != "rootAgentId not found in agents" {
 		t.Errorf("Message = %q", httpErr.Message)
+	}
+}
+
+func TestSupportsDeploymentKey_V31Sentinel(t *testing.T) {
+	// v3.1.0+ validation order: rootAgentID ok → deploymentKey missing →
+	// 400 "deploymentKey is required" (before agents/provider checks).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "deploymentKey is required"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_LegacyV30(t *testing.T) {
+	// v3.0.x has no deploymentKey concept: the same probe trips the
+	// empty-agents guard instead → reported as unsupported, not an error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "agents must contain at least the root agent definition"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err != nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_TransportError(t *testing.T) {
+	client := NewClient("http://127.0.0.1:1", "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err == nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, error)", ok, err)
+	}
+}
+
+func TestSupportsDeploymentKey_UnexpectedSuccess(t *testing.T) {
+	// No known deployer generation accepts this invalid probe. Fail closed
+	// with an error rather than guessing support.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	ok, err := client.SupportsDeploymentKey(context.Background())
+	if err == nil || ok {
+		t.Fatalf("SupportsDeploymentKey() = (%v, %v), want (false, error)", ok, err)
 	}
 }
