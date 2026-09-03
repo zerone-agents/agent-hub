@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,16 +58,16 @@ func (m *graphKnowledgeSvc) GetDataset(ctx context.Context, id string) (*knowled
 }
 
 // graphKnowledgeMcp mimics the built-in knowledge MCP as GetClientMcpsByAgent
-// serves it per-agent (headers already decrypted). The stale X-Agent-Id decoy
-// mimics a same-named key configured on the MCP server — the deployment owns
-// that key exclusively and must override it with the node's own identity
-// (issue #111 review F1).
+// serves it per-agent (headers already decrypted). The stale X-Agent-Capability
+// decoy mimics a same-named key configured on the MCP server — the deployment
+// owns that key exclusively and must override it with the node's own signed
+// capability (issue #111 reopened: server-verifiable per-agent capability).
 func graphKnowledgeMcp() *McpClientDTO {
 	return &McpClientDTO{
 		Name: "knowledge", Type: "http", URL: "https://hub.example.com/api/v1/knowledge/mcp",
 		Headers: map[string]string{
-			"Authorization": BuiltinKnowledgeAuthHeader,
-			"X-Agent-Id":    "stale-configured-identity",
+			"Authorization":           BuiltinKnowledgeAuthHeader,
+			knowledgeCapabilityHeader: "stale-configured-capability",
 		},
 		Tools: builtinKnowledgeTools,
 	}
@@ -140,6 +141,9 @@ func (w *graphWorld) service(t *testing.T, deployerURL string) *AgentDeployerSer
 	s.mcpSvc = &graphMcpSvc{byAgent: w.mcps}
 	s.knowledgeSvc = &graphKnowledgeSvc{byID: w.datasetMeta}
 	s.cdnHost = "https://cdn.example.com"
+	// The knowledge capability issuer needs a server-held secret (the graph
+	// mounts the built-in knowledge MCP); production never runs without one.
+	s.encryptionKey = testKnowledgeEncKey
 	return s
 }
 
@@ -398,7 +402,7 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		require.Equal(t, float64(42), root["maxSessionQueries"])
 	})
 
-	t.Run("10: knowledge MCP headers carry each node's deployment identity", func(t *testing.T) {
+	t.Run("10: knowledge MCP headers carry per-node signed capabilities", func(t *testing.T) {
 		body, f := deployGraphParent(t, buildGraphFixture(t))
 		nodes := graphAgents(t, body)
 		require.Len(t, nodes, 3)
@@ -414,17 +418,37 @@ func TestDeploy_AgentGraph(t *testing.T) {
 			return headers
 		}
 
-		// Root carries its DB bare name — NOT the tenant-scoped deploy key
-		// "tenant-a-parent": the hub authorizer resolves X-Agent-Id with a
-		// tenant-scoped GetByName, and the deploy key is not a DB name.
-		// Equality against "parent" also proves the stale same-named key
-		// configured on the MCP server (fixture decoy) was overridden.
-		require.Equal(t, "parent", knowledgeHeaders(t, nodes[0])["X-Agent-Id"])
-		// Child carries its own bare name, never the root's.
-		require.Equal(t, "child-a", knowledgeHeaders(t, nodes[1])["X-Agent-Id"])
-		// resolveMcpHeaders must preserve the injected identity key while
+		rootCap := fmt.Sprintf("%v", knowledgeHeaders(t, nodes[0])[knowledgeCapabilityHeader])
+		childCap := fmt.Sprintf("%v", knowledgeHeaders(t, nodes[1])[knowledgeCapabilityHeader])
+
+		// Signed per-node capabilities replace the spoofable bare identity
+		// header: v1.-prefixed, stale same-named decoy overridden, and
+		// X-Agent-Id is gone entirely (not injected, not passed through).
+		require.True(t, strings.HasPrefix(rootCap, "v1."), "root capability must be v1.-prefixed, got %q", rootCap)
+		require.True(t, strings.HasPrefix(childCap, "v1."), "child capability must be v1.-prefixed, got %q", childCap)
+		require.NotEqual(t, "stale-configured-capability", rootCap, "stale same-named key configured on the MCP server must be overridden")
+		require.NotEqual(t, rootCap, childCap, "root and child capabilities must differ (same token, different agent binding)")
+		// Only nodes 0/1 mount the knowledge MCP; child-b mounts nothing.
+		for _, i := range []int{0, 1} {
+			_, hasLegacy := knowledgeHeaders(t, nodes[i])["X-Agent-Id"]
+			require.False(t, hasLegacy, "X-Agent-Id must never be injected on knowledge MCP headers")
+		}
+
+		// The issued capabilities verify against the deployment's binding
+		// triple: tenant-a, deploy key tenant-a-parent, and the fingerprint
+		// of the token actually sent in the same request.
+		token := f.sentToken(t)
+		allowed := map[string]struct{}{"parent": {}, "child-a": {}, "child-b": {}}
+		name, err := verifyKnowledgeCapability([]byte(testKnowledgeEncKey), rootCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		require.NoError(t, err)
+		require.Equal(t, "parent", name)
+		name, err = verifyKnowledgeCapability([]byte(testKnowledgeEncKey), childCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		require.NoError(t, err)
+		require.Equal(t, "child-a", name)
+
+		// resolveMcpHeaders must preserve the injected capability key while
 		// substituting the Authorization placeholder with the real token.
-		require.Equal(t, "Bearer "+f.sentToken(t), knowledgeHeaders(t, nodes[0])["Authorization"])
+		require.Equal(t, "Bearer "+token, knowledgeHeaders(t, nodes[0])["Authorization"])
 	})
 
 	t.Run("11: disallowedTools is agent-local; empty stays absent; never cross-copied", func(t *testing.T) {

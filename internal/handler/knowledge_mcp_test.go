@@ -61,8 +61,8 @@ type fakeAgentMcpService struct {
 	err      error
 }
 
-func (f *fakeAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
-	return f.datasets, f.err
+func (f *fakeAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+	return f.datasets, tokenAgentName, f.err
 }
 
 func testAgentAuthMiddlewareFor(agentName, validToken string) gin.HandlerFunc {
@@ -103,12 +103,13 @@ func setupKnowledgeMcpRouterAsAgent(agentName string, knowledgeSvc KnowledgeMcpS
 }
 
 func postJSONRPC(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token string) *httptest.ResponseRecorder {
-	return postJSONRPCAsAgent(t, router, method, params, token, "")
+	return postJSONRPCWithHeaders(t, router, method, params, token, nil)
 }
 
-// postJSONRPCAsAgent 在 postJSONRPC 基础上附带 X-Agent-Id 请求头（部署时
-// hub 注入 MCP 连接头的请求身份），用于按身份授权矩阵。
-func postJSONRPCAsAgent(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token, agentID string) *httptest.ResponseRecorder {
+// postJSONRPCWithHeaders 在 postJSONRPC 基础上附加任意请求头。key 经
+// net/http 的 MIME 规范化存储（Add 语义：同名 key 多值累加），用于
+// capability 攻击矩阵（重复头、大小写变体、裸 X-Agent-Id 等）。
+func postJSONRPCWithHeaders(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token string, headers map[string][]string) *httptest.ResponseRecorder {
 	body := jsonRPCRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: params}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -119,12 +120,24 @@ func postJSONRPCAsAgent(t *testing.T, router *gin.Engine, method string, params 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if agentID != "" {
-		req.Header.Set("X-Agent-Id", agentID)
+	for k, vs := range headers {
+		for _, v := range vs {
+			// Add 规范化 key：模拟真实链路里 net/http 对 header 名的
+			// 大小写归一（x-agent-capability 与 X-Agent-Capability 同桶）。
+			req.Header.Add(k, v)
+		}
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
+}
+
+// postJSONRPCWithCapability 附带一个或多个 X-Agent-Capability 请求头
+// （部署时 hub 签发并注入 MCP 连接头），用于按身份授权攻击矩阵。
+func postJSONRPCWithCapability(t *testing.T, router *gin.Engine, method string, params json.RawMessage, token string, capabilities ...string) *httptest.ResponseRecorder {
+	return postJSONRPCWithHeaders(t, router, method, params, token, map[string][]string{
+		"X-Agent-Capability": capabilities,
+	})
 }
 
 func TestKnowledgeMcpHandler_Initialize(t *testing.T) {
@@ -305,31 +318,46 @@ func TestKnowledgeMcpHandler_ToolsCall_UnauthorizedDataset(t *testing.T) {
 	}
 }
 
-// issue #111 review P1-1：Knowledge MCP 授权按「部署时受信的请求身份」逐
-// agent 隔离。请求身份来自 X-Agent-Id 连接头（hub 构造 MCP headers 时注入
-// agents.yaml，模型只能选 dataset_ids 参数、无法伪造连接头）；child 不得
-// 访问 parent/sibling 的 dataset，root 也不得访问 child 的。token agent
-// 固定为 root（fixture：root 绑 ds-root，child-a 绑 ds-child，child-b 无
-// 绑定——service 层行为由单测锁定，此处的 keyed fake 模拟其返回）。
-func TestKnowledgeMcpHandler_ToolsCall_PerAgentIdentityAuthorization(t *testing.T) {
-	identityBindings := func(requestingID string) ([]string, error) {
-		switch requestingID {
-		case "root":
-			return []string{"ds-root"}, nil
-		case "child-a":
-			return []string{"ds-child"}, nil
+// issue #111（重开）：Knowledge MCP 授权按「服务端可验证的 per-Agent
+// capability」逐节点隔离。capability 由 hub 部署时用仅服务端持有的密钥
+// 签发（HMAC），绑定 tenant/部署 key/请求身份/token 指纹；裸 X-Agent-Id
+// 不再参与授权。child 不得访问 parent/sibling 的 dataset，root 也不得
+// 访问 child 的。token agent 固定为 root（fixture：root 绑 ds-root，
+// child-a 绑 ds-child——verify 逻辑由 services 包单测锁定，此处的 keyed
+// fake 按真实语义模拟其返回）。
+func TestKnowledgeMcpHandler_ToolsCall_PerAgentCapabilityAuthorization(t *testing.T) {
+	const (
+		capRoot   = "v1.cap-root-opaque"
+		capChildA = "v1.cap-child-a-opaque"
+	)
+	// capability 值是敏感凭据：矩阵第 7 组断言其绝不出现在响应文本里。
+	allCaps := []string{capRoot, capChildA, "v1.cap-tampered-opaque"}
+
+	resolve := func(capabilityHeader, bearerToken string) ([]string, string, error) {
+		// 模拟真实 service 语义：token 指纹不匹配（轮换）→ sentinel deny。
+		if bearerToken != testValidToken {
+			return nil, "", fmt.Errorf("%w: token fingerprint mismatch", services.ErrKnowledgeCapabilityDenied)
+		}
+		switch capabilityHeader {
+		case "":
+			// 缺失 capability → 存量回退：token agent 自身绑定。
+			return []string{"ds-root"}, "root", nil
+		case capRoot:
+			return []string{"ds-root"}, "root", nil
+		case capChildA:
+			return []string{"ds-child"}, "child-a", nil
 		default:
-			return nil, fmt.Errorf("请求身份 %q 不属于 Agent %q 的部署图", requestingID, "root")
+			return nil, "", fmt.Errorf("%w: capability rejected", services.ErrKnowledgeCapabilityDenied)
 		}
 	}
-	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
-		return identityBindings(requestingID)
-	}}
-	newRouter := func(knowledgeSvc KnowledgeMcpService) *gin.Engine {
-		return setupKnowledgeMcpRouterAsAgent("root", knowledgeSvc, agentSvc)
+	newRouter := func(knowledgeSvc KnowledgeMcpService, fn func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error)) *gin.Engine {
+		return setupKnowledgeMcpRouterAsAgent("root", knowledgeSvc, &tenantAwareAgentMcpService{fn: fn})
+	}
+	bindings := func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+		return resolve(capabilityHeader, bearerToken)
 	}
 
-	t.Run("child-a 身份请求自己的 dataset → 放行", func(t *testing.T) {
+	t.Run("root capability → 只授权 root datasets", func(t *testing.T) {
 		var gotDatasetIDs []string
 		knowledgeSvc := &fakeKnowledgeMcpService{
 			retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
@@ -337,105 +365,183 @@ func TestKnowledgeMcpHandler_ToolsCall_PerAgentIdentityAuthorization(t *testing.
 				return &knowledge.RetrievalResult{}, nil
 			},
 		}
-		rec := postJSONRPCAsAgent(t, newRouter(knowledgeSvc), "tools/call",
-			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
-			testValidToken, "child-a")
+		rec := postJSONRPCWithCapability(t, newRouter(knowledgeSvc, bindings), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, capRoot)
 
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
 		}
 		if isErrorResult(resp.Result) {
-			t.Fatalf("child-a requesting its own dataset must pass, got %v", resp.Result)
+			t.Fatalf("root capability requesting its own dataset must pass, got %v", resp.Result)
+		}
+		if len(gotDatasetIDs) != 1 || gotDatasetIDs[0] != "ds-root" {
+			t.Fatalf("retrieval dataset_ids = %v, want [ds-root]", gotDatasetIDs)
+		}
+	})
+
+	t.Run("child-a capability → 真实检索放行自己的 dataset", func(t *testing.T) {
+		var gotDatasetIDs []string
+		knowledgeSvc := &fakeKnowledgeMcpService{
+			retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+				gotDatasetIDs, _ = req["dataset_ids"].([]string)
+				return &knowledge.RetrievalResult{}, nil
+			},
+		}
+		rec := postJSONRPCWithCapability(t, newRouter(knowledgeSvc, bindings), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
+			testValidToken, capChildA)
+
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+		}
+		if isErrorResult(resp.Result) {
+			t.Fatalf("child-a capability requesting its own dataset must pass, got %v", resp.Result)
 		}
 		if len(gotDatasetIDs) != 1 || gotDatasetIDs[0] != "ds-child" {
 			t.Fatalf("retrieval dataset_ids = %v, want [ds-child]", gotDatasetIDs)
 		}
 	})
 
-	t.Run("child-a 身份请求 parent 的 dataset → 拒绝", func(t *testing.T) {
-		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
+	t.Run("child-a capability 请求 parent 的 dataset → 拒绝", func(t *testing.T) {
+		rec := postJSONRPCWithCapability(t, newRouter(&fakeKnowledgeMcpService{}, bindings), "tools/call",
 			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
-			testValidToken, "child-a")
+			testValidToken, capChildA)
 
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
 		}
 		if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
-			t.Fatalf("child-a must not reach parent datasets, got %v", resp.Result)
+			t.Fatalf("child-a capability must not reach parent datasets, got %v", resp.Result)
 		}
 	})
 
-	t.Run("root 身份请求 child 的 dataset → 拒绝", func(t *testing.T) {
-		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
+	t.Run("root token + 裸 X-Agent-Id（无 capability）→ 完全不参与，回退 root 自身", func(t *testing.T) {
+		var gotCapabilityHeader string
+		capture := func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+			gotCapabilityHeader = capabilityHeader
+			return resolve(capabilityHeader, bearerToken)
+		}
+		router := newRouter(&fakeKnowledgeMcpService{}, capture)
+
+		// 裸 X-Agent-Id: child-a 出现在请求里，但 capability 通道为空。
+		rec := postJSONRPCWithHeaders(t, router, "tools/call",
 			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
-			testValidToken, "root")
-
+			testValidToken, map[string][]string{"X-Agent-Id": {"child-a"}})
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
 		}
 		if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
-			t.Fatalf("root must not reach child datasets, got %v", resp.Result)
+			t.Fatalf("bare X-Agent-Id must not grant child bindings, got %v", resp.Result)
 		}
-	})
+		if gotCapabilityHeader != "" {
+			t.Fatalf("service must receive empty capability header; bare X-Agent-Id must never reach it, got %q", gotCapabilityHeader)
+		}
 
-	t.Run("无 X-Agent-Id（存量回退）→ 按 token agent 自身绑定", func(t *testing.T) {
-		var gotRequestingID string
-		fallbackSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
-			gotRequestingID = requestingID
-			return identityBindings(requestingID)
-		}}
-		router := setupKnowledgeMcpRouterAsAgent("root", &fakeKnowledgeMcpService{}, fallbackSvc)
-
-		// token agent 自身绑定放行。
-		rec := postJSONRPC(t, router, "tools/call",
+		// 同一请求下 root 自身 dataset 放行（回退 = token agent 绑定）。
+		rec = postJSONRPCWithHeaders(t, router, "tools/call",
 			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
-			testValidToken)
+			testValidToken, map[string][]string{"X-Agent-Id": {"root"}})
 		var passResp jsonRPCResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &passResp); err != nil {
 			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
 		}
 		if isErrorResult(passResp.Result) {
-			t.Fatalf("root requesting its own dataset (no identity header) must pass, got %v", passResp.Result)
-		}
-
-		// child 绑定的 dataset 拒绝（回到 #111 前的最严格行为）。
-		rec = postJSONRPC(t, router, "tools/call",
-			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-child"]}}`),
-			testValidToken)
-		var denyResp jsonRPCResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &denyResp); err != nil {
-			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
-		}
-		if !isErrorResult(denyResp.Result) || !strings.Contains(resultText(denyResp.Result), "无权访问") {
-			t.Fatalf("fallback identity must be token agent itself, child dataset should be denied, got %v", denyResp.Result)
-		}
-		if gotRequestingID != "root" {
-			t.Fatalf("requestingID = %q, want fallback to token agent name %q", gotRequestingID, "root")
+			t.Fatalf("fallback (no capability) must grant token agent own bindings, got %v", passResp.Result)
 		}
 	})
 
-	t.Run("X-Agent-Id 非闭包成员 → 中性 -32603 错误", func(t *testing.T) {
-		rec := postJSONRPCAsAgent(t, newRouter(&fakeKnowledgeMcpService{}), "tools/call",
-			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
-			testValidToken, "another-root")
-
+	denyTexts := make([]string, 0, 4) // matrix 7: 所有 deny 原因同一中性文案
+	collectDeny := func(t *testing.T, rec *httptest.ResponseRecorder) string {
+		t.Helper()
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
 		}
-		if resp.Error == nil {
-			t.Fatalf("identity outside the deploy graph must surface a JSON-RPC error, got %v", resp.Result)
+		if !isErrorResult(resp.Result) {
+			t.Fatalf("expected isError deny, got %v", resp.Result)
 		}
-		if !strings.Contains(resp.Error.Message, "获取 Agent 知识库绑定关系失败") {
-			t.Fatalf("client-visible error must stay neutral, got %q", resp.Error.Message)
+		text := resultText(resp.Result)
+		denyTexts = append(denyTexts, text)
+		return text
+	}
+
+	t.Run("篡改 capability（payload/大小写）→ 验签失败拒绝", func(t *testing.T) {
+		router := newRouter(&fakeKnowledgeMcpService{}, bindings)
+		// 未知 capability 值（模拟篡改后验签不过）。
+		collectDeny(t, postJSONRPCWithCapability(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, "v1.cap-tampered-opaque"))
+		// 内容大小写改动。
+		collectDeny(t, postJSONRPCWithCapability(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, "V1.CAP-ROOT-OPAQUE"))
+	})
+
+	t.Run("token 轮换：旧 token 签的 capability + 轮换后的新 token 请求 → 拒绝", func(t *testing.T) {
+		// 轮换后新 token 本身有效（middleware 放行），但 capability 的
+		// TokenFp 绑定签发时的旧 token（fake: capRoot 仅对 testValidToken
+		// 有效）→ TokenFp 失配 → sentinel deny。
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.POST("/api/v1/knowledge/mcp",
+			testAgentAuthMiddlewareFor("root", "new-rotated-token"),
+			NewKnowledgeMcpHandler(&fakeKnowledgeMcpService{}, &tenantAwareAgentMcpService{fn: bindings}).HandleMessage)
+		collectDeny(t, postJSONRPCWithCapability(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			"new-rotated-token", capRoot))
+	})
+
+	t.Run("重复 X-Agent-Capability 头 → 拒绝且不触发 service", func(t *testing.T) {
+		called := false
+		capture := func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+			called = true
+			return resolve(capabilityHeader, bearerToken)
 		}
-		if strings.Contains(resp.Error.Message, "another-root") {
-			t.Fatalf("client-visible error must not echo the requesting identity, got %q", resp.Error.Message)
+		router := newRouter(&fakeKnowledgeMcpService{}, capture)
+		// 两个值（第二个用小写 key 变体——Add 规范化后与第一个同桶，
+		// 模拟真实链路里 net/http 对 header 名的大小写归一）都必须按重复拒绝。
+		collectDeny(t, postJSONRPCWithHeaders(t, router, "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, map[string][]string{
+				"X-Agent-Capability": {capRoot},
+				"x-agent-capability": {capChildA},
+			}))
+		if called {
+			t.Fatal("duplicate capability headers must be denied before the service is called")
 		}
 	})
+
+	t.Run("空值 capability 头 → 拒绝（present-but-blank ≠ 缺失）", func(t *testing.T) {
+		collectDeny(t, postJSONRPCWithCapability(t, newRouter(&fakeKnowledgeMcpService{}, bindings), "tools/call",
+			json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello","dataset_ids":["ds-root"]}}`),
+			testValidToken, "  "))
+	})
+
+	// matrix 7：capability 值不出现在任何响应文本；所有 deny 原因同一文案
+	// （不给探测 oracle），与 dataset 越权拒绝的文案一致。
+	for _, text := range denyTexts {
+		if text != "无权访问部分知识库 dataset" {
+			t.Fatalf("all capability denies must share the neutral subset-denial message, got %q (all: %v)", text, denyTexts)
+		}
+	}
+	assertNoCapabilityLeak(t, allCaps, denyTexts)
+}
+
+// assertNoCapabilityLeak 断言 capability 值不出现在任何客户端可见文本里。
+func assertNoCapabilityLeak(t *testing.T, caps, texts []string) {
+	t.Helper()
+	for _, text := range texts {
+		for _, cap := range caps {
+			if strings.Contains(text, cap) {
+				t.Fatalf("capability value leaked to client-visible text: %q", cap)
+			}
+		}
+	}
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
@@ -804,9 +910,9 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 	// 无 tenant 时必须返回明确错误，而非用空串静默查询全表。
 	gin.SetMode(gin.TestMode)
 	var gotTenantID string
-	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
 		gotTenantID = tenantID
-		return []string{"allowed-dataset"}, nil
+		return []string{"allowed-dataset"}, "test-agent", nil
 	}}
 	router := gin.New()
 	router.POST("/api/v1/knowledge/mcp", func(c *gin.Context) {
@@ -831,12 +937,13 @@ func TestKnowledgeMcpHandler_ToolsCall_MissingTenantContext(t *testing.T) {
 }
 
 func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
-	// 验证 handler 把 context 里的 tenant_id 与 token agent 名原样传给
-	// dataset 反查；无 X-Agent-Id 时 requestingID 回退 token agent 自身。
-	var gotTenantID, gotTokenAgent, gotRequestingID string
-	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, requestingID string) ([]string, error) {
-		gotTenantID, gotTokenAgent, gotRequestingID = tenantID, tokenAgentName, requestingID
-		return []string{"tenant-a-dataset"}, nil
+	// 验证 handler 把 context 里的 tenant_id、token agent 名、capability
+	// 头与 Bearer token 原文传给 dataset 反查；无 capability 时回退 token
+	// agent 自身绑定（capabilityHeader 为空串）。
+	var gotTenantID, gotTokenAgent, gotCapability, gotBearer string
+	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+		gotTenantID, gotTokenAgent, gotCapability, gotBearer = tenantID, tokenAgentName, capabilityHeader, bearerToken
+		return []string{"tenant-a-dataset"}, tokenAgentName, nil
 	}}
 	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
 	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
@@ -851,17 +958,20 @@ func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
 	if gotTokenAgent != "test-agent" {
 		t.Fatalf("tokenAgentName = %q, want test-agent", gotTokenAgent)
 	}
-	if gotRequestingID != "test-agent" {
-		t.Fatalf("requestingID = %q, want fallback to token agent %q", gotRequestingID, "test-agent")
+	if gotCapability != "" {
+		t.Fatalf("capabilityHeader = %q, want empty (legacy fallback without the header)", gotCapability)
+	}
+	if gotBearer != testValidToken {
+		t.Fatalf("bearerToken = %q, want the raw presented token %q", gotBearer, testValidToken)
 	}
 }
 
 type tenantAwareAgentMcpService struct {
-	fn func(tenantID, tokenAgentName, requestingID string) ([]string, error)
+	fn func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error)
 }
 
-func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
-	return f.fn(tenantID, tokenAgentName, requestingID)
+func (f *tenantAwareAgentMcpService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
+	return f.fn(tenantID, tokenAgentName, capabilityHeader, bearerToken)
 }
 
 func isErrorResult(result interface{}) bool {

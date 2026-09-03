@@ -3,11 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
+	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/middleware"
@@ -26,11 +28,14 @@ type KnowledgeMcpService interface {
 // AgentMcpService abstracts the agent operations needed by the MCP handler.
 type AgentMcpService interface {
 	// GetAgentKnowledgeDatasetsForRequest 返回「请求身份」可访问的 dataset
-	// IDs：requestingID 是部署时 hub 注入 MCP 连接头的 X-Agent-Id（缺失时
-	// 回退 token agent 自身），必须等于 token agent 本身或其直接挂载的
-	// subagent；授权集只是该身份自己的绑定——不是部署闭包并集（child 拿
-	// 不到 parent/sibling 的，root 也拿不到 child 的）。
-	GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error)
+	// IDs：capabilityHeader 是部署时 hub 签发注入 MCP 连接头的
+	// X-Agent-Capability（缺失时回退 token agent 自身），必须验签通过并
+	// 绑定 token agent 本身或其直接挂载的 subagent；bearerToken 原文用于
+	// token 指纹失效域校验。授权集只是该身份自己的绑定——不是部署闭包
+	// 并集（child 拿不到 parent/sibling 的，root 也拿不到 child 的）。
+	// 验证失败返回包装 ErrKnowledgeCapabilityDenied 的 error（handler 转
+	// 中性 deny）。
+	GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, capabilityHeader, bearerToken string) (datasets []string, requestingAgent string, err error)
 }
 
 type jsonRPCRequest struct {
@@ -345,9 +350,12 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		*args.Highlight = false
 	}
 
-	allowedDatasetIDs, err := h.resolveAgentContext(c)
+	allowedDatasetIDs, deny, err := h.resolveAgentContext(c, id)
 	if err != nil {
 		return jsonRPCResponse{}, err
+	}
+	if deny != nil {
+		return *deny, nil
 	}
 	if len(allowedDatasetIDs) == 0 {
 		return mcpErrorResult(id, "当前 Agent 未启用知识库 MCP"), nil
@@ -358,7 +366,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		datasetIDs = allowedDatasetIDs
 	}
 	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return mcpErrorResult(id, "无权访问部分知识库 dataset"), nil
+		return mcpErrorResult(id, knowledgeCapabilityDeniedMessage), nil
 	}
 
 	req := knowledge.RetrievalRequest{
@@ -392,9 +400,12 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 }
 
 func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gin.Context, id interface{}) (jsonRPCResponse, error) {
-	allowed, err := h.resolveAgentContext(c)
+	allowed, deny, err := h.resolveAgentContext(c, id)
 	if err != nil {
 		return jsonRPCResponse{}, err
+	}
+	if deny != nil {
+		return *deny, nil
 	}
 	datasets := make([]map[string]any, 0, len(allowed))
 	for _, dsID := range allowed {
@@ -499,40 +510,68 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 	})
 }
 
-// agentIdentityHeader 承载 Knowledge MCP 请求的「部署时受信身份」。部署
-// 侧（agent_deployer.go）构造每个 graph 节点的 knowledge MCP 连接 headers
-// 时注入该头（值 = 该 agent 的 DB 裸名），deployer 原样写入该节点自己的
-// agents.yaml 段——模型只能调 knowledge_search 选 dataset_ids 参数，无法
-// 伪造 MCP 连接 headers，因此该头就是按节点隔离授权的受信凭据。两个包
-// 各持同名常量，改动须同步。
-const agentIdentityHeader = "X-Agent-Id"
+// knowledgeCapabilityHeader 承载 Knowledge MCP 请求的「服务端可验证
+// per-Agent capability」（issue #111 重开）。部署侧（agent_deployer.go）
+// 构造每个 graph 节点的 knowledge MCP 连接 headers 时用仅服务端持有的
+// 密钥签发该头（HMAC，绑定 tenant/deployment/agent/token 指纹），deployer
+// 原样写入该节点自己的 agents.yaml 段。可伪造的裸身份头已废弃：
+// 不注入、不消费。两个包各持同名常量，改动须同步。
+const knowledgeCapabilityHeader = "X-Agent-Capability"
+
+// knowledgeCapabilityDeniedMessage 是 capability 通道一切拒绝的统一中性
+// 文案（重复头/空值/验签失败/绑定不匹配/越权 dataset 子集共用），不区分
+// 失败原因——不给探测 oracle。
+const knowledgeCapabilityDeniedMessage = "无权访问部分知识库 dataset"
 
 // resolveAgentContext 抽取 agent/租户/请求身份提取与绑定 dataset 反查。
-// 请求身份取 X-Agent-Id 连接头（见 agentIdentityHeader）；缺失时回退
-// token agent 自身——存量未注入身份的 agents.yaml 回到 #111 前的最严格
-// 行为。返回错误即 JSON-RPC -32603（由调用方决定文案透传）。
-func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context) ([]string, error) {
+// 请求身份取 X-Agent-Capability 连接头（见 knowledgeCapabilityHeader）：
+// 重复头（net/http 对 header 名大小写归一后同桶多值）与呈现但空值的头
+// 直接中性拒绝，不触发 service；缺失时回退 token agent 自身——存量未
+// 注入 capability 的 agents.yaml 回到 #111 前的最严格行为。err 由调用方
+// 原样上抛（走 -32603 中性文案）；deny 非 nil 时直接返回 *deny。
+func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}) ([]string, *jsonRPCResponse, error) {
 	agentCfg, ok := middleware.AgentFromContext(c)
 	if !ok {
-		return nil, fmt.Errorf("上下文中未找到 Agent 身份")
+		return nil, nil, fmt.Errorf("上下文中未找到 Agent 身份")
 	}
 	tenantID := tenant.GetTenantID(c)
 	if tenantID == "" {
 		// 理论不可达：AgentRuntimeAuthMiddleware 命中 agents 行后必写 tenant_id。
 		// 防御性拒绝，避免空串 tenant 静默查询全表造成跨租户泄漏。
-		return nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
+		return nil, nil, fmt.Errorf("知识库 MCP 请求缺少租户上下文")
 	}
-	requestingID := strings.TrimSpace(c.GetHeader(agentIdentityHeader))
-	if requestingID == "" {
-		requestingID = agentCfg.Name
+	capability := ""
+	caps := c.Request.Header.Values(knowledgeCapabilityHeader)
+	if len(caps) > 1 {
+		// Values 按 canonical MIME key 取值：header 名大小写变体天然同桶，
+		// 多值即重复头攻击。
+		log.Printf("knowledge-mcp: duplicate %s headers rejected (tenant=%s agent=%s count=%d)", knowledgeCapabilityHeader, tenantID, agentCfg.Name, len(caps))
+		deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+		return nil, &deny, nil
 	}
-	allowed, err := h.agentService.GetAgentKnowledgeDatasetsForRequest(tenantID, agentCfg.Name, requestingID)
+	if len(caps) == 1 {
+		capability = strings.TrimSpace(caps[0])
+		if capability == "" {
+			// 呈现但空值 ≠ 缺失：缺失才回退，空值按拒绝。
+			log.Printf("knowledge-mcp: blank %s header rejected (tenant=%s agent=%s)", knowledgeCapabilityHeader, tenantID, agentCfg.Name)
+			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			return nil, &deny, nil
+		}
+	}
+	bearer := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+	allowed, _, err := h.agentService.GetAgentKnowledgeDatasetsForRequest(tenantID, agentCfg.Name, capability, bearer)
 	if err != nil {
-		// 细节（身份解析失败原因等）只进服务端日志，客户端拿中性文案。
-		log.Printf("knowledge-mcp: resolve knowledge datasets failed (tenant=%s agent=%s requesting=%s): %v", tenantID, agentCfg.Name, requestingID, err)
-		return nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
+		if errors.Is(err, services.ErrKnowledgeCapabilityDenied) {
+			// 失败原因只进服务端日志；capability 值绝不上日志/响应。
+			log.Printf("knowledge-mcp: capability rejected (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			return nil, &deny, nil
+		}
+		// 细节（绑定解析失败原因等）只进服务端日志，客户端拿中性文案。
+		log.Printf("knowledge-mcp: resolve knowledge datasets failed (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
+		return nil, nil, fmt.Errorf("获取 Agent 知识库绑定关系失败")
 	}
-	return allowed, nil
+	return allowed, nil, nil
 }
 
 // requireDatasetAccess 是遍历工具的统一 dataset 入口：TrimSpace + 非空校验
@@ -545,12 +584,15 @@ func (h *KnowledgeMcpHandler) requireDatasetAccess(c *gin.Context, id interface{
 	if datasetID == "" {
 		return "", nil, fmt.Errorf("dataset_id 不能为空")
 	}
-	allowed, err := h.resolveAgentContext(c)
+	allowed, capDeny, err := h.resolveAgentContext(c, id)
 	if err != nil {
 		return "", nil, err
 	}
+	if capDeny != nil {
+		return "", capDeny, nil
+	}
 	if !isStringSubset([]string{datasetID}, allowed) {
-		resp := mcpErrorResult(id, "无权访问部分知识库 dataset")
+		resp := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
 		return datasetID, &resp, nil
 	}
 	return datasetID, nil, nil

@@ -380,6 +380,9 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
+		// The knowledge MCP mounted below now also receives a signed
+		// per-agent capability — issuance requires a server-held key.
+		s.encryptionKey = testKnowledgeEncKey
 		s.mcpSvc = &mockMcpSvc{mcps: map[string]*McpClientDTO{
 			"knowledge": {
 				Name: "knowledge",
