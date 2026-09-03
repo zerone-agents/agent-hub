@@ -107,6 +107,7 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		"",          // cdnHost
 		"",          // encryptionKey: RuntimeToken stays plaintext
 		"",          // runtimeAPIKey
+		"",          // capabilitySecret: no knowledge MCP in this fixture
 		nil, nil, nil,
 		"", "", // chat push key / public URL: 未配置 = 不下发回传段
 		services.ModeCasdoor, // casdoor-shaped addressing fixture

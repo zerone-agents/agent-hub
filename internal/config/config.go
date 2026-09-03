@@ -118,6 +118,15 @@ type KnowledgeConfig struct {
 	MCPURL               string `mapstructure:"mcp_url"`
 	TimeoutSeconds       int    `mapstructure:"timeout_seconds"`
 	UploadTimeoutSeconds int    `mapstructure:"upload_timeout_seconds"`
+	// CapabilitySecret signs the per-agent knowledge MCP capabilities
+	// (issue #111, reopened). It is a dedicated secret decoupled from the
+	// provider credential encryption key (PROVIDER_ENCRYPTION_KEY): when
+	// left empty, the server provisions a
+	// random secret at startup and persists it in the database (see
+	// systemsetting.EnsureKnowledgeCapabilitySecret), so deployments keep
+	// working in zero-provider-key environments. Explicit config is used
+	// as-is and never persisted — symmetric with AUTH_JWT_SECRET.
+	CapabilitySecret string `mapstructure:"capability_secret"`
 }
 
 type ProviderConfig struct {
@@ -180,6 +189,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("knowledge.multirag_base_url", "MULTIRAG_BASE_URL")
 	viper.BindEnv("knowledge.multirag_api_key", "MULTIRAG_API_KEY")
 	viper.BindEnv("knowledge.mcp_url", "KNOWLEDGE_MCP_URL")
+	viper.BindEnv("knowledge.capability_secret", "KNOWLEDGE_CAPABILITY_SECRET")
 	viper.BindEnv("knowledge.timeout_seconds", "MULTIRAG_TIMEOUT_SECONDS")
 	viper.BindEnv("knowledge.upload_timeout_seconds", "MULTIRAG_UPLOAD_TIMEOUT_SECONDS")
 	viper.BindEnv("kong.admin_url", "KONG_ADMIN_URL")

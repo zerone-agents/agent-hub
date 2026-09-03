@@ -46,7 +46,7 @@ func TestApplyAigc_ErrorPropagates(t *testing.T) {
 }
 
 func TestNewAgentDeployerService_NilAigcSvcLeavesFieldNil(t *testing.T) {
-	s := NewAgentDeployerService(nil, "", "", "", "", "", nil, nil, nil, "", "", ModeCasdoor)
+	s := NewAgentDeployerService(nil, "", "", "", "", "", "", nil, nil, nil, "", "", ModeCasdoor)
 	require.Nil(t, s.aigcSvc)
 
 	req := &deployer.CreateAgentRequest{}
