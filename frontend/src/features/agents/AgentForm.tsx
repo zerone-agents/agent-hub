@@ -98,6 +98,7 @@ interface FormValues {
   iconBgColor: string
   maxTurns: number
   maxSessionQueries?: number
+  disallowedTools?: string[]
   systemPrompt: string
   desktopEnabled: boolean
   mobileEnabled: boolean
@@ -145,6 +146,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           iconBgColor: editingAgent.config.iconBgColor ?? '',
           maxTurns: editingAgent.config.maxTurns ?? 50,
           maxSessionQueries: editingAgent.config.maxSessionQueries,
+          disallowedTools: editingAgent.config.disallowedTools ?? [],
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
@@ -155,7 +157,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
         })
       }
     }
@@ -184,6 +186,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       permissionMode: v.permissionMode,
       maxTurns: v.maxTurns,
       maxSessionQueries: v.maxSessionQueries ?? undefined,
+      // 空数组不下发——与 hub 侧「未配置」语义对齐，避免存 '[]'
+      disallowedTools: v.disallowedTools?.length ? v.disallowedTools : undefined,
       title: v.titleZh ? { zh: v.titleZh, ...(v.titleEn ? { en: v.titleEn } : {}) } : undefined,
       description: v.descriptionZh
         ? { zh: v.descriptionZh, ...(v.descriptionEn ? { en: v.descriptionEn } : {}) }
@@ -348,6 +352,9 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </Form.Item>
         <Form.Item label="会话查询数上限" name="maxSessionQueries" tooltip="控制单个会话内的最大查询次数，留空表示无限制">
           <InputNumber min={1} placeholder="无限制" style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label="禁用工具" name="disallowedTools" tooltip="在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名">
+          <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
         </Form.Item>
 
         {/* 系统提示词 */}

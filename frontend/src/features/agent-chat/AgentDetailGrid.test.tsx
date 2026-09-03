@@ -11,7 +11,7 @@ function renderWith(ui: React.ReactElement) {
 
 const fullDetail: Pick<
   AgentDetail,
-  'allowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionQueries'
+  'allowedTools' | 'disallowedTools' | 'mcpServers' | 'subagents' | 'datasets' | 'availableSkills' | 'maxTurns' | 'maxSessionQueries'
 > = {
   maxTurns: 10,
   allowedTools: ['Bash', 'Read', 'Write'],
@@ -129,6 +129,43 @@ describe('AgentDetailGrid', () => {
     expect(screen.getByText('Limits')).toBeInTheDocument()
     expect(screen.getByText('maxTurns: 10')).toBeInTheDocument()
     expect(screen.getByText('maxSessionQueries: 30')).toBeInTheDocument()
+    expect(screen.queryByText('Tools')).not.toBeInTheDocument()
+  })
+
+  it('renders Disallowed row with tags when disallowedTools is set', () => {
+    // 名字与 allowedTools（Bash/Read/Write）不重叠，避免 getByText 多重匹配
+    renderWith(<AgentDetailGrid {...fullDetail} disallowedTools={['WebSearch', 'mcp__knowledge__lookup']} />)
+
+    expect(screen.getByText('Disallowed')).toBeInTheDocument()
+    expect(screen.getByText('WebSearch')).toBeInTheDocument()
+    expect(screen.getByText('mcp__knowledge__lookup')).toBeInTheDocument()
+    expect(screen.getByText('Tools')).toBeInTheDocument()
+  })
+
+  it('hides Disallowed row when disallowedTools is undefined or empty', () => {
+    const { unmount } = renderWith(<AgentDetailGrid {...fullDetail} />)
+    expect(screen.queryByText('Disallowed')).not.toBeInTheDocument()
+    unmount()
+
+    renderWith(<AgentDetailGrid {...fullDetail} disallowedTools={[]} />)
+    expect(screen.queryByText('Disallowed')).not.toBeInTheDocument()
+  })
+
+  it('renders Disallowed row alone when only disallowedTools is set', () => {
+    renderWith(
+      <AgentDetailGrid
+        allowedTools={[]}
+        mcpServers={undefined}
+        subagents={undefined}
+        datasets={undefined}
+        availableSkills={[]}
+        maxTurns={10}
+        disallowedTools={['Bash']}
+      />
+    )
+
+    expect(screen.getByText('Disallowed')).toBeInTheDocument()
+    expect(screen.getByText('Bash')).toBeInTheDocument()
     expect(screen.queryByText('Tools')).not.toBeInTheDocument()
   })
 })

@@ -8,6 +8,7 @@ export interface AgentConfig {
   permissionMode?: string
   maxTurns?: number
   maxSessionQueries?: number
+  disallowedTools?: string[]
   title?: Record<string, string>
   description?: Record<string, string>
   icon?: string
