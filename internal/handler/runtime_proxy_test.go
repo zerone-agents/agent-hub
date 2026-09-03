@@ -28,11 +28,13 @@ type fakeRuntime struct {
 	lastFileRange string      // /v1/files/content 收到的 Range 头
 	body          chan string // SSE chunk 管道
 	gotCancel     chan struct{}
+	agentListBody string // /v1/agents* 代理出口的响应体（R3 egress redaction 测试可注入）
 }
 
 func newFakeRuntime(t *testing.T) *fakeRuntime {
 	t.Helper()
 	f := &fakeRuntime{body: make(chan string, 8), gotCancel: make(chan struct{}, 1)}
+	f.agentListBody = "{}" // 默认合法 JSON：/v1/agents* 是 agent-config 出口，R3 redact fail-closed
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/files/content", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=\"a b.txt\"")
@@ -76,6 +78,20 @@ func newFakeRuntime(t *testing.T) *fakeRuntime {
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"status":"ok"}`)
+	})
+	// /v1/agents 与 /v1/agents/<id>（agent-config 出口）：返回可注入的
+	// JSON 体。R3 egress redaction 对非 JSON 响应 fail-closed(502)，转发
+	// 语义类的旧测试默认收到合法 JSON 走完整链路；redact 专项测试注入
+	// 含敏感 headers 的 JSON 断言脱敏输出。
+	mux.HandleFunc("/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
+		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, f.agentListBody)
+	})
+	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, f.agentListBody)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
@@ -439,5 +455,33 @@ func TestProxyBuiltinEscapedTraversalRejected(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/test/v1/%2e%2e/etc", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestProxyRedactsAgentConfigEgress（PR #118 复审 P1-2）锁定代理出口的
+// agent-config 脱敏：runtime 返回的列表/detail 若含 hub 部署时武装的
+// MCP 凭据（X-Agent-Capability / Authorization），必须在越过 hub 边界前
+// 被剥离——即使上游 runtime 自身的脱敏版本滞后或漏配。
+func TestProxyRedactsAgentConfigEgress(t *testing.T) {
+	f := newFakeRuntime(t)
+	f.agentListBody = `{"agents":[{"id":"a","mcpServers":{"knowledge":{"url":"http://hub/mcp","headers":{"Authorization":"Bearer sekrit-token","X-Agent-Capability":"v1.cGF5bG9hZA.s2ln","X-Custom":"plain"}}}}]}`
+	r := newBuiltinProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/runtime/test/v1/agents", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, leak := range []string{"sekrit-token", "v1.cGF5bG9hZA", "s2ln", "Bearer"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("credential leaked through proxy egress: %q in %s", leak, body)
+		}
+	}
+	if !strings.Contains(body, "X-Custom") || !strings.Contains(body, `"***"`) {
+		t.Errorf("non-sensitive header key must survive with masked value, got: %s", body)
+	}
+	if !strings.Contains(body, "http://hub/mcp") {
+		t.Errorf("non-credential detail content must pass through, got: %s", body)
 	}
 }

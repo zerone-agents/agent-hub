@@ -221,21 +221,21 @@ func main() {
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
-	deployerService := services.NewAgentDeployerService(
-		deployerClient,
-		cfg.Deployer.PublicHost,
-		cfg.Deployer.DeployerURLHost,
-		cfg.OSS.CDNHost,
-		cfg.Provider.EncryptionKey,
-		cfg.Deployer.RuntimeAPIKey,
-		capabilitySecret, // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
-		knowledgeService,
-		kongService,
-		aigcConfigSvc,
-		cfg.ChatPush.APIKey,
-		cfg.ChatPush.PublicURL,
-		services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
-	)
+	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
+		Client:            deployerClient,
+		PublicHost:        cfg.Deployer.PublicHost,
+		UpstreamHost:      cfg.Deployer.DeployerURLHost,
+		CDNHost:           cfg.OSS.CDNHost,
+		EncryptionKey:     cfg.Provider.EncryptionKey,
+		RuntimeAPIKey:     cfg.Deployer.RuntimeAPIKey,
+		CapabilitySecret:  capabilitySecret, // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
+		KnowledgeSvc:      knowledgeService,
+		KongSvc:           kongService,
+		AigcSvc:           aigcConfigSvc,
+		ChatPushAPIKey:    cfg.ChatPush.APIKey,
+		ChatPushPublicURL: cfg.ChatPush.PublicURL,
+		AuthMode:          services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
+	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)

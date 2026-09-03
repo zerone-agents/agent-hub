@@ -131,46 +131,49 @@ func issueKnowledgeCapability(secret []byte, p knowledgeCapabilityPayload) strin
 func verifyKnowledgeCapability(secret []byte, cap string, expectTenant, expectDep, expectTokenFp string, allowedAgents map[string]struct{}) (string, error) {
 	key := knowledgeCapabilityKey(secret)
 	if key == nil {
-		return "", errors.New("服务端未配置签名密钥，capability 校验拒绝")
+		// Internal detail: logged server-side, rendered as a neutral deny
+		// at the handler boundary (CONTRIBUTING: user-visible text is
+		// Chinese, internals are English).
+		return "", errors.New("capability verification denied: signing secret is not configured (fail-closed)")
 	}
 	parts := strings.Split(cap, ".")
 	if len(parts) != 3 {
-		return "", fmt.Errorf("capability 格式无效（%d 段）", len(parts))
+		return "", fmt.Errorf("invalid capability format: %d segments", len(parts))
 	}
 	if parts[0] != knowledgeCapabilityPrefix {
-		return "", fmt.Errorf("capability 版本前缀无效: %q", parts[0])
+		return "", fmt.Errorf("invalid capability version prefix: %q", parts[0])
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", fmt.Errorf("capability payload 解码失败: %w", err)
+		return "", fmt.Errorf("decode capability payload: %w", err)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return "", fmt.Errorf("capability 签名解码失败: %w", err)
+		return "", fmt.Errorf("decode capability signature: %w", err)
 	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write(payloadJSON)
 	if !hmac.Equal(mac.Sum(nil), sig) {
-		return "", errors.New("capability 签名不匹配")
+		return "", errors.New("capability signature mismatch")
 	}
 	var p knowledgeCapabilityPayload
 	if err := json.Unmarshal(payloadJSON, &p); err != nil {
-		return "", fmt.Errorf("capability payload 解析失败: %w", err)
+		return "", fmt.Errorf("parse capability payload: %w", err)
 	}
 	if p.Version != 1 {
-		return "", fmt.Errorf("capability 版本不支持: %d", p.Version)
+		return "", fmt.Errorf("unsupported capability version: %d", p.Version)
 	}
 	if p.Tenant != expectTenant {
-		return "", errors.New("capability 租户绑定不匹配")
+		return "", errors.New("capability tenant binding mismatch")
 	}
 	if p.Dep != expectDep {
-		return "", errors.New("capability 部署绑定不匹配")
+		return "", errors.New("capability deployment binding mismatch")
 	}
 	if p.TokenFp != expectTokenFp {
-		return "", errors.New("capability token 指纹不匹配（token 可能已轮换）")
+		return "", errors.New("capability token fingerprint mismatch (token may have rotated)")
 	}
 	if _, ok := allowedAgents[p.Agent]; !ok {
-		return "", fmt.Errorf("capability 身份 %q 不在 token agent 的部署图内", p.Agent)
+		return "", fmt.Errorf("capability identity %q is not in the token agent's deployment graph", p.Agent)
 	}
 	return p.Agent, nil
 }
