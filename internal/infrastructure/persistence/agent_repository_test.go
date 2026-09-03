@@ -46,6 +46,7 @@ func setupAgentRepoTestDB(t *testing.T) *gorm.DB {
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
+			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',
 			deployed_at DATETIME,
@@ -273,6 +274,35 @@ func TestAgentRepository_Create_StampsTenant(t *testing.T) {
 
 	_, err = repo.GetByName("forged", "coder")
 	require.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+}
+
+// TestAgentRepository_DisallowedToolsRoundTrip covers the issue #111 agent-
+// local deny-list storage: the serializer:json TEXT column preserves entries
+// through Create/GetByName, an explicit clear (Save writes all fields
+// including zero values) persists as nil, and pre-column NULL rows read
+// back nil.
+func TestAgentRepository_DisallowedToolsRoundTrip(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+
+	in := &agent.AgentConfig{Name: "deny-agent", DisallowedTools: []string{"Bash", "mcp__knowledge__lookup"}}
+	require.NoError(t, repo.Create("org-a", in))
+	got, err := repo.GetByName("org-a", "deny-agent")
+	require.NoError(t, err)
+	require.Equal(t, []string{"Bash", "mcp__knowledge__lookup"}, got.DisallowedTools)
+
+	// Explicit clear persists (repo.Update → Save 全字段写，nil 不会被跳过).
+	got.DisallowedTools = nil
+	require.NoError(t, repo.Update("org-a", got))
+	cleared, err := repo.GetByName("org-a", "deny-agent")
+	require.NoError(t, err)
+	require.Nil(t, cleared.DisallowedTools)
+
+	// Rows created before the column existed (NULL) read back nil.
+	require.NoError(t, db.Exec(`INSERT INTO agents (name, tenant_id) VALUES ('legacy-null', 'org-a')`).Error)
+	legacy, err := repo.GetByName("org-a", "legacy-null")
+	require.NoError(t, err)
+	require.Nil(t, legacy.DisallowedTools)
 }
 
 func TestAgentRepository_Update_CrossTenantRejected(t *testing.T) {

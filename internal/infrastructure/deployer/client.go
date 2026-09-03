@@ -28,10 +28,12 @@ type AgentDefinition struct {
 	MaxSessionQueries *int     `json:"maxSessionQueries,omitempty"`
 	PermissionMode    string   `json:"permissionMode,omitempty"`
 	Tools             []string `json:"tools,omitempty"`
-	// DisallowedTools is part of the v3 contract but control-panel never
-	// populates it: read-only restrictions (e.g. Explore) are enforced
-	// dynamically by the runtime/SDK from tool metadata, not by a static
-	// hub-maintained deny list (issue #111 comment).
+	// DisallowedTools is the agent-local deny list (issue #111): a
+	// user-configured tool-name blacklist (built-in names like "Bash" or
+	// MCP-qualified names, no referential integrity) applied on top of the
+	// Tools allow-list. Distinct from read-only restrictions such as Explore,
+	// which stay dynamic in the runtime/SDK. Root and children are
+	// isomorphic; empty omits the key.
 	DisallowedTools []string      `json:"disallowedTools,omitempty"`
 	CustomTools     []ToolSource  `json:"customTools,omitempty"`
 	Skills          []SkillSource `json:"skills,omitempty"`

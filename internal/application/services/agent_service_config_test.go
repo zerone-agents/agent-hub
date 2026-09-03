@@ -76,6 +76,73 @@ func TestMaxSessionQueriesConfigKeys(t *testing.T) {
 	})
 }
 
+// TestDisallowedToolsConfigKeys locks the issue #111 agent-local deny list
+// config key: unpack accepts a string array and rejects non-string items,
+// absent key stays nil; pack writes the array back and keeps unset as
+// explicit null (same nil semantics as maxSessionQueries).
+func TestDisallowedToolsConfigKeys(t *testing.T) {
+	t.Run("unpack 数组", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		if err := unpackConfigToModel(map[string]interface{}{
+			"disallowedTools": []interface{}{"Bash", "mcp__knowledge__lookup"},
+			"systemPrompt":    "p",
+		}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		want := []string{"Bash", "mcp__knowledge__lookup"}
+		if len(cfg.DisallowedTools) != len(want) || cfg.DisallowedTools[0] != want[0] || cfg.DisallowedTools[1] != want[1] {
+			t.Fatalf("cfg.DisallowedTools = %#v, want %#v", cfg.DisallowedTools, want)
+		}
+	})
+
+	t.Run("unpack 非字符串项报错", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		err := unpackConfigToModel(map[string]interface{}{
+			"disallowedTools": []interface{}{"Bash", 42},
+		}, cfg, "")
+		if err == nil {
+			t.Fatal("unpackConfigToModel must reject non-string disallowedTools items")
+		}
+		if !strings.Contains(err.Error(), "disallowedTools") {
+			t.Fatalf("error should mention disallowedTools, got: %v", err)
+		}
+		if cfg.DisallowedTools != nil {
+			t.Fatalf("cfg.DisallowedTools must stay nil on error, got %#v", cfg.DisallowedTools)
+		}
+	})
+
+	t.Run("unpack 缺省 nil", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		if err := unpackConfigToModel(map[string]interface{}{"systemPrompt": "p"}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		if cfg.DisallowedTools != nil {
+			t.Fatalf("cfg.DisallowedTools must stay nil when key absent, got %#v", cfg.DisallowedTools)
+		}
+	})
+
+	t.Run("pack 数组", func(t *testing.T) {
+		cfg := &agent.AgentConfig{DisallowedTools: []string{"Bash"}}
+		m := modelToConfigMap(cfg, "")
+		v, ok := m["disallowedTools"].([]string)
+		if !ok || len(v) != 1 || v[0] != "Bash" {
+			t.Fatalf(`m["disallowedTools"] = %#v, want []string{"Bash"}`, m["disallowedTools"])
+		}
+	})
+
+	t.Run("pack nil 显式 null", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		m := modelToConfigMap(cfg, "")
+		v, exists := m["disallowedTools"]
+		if !exists {
+			t.Fatal(`m["disallowedTools"] key must be present with explicit nil`)
+		}
+		if v != nil {
+			t.Fatalf(`m["disallowedTools"] = %#v, want nil`, v)
+		}
+	})
+}
+
 // setupAgentKnowledgeAuthTestDB 起 sqlite 内存库，建齐
 // GetAgentKnowledgeDatasetsForRequest 触碰的三张表：agents、agent_subagents、
 // agent_knowledge_datasets。与 setupSubagentToolsTestDB 同款裸 SQL 方案
@@ -109,6 +176,7 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
+			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',
 			deployed_at DATETIME,

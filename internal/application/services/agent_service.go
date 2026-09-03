@@ -609,6 +609,22 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MaxSessionQueries = &n
 	}
 
+	// Handle disallowedTools (issue #111 agent-local deny list): accept a
+	// string array only; non-string items fail the whole unpack (validator
+	// separately enforces per-item constraints). Absent key leaves the field
+	// untouched.
+	if v, ok := config["disallowedTools"].([]interface{}); ok {
+		items := make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
+			}
+			items = append(items, s)
+		}
+		cfg.DisallowedTools = items
+	}
+
 	// Handle fieldOverrides
 	if v, ok := config["fieldOverrides"].(map[string]interface{}); ok && len(v) > 0 {
 		overrides := make(map[string]string)
@@ -651,6 +667,12 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 		m["maxSessionQueries"] = float64(*cfg.MaxSessionQueries)
 	} else {
 		m["maxSessionQueries"] = nil
+	}
+
+	if cfg.DisallowedTools != nil {
+		m["disallowedTools"] = cfg.DisallowedTools
+	} else {
+		m["disallowedTools"] = nil
 	}
 
 	if cfg.ProviderID != nil {

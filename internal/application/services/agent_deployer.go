@@ -766,12 +766,12 @@ type definitionOpts struct {
 }
 
 // buildAgentDefinition assembles one agent's complete AgentDefinition: its
-// own tools allow-list (extended with SDK-qualified MCP tool names), custom
-// tool artifacts, skills, MCP servers, knowledge datasets and subagent id
-// references. Mounted agents never inherit or fall back to the root's
-// capabilities — an empty relation stays empty. It also returns the agent's
-// subagent names so loadAgentGraph can traverse the closure without a second
-// query.
+// own tools allow-list (extended with SDK-qualified MCP tool names) and
+// agent-local deny list, custom tool artifacts, skills, MCP servers,
+// knowledge datasets and subagent id references. Mounted agents never
+// inherit or fall back to the root's capabilities — an empty relation stays
+// empty. It also returns the agent's subagent names so loadAgentGraph can
+// traverse the closure without a second query.
 func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantID string, cfg *agent.AgentConfig, opts definitionOpts) (*deployer.AgentDefinition, []string, error) {
 	name := cfg.Name
 	if opts.isRoot {
@@ -788,6 +788,10 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		def.MaxSessionQueries = cfg.MaxSessionQueries
 		def.PermissionMode = cfg.PermissionMode
 	}
+	// Agent-local deny list (issue #111): root and children are isomorphic —
+	// each node carries exactly its own user-configured disallowedTools on top
+	// of its allow-list; nil/empty omits the key via DTO omitempty.
+	def.DisallowedTools = cfg.DisallowedTools
 
 	// Custom tool artifacts (issue #88): Tools stays the complete allow-list;
 	// CustomTools only carries source=custom && ready rows, sorted by name so

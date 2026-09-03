@@ -165,6 +165,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.PermissionMode = "plan"
 		c.MaxSessionQueries = intPtr(42)
 		c.Description = map[string]string{"zh": "父 Agent", "en": "parent agent"}
+		c.DisallowedTools = []string{"Bash"}
 	})
 	childA := w.addAgent("tenant-a", "child-a", func(c *agent.AgentConfig) {
 		c.SystemPrompt = "child-a-system-prompt"
@@ -172,6 +173,8 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.ModelID = "child-a-model-must-not-leak"
 		c.PermissionMode = "bypassPermissions"
 		c.MaxSessionQueries = intPtr(99)
+		// Agent-local deny list (issue #111 F3a): children carry their own.
+		c.DisallowedTools = []string{"WebSearch", "mcp__knowledge__lookup"}
 	})
 	childB := w.addAgent("tenant-a", "child-b", func(c *agent.AgentConfig) {
 		c.SystemPrompt = "child-b-system-prompt"
@@ -421,6 +424,22 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		// resolveMcpHeaders must preserve the injected identity key while
 		// substituting the Authorization placeholder with the real token.
 		require.Equal(t, "Bearer "+f.sentToken(t), knowledgeHeaders(t, nodes[0])["Authorization"])
+	})
+
+	t.Run("11: disallowedTools is agent-local; empty stays absent; never cross-copied", func(t *testing.T) {
+		body, _ := deployGraphParent(t, buildGraphFixture(t))
+		nodes := graphAgents(t, body)
+		root, childA, childB := nodes[0], nodes[1], nodes[2]
+
+		// Each node carries exactly its own deny list (parent ["Bash"],
+		// child-a ["WebSearch","mcp__knowledge__lookup"], child-b none).
+		require.Equal(t, []any{"Bash"}, root["disallowedTools"])
+		require.Equal(t, []any{"WebSearch", "mcp__knowledge__lookup"}, childA["disallowedTools"])
+		// Empty deny list stays absent (omitempty drops the key), never []/null.
+		require.NotContains(t, childB, "disallowedTools")
+		// Deny lists never cross-copy between sibling/parent nodes.
+		require.NotContains(t, root["disallowedTools"], "WebSearch")
+		require.NotContains(t, childA["disallowedTools"], "Bash")
 	})
 }
 

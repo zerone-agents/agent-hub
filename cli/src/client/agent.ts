@@ -14,6 +14,7 @@ export interface Agent {
     permissionMode?: string;
     maxTurns?: number;
     maxSessionQueries?: number;
+    disallowedTools?: string[];
     iconName?: string;
     iconColor?: string;
     iconBgColor?: string;
