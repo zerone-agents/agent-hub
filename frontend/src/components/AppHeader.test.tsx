@@ -36,6 +36,19 @@ async function openUserMenu() {
   await user.click(avatar)
 }
 
+describe('AppHeader 页眉链接', () => {
+  it('包含 GitHub 仓库与官方网站链接，新窗口打开', () => {
+    renderHeader()
+    const github = screen.getByRole('link', { name: 'GitHub 仓库' })
+    expect(github).toHaveAttribute('href', 'https://github.com/zerone-agents/agent-hub')
+    expect(github).toHaveAttribute('target', '_blank')
+    expect(github).toHaveAttribute('rel', 'noopener noreferrer')
+    const site = screen.getByRole('link', { name: '官方网站' })
+    expect(site).toHaveAttribute('href', 'https://www.zerone.run/')
+    expect(site).toHaveAttribute('target', '_blank')
+  })
+})
+
 describe('AppHeader 用户菜单', () => {
   beforeEach(() => {
     setAuthRole('admin')

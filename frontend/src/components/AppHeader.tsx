@@ -9,6 +9,7 @@ import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
+import HeaderLinks from '@/components/HeaderLinks'
 import ChangePasswordModal from '@/features/users/ChangePasswordModal'
 
 const useStyles = createStyles(({ css }) => ({
@@ -280,6 +281,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
         </div>
 
         <div className={styles.actions}>
+          <HeaderLinks />
           <ThemeControls />
           <Dropdown menu={{ items: dropdownItems }} trigger={['click']}>
             <div className={styles.userArea}>
