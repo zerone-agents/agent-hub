@@ -116,6 +116,7 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 		"127.0.0.1", // publicHost
 		"127.0.0.1", // upstreamHost（no-Kong 回源 → fake runtime）
 		"", "", "", nil, nil, nil, "", "",
+		services.ModeCasdoor, // casdoor 形寻址（同 agent_chat_runtime_addressing_test）
 	)
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),

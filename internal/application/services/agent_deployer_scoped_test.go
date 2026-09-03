@@ -395,7 +395,7 @@ func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
 	// builtin mode omits the implicit default tenant from public URLs
 	// (issue #114): /runtime/<name>, not /runtime/default/<name>.
 	s := &AgentDeployerService{publicHost: "203.0.113.10", authMode: ModeBuiltin}
-	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
+	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", "", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/test", dto.RuntimeURL)
 	}
