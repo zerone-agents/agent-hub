@@ -55,10 +55,12 @@ func TestRuntimeAttachmentCode(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestRuntimeErrorMessage(t *testing.T) {
-	require.Equal(t, "附件已失效，请重新上传", runtimeErrorMessage(chat.ErrCodeAttachmentMissing))
-	require.Equal(t, "附件数量或大小超出限制", runtimeErrorMessage(chat.ErrCodeUploadLimitExceeded))
-	require.Equal(t, "附件信息无效", runtimeErrorMessage(chat.ErrCodeInvalidAttachment))
+func TestAttachmentCodeMessage(t *testing.T) {
+	require.Equal(t, "附件已失效，请重新上传", attachmentCodeMessage(chat.ErrCodeAttachmentMissing))
+	require.Equal(t, "附件大小超出限制", attachmentCodeMessage(chat.ErrCodeUploadLimitExceeded))
+	require.Equal(t, "附件信息无效", attachmentCodeMessage(chat.ErrCodeInvalidAttachment))
+	require.Equal(t, "附件已过期（部署代次变更），请重新上传", attachmentCodeMessage(chat.ErrCodeGenerationMismatch))
+	require.Equal(t, "Runtime 部署状态异常，请稍后重试", attachmentCodeMessage(chat.ErrCodeGenerationUnavailable))
 }
 
 type assertErr string

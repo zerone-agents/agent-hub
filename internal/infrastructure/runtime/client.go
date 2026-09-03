@@ -12,19 +12,9 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"control-panel/internal/domain/chat"
 )
-
-// RuntimeHTTPError is returned by client methods when the runtime responds
-// with a non-2xx status. It carries the status and body so handlers can map
-// runtime domain error codes (e.g. attachment_missing) to their own envelope.
-type RuntimeHTTPError struct {
-	Status int
-	Body   string
-}
-
-func (e *RuntimeHTTPError) Error() string {
-	return fmt.Sprintf("runtime returned HTTP %d: %s", e.Status, e.Body)
-}
 
 // HeaderExpectedContainerID is the runtime v2.7.0 expected-generation
 // contract header (runtime issue #61 / hub issue #94): when set on an
@@ -42,6 +32,47 @@ const HeaderExpectedContainerID = "X-Expected-Container-Id"
 // Client is an HTTP client for an open-agent-runtime container.
 type Client struct {
 	httpClient *http.Client
+}
+
+// RuntimeHTTPError marks a non-2xx runtime response. The upstream error body
+// is deliberately NOT carried: runtime responses can echo the resolved agent
+// config, whose MCP connection headers the hub armed at deploy time
+// (X-Agent-Capability / Authorization, issue #111) — interpolating that body
+// into an error that crosses the hub egress would leak the credentials past
+// the content redaction (main #121 constraint, preserved). The only body
+// derivative kept is an ALLOWLISTED attachment-domain code, parsed at the
+// client boundary and discarded immediately.
+type RuntimeHTTPError struct {
+	StatusCode int
+	// AttachmentCode is a stable attachment-domain code only (one of
+	// chat.ErrCode*); empty for non-attachment errors. Never raw body text.
+	AttachmentCode string
+}
+
+func (e *RuntimeHTTPError) Error() string {
+	if e.AttachmentCode != "" {
+		return fmt.Sprintf("runtime returned HTTP %d (attachment code %s)", e.StatusCode, e.AttachmentCode)
+	}
+	return fmt.Sprintf("runtime returned HTTP %d", e.StatusCode)
+}
+
+// allowlistedAttachmentCode extracts a stable attachment-domain code from a
+// runtime error body and DISCARDS the body — the only string allowed to
+// survive the client boundary (credential-leak constraint, main #121).
+func allowlistedAttachmentCode(body string) string {
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	switch payload.Code {
+	case chat.ErrCodeAttachmentMissing, chat.ErrCodeInvalidAttachment,
+		chat.ErrCodeUploadLimitExceeded, chat.ErrCodeGenerationMismatch,
+		chat.ErrCodeGenerationUnavailable:
+		return payload.Code
+	}
+	return ""
 }
 
 // NewClient returns a runtime Client. The HTTP setup is tuned for SSE:
@@ -100,9 +131,15 @@ func (c *Client) StreamRun(ctx context.Context, baseURL, agentName, apiKey strin
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// The body is parsed for an allowlisted attachment code and discarded
+		// immediately — raw body text never crosses this boundary (main #121
+		// credential-leak constraint).
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		resp.Body.Close()
-		return nil, &RuntimeHTTPError{Status: resp.StatusCode, Body: string(buf)}
+		return nil, &RuntimeHTTPError{
+			StatusCode:     resp.StatusCode,
+			AttachmentCode: allowlistedAttachmentCode(string(buf)),
+		}
 	}
 
 	return resp.Body, nil
@@ -136,7 +173,10 @@ func (c *Client) GetAgentDetail(ctx context.Context, baseURL, agentName, apiKey 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB cap; AgentDetail is small JSON
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("runtime returned HTTP %d: %s", resp.StatusCode, string(body))
+		// Discard the upstream body (see RuntimeHTTPError): it may echo the
+		// resolved MCP headers (capability / Authorization) which must never
+		// cross the hub egress, even inside an error string.
+		return nil, &RuntimeHTTPError{StatusCode: resp.StatusCode}
 	}
 
 	return body, nil

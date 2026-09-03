@@ -101,15 +101,20 @@ type AgentDeployerService struct {
 	upstreamHost  string // cfg.Deployer.DeployerURLHost; strict, no PublicHost fallback
 	cdnHost       string
 	encryptionKey string
-	runtimeAPIKey string
-	agentRepo     agentRepository
-	toolRepo      toolRepository
-	skillRepo     skillRepository
-	providerSvc   providerService
-	mcpSvc        mcpService
-	knowledgeSvc  knowledgeService
-	kongSvc       *KongGatewayService
-	aigcSvc       aigcConfigProvider
+	// capabilitySecret signs the per-agent knowledge MCP capabilities
+	// (issue #111 reopened). Independent from encryptionKey: provisioned
+	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
+	// never empty in production.
+	capabilitySecret string
+	runtimeAPIKey    string
+	agentRepo        agentRepository
+	toolRepo         toolRepository
+	skillRepo        skillRepository
+	providerSvc      providerService
+	mcpSvc           mcpService
+	knowledgeSvc     knowledgeService
+	kongSvc          *KongGatewayService
+	aigcSvc          aigcConfigProvider
 	// chatPushAPIKey / chatPushPublicURL 同时非空时，部署请求注入 hub 段
 	// （runtime 聊天记录回传配置）；任一为空则不注入 = 回传关闭。
 	chatPushAPIKey    string
@@ -252,29 +257,55 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // fetchable http(s) URLs when sending skills to the deployer.
 // chatPushAPIKey / chatPushPublicURL（来自 CHAT_PUSH_API_KEY /
 // CHAT_PUSH_PUBLIC_URL）同时非空时，部署请求注入 runtime 聊天记录回传配置。
-func NewAgentDeployerService(client *deployer.Client, publicHost, upstreamHost, cdnHost, encryptionKey, runtimeAPIKey string, knowledgeSvc *KnowledgeService, kongSvc *KongGatewayService, aigcSvc *AigcConfigService, chatPushAPIKey, chatPushPublicURL string, authMode AuthMode) *AgentDeployerService {
+// capabilitySecret 是 knowledge capability 的签名 secret（issue #111 重开：
+// 与 encryptionKey 解耦的独立 secret，main.go 经
+// systemsetting.EnsureKnowledgeCapabilitySecret 解析后注入；验证侧
+// AgentService 必须注入同一值）。
+// AgentDeployerConfig bundles the deployer service's construction
+// dependencies (Std-3: the 13-parameter constructor became a config
+// object). AuthMode is ModeBuiltin or ModeCasdoor; capabilitySecret is the
+// dedicated knowledge-capability signing secret (Ensure pattern, decoupled
+// from encryptionKey).
+type AgentDeployerConfig struct {
+	Client            *deployer.Client
+	PublicHost        string
+	UpstreamHost      string
+	CDNHost           string
+	EncryptionKey     string
+	RuntimeAPIKey     string
+	CapabilitySecret  string
+	KnowledgeSvc      *KnowledgeService
+	KongSvc           *KongGatewayService
+	AigcSvc           *AigcConfigService
+	ChatPushAPIKey    string
+	ChatPushPublicURL string
+	AuthMode          AuthMode
+}
+
+func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 	s := &AgentDeployerService{
-		client:            client,
-		publicHost:        publicHost,
-		upstreamHost:      upstreamHost,
-		cdnHost:           cdnHost,
-		encryptionKey:     encryptionKey,
-		runtimeAPIKey:     runtimeAPIKey,
+		client:            cfg.Client,
+		publicHost:        cfg.PublicHost,
+		upstreamHost:      cfg.UpstreamHost,
+		cdnHost:           cfg.CDNHost,
+		encryptionKey:     cfg.EncryptionKey,
+		capabilitySecret:  cfg.CapabilitySecret,
+		runtimeAPIKey:     cfg.RuntimeAPIKey,
 		agentRepo:         repository.NewAgentRepository(),
 		toolRepo:          repository.NewToolRepository(),
 		skillRepo:         repository.NewSkillRepository(),
-		providerSvc:       NewProviderService(encryptionKey),
-		mcpSvc:            NewMcpService(encryptionKey),
-		knowledgeSvc:      knowledgeSvc,
-		kongSvc:           kongSvc,
-		authMode:          authMode,
-		chatPushAPIKey:    chatPushAPIKey,
-		chatPushPublicURL: chatPushPublicURL,
+		providerSvc:       NewProviderService(cfg.EncryptionKey),
+		mcpSvc:            NewMcpService(cfg.EncryptionKey),
+		knowledgeSvc:      cfg.KnowledgeSvc,
+		kongSvc:           cfg.KongSvc,
+		authMode:          cfg.AuthMode,
+		chatPushAPIKey:    cfg.ChatPushAPIKey,
+		chatPushPublicURL: cfg.ChatPushPublicURL,
 		healthProbe:       defaultHealthProbe,
 		gatewayHealth:     &sync.Map{},
 	}
-	if aigcSvc != nil {
-		s.aigcSvc = aigcSvc
+	if cfg.AigcSvc != nil {
+		s.aigcSvc = cfg.AigcSvc
 	}
 	return s
 }
@@ -394,6 +425,9 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 
 	req.RuntimeToken = token
 	s.resolveMcpHeaders(req, token)
+	if err := s.attachKnowledgeCapabilities(req, tenantID, key, token); err != nil {
+		return nil, err
+	}
 
 	// Call deployer. Nothing is deregistered from Kong before this point: a
 	// pre-rejection (4xx protocol validation, 503 runtime floor) must leave a
@@ -490,11 +524,64 @@ func (s *AgentDeployerService) resolveRuntimeToken(ctx context.Context, key stri
 // substitutes the real token before sending the create request.
 const agentRuntimeTokenPlaceholder = "$agent_runtime_token"
 
-// agentIdentityHeader mirrors the handler-side constant of the same name
-// (internal/handler knowledge_mcp.go): the deployment-trusted per-agent
-// identity carried on the built-in knowledge MCP's connection headers.
-// Both packages hold their own copy — changes must stay in sync.
-const agentIdentityHeader = "X-Agent-Id"
+// attachKnowledgeCapabilities issues the server-verifiable per-agent
+// capability (issue #111 reopened) on every graph node's built-in knowledge
+// MCP: "X-Agent-Capability" = HMAC-signed payload binding tenant ID, the
+// root deployment key, the node's DB bare name, and the runtime token's
+// fingerprint. The header replaces the spoofable bare identity header; the
+// hub verifier (agent_service.go) grants only the bound identity's own
+// dataset bindings. A same-named key configured on the MCP server is
+// overridden — the deployment owns it exclusively. Header maps are rebuilt
+// rather than mutated so the MCP DTOs from the MCP service stay untouched,
+// mirroring resolveMcpHeaders (run before this, so the Authorization
+// placeholder is already substituted). Capabilities are credentials: they
+// must never be persisted or logged. The signing secret is the dedicated
+// capability secret (systemsetting.EnsureKnowledgeCapabilitySecret,
+// decoupled from the provider credential encryption key): startup
+// provisioning fails the boot before any deploy can, so the empty-secret
+// branch below is defense-in-depth against constructor omissions only —
+// issuing with an empty secret would ship publicly forgeable capabilities.
+func (s *AgentDeployerService) attachKnowledgeCapabilities(req *deployer.CreateAgentRequest, tenantID, deploymentKey, token string) error {
+	hasKnowledge := false
+	for i := range req.Agents {
+		if _, ok := req.Agents[i].McpServers["knowledge"]; ok {
+			hasKnowledge = true
+			break
+		}
+	}
+	if !hasKnowledge {
+		return nil
+	}
+	if s.capabilitySecret == "" {
+		// 防御纵深：secret 经启动 Ensure 恒非空，走到这里只可能是构造
+		// 遗漏（直接构造 service 绕过 main.go 注入的调用方）。拒绝签发，
+		// 不注入空 capability。
+		return fmt.Errorf("knowledge capability secret 未注入（AgentDeployerService 构造遗漏），拒绝签发 per-agent capability")
+	}
+	secret := []byte(s.capabilitySecret)
+	fp := tokenFingerprint(token)
+	for i := range req.Agents {
+		a := &req.Agents[i]
+		mcp, ok := a.McpServers["knowledge"]
+		if !ok {
+			continue
+		}
+		headers := make(map[string]string, len(mcp.Headers)+1)
+		for k, v := range mcp.Headers {
+			headers[k] = v
+		}
+		headers[knowledgeCapabilityHeader] = issueKnowledgeCapability(secret, knowledgeCapabilityPayload{
+			Version: 1,
+			Tenant:  tenantID,
+			Dep:     deploymentKey,
+			Agent:   a.Name,
+			TokenFp: fp,
+		})
+		mcp.Headers = headers
+		a.McpServers["knowledge"] = mcp
+	}
+	return nil
+}
 
 // resolveMcpHeaders replaces the $agent_runtime_token placeholder in MCP
 // server header values with the actual runtime token being deployed, across
@@ -516,30 +603,6 @@ func (s *AgentDeployerService) resolveMcpHeaders(req *deployer.CreateAgentReques
 			req.Agents[i].McpServers[name] = mcp
 		}
 	}
-}
-
-// knowledgeMcpHeaders returns the connection headers for one MCP server,
-// injecting the deployment-trusted per-agent identity on the built-in
-// knowledge MCP (issue #111 review P1-1). The hub-side authorizer resolves
-// the identity tenant-scoped and grants only that node's own dataset
-// bindings, so every graph node — root included — carries its DB bare name
-// (never the root's deploy key). The runtime can only call knowledge_search
-// with dataset_ids arguments and cannot forge connection headers, which is
-// what makes this header deployment-trusted. The key is owned exclusively
-// by the deployment: a same-named key configured on the MCP server is
-// overridden. The map is rebuilt rather than mutated so the MCP service
-// DTO stays untouched, mirroring resolveMcpHeaders (which in turn preserves
-// this key — its value carries no placeholder).
-func knowledgeMcpHeaders(mcpName string, src map[string]string, agentName string) map[string]string {
-	if mcpName != "knowledge" {
-		return src
-	}
-	headers := make(map[string]string, len(src)+1)
-	for k, v := range src {
-		headers[k] = v
-	}
-	headers[agentIdentityHeader] = agentName
-	return headers
 }
 
 // generateRuntimeToken returns a cryptographically random 32-char hex token,
@@ -923,9 +986,11 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 			return nil, nil, fmt.Errorf("内置 knowledge MCP 未配置可达地址，请设置 KNOWLEDGE_MCP_URL（完整路径需包含 /api/v1/knowledge/mcp），重启 Hub 后重新部署 Agent")
 		}
 		mcpServerConfigs[name] = deployer.McpServerConfig{
-			Type:    mcp.Type,
-			URL:     mcp.URL,
-			Headers: knowledgeMcpHeaders(name, mcp.Headers, cfg.Name),
+			Type: mcp.Type,
+			URL:  mcp.URL,
+			// Knowledge capabilities are attached later, after the runtime
+			// token is known (attachKnowledgeCapabilities in Deploy).
+			Headers: mcp.Headers,
 		}
 	}
 	def.McpServers = mcpServerConfigs

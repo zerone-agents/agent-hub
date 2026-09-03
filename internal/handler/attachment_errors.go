@@ -61,25 +61,28 @@ func runtimeAttachmentCode(body string) (string, bool) {
 	return "", false
 }
 
-// runtimeErrorMessage maps a runtime attachment domain code onto a neutral
-// Chinese user-facing message (CONTRIBUTING Standards 1: raw runtime text
-// never reaches the response envelope). The function stays pure — callers
-// log the raw body first and then use the return value; the SendMessage
-// relay and the upload-result mapping share it so both surfaces stay in
-// sync.
-func runtimeErrorMessage(code string) string {
+// attachmentCodeMessage maps an allowlisted attachment-domain code (parsed
+// at the runtime client boundary from StreamRun errors, or here from a raw
+// upload *http.Response) onto a fixed neutral Chinese message (CONTRIBUTING
+// Standards 1: raw runtime text never reaches the response envelope). The
+// function stays pure — callers log the raw body first and then use the
+// return value; the SendMessage relay, the upload-result mapping, and the
+// content proxy share it so all surfaces stay in sync.
+func attachmentCodeMessage(code string) string {
 	switch code {
 	case chat.ErrCodeAttachmentMissing:
 		return "附件已失效，请重新上传"
-	case chat.ErrCodeUploadLimitExceeded:
-		return "附件数量或大小超出限制"
 	case chat.ErrCodeGenerationMismatch:
 		// runtime v2.7.0 X-Expected-Container-Id 原子校验不通过（412）：
 		// 部署代次已变更，本地文件需重新上传后再发送。
 		return "附件已过期（部署代次变更），请重新上传"
 	case chat.ErrCodeGenerationUnavailable:
 		return "Runtime 部署状态异常，请稍后重试"
-	default: // invalid_attachment 等其余附件域码
+	case chat.ErrCodeInvalidAttachment:
+		return "附件信息无效"
+	case chat.ErrCodeUploadLimitExceeded:
+		return "附件大小超出限制"
+	default: // 非白名单码不会到达（client 边界 allowlist），防御性兜底
 		return "附件信息无效"
 	}
 }

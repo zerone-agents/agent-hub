@@ -266,30 +266,32 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		// Runtime run-attachment domain errors (attachment_missing etc.) are
 		// pre-run failures: surface the code so the frontend can retry from
-		// local files instead of persisting a system error message.
+		// local files instead of persisting a system error message. The code
+		// is parsed at the client boundary against an allowlist; the raw body
+		// never reaches the hub (main #121 credential-leak constraint).
 		var httpErr *runtime.RuntimeHTTPError
-		if errors.As(err, &httpErr) {
-			if code, ok := runtimeAttachmentCode(httpErr.Body); ok {
-				// 附件失效可重试语义（attachment_missing / generation_mismatch，
-				// runtime v2.7.0 契约）：回滚乐观持久化的用户消息，重发（重新
-				// 上传→再发）才不会在历史里留下重复的 user turn。其余域码
-				//（generation_unavailable 等）不回滚——瞬时部署状态异常，代次
-				// 本身未变，恢复后原样重发即可。删除失败仅日志——消息重复是
-				// 体验问题，不该阻塞错误上报。
-				if code == chat.ErrCodeAttachmentMissing || code == chat.ErrCodeGenerationMismatch {
-					if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
-						log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
-							tenantID, sessionID, msg.ID, delErr)
-					}
+		if errors.As(err, &httpErr) && httpErr.AttachmentCode != "" {
+			code := httpErr.AttachmentCode
+			// 附件失效可重试语义（attachment_missing / generation_mismatch，
+			// runtime v2.7.0 契约）：回滚乐观持久化的用户消息，重发（重新
+			// 上传→再发）才不会在历史里留下重复的 user turn。其余域码
+			//（generation_unavailable 等）不回滚——瞬时部署状态异常，代次
+			// 本身未变，恢复后原样重发即可。删除失败仅日志——消息重复是
+			// 体验问题，不该阻塞错误上报。
+			if code == chat.ErrCodeAttachmentMissing || code == chat.ErrCodeGenerationMismatch {
+				if delErr := h.svc.DeleteMessageByID(tenantID, userID, sessionID, msg.ID); delErr != nil {
+					log.Printf("[chat] rollback user message failed: tenant=%s session=%s msg=%s err=%v",
+						tenantID, sessionID, msg.ID, delErr)
 				}
-				// 契约（runtime v2.7.0）：412 generation_mismatch 后禁止无 header
-				// 降级重试——去掉 X-Expected-Container-Id 重发会把代次不匹配
-				// 静默退化为旧的 TOCTOU 已知边界。此分支只 respond，不重试。
-				log.Printf("[chat] runtime rejected run (pre-run failure): tenant=%s session=%s code=%s body=%s",
-					tenantID, sessionID, code, httpErr.Body)
-				respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(code))
-				return
 			}
+			// 契约（runtime v2.7.0）：412 generation_mismatch 后禁止无 header
+			// 降级重试——去掉 X-Expected-Container-Id 重发会把代次不匹配
+			// 静默退化为旧的 TOCTOU 已知边界。此分支只 respond，不重试。
+			// 响应体已在 client 边界丢弃（main #121），日志只留 code+status。
+			log.Printf("[chat] runtime rejected run (pre-run failure): tenant=%s session=%s code=%s status=%d",
+				tenantID, sessionID, code, httpErr.StatusCode)
+			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
+			return
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)

@@ -103,35 +103,12 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
-	// disallowedTools（issue #111 agent-local deny list）: 条目是工具名
-	// （内置名如 "Bash"、MCP 限定名如 "mcp__knowledge__lookup"），刻意不做
-	// 对已挂载工具的引用完整性校验；只做形态校验：trim 后非空、单项长度、
-	// 条目数、按 trim 值去重。
+	// disallowedTools（issue #111 agent-local deny list）: 形态校验全部
+	// 收在 parseDisallowedTools 单一来源，与 unpackConfigToModel 共享，
+	// 防两处规则漂移。
 	if v, ok := config["disallowedTools"].([]interface{}); ok {
-		const (
-			maxDisallowedTools     = 64
-			maxDisallowedToolChars = 128
-		)
-		if len(v) > maxDisallowedTools {
-			return fmt.Errorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
-		}
-		seen := make(map[string]bool, len(v))
-		for i, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
-			}
-			trimmed := strings.TrimSpace(s)
-			if trimmed == "" {
-				return fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
-			}
-			if len(trimmed) > maxDisallowedToolChars {
-				return fmt.Errorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
-			}
-			if seen[trimmed] {
-				return fmt.Errorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
-			}
-			seen[trimmed] = true
+		if _, err := parseDisallowedTools(v); err != nil {
+			return err
 		}
 	}
 
@@ -189,6 +166,51 @@ func ValidateConfig(config map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// parseDisallowedTools is the single source of truth for the issue #111
+// agent-local deny-list shape rules, shared by ValidateConfig (boundary
+// enforcement) and unpackConfigToModel (normalization before store/deploy)
+// so the two sites cannot drift. Entries are tool names (built-in like
+// "Bash", MCP-qualified like "mcp__knowledge__lookup"); referential
+// integrity against mounted tools is deliberately not checked. Each entry
+// is trimmed because the runtime matches tool names exactly — shipping an
+// un-trimmed entry would silently fail-open the deny list; trim-based
+// emptiness and dedup follow from that. Check order is part of the
+// contract (count first, then per item: string → non-blank → length →
+// duplicate) since callers surface these errors to API clients. The
+// returned list is trimmed and duplicate-free in input order; an absent
+// or wrong-typed config key stays each caller's concern (both skip
+// silently for legacy payloads).
+func parseDisallowedTools(raw []interface{}) ([]string, error) {
+	const (
+		maxDisallowedTools     = 64
+		maxDisallowedToolChars = 128
+	)
+	if len(raw) > maxDisallowedTools {
+		return nil, fmt.Errorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
+	}
+	seen := make(map[string]bool, len(raw))
+	items := make([]string, 0, len(raw))
+	for i, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
+		}
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
+		}
+		if len(trimmed) > maxDisallowedToolChars {
+			return nil, fmt.Errorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
+		}
+		if seen[trimmed] {
+			return nil, fmt.Errorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
+		}
+		seen[trimmed] = true
+		items = append(items, trimmed)
+	}
+	return items, nil
 }
 
 // validateProviderModel checks that the referenced provider exists and,

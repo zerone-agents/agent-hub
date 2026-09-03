@@ -122,13 +122,14 @@ func newAttachmentChatEnv(t *testing.T, opts attachmentFakeOpts) *attachmentChat
 	}))
 	t.Cleanup(deployerSrv.Close)
 
-	deployerSvc := services.NewAgentDeployerService(
-		deployer.NewClient(deployerSrv.URL, ""),
-		"127.0.0.1", // publicHost
-		"127.0.0.1", // upstreamHost（no-Kong 回源 → fake runtime）
-		"", "", "", nil, nil, nil, "", "",
-		services.ModeCasdoor, // casdoor 形寻址（同 agent_chat_runtime_addressing_test）
-	)
+	deployerSvc := services.NewAgentDeployerService(services.AgentDeployerConfig{
+		Client:       deployer.NewClient(deployerSrv.URL, ""),
+		PublicHost:   "127.0.0.1",
+		UpstreamHost: "127.0.0.1", // no-Kong 回源 → fake runtime
+		// CDNHost/EncryptionKey/RuntimeAPIKey/CapabilitySecret/knowledge/
+		// aigc/chat push 均留空：无 knowledge MCP、无 agent graph 下发
+		AuthMode: services.ModeCasdoor, // casdoor 形寻址（同 agent_chat_runtime_addressing_test）
+	})
 	chatSvc := services.NewAgentChatService(
 		repository.NewChatRepository(),
 		repository.NewAgentRepository(),
@@ -774,7 +775,7 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
-	require.Contains(t, w.Body.String(), "附件数量或大小超出限制")
+	require.Contains(t, w.Body.String(), "附件大小超出限制")
 }
 
 // seedUploadRecords inserts server-side upload records (the authorization

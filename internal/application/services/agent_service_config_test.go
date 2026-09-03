@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -246,12 +247,32 @@ func mustCreateAgent(t *testing.T, tenantID, name string) *agent.AgentConfig {
 	return cfg
 }
 
-// GetAgentKnowledgeDatasetsForRequest 按「部署时受信的请求身份」授权：
-// requestingID 必须是 token agent 自身或其直接挂载的 subagent，授权集
-// 永远只是该身份自己的绑定（issue #111 review P1-1：部署闭包并集语义
-// 已废弃——child 不得访问 parent/sibling 的 dataset，root 也不得访问
-// child 的）。
+// GetAgentKnowledgeDatasetsForRequest 按「服务端可验证的 per-agent
+// capability」授权（issue #111 重开）：呈现的 X-Agent-Capability 必须验签
+// 通过并绑定 token agent 的 tenant/部署 key/token 指纹，身份必须是 token
+// agent 自身或其直接挂载的 subagent；授权集永远只是该身份自己的绑定
+// （部署闭包并集语义已废弃——child 不得访问 parent/sibling 的 dataset，
+// root 也不得访问 child 的）。缺失 capability 回退 token agent 自身。
 func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
+	const (
+		// capSecret 模拟 Ensure 解析出的独立 capability secret；构造
+		// AgentService 时 provider 加密密钥恒留空——坐实两种密钥解耦
+		// （空 provider 密钥环境下 capability 授权照常工作，即 ECS 实测
+		// 暴露的缺陷场景）。
+		capSecret    = "test-capability-secret-0123456789abcdef"
+		runtimeToken = "0123456789abcdef0123456789abcdef"
+	)
+	// issueCap 按 facade 期望的绑定三元组签发 capability（tenant=default，
+	// dep=DeployKey("default","root")，token 指纹默认取 runtimeToken）。
+	issueCap := func(agentName, token string) string {
+		return issueKnowledgeCapability([]byte(capSecret), knowledgeCapabilityPayload{
+			Version: 1,
+			Tenant:  "default",
+			Dep:     DeployKey("default", "root"),
+			Agent:   agentName,
+			TokenFp: tokenFingerprint(token),
+		})
+	}
 	newFixture := func(t *testing.T) (*AgentService, *repository.AgentRepository) {
 		t.Helper()
 		setupAgentKnowledgeAuthTestDB(t)
@@ -262,57 +283,60 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{childA.ID, childB.ID}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root", "ds-shared"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childA.ID, []string{"ds-child", "ds-shared"}))
-		return NewAgentService("test-encryption-key"), agentRepo
+		return NewAgentService("", capSecret), agentRepo
 	}
 
-	t.Run("token agent 自身 → 仅自身绑定", func(t *testing.T) {
+	t.Run("root capability → 仅自身绑定", func(t *testing.T) {
 		svc, _ := newFixture(t)
-		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "root")
+		got, requesting, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("root", runtimeToken), runtimeToken)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"ds-root", "ds-shared"}, got)
-		assert.NotContains(t, got, "ds-child", "root must not reach child datasets under identity auth")
+		assert.Equal(t, "root", requesting)
+		assert.NotContains(t, got, "ds-child", "root must not reach child datasets under capability auth")
 	})
 
-	t.Run("直接 child 身份 → 仅 child 自身绑定（parent/sibling 均不可达）", func(t *testing.T) {
+	t.Run("直接 child capability → 仅 child 自身绑定（parent/sibling 均不可达）", func(t *testing.T) {
 		svc, _ := newFixture(t)
-		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "child-a")
+		got, requesting, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("child-a", runtimeToken), runtimeToken)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"ds-child", "ds-shared"}, got)
+		assert.Equal(t, "child-a", requesting)
 		assert.NotContains(t, got, "ds-root", "child must not reach parent datasets")
 
 		// 挂载但无绑定的 sibling：空集而非并集。
-		gotB, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "child-b")
+		gotB, requestingB, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("child-b", runtimeToken), runtimeToken)
 		require.NoError(t, err)
 		assert.Empty(t, gotB, "mounted child with no bindings grants nothing")
+		assert.Equal(t, "child-b", requestingB)
 	})
 
-	t.Run("未挂载的同租户 agent 身份 → 拒绝", func(t *testing.T) {
+	t.Run("未挂载的同租户 agent capability → sentinel 拒绝", func(t *testing.T) {
 		svc, agentRepo := newFixture(t)
 		outsider := mustCreateAgent(t, "default", "outsider")
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(outsider.ID, []string{"ds-outsider"}))
 
-		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "outsider")
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("outsider", runtimeToken), runtimeToken)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "不属于")
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
 	})
 
-	t.Run("跨租户脏引用 → fail-closed 拒绝", func(t *testing.T) {
+	t.Run("capability 绑定跨租户脏引用身份 → fail-closed 拒绝", func(t *testing.T) {
 		setupAgentKnowledgeAuthTestDB(t)
 		agentRepo := repository.NewAgentRepository()
 		root := mustCreateAgent(t, "default", "root")
 		ghost := mustCreateAgent(t, "tenant-b", "ghost")
 		// repo 层 ReplaceSubagents 不做租户校验（校验在 service UpdateSubagents），
-		// 直接种入脏引用模拟存量数据：GetSubagents 的 JOIN 能取到名字，但
-		// default 租户下 GetByName 解析失败——必须是明确拒绝而非旧闭包的
-		// 跳过语义。
+		// 直接种入脏引用模拟存量数据：GetSubagents 的 JOIN 能取到名字
+		// （capability 闭包校验通过），但 default 租户下 GetByName 解析失败
+		// ——必须是明确拒绝而非旧闭包的跳过语义。
 		require.NoError(t, agentRepo.ReplaceSubagents(root.ID, []uint64{ghost.ID}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(ghost.ID, []string{"ds-ghost"}))
 
-		svc := NewAgentService("test-encryption-key")
-		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "ghost")
+		svc := NewAgentService("", capSecret)
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("ghost", runtimeToken), runtimeToken)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "不属于")
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
 	})
 
 	t.Run("同名跨租户身份解析 tenant-scoped", func(t *testing.T) {
@@ -326,24 +350,79 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childDefault.ID, []string{"ds-child"}))
 		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(childTenantB.ID, []string{"ds-tenant-b"}))
 
-		svc := NewAgentService("test-encryption-key")
-		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "shared-name")
+		svc := NewAgentService("", capSecret)
+		got, requesting, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("shared-name", runtimeToken), runtimeToken)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"ds-child"}, got)
+		assert.Equal(t, "shared-name", requesting)
 		assert.NotContains(t, got, "ds-tenant-b")
 	})
 
-	t.Run("requestingID 为空回退 token agent 自身", func(t *testing.T) {
+	t.Run("capability 缺失回退 token agent 自身", func(t *testing.T) {
 		svc, _ := newFixture(t)
-		got, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "")
+		got, requesting, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "", runtimeToken)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"ds-root", "ds-shared"}, got)
+		assert.Equal(t, "root", requesting)
+	})
+
+	t.Run("token 轮换：旧 token 签的 capability → TokenFp 失配拒绝", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		rotated := "ffffffffffffffffffffffffffffffff"
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("root", rotated), runtimeToken)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
+	})
+
+	t.Run("篡改 capability（payload 换身份保签名）→ 拒绝", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		orig := issueCap("child-a", runtimeToken)
+		parts := strings.Split(orig, ".")
+		require.Len(t, parts, 3)
+		payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+		require.NoError(t, err)
+		// 解码 payload 段换身份后原样保签名重编码——签名覆盖的是原始字节，
+		// 篡改必然失配。
+		forged := strings.Replace(string(payloadJSON), `"a":"child-a"`, `"a":"root"`, 1)
+		require.NotEqual(t, string(payloadJSON), forged, "fixture payload must contain the agent field")
+		tampered := parts[0] + "." + base64.RawURLEncoding.EncodeToString([]byte(forged)) + "." + parts[2]
+		_, _, err = svc.GetAgentKnowledgeDatasetsForRequest("default", "root", tampered, runtimeToken)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
+	})
+
+	t.Run("跨部署 capability（dep 绑定他人）→ 拒绝", func(t *testing.T) {
+		svc, _ := newFixture(t)
+		crossDep := issueKnowledgeCapability([]byte(capSecret), knowledgeCapabilityPayload{
+			Version: 1, Tenant: "default", Dep: DeployKey("default", "another-root"),
+			Agent: "root", TokenFp: tokenFingerprint(runtimeToken),
+		})
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", crossDep, runtimeToken)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
+	})
+
+	t.Run("服务端 capability secret 未注入（构造遗漏）：呈现 capability 一律拒绝（不回退）", func(t *testing.T) {
+		setupAgentKnowledgeAuthTestDB(t)
+		agentRepo := repository.NewAgentRepository()
+		root := mustCreateAgent(t, "default", "root")
+		require.NoError(t, agentRepo.ReplaceAgentKnowledgeDatasets(root.ID, []string{"ds-root"}))
+
+		svc := NewAgentService("", "") // 防御纵深用例：secret 经 Ensure 恒非空，空值只可能是构造遗漏
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", issueCap("root", runtimeToken), runtimeToken)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrKnowledgeCapabilityDenied)
+
+		// 缺失 capability 的存量回退不受影响（token agent 自身绑定）。
+		got, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "root", "", runtimeToken)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"ds-root"}, got)
 	})
 
 	t.Run("token agent 不存在", func(t *testing.T) {
 		setupAgentKnowledgeAuthTestDB(t)
-		svc := NewAgentService("test-encryption-key")
-		_, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "no-such-agent", "no-such-agent")
+		svc := NewAgentService("", capSecret)
+		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "no-such-agent", issueCap("no-such-agent", runtimeToken), runtimeToken)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "不存在")
 	})

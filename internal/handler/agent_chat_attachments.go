@@ -265,7 +265,7 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		if code, ok := runtimeAttachmentCode(body); ok {
 			log.Printf("[chat] runtime upload rejected: session=%s status=%d code=%s body=%s",
 				sessionID, resp.StatusCode, code, body)
-			respondErrorCode(c, attachmentHTTPStatus(code), code, runtimeErrorMessage(code))
+			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
 			return
 		}
 		// mid-stream abort（runtime 未排空 body 即回响应后关闭连接）：
@@ -276,7 +276,7 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		if readErr != nil && resp.StatusCode == http.StatusRequestEntityTooLarge {
 			log.Printf("[chat] runtime 413 body unreadable (mid-stream abort): session=%s readErr=%v", sessionID, readErr)
 			respondErrorCode(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded,
-				"附件数量或大小超出限制")
+				attachmentCodeMessage(chat.ErrCodeUploadLimitExceeded))
 			return
 		}
 		log.Printf("[chat] runtime upload failed: session=%s status=%d", sessionID, resp.StatusCode)
@@ -369,11 +369,11 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		// runtime v2.7.0 原子代次校验不通过（412）：容器已重建，该 path 属于
 		// 旧代次。透传域码 + 中文文案，前端据此提示重新上传。
 		respondErrorCode(c, http.StatusPreconditionFailed, chat.ErrCodeGenerationMismatch,
-			runtimeErrorMessage(chat.ErrCodeGenerationMismatch))
+			attachmentCodeMessage(chat.ErrCodeGenerationMismatch))
 	case resp.StatusCode == http.StatusServiceUnavailable:
 		// runtime 无法确定自身容器身份（503 generation_unavailable）。
 		respondErrorCode(c, http.StatusServiceUnavailable, chat.ErrCodeGenerationUnavailable,
-			runtimeErrorMessage(chat.ErrCodeGenerationUnavailable))
+			attachmentCodeMessage(chat.ErrCodeGenerationUnavailable))
 	default:
 		log.Printf("[chat] attachment content runtime error: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)

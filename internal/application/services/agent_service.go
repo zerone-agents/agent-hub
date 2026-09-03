@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,17 +23,26 @@ type AgentService struct {
 	mcpRepo       *repository.McpRepository
 	providerSvc   *ProviderService
 	encryptionKey string
+	// capabilitySecret verifies the per-agent knowledge MCP capabilities
+	// (issue #111 reopened). Independent from encryptionKey: provisioned
+	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
+	// injected by main.go with the same value the deployer-side issuer
+	// (AgentDeployerService) holds.
+	capabilitySecret string
 }
 
 // NewAgentService creates a new AgentService with default repositories.
-func NewAgentService(encryptionKey string) *AgentService {
+// capabilitySecret 是 knowledge capability 的验证 secret（与 encryptionKey
+// 解耦的独立 secret，须与 AgentDeployerService 注入的签发值同源同值）。
+func NewAgentService(encryptionKey, capabilitySecret string) *AgentService {
 	return &AgentService{
-		repo:          repository.NewAgentRepository(),
-		toolRepo:      repository.NewToolRepository(),
-		skillRepo:     repository.NewSkillRepository(),
-		mcpRepo:       repository.NewMcpRepository(),
-		providerSvc:   NewProviderService(encryptionKey),
-		encryptionKey: encryptionKey,
+		repo:             repository.NewAgentRepository(),
+		toolRepo:         repository.NewToolRepository(),
+		skillRepo:        repository.NewSkillRepository(),
+		mcpRepo:          repository.NewMcpRepository(),
+		providerSvc:      NewProviderService(encryptionKey),
+		encryptionKey:    encryptionKey,
+		capabilitySecret: capabilitySecret,
 	}
 }
 
@@ -609,26 +617,15 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MaxSessionQueries = &n
 	}
 
-	// Handle disallowedTools (issue #111 agent-local deny list): accept a
-	// string array only; non-string items fail the whole unpack (validator
-	// separately enforces per-item constraints). Each entry is trimmed here
-	// so the stored/deployed value matches the validator's trim-based
-	// dedup/emptiness semantics — runtime matches tool names exactly, so
-	// shipping an un-trimmed entry would silently fail-open the deny list.
-	// Whitespace-only entries are rejected the same way as non-strings.
-	// Absent key leaves the field untouched.
+	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
+	// trimming and boundary rules all live in parseDisallowedTools — the
+	// single source shared with ValidateConfig — so the stored/deployed
+	// value always matches the validator's semantics. Absent key leaves
+	// the field untouched.
 	if v, ok := config["disallowedTools"].([]interface{}); ok {
-		items := make([]string, 0, len(v))
-		for i, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
-			}
-			trimmed := strings.TrimSpace(s)
-			if trimmed == "" {
-				return fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
-			}
-			items = append(items, trimmed)
+		items, err := parseDisallowedTools(v)
+		if err != nil {
+			return err
 		}
 		cfg.DisallowedTools = items
 	}
@@ -906,37 +903,70 @@ func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]
 }
 
 // GetAgentKnowledgeDatasetsForRequest resolves the dataset ids the requesting
-// identity may access. tokenAgentName is the agent whose runtime token was
-// presented; requestingID is the deployment-trusted X-Agent-Id (falls back
-// to tokenAgentName itself when absent). requestingID must be the token
-// agent itself or one of its direct subagents; the granted set is the
-// requesting agent's OWN bindings only — never a closure union.
-// 日志不含 token/headers。
-func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, requestingID string) ([]string, error) {
+// identity may access (issue #111 reopened). tokenAgentName is the agent
+// whose runtime token was presented; capabilityHeader is the hub-signed
+// X-Agent-Capability injected into MCP connection headers at deploy time
+// (missing → legacy fallback to tokenAgentName's own bindings); bearerToken
+// is the raw presented token, used for the TokenFp failure-domain check. A
+// presented capability must verify (HMAC plus tenant/deployment/token
+// binding) and bind an identity inside {tokenAgent} ∪ its direct subagents;
+// the granted set is that identity's OWN bindings only — never a closure
+// union. Verification and binding failures return an error wrapping
+// ErrKnowledgeCapabilityDenied (the handler maps it to a neutral deny);
+// the legacy fallback returns (ownDatasets, ownName, nil). 日志不含
+// token/capability 值。
+func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
 	agentCfg, err := s.repo.GetByName(tenantID, tokenAgentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在: %w", tokenAgentName, err)
+		return nil, "", fmt.Errorf("Agent '%s' 不存在: %w", tokenAgentName, err)
 	}
-	if requestingID == "" {
-		requestingID = tokenAgentName
-	}
-	if requestingID != tokenAgentName {
-		subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
+	if capabilityHeader == "" {
+		// 存量兼容：未携带 capability 的已部署 agents.yaml 回到 #111 前
+		// 的最严格行为——token agent 自身绑定。
+		datasets, err := s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 		if err != nil {
-			return nil, fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", tokenAgentName, err)
+			return nil, "", fmt.Errorf("查询 Agent '%s' 知识库绑定失败: %w", tokenAgentName, err)
 		}
-		// 先 tenant-scoped 解析（悬空/跨租户引用在此暴露），再比对直接挂载
-		// 成员；任一失败都 fail-closed，与「非成员」保持同一对外语义。
-		reqCfg, resolveErr := s.repo.GetByName(tenantID, requestingID)
-		if resolveErr != nil {
-			log.Printf("knowledge auth: resolve requesting identity %q failed (agent=%s tenant=%s): %v", requestingID, tokenAgentName, tenantID, resolveErr)
-		}
-		if resolveErr != nil || !slices.Contains(subagentNames, requestingID) {
-			return nil, fmt.Errorf("请求身份 %q 不属于 Agent %q 的部署图", requestingID, tokenAgentName)
-		}
-		agentCfg = reqCfg
+		return datasets, agentCfg.Name, nil
 	}
-	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
+	if s.capabilitySecret == "" {
+		// Fail-closed 防御纵深：secret 经启动 Ensure 恒非空，空值只可能是
+		// 构造遗漏。此时拒绝一切已呈现的 capability——HKDF(empty) 公开可算，
+		// 继续验签等于接受伪造。回退仅适用于缺失 header，不适用于校验失败。
+		log.Printf("knowledge capability: capability secret not injected, presented capability denied (tenant=%s agent=%s)", tenantID, tokenAgentName)
+		return nil, "", fmt.Errorf("%w: 服务端未配置签名密钥", ErrKnowledgeCapabilityDenied)
+	}
+	subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", tokenAgentName, err)
+	}
+	allowedAgents := make(map[string]struct{}, len(subagentNames)+1)
+	allowedAgents[agentCfg.Name] = struct{}{}
+	for _, n := range subagentNames {
+		allowedAgents[n] = struct{}{}
+	}
+	agentName, err := verifyKnowledgeCapability(
+		[]byte(s.capabilitySecret), capabilityHeader,
+		tenantID, DeployKey(tenantID, agentCfg.Name), tokenFingerprint(bearerToken),
+		allowedAgents,
+	)
+	if err != nil {
+		// 失败原因只进服务端日志；verify 错误不含 capability 值。
+		log.Printf("knowledge capability: rejected (tenant=%s agent=%s): %v", tenantID, tokenAgentName, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrKnowledgeCapabilityDenied, err)
+	}
+	reqCfg, err := s.repo.GetByName(tenantID, agentName)
+	if err != nil {
+		// capability 绑定的身份在当前租户下不可解析（悬空/跨租户引用）：
+		// 与「非闭包成员」同一对外语义，fail-closed。
+		log.Printf("knowledge capability: bound identity unresolvable (tenant=%s agent=%s identity=%s): %v", tenantID, tokenAgentName, agentName, err)
+		return nil, "", fmt.Errorf("%w: 授权身份解析失败", ErrKnowledgeCapabilityDenied)
+	}
+	datasets, err := s.repo.GetKnowledgeDatasetIDsByAgent(reqCfg.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("查询 Agent '%s' 知识库绑定失败: %w", agentName, err)
+	}
+	return datasets, agentName, nil
 }
 
 // UpdateAgentKnowledgeDatasets replaces the dataset bindings for an agent and

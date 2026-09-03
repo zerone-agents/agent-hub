@@ -113,6 +113,21 @@ func main() {
 		log.Fatalf("Invalid auth config: %v", err)
 	}
 
+	// Knowledge capability secret（issue #111 重开修复）：per-agent capability
+	// 的签名 secret，与 provider 凭证加密密钥（PROVIDER_ENCRYPTION_KEY）解耦
+	// 的独立安全关注点。Ensure 模式（与 AUTH_JWT_SECRET 对称）：显式配置
+	// KNOWLEDGE_CAPABILITY_SECRET 时原样使用不写库；未配置时生成随机 secret
+	// 持久化到 system_settings（空 provider 密钥环境下 knowledge MCP 部署
+	// 不再被拦截）。签发侧（AgentDeployerService）与验证侧（AgentService）
+	// 必须同源同值——此处一次 Ensure、两处注入。
+	capabilitySecret, err := systemsetting.EnsureKnowledgeCapabilitySecret(database.GetDB(), cfg.Knowledge.CapabilitySecret)
+	if err != nil {
+		log.Fatalf("Failed to provision knowledge capability secret: %v", err)
+	}
+	if cfg.Knowledge.CapabilitySecret == "" {
+		log.Println("Knowledge: capability secret auto-provisioned and persisted in the database (set KNOWLEDGE_CAPABILITY_SECRET explicitly to override)")
+	}
+
 	// ==================== 认证装配（按 auth.mode 二选一） ====================
 	var authProvider auth.Provider
 	var casdoorProvider *auth.CasdoorProvider
@@ -206,22 +221,23 @@ func main() {
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
-	deployerService := services.NewAgentDeployerService(
-		deployerClient,
-		cfg.Deployer.PublicHost,
-		cfg.Deployer.DeployerURLHost,
-		cfg.OSS.CDNHost,
-		cfg.Provider.EncryptionKey,
-		cfg.Deployer.RuntimeAPIKey,
-		knowledgeService,
-		kongService,
-		aigcConfigSvc,
-		cfg.ChatPush.APIKey,
-		cfg.ChatPush.PublicURL,
-		services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
-	)
+	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
+		Client:            deployerClient,
+		PublicHost:        cfg.Deployer.PublicHost,
+		UpstreamHost:      cfg.Deployer.DeployerURLHost,
+		CDNHost:           cfg.OSS.CDNHost,
+		EncryptionKey:     cfg.Provider.EncryptionKey,
+		RuntimeAPIKey:     cfg.Deployer.RuntimeAPIKey,
+		CapabilitySecret:  capabilitySecret, // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
+		KnowledgeSvc:      knowledgeService,
+		KongSvc:           kongService,
+		AigcSvc:           aigcConfigSvc,
+		ChatPushAPIKey:    cfg.ChatPush.APIKey,
+		ChatPushPublicURL: cfg.ChatPush.PublicURL,
+		AuthMode:          services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
+	})
 
-	agentService := services.NewAgentService(cfg.Provider.EncryptionKey)
+	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
