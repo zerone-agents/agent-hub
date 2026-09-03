@@ -111,6 +111,35 @@ func TestDisallowedToolsConfigKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("unpack 条目 trim 归一", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		if err := unpackConfigToModel(map[string]interface{}{
+			"disallowedTools": []interface{}{"  Bash  ", "mcp__knowledge__lookup"},
+		}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		want := []string{"Bash", "mcp__knowledge__lookup"}
+		if len(cfg.DisallowedTools) != len(want) || cfg.DisallowedTools[0] != want[0] || cfg.DisallowedTools[1] != want[1] {
+			t.Fatalf("cfg.DisallowedTools = %#v, want %#v (entries must be trimmed so runtime exact-match deny actually applies)", cfg.DisallowedTools, want)
+		}
+	})
+
+	t.Run("unpack trim 后为空的条目报错", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		err := unpackConfigToModel(map[string]interface{}{
+			"disallowedTools": []interface{}{"   "},
+		}, cfg, "")
+		if err == nil {
+			t.Fatal("unpackConfigToModel must reject whitespace-only disallowedTools items")
+		}
+		if !strings.Contains(err.Error(), "disallowedTools") {
+			t.Fatalf("error should mention disallowedTools, got: %v", err)
+		}
+		if cfg.DisallowedTools != nil {
+			t.Fatalf("cfg.DisallowedTools must stay nil on error, got %#v", cfg.DisallowedTools)
+		}
+	})
+
 	t.Run("unpack 缺省 nil", func(t *testing.T) {
 		cfg := &agent.AgentConfig{}
 		if err := unpackConfigToModel(map[string]interface{}{"systemPrompt": "p"}, cfg, ""); err != nil {
