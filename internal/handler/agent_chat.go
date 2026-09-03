@@ -135,21 +135,10 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 
 	// 3. Build runtime request body. Re-use the runtime SDK session id if this
-	// control-panel session has already been bound to one. The run body must
-	// carry the agent's maxSessionQueries when configured (issue #111): the
-	// runtime forwards body.maxSessionQueries into the SDK query overrides —
-	// including an implicit undefined when absent — which would clobber the
-	// agents.yaml value and silently disable session compaction.
-	body := map[string]any{"message": req.Content}
+	// control-panel session has already been bound to one.
+	body := map[string]string{"message": req.Content}
 	if sess.RuntimeSessionID != "" {
 		body["sessionId"] = sess.RuntimeSessionID
-	}
-	if maxQ, err := h.svc.AgentMaxSessionQueries(tenantID, agentName); err != nil {
-		h.saveErrorMessage(tenantID, userID, sessionID, "Agent 配置读取失败："+err.Error())
-		respondError(c, http.StatusInternalServerError, "agent config unavailable")
-		return
-	} else if maxQ != nil {
-		body["maxSessionQueries"] = *maxQ
 	}
 	bodyBytes, _ := json.Marshal(body)
 

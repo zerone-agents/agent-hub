@@ -294,19 +294,3 @@ func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, s
 	}
 	return baseURL, status.APIKey, nil
 }
-
-// AgentMaxSessionQueries returns the agent's configured session query cap
-// (nil = unset, the caller must not send the field). The run body MUST carry
-// it when configured: the runtime forwards body.maxSessionQueries into the
-// SDK query overrides on every run — including an implicit undefined when
-// absent — and the SDK's spread merge (`{...config, ...overrides}`) lets that
-// undefined clobber the agents.yaml value, silently disabling the SDK's
-// session-query compaction (verified end-to-end: with the field the Nth
-// over-limit query emits compact/progress+end; without it, never).
-func (s *AgentChatService) AgentMaxSessionQueries(tenantID, agentName string) (*int, error) {
-	cfg, err := s.agentRepo.GetByName(tenantID, agentName)
-	if err != nil {
-		return nil, fmt.Errorf("load agent config: %w", err)
-	}
-	return cfg.MaxSessionQueries, nil
-}
