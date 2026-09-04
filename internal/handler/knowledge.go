@@ -137,7 +137,7 @@ func (h *KnowledgeHandler) DeleteDatasets(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.service.DeleteDatasets(c.Request.Context(), req); err != nil {
+	if err := h.service.DeleteDatasets(c.Request.Context(), tenant.GetTenantID(c), req); err != nil {
 		respondKnowledgeError(c, err)
 		return
 	}
@@ -379,7 +379,7 @@ func respondKnowledgeError(c *gin.Context, err error) {
 	if errors.As(err, &inUse) {
 		datasets := make([]gin.H, 0, len(inUse.Datasets))
 		for _, d := range inUse.Datasets {
-			datasets = append(datasets, gin.H{"id": d.ID, "agents": d.Agents})
+			datasets = append(datasets, gin.H{"id": d.ID, "agents": d.Agents, "foreign": d.Foreign})
 		}
 		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"datasets": datasets}})
 		return
