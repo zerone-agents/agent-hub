@@ -288,6 +288,30 @@ func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs(tenantID string) (map[s
 	return result, nil
 }
 
+// GetDatasetBindings 返回全表 dataset_id → 绑定 agent 名单（issue #122 删除
+// 保护 409 载荷）。跨租户全量：对齐 GetAgentNamesByToolID 先例——in-use 事实
+// 必须跨租户才有效，名单仅作提示。控制面小表，全表拉取由 service 按需过滤。
+func (r *AgentRepository) GetDatasetBindings() (map[string][]string, error) {
+	type row struct {
+		DatasetID string
+		AgentName string
+	}
+	var rows []row
+	err := r.db.Table("agent_knowledge_datasets").
+		Select("agent_knowledge_datasets.dataset_id as dataset_id, agents.name as agent_name").
+		Joins("JOIN agents ON agent_knowledge_datasets.agent_id = agents.id").
+		Order("agents.name ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string)
+	for _, r := range rows {
+		result[r.DatasetID] = append(result[r.DatasetID], r.AgentName)
+	}
+	return result, nil
+}
+
 // EnsureAgentToolBinding makes sure the agent is bound to the given tool.
 func (r *AgentRepository) EnsureAgentToolBinding(agentID, toolID uint64) error {
 	var count int64

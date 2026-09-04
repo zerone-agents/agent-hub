@@ -442,3 +442,26 @@ func TestAgentRepository_GetAllAgentKnowledgeDatasetIDs_TenantIsolation(t *testi
 	require.NoError(t, err)
 	require.Equal(t, map[string][]string{"coder": {"ds-b"}}, bMap)
 }
+
+// issue #122：全表反查 dataset_id → 绑定 agent 名单（跨租户，409 载荷）。
+func TestAgentRepository_GetDatasetBindings_CrossTenant(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	alpha := &agent.AgentConfig{Name: "alpha"}
+	beta := &agent.AgentConfig{Name: "beta"}
+	gamma := &agent.AgentConfig{Name: "gamma"}
+	require.NoError(t, repo.Create("org-a", alpha))
+	require.NoError(t, repo.Create("org-b", beta))
+	require.NoError(t, repo.Create("org-a", gamma))
+
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: alpha.ID, DatasetID: "kb-shared"}).Error)
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: beta.ID, DatasetID: "kb-shared"}).Error)
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: gamma.ID, DatasetID: "kb-a-only"}).Error)
+
+	got, err := repo.GetDatasetBindings()
+	require.NoError(t, err)
+	require.Equal(t, map[string][]string{
+		"kb-shared": {"alpha", "beta"},
+		"kb-a-only": {"gamma"},
+	}, got)
+}
