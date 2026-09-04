@@ -311,12 +311,12 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	if t.IsBuiltin() {
 		return agent.ErrToolIsBuiltin
 	}
-	agents, err := s.repo.GetAgentNamesByToolID(t.ID)
+	own, foreign, err := s.repo.GetToolBindingsScoped(tenantID, t.ID)
 	if err != nil {
 		return fmt.Errorf("query tool agent associations failed: %w", err)
 	}
-	if len(agents) > 0 {
-		return &agent.ToolInUseError{ToolName: t.Name, Agents: agents}
+	if len(own) > 0 || foreign {
+		return &agent.ToolInUseError{ToolName: t.Name, Agents: own, Foreign: foreign}
 	}
 	// 顺序契约（expert review Fix 1）：先删 DB 行，后清 OSS 对象。若先删对象
 	// 而行删除失败，会残留指向已删对象的 ready 行（false-ready），下载/部署
