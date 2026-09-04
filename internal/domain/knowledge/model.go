@@ -266,6 +266,32 @@ func NormalizeChunk(raw map[string]any) Chunk {
 	return Chunk(renameInbound(raw, InboundChunkKeyMap))
 }
 
+// retrievalDocumentNameAliases lists retrieval-specific keys that may carry
+// the document name, in resolution order after an explicit document_name.
+var retrievalDocumentNameAliases = []string{"docnm_kwd", "document_keyword"}
+
+// NormalizeRetrievalChunk normalizes a chunk from MultiRAG's /api/v1/retrieval
+// response (issue #119). It applies the plain inbound chunk mapping first,
+// then resolves the document name: an existing non-empty document_name wins;
+// otherwise the first non-empty alias (docnm_kwd, then document_keyword) is
+// promoted and its key removed (matching renameInbound's move semantics).
+// Unconsumed aliases pass through untouched. doc_id → document_id comes from
+// the plain chunk map and is preserved for source attribution.
+func NormalizeRetrievalChunk(raw map[string]any) Chunk {
+	dst := map[string]any(NormalizeChunk(raw))
+	if firstNonEmptyString(dst["document_name"]) != "" {
+		return Chunk(dst)
+	}
+	for _, alias := range retrievalDocumentNameAliases {
+		if name := firstNonEmptyString(dst[alias]); name != "" {
+			dst["document_name"] = name
+			delete(dst, alias)
+			break
+		}
+	}
+	return Chunk(dst)
+}
+
 func DatasetMutationToRemote(req DatasetMutationRequest) map[string]any {
 	return renameOutbound(map[string]any(req), OutboundDatasetKeyMap)
 }

@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
@@ -112,6 +115,14 @@ func normalizePaging(page, pageSize *int) (int, int) {
 type KnowledgeMcpHandler struct {
 	knowledgeService KnowledgeMcpService
 	agentService     AgentMcpService
+
+	// probeMu 保护 probeCooldown（canonical dataset 集签名 → 上次探测
+	// 时刻）与 probeSem 的惰性初始化。
+	probeMu       sync.Mutex
+	probeCooldown map[string]time.Time
+	// probeSem 是容量 mcpDatasetProbeMaxConcurrent 的 try-acquire 信号量，
+	// 全局限界在途探测 goroutine 数。
+	probeSem chan struct{}
 }
 
 // NewKnowledgeMcpHandler creates a new KnowledgeMcpHandler.
@@ -119,6 +130,8 @@ func NewKnowledgeMcpHandler(knowledgeService KnowledgeMcpService, agentService A
 	return &KnowledgeMcpHandler{
 		knowledgeService: knowledgeService,
 		agentService:     agentService,
+		probeCooldown:    make(map[string]time.Time),
+		probeSem:         make(chan struct{}, mcpDatasetProbeMaxConcurrent),
 	}
 }
 
@@ -358,7 +371,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		return *deny, nil
 	}
 	if len(allowedDatasetIDs) == 0 {
-		return mcpErrorResult(id, "当前 Agent 未启用知识库 MCP"), nil
+		return mcpCodedErrorResult(id, mcpErrNoDatasetBound, "当前 Agent 未绑定任何知识库数据集"), nil
 	}
 
 	datasetIDs := args.DatasetIDs
@@ -366,7 +379,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		datasetIDs = allowedDatasetIDs
 	}
 	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return mcpErrorResult(id, knowledgeCapabilityDeniedMessage), nil
+		return mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage), nil
 	}
 
 	req := knowledge.RetrievalRequest{
@@ -383,7 +396,8 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 	if err != nil {
 		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
 		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
-		return mcpErrorResult(id, "知识库检索失败，请稍后重试"), nil
+		h.probeDatasetsForDiagnosis(ctx, datasetIDs)
+		return mcpCodedErrorResult(id, mcpErrRetrievalFailed, "知识库检索失败，请稍后重试"), nil
 	}
 
 	text := formatRetrievalResult(result)
@@ -546,7 +560,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		// Values 按 canonical MIME key 取值：header 名大小写变体天然同桶，
 		// 多值即重复头攻击。
 		log.Printf("knowledge-mcp: duplicate %s headers rejected (tenant=%s agent=%s count=%d)", knowledgeCapabilityHeader, tenantID, agentCfg.Name, len(caps))
-		deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+		deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 		return nil, &deny, nil
 	}
 	if len(caps) == 1 {
@@ -554,7 +568,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		if capability == "" {
 			// 呈现但空值 ≠ 缺失：缺失才回退，空值按拒绝。
 			log.Printf("knowledge-mcp: blank %s header rejected (tenant=%s agent=%s)", knowledgeCapabilityHeader, tenantID, agentCfg.Name)
-			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 			return nil, &deny, nil
 		}
 	}
@@ -564,7 +578,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		if errors.Is(err, services.ErrKnowledgeCapabilityDenied) {
 			// 失败原因只进服务端日志；capability 值绝不上日志/响应。
 			log.Printf("knowledge-mcp: capability rejected (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
-			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 			return nil, &deny, nil
 		}
 		// 细节（绑定解析失败原因等）只进服务端日志，客户端拿中性文案。
@@ -592,7 +606,7 @@ func (h *KnowledgeMcpHandler) requireDatasetAccess(c *gin.Context, id interface{
 		return "", capDeny, nil
 	}
 	if !isStringSubset([]string{datasetID}, allowed) {
-		resp := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+		resp := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 		return datasetID, &resp, nil
 	}
 	return datasetID, nil, nil
@@ -624,6 +638,21 @@ func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error)
 	}, nil
 }
 
+// MCP 工具错误码（issue #119）：调用方（runtime/子 Agent）程序化识别用，
+// 文案保持中性。码是稳定契约，只增不改。capability 拒绝与 dataset 越权
+// 共用 dataset_not_authorized，不区分失败步骤——不给探测 oracle。
+const (
+	mcpErrDatasetNotAuthorized = "dataset_not_authorized"
+	mcpErrNoDatasetBound       = "no_dataset_bound"
+	mcpErrRetrievalFailed      = "retrieval_failed"
+)
+
+// mcpCodedErrorResult 构造带稳定错误码前缀的 isError 工具结果，
+// 文本形态 `[<code>] <中性文案>`。
+func mcpCodedErrorResult(id interface{}, code, msg string) jsonRPCResponse {
+	return mcpErrorResult(id, "["+code+"] "+msg)
+}
+
 func mcpErrorResult(id interface{}, msg string) jsonRPCResponse {
 	return jsonRPCResponse{
 		JSONRPC: "2.0",
@@ -648,6 +677,110 @@ func isStringSubset(subset, superset []string) bool {
 	return true
 }
 
+const (
+	// mcpDatasetProbeTimeout 界定后台探测的总预算：探测是诊断路径，绝不
+	// 放大 MultiRAG 故障期的等待——retrieval 本身可能已烧掉完整 client
+	// 超时，探测不再逐库继承 ~30s。
+	mcpDatasetProbeTimeout = 5 * time.Second
+
+	// mcpDatasetProbeCooldown 是同一 canonical dataset 集签名的探测冷却
+	// 窗口：持续故障期 burst 的重复失败只在窗口首笔探测一次，后续直接
+	// 跳过，跨请求不累积 goroutine / MultiRAG 请求 / 日志量。
+	mcpDatasetProbeCooldown = time.Minute
+
+	// mcpDatasetProbeMaxConcurrent 全局封顶同时在途的探测 goroutine（跨
+	// 不同 dataset 集）：容量满时新探测直接跳过——诊断尽力而为，不排队。
+	mcpDatasetProbeMaxConcurrent = 4
+)
+
+// canonicalDatasetIDs 返回排序去重后的 dataset ID 副本：cooldown 签名与
+// 探测迭代都以 canonical 形态进行——参数的顺序、重复不影响去重语义
+// （review P1 第三轮：["a"] / ["a","a"] / ["b","a"] 不得各自起探测）。
+func canonicalDatasetIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	sort.Strings(unique)
+	return unique
+}
+
+// probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败后在
+// 后台逐个解析本次请求的 dataset 元数据并把存活状态写进服务端日志——
+// 全部 ok 而组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）
+// → 僵尸绑定（衔接 issue #122）。仅诊断，且不进入请求关键路径（review
+// P1 三轮）：goroutine 异步执行、detached ctx + 5s 总预算、canonical 签名
+// （排序去重 + %q 无歧义编码）冷却窗口内跨请求去重、过期条目随手淘汰、
+// 全局 try-acquire 信号量封顶在途探测数，响应不被探测阻塞，健康路径
+// 零开销。
+func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, datasetIDs []string) {
+	canonical := canonicalDatasetIDs(datasetIDs)
+	if len(canonical) == 0 {
+		return
+	}
+	signature := fmt.Sprintf("%q", canonical)
+
+	// 冷却标记在请求路径同步完成：去重不依赖 goroutine 调度时序。
+	h.probeMu.Lock()
+	if h.probeCooldown == nil {
+		h.probeCooldown = make(map[string]time.Time)
+	}
+	if h.probeSem == nil {
+		h.probeSem = make(chan struct{}, mcpDatasetProbeMaxConcurrent)
+	}
+	// 淘汰过期条目：过期条目语义上等价于不存在（time.Since ≥ cooldown 即
+	// 放行），删除纯属内存卫生，避免 canonical 签名集合长期增长。
+	now := time.Now()
+	for sig, last := range h.probeCooldown {
+		if now.Sub(last) >= mcpDatasetProbeCooldown {
+			delete(h.probeCooldown, sig)
+		}
+	}
+	if now.Sub(h.probeCooldown[signature]) < mcpDatasetProbeCooldown {
+		h.probeMu.Unlock()
+		return
+	}
+	// 全局并发上限：try-acquire，满则跳过且不占用冷却标记（否则满载期
+	// 过后会被误判为已探测）——诊断尽力而为，不排队。
+	select {
+	case h.probeSem <- struct{}{}:
+	default:
+		h.probeMu.Unlock()
+		return
+	}
+	h.probeCooldown[signature] = now
+	h.probeMu.Unlock()
+
+	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) in background (datasets=%v)", len(canonical), canonical)
+	go func() {
+		// 信号量释放最先声明（LIFO 最后执行）：panic 被 recover 拦下后本
+		// defer 仍会运行，探测槽位不得泄漏。
+		defer func() { <-h.probeSem }()
+		// 裸 goroutine 不在 gin recovery 覆盖内，诊断路径不得 panic 拖垮进程。
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("knowledge-mcp: dataset probe panicked: %v", r)
+			}
+		}()
+		// WithoutCancel：请求 ctx 随响应返回即取消，探测须脱离其生命周期；
+		// WithTimeout：故障期后台工作总量有界，不逐库累积 client 超时。
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mcpDatasetProbeTimeout)
+		defer cancel()
+		for _, dsID := range canonical {
+			if _, err := h.knowledgeService.GetDataset(probeCtx, dsID); err != nil {
+				log.Printf("knowledge-mcp: dataset probe failed (dataset=%s): %v", dsID, err)
+				continue
+			}
+			log.Printf("knowledge-mcp: dataset probe ok (dataset=%s)", dsID)
+		}
+	}()
+}
+
 func formatRetrievalResult(result *knowledge.RetrievalResult) string {
 	if result == nil {
 		return "未检索到相关知识库内容。"
@@ -669,9 +802,15 @@ func formatRetrievalResult(result *knowledge.RetrievalResult) string {
 		if docName == "" {
 			docName = "未知文档"
 		}
+		docID, _ := chunk["document_id"].(string)
 		similarity, _ := chunk["similarity"].(float64)
 		content, _ := chunk["content"].(string)
-		sb.WriteString(fmt.Sprintf("[来源：%s | 相似度：%.3f]\n%s\n\n", docName, similarity, content))
+		source := fmt.Sprintf("[来源：%s", docName)
+		if docID != "" {
+			source += fmt.Sprintf(" | 文档ID：%s", docID)
+		}
+		source += fmt.Sprintf(" | 相似度：%.3f]", similarity)
+		sb.WriteString(fmt.Sprintf("%s\n%s\n\n", source, content))
 	}
 	return sb.String()
 }
