@@ -3,15 +3,18 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/skill"
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -230,4 +233,99 @@ func TestGetSkillMd_UnsafePath(t *testing.T) {
 	if err != skill.ErrInvalidSkillFile {
 		t.Errorf("err = %v, want skill.ErrInvalidSkillFile", err)
 	}
+}
+
+func TestDeleteSkill_InUseBlocksWithListAndKeepsObject(t *testing.T) {
+	db := setupSkillServiceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agent.AgentSkill{}))
+	uploader := &mockUploader{data: make(map[string][]byte)}
+	ossKey := "expert-skills/s1.zip"
+	uploader.data[ossKey] = []byte("zip")
+	sk := &skill.Skill{Name: "s1", Type: "expert", URL: ossKey}
+	require.NoError(t, db.Create(sk).Error)
+
+	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, db.Create(a).Error)
+	require.NoError(t, db.Create(&agent.AgentSkill{AgentID: a.ID, SkillID: sk.ID}).Error)
+
+	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
+	err := svc.DeleteSkill("acme", "s1")
+	var inUse *agent.SkillInUseError
+	require.ErrorAs(t, err, &inUse)
+	require.Equal(t, []string{"bot"}, inUse.Agents)
+	require.False(t, inUse.Foreign)
+
+	// guard 命中：OSS 对象与 DB 行均原封不动
+	_, exists := uploader.data[ossKey]
+	require.True(t, exists)
+	var cnt int64
+	require.NoError(t, db.Model(&skill.Skill{}).Where("name = ?", "s1").Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt)
+}
+
+func TestDeleteSkill_ForeignOnlyBlocks(t *testing.T) {
+	db := setupSkillServiceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agent.AgentSkill{}))
+	uploader := &mockUploader{data: make(map[string][]byte)}
+	sk := &skill.Skill{Name: "s1", Type: "expert"}
+	require.NoError(t, db.Create(sk).Error)
+	fb := &agent.AgentConfig{Name: "sneaky", TenantID: "other", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, db.Create(fb).Error)
+	require.NoError(t, db.Create(&agent.AgentSkill{AgentID: fb.ID, SkillID: sk.ID}).Error)
+
+	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
+	err := svc.DeleteSkill("acme", "s1")
+	var inUse *agent.SkillInUseError
+	require.ErrorAs(t, err, &inUse)
+	require.Empty(t, inUse.Agents)
+	require.True(t, inUse.Foreign)
+}
+
+func TestDeleteSkill_UnboundDeletesRowAndObject(t *testing.T) {
+	db := setupSkillServiceTestDB(t)
+	// 守卫反查无条件扫描 agent_skills（绑定表），即使无绑定的用例也必须建表
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agent.AgentSkill{}))
+	uploader := &mockUploader{data: make(map[string][]byte)}
+	ossKey := "expert-skills/s1.zip"
+	uploader.data[ossKey] = []byte("zip")
+	// 删除走 mustOwnSkill（TenantOwned）：种子必须属于删除租户 acme，共享行 "" 不可删
+	sk := &skill.Skill{Name: "s1", Type: "expert", URL: ossKey, TenantID: "acme"}
+	require.NoError(t, db.Create(sk).Error)
+
+	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
+	require.NoError(t, svc.DeleteSkill("acme", "s1"))
+	var cnt int64
+	require.NoError(t, db.Model(&skill.Skill{}).Where("name = ?", "s1").Count(&cnt).Error)
+	require.Equal(t, int64(0), cnt)
+	_, exists := uploader.data[ossKey]
+	require.False(t, exists)
+}
+
+// TestDeleteSkill_DBFailureKeepsObjectAndRow 锁定顺序契约（对齐工具 expert
+// review Fix 1）：DB 行删除失败时 OSS 对象必须原封不动，绝不先删对象。
+func TestDeleteSkill_DBFailureKeepsObjectAndRow(t *testing.T) {
+	db := setupSkillServiceTestDB(t)
+	// 守卫反查无条件扫描 agent_skills（绑定表），即使无绑定的用例也必须建表
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agent.AgentSkill{}))
+	uploader := &mockUploader{data: make(map[string][]byte)}
+	ossKey := "expert-skills/s1.zip"
+	uploader.data[ossKey] = []byte("zip")
+	// 删除走 mustOwnSkill（TenantOwned）：种子必须属于删除租户 acme，共享行 "" 不可删
+	sk := &skill.Skill{Name: "s1", Type: "expert", URL: ossKey, TenantID: "acme"}
+	require.NoError(t, db.Create(sk).Error)
+
+	forced := errors.New("forced skills delete failure")
+	require.NoError(t, db.Callback().Delete().Before("gorm:before_delete").Register("test:force_skills_delete_fail", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "skills" {
+			_ = tx.AddError(forced)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Delete().Remove("test:force_skills_delete_fail") })
+
+	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
+	err := svc.DeleteSkill("acme", "s1")
+	require.ErrorIs(t, err, forced)
+	require.Contains(t, err.Error(), "删除技能失败")
+	_, exists := uploader.data[ossKey]
+	require.True(t, exists, "DB 删除失败时 OSS 对象必须原封不动")
 }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/skill"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/oss"
@@ -252,15 +253,24 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 		return skill.ErrSkillNotFound
 	}
 
-	if sk.URL != "" {
-		ctx := context.Background()
-		if err := s.uploader.Delete(ctx, sk.URL); err != nil {
-			log.Printf("删除 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
-		}
+	own, foreign, err := s.repo.GetSkillBindingsScoped(tenantID, sk.ID)
+	if err != nil {
+		return fmt.Errorf("查询技能绑定失败: %w", err)
+	}
+	if len(own) > 0 || foreign {
+		return &agent.SkillInUseError{SkillName: sk.Name, Agents: own, Foreign: foreign}
 	}
 
 	if err := s.repo.Delete(tenantID, sk.ID); err != nil {
 		return fmt.Errorf("删除技能失败: %w", err)
+	}
+
+	// 行已删成功：残留对象只是无引用方的孤立对象，删除失败无害，仅记日志。
+	if sk.URL != "" && s.uploader != nil {
+		ctx := context.Background()
+		if err := s.uploader.Delete(ctx, sk.URL); err != nil {
+			log.Printf("删除 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
+		}
 	}
 
 	return nil
