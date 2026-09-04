@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"mime"
 	"net/http"
 	"strconv"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
@@ -370,7 +372,18 @@ func (h *KnowledgeHandler) Retrieval(c *gin.Context) {
 	respondSuccess(c, result)
 }
 
+// respondKnowledgeError 映射知识域错误：删除保护（issue #122）→ 409 +
+// data.datasets 名单；其余沿用 knowledge.StatusCode 桶。
 func respondKnowledgeError(c *gin.Context, err error) {
+	var inUse *agent.DatasetInUseError
+	if errors.As(err, &inUse) {
+		datasets := make([]gin.H, 0, len(inUse.Datasets))
+		for _, d := range inUse.Datasets {
+			datasets = append(datasets, gin.H{"id": d.ID, "agents": d.Agents})
+		}
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"datasets": datasets}})
+		return
+	}
 	respondError(c, knowledge.StatusCode(err), err.Error())
 }
 
