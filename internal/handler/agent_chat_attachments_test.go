@@ -461,6 +461,33 @@ func TestSendMessage_GenerationUnavailable503RollsBackUserMessage(t *testing.T) 
 	require.Zero(t, sysCount, "generation_unavailable must not be persisted as a system error message")
 }
 
+// 发送侧状态码与域码错配（review round 8）：503 + generation_mismatch 不满足
+// runtime 契约逐对配对（412↔mismatch、503↔unavailable）——网关或异常 runtime
+// 伪造的域码不可信，不得驱动回滚/重传等恢复动作：落入 transport 兜底（中性
+// 502），user message 留存不回滚，system error 落库（兜底路径证据）。
+func TestSendMessage_StatusCodeMismatchFallsBackNeutral502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		runsHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"x","code":"generation_mismatch"}`))
+		},
+	})
+	body := `{"content":"","attachments":[{"id":"f-1","name":"a.txt","mime":"text/plain","size":3,"path":".zerone-uploads/a.txt"}]}`
+	seedUploadRecords(t, "s-att", services.AttachmentDesc{ID: "f-1", Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt"})
+	w := sendMessageForAttachments(t, env, body, "min", "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Contains(t, w.Body.String(), "Runtime 连接失败，请稍后重试")
+	require.NotContains(t, w.Body.String(), "generation_mismatch", "a mismatched pair must not surface the claimed domain code")
+	var userCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "user").Count(&userCount).Error)
+	require.Equal(t, int64(1), userCount, "an untrusted mismatched code must NOT drive the rollback recovery action (message stays)")
+	var sysCount int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ? AND role = ?", "s-att", "system").Count(&sysCount).Error)
+	require.Equal(t, int64(1), sysCount, "the fallback path must persist a system error message (same semantics as transport failure)")
+}
+
 // F2（review round 7）：自动标题只在 runtime 流成功建立后铸出——首条纯附件
 // 消息被 412 pre-run 拒绝（回滚分支）时 session 不得留下标题：被回滚的
 // user turn 在历史中从未存在，其标题来源也必须不存在。
@@ -628,6 +655,27 @@ func TestUploadAttachments_GenerationUnavailable503(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.Contains(t, w.Body.String(), `"code":"generation_unavailable"`)
 	require.Contains(t, w.Body.String(), "Runtime 部署状态异常，请稍后重试")
+}
+
+// 上传侧状态码与域码错配（review round 8）：503 + generation_mismatch 错配
+// 组合不透传——不可信上游伪造的域码不得驱动客户端恢复动作，回中性 502，
+// 响应不含伪造的域码。
+func TestUploadAttachments_StatusCodeMismatchFallsBackNeutral502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.7.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"x","code":"generation_mismatch"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "abc"}}, "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Contains(t, w.Body.String(), "上传服务暂时不可用")
+	require.NotContains(t, w.Body.String(), "generation_mismatch", "a mismatched pair must not surface the claimed domain code")
+	var recCount int64
+	require.NoError(t, database.DB.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-att").Count(&recCount).Error)
+	require.Zero(t, recCount, "a mismatched upload response must not persist upload records")
 }
 
 // F1（review round 7 / Standards P1）：非 2xx 已识别分支的日志不得携带

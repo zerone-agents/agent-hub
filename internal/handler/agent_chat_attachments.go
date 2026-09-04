@@ -266,9 +266,11 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 			"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 	default:
 		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		if code, ok := runtimeAttachmentCode(string(bodyBytes)); ok {
+		if code, ok := runtimeAttachmentCode(string(bodyBytes)); ok && runtimeAttachmentContractMet(resp.StatusCode, code) {
 			// body 只用于白名单域码解析，内容不进日志（review round 7 /
-			// main #121 凭据约束）：日志只留 session/status/code。
+			// main #121 凭据约束）：日志只留 session/status/code。状态码与
+			// 域码按契约逐对核验（review round 8）：错配=不可信上游（网关/
+			// 异常 runtime）伪造的域码，不透传，落入下方中性 502。
 			log.Printf("[chat] runtime upload rejected: session=%s status=%d code=%s",
 				sessionID, resp.StatusCode, code)
 			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
@@ -372,18 +374,16 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
 		respondError(c, http.StatusNotFound, "临时文件已不可用")
 	case resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusServiceUnavailable:
-		// status+code 契约透传（review round 7）：有限读取、只接受白名单
-		// code 且状态码与域码契约匹配（412↔generation_mismatch、
-		// 503↔generation_unavailable）才透传；其余（含 Kong/普通不可用的
-		// 503、伪造的错配组合）一律中性 502——不凭状态码伪造域码。原始
-		// body 局部变量即弃，不进日志（main #121）。
+		// status+code 契约透传（review round 7；round 8 改共享单一来源）：
+		// 有限读取、白名单 code 且 runtimeAttachmentContractMet 逐对核验
+		// （412↔generation_mismatch、503↔generation_unavailable）才透传；
+		// 其余（含 Kong/普通不可用的 503、伪造的错配组合）一律中性 502
+		// ——不凭状态码伪造域码。原始 body 局部变量即弃，不进日志
+		// （main #121）。
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		if code, ok := runtimeAttachmentCode(string(buf)); ok {
-			if (resp.StatusCode == http.StatusPreconditionFailed && code == chat.ErrCodeGenerationMismatch) ||
-				(resp.StatusCode == http.StatusServiceUnavailable && code == chat.ErrCodeGenerationUnavailable) {
-				respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
-				return
-			}
+		if code, ok := runtimeAttachmentCode(string(buf)); ok && runtimeAttachmentContractMet(resp.StatusCode, code) {
+			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
+			return
 		}
 		log.Printf("[chat] attachment content rejected without contract code: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)

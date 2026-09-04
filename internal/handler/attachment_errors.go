@@ -29,6 +29,16 @@ func attachmentHTTPStatus(code string) int {
 	}
 }
 
+// runtimeAttachmentContractMet reports whether the runtime's HTTP status
+// matches the claimed attachment-domain code per the runtime contract
+// (412↔generation_mismatch, 503↔generation_unavailable, 400↔attachment_missing/
+// invalid_attachment, 413↔upload_limit_exceeded). A mismatched pair means an
+// untrusted upstream (gateway or anomalous runtime) whose claimed code must
+// NOT drive the client's recovery actions — callers return a neutral 502.
+func runtimeAttachmentContractMet(status int, code string) bool {
+	return status == attachmentHTTPStatus(code)
+}
+
 // respondAttachmentError maps err into the envelope; non-AttachmentError gets
 // a neutral 500 (details stay out of the response body).
 func respondAttachmentError(c *gin.Context, err error) {

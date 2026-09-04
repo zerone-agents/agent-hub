@@ -264,7 +264,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		// is parsed at the client boundary against an allowlist; the raw body
 		// never reaches the hub (main #121 credential-leak constraint).
 		var httpErr *runtime.RuntimeHTTPError
-		if errors.As(err, &httpErr) && httpErr.AttachmentCode != "" {
+		// 状态码与域码按契约逐对核验（review round 8）：错配的组合（如
+		// 503 + generation_mismatch）意味着不可信上游（网关/异常 runtime）
+		// 伪造的域码——不得驱动回滚、重传等客户端恢复动作，落入下方
+		// transport 兜底（中性 502，消息留存不回滚）。
+		if errors.As(err, &httpErr) && httpErr.AttachmentCode != "" &&
+			runtimeAttachmentContractMet(httpErr.StatusCode, httpErr.AttachmentCode) {
 			code := httpErr.AttachmentCode
 			// 白名单五码统一回滚（review F3：所有已识别的附件 pre-run 拒绝
 			// 都回滚）：runtime 在消费任何附件之前就拒绝，该 user turn 从未
