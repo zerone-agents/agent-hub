@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
@@ -664,22 +665,41 @@ func isStringSubset(subset, superset []string) bool {
 	return true
 }
 
-// probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败时逐个
-// 解析本次请求的 dataset 元数据并把存活状态写进服务端日志——全部 ok 而
-// 组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）→ 僵尸绑定
-// （衔接 issue #122）。仅诊断：不改变客户端可见行为，健康路径零开销。
+// mcpDatasetProbeTimeout 界定后台探测的总预算：探测是诊断路径，绝不放大
+// MultiRAG 故障期的等待——retrieval 本身可能已烧掉完整 client 超时，探测
+// 不再逐库继承 ~30s。
+const mcpDatasetProbeTimeout = 5 * time.Second
+
+// probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败后在
+// 后台逐个解析本次请求的 dataset 元数据并把存活状态写进服务端日志——
+// 全部 ok 而组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）
+// → 僵尸绑定（衔接 issue #122）。仅诊断，且不进入请求关键路径（review
+// P1）：goroutine 异步执行、detached ctx + 5s 总预算、串行即并发上限 1，
+// 响应不被探测阻塞，健康路径零开销。
 func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, datasetIDs []string) {
 	if len(datasetIDs) == 0 {
 		return
 	}
-	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) for diagnosis (datasets=%v)", len(datasetIDs), datasetIDs)
-	for _, dsID := range datasetIDs {
-		if _, err := h.knowledgeService.GetDataset(ctx, dsID); err != nil {
-			log.Printf("knowledge-mcp: dataset probe failed (dataset=%s): %v", dsID, err)
-			continue
+	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) in background (datasets=%v)", len(datasetIDs), datasetIDs)
+	go func() {
+		// 裸 goroutine 不在 gin recovery 覆盖内，诊断路径不得 panic 拖垮进程。
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("knowledge-mcp: dataset probe panicked: %v", r)
+			}
+		}()
+		// WithoutCancel：请求 ctx 随响应返回即取消，探测须脱离其生命周期；
+		// WithTimeout：故障期后台工作总量有界，不逐库累积 client 超时。
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mcpDatasetProbeTimeout)
+		defer cancel()
+		for _, dsID := range datasetIDs {
+			if _, err := h.knowledgeService.GetDataset(probeCtx, dsID); err != nil {
+				log.Printf("knowledge-mcp: dataset probe failed (dataset=%s): %v", dsID, err)
+				continue
+			}
+			log.Printf("knowledge-mcp: dataset probe ok (dataset=%s)", dsID)
 		}
-		log.Printf("knowledge-mcp: dataset probe ok (dataset=%s)", dsID)
-	}
+	}()
 }
 
 func formatRetrievalResult(result *knowledge.RetrievalResult) string {

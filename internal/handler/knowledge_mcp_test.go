@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
@@ -1345,16 +1346,18 @@ func TestKnowledgeMcpHandler_ToolsCall_SearchDefaultCompletionUsesAllBoundDatase
 	}
 }
 
-// issue #119 失败路径诊断：检索失败时逐个探测本次请求的 dataset 并记录
-// 存活状态（结果只进服务端日志），客户端仍收 [retrieval_failed] 中性文案。
+// issue #119 失败路径诊断：检索失败后在后台逐个探测本次请求的 dataset 并
+// 记录存活状态（结果只进服务端日志），客户端仍收 [retrieval_failed] 中性
+// 文案。探测经无缓冲 channel 交接：若实现退化为同步（阻塞响应），此处与
+// postJSONRPC 互等死锁、由 go test 超时暴露；异步实现则响应先返回。
 func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbesBoundDatasets(t *testing.T) {
-	var probed []string
+	probeStarted := make(chan string)
 	svc := &fakeKnowledgeMcpService{
 		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
 			return nil, errors.New("multirag error 102: combined retrieval boom")
 		},
 		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
-			probed = append(probed, id)
+			probeStarted <- id
 			if id == "kb-zombie" {
 				return nil, knowledge.NewNotFoundError("dataset 不存在")
 			}
@@ -1378,8 +1381,16 @@ func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbesBoundDatasets(t *testi
 	if text := resultText(resp.Result); !strings.HasPrefix(text, "[retrieval_failed]") {
 		t.Fatalf("text = %q, want [retrieval_failed] prefix", text)
 	}
-	want := []string{"kb-live", "kb-zombie"}
-	if len(probed) != len(want) || probed[0] != want[0] || probed[1] != want[1] {
-		t.Fatalf("probed = %v, want %v", probed, want)
+	var got []string
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-probeStarted:
+			got = append(got, id)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("background probe %d/2 not fired (got %v) — probe must run off the request path", i+1, got)
+		}
+	}
+	if got[0] != "kb-live" || got[1] != "kb-zombie" {
+		t.Fatalf("probed = %v, want [kb-live kb-zombie]", got)
 	}
 }
