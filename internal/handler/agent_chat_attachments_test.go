@@ -910,18 +910,27 @@ func TestUploadAttachments_RuntimeUnreachable502(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code)
 }
 
-// runtime 读少量 body 后直接回 413 不排空（>256KB 请求体迫使 net/http 服务端
-// 丢弃剩余 body 关闭连接 → 触发 hub 侧 mid-stream 中断）→ hub 必须透传 runtime
-// 的 413 upload_limit_exceeded，而不是 400 invalid_multipart。
-func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
+// runtime 读少量 body 后回 413，且响应体在 code 值中间被截断（Content-Length
+// 虚高 + 服务端 handler 返回即关闭连接，模拟 mid-stream abort 后 body 不可
+// 读/不完整）→ code 无法从 body 验证：review round 9 起不得仅凭 413 状态码
+// 伪造 upload_limit_exceeded，统一落中性 502（与 send/download 全路径一致）。
+// 注：若 body 完整可达（缓冲在 transport 内），可验证 code 按第八轮契约仍应
+// 透传 413（由 RuntimeLimitExceededPassthrough 覆盖），故此处必须截断 body。
+func TestUploadAttachments_Runtime413MidStreamFallsBackNeutral502(t *testing.T) {
 	env := newAttachmentChatEnv(t, attachmentFakeOpts{
 		runtimeVersion: "2.5.0",
 		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
 			buf := make([]byte, 64)
 			_, _ = r.Body.Read(buf) // 只读一点，不排空 → 触发 mid-stream 中断
 			w.Header().Set("Content-Type", "application/json")
+			// Content-Length 故意虚高：只投递截断在 code 值中间的 body，
+			// hub 侧 ReadAll 必然 readErr 且拿不到可解析的完整 code。
+			w.Header().Set("Content-Length", "87")
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			_, _ = w.Write([]byte(`{"error":"File limit","code":"upload_limit_exceeded"}`))
+			_, _ = w.Write([]byte(`{"error":"File limit","code":"upload_lim`))
+			// 让 hub 的 readLoop 先把 head + 截断 body 收进 transport 缓冲，
+			// 确定性命中「resp 已到、body 读到一半断流」而非纯传输失败。
+			time.Sleep(100 * time.Millisecond)
 		},
 	})
 	// 20MB body 远大于 net/http 服务端 handler 返回后的排空上限（256KB）
@@ -929,9 +938,27 @@ func TestUploadAttachments_Runtime413MidStreamPassthrough(t *testing.T) {
 	// pipe 写处失败（确定性命中 relay-fail 分支，而非服务端把整个小 body
 	// 缓冲掉）、恰好等于单文件限额上限（20MB）不会触发 hub 侧限额检查。
 	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", strings.Repeat("x", 20<<20)}}, "s-att", "u1")
-	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
-	require.Contains(t, w.Body.String(), `"code":"upload_limit_exceeded"`)
-	require.Contains(t, w.Body.String(), "附件大小超出限制")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.NotContains(t, w.Body.String(), "upload_limit_exceeded")
+	require.Contains(t, w.Body.String(), "上传服务暂时不可用")
+}
+
+// codeless 413：body 可读但无 code 字段（如网关/异常上游回 {"error":"too
+// large"}）→ 状态码与域码配对无从核验，不得按状态码伪造域码，落中性 502。
+func TestUploadAttachments_Runtime413CodelessFallsBackNeutral502(t *testing.T) {
+	env := newAttachmentChatEnv(t, attachmentFakeOpts{
+		runtimeVersion: "2.5.0",
+		uploadHandler: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body) // 排空 body：小请求 + 服务端自动排空，响应体可完整读取
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"too large"}`))
+		},
+	})
+	w := uploadRequestForAttachments(t, env, []struct{ name, body string }{{"a.txt", "tiny"}}, "s-att", "u1")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.NotContains(t, w.Body.String(), "upload_limit_exceeded")
+	require.Contains(t, w.Body.String(), "上传服务暂时不可用")
 }
 
 // seedUploadRecords inserts server-side upload records (the authorization

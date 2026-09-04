@@ -276,18 +276,10 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
 			return
 		}
-		// mid-stream abort（runtime 未排空 body 即回响应后关闭连接）：
-		// transport 在请求体写失败时会把已收到的响应体标记为关闭
-		// （"http: read on closed response body"），code 无法从 body 解析。
-		// runtime 契约中 413 唯一对应 upload_limit_exceeded（见
-		// attachmentHTTPStatus 的双向映射），按状态码兜底保持透传语义。
-		if readErr != nil && resp.StatusCode == http.StatusRequestEntityTooLarge {
-			log.Printf("[chat] runtime 413 body unreadable (mid-stream abort): session=%s readErr=%v", sessionID, readErr)
-			respondErrorCode(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded,
-				attachmentCodeMessage(chat.ErrCodeUploadLimitExceeded))
-			return
-		}
-		log.Printf("[chat] runtime upload failed: session=%s status=%d", sessionID, resp.StatusCode)
+		// review round 9：不可验证 code 的上游响应（body 不可读 / 无 code /
+		// 配对不符）不得驱动附件域恢复动作，与 send/download 全路径一致，
+		// 统一落下方中性 502（readErr 仅传输层错误串，不含 body 内容）。
+		log.Printf("[chat] runtime upload failed: session=%s status=%d readErr=%v", sessionID, resp.StatusCode, readErr)
 		respondError(c, http.StatusBadGateway, "上传服务暂时不可用")
 	}
 }
