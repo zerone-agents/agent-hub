@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -115,9 +116,13 @@ type KnowledgeMcpHandler struct {
 	knowledgeService KnowledgeMcpService
 	agentService     AgentMcpService
 
-	// probeMu 保护 probeCooldown（dataset 集签名 → 上次探测时刻）。
+	// probeMu 保护 probeCooldown（canonical dataset 集签名 → 上次探测
+	// 时刻）与 probeSem 的惰性初始化。
 	probeMu       sync.Mutex
 	probeCooldown map[string]time.Time
+	// probeSem 是容量 mcpDatasetProbeMaxConcurrent 的 try-acquire 信号量，
+	// 全局限界在途探测 goroutine 数。
+	probeSem chan struct{}
 }
 
 // NewKnowledgeMcpHandler creates a new KnowledgeMcpHandler.
@@ -126,6 +131,7 @@ func NewKnowledgeMcpHandler(knowledgeService KnowledgeMcpService, agentService A
 		knowledgeService: knowledgeService,
 		agentService:     agentService,
 		probeCooldown:    make(map[string]time.Time),
+		probeSem:         make(chan struct{}, mcpDatasetProbeMaxConcurrent),
 	}
 }
 
@@ -677,38 +683,84 @@ const (
 	// 超时，探测不再逐库继承 ~30s。
 	mcpDatasetProbeTimeout = 5 * time.Second
 
-	// mcpDatasetProbeCooldown 是同一 dataset 集签名的探测冷却窗口（review
-	// P1 第二轮）：持续故障期 burst 的重复失败只在窗口首笔探测一次，后续
-	// 直接跳过，跨请求不累积 goroutine / MultiRAG 请求 / 日志量；并发探测
-	// goroutine 数被「不同失败签名数/窗口」天然封顶，无需额外 semaphore。
+	// mcpDatasetProbeCooldown 是同一 canonical dataset 集签名的探测冷却
+	// 窗口：持续故障期 burst 的重复失败只在窗口首笔探测一次，后续直接
+	// 跳过，跨请求不累积 goroutine / MultiRAG 请求 / 日志量。
 	mcpDatasetProbeCooldown = time.Minute
+
+	// mcpDatasetProbeMaxConcurrent 全局封顶同时在途的探测 goroutine（跨
+	// 不同 dataset 集）：容量满时新探测直接跳过——诊断尽力而为，不排队。
+	mcpDatasetProbeMaxConcurrent = 4
 )
+
+// canonicalDatasetIDs 返回排序去重后的 dataset ID 副本：cooldown 签名与
+// 探测迭代都以 canonical 形态进行——参数的顺序、重复不影响去重语义
+// （review P1 第三轮：["a"] / ["a","a"] / ["b","a"] 不得各自起探测）。
+func canonicalDatasetIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	sort.Strings(unique)
+	return unique
+}
 
 // probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败后在
 // 后台逐个解析本次请求的 dataset 元数据并把存活状态写进服务端日志——
 // 全部 ok 而组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）
 // → 僵尸绑定（衔接 issue #122）。仅诊断，且不进入请求关键路径（review
-// P1 两轮）：goroutine 异步执行、detached ctx + 5s 总预算、串行即单任务
-// 并发上限、同一 dataset 集冷却窗口内跨请求去重，响应不被探测阻塞，
-// 健康路径零开销。
+// P1 三轮）：goroutine 异步执行、detached ctx + 5s 总预算、canonical 签名
+// （排序去重 + %q 无歧义编码）冷却窗口内跨请求去重、过期条目随手淘汰、
+// 全局 try-acquire 信号量封顶在途探测数，响应不被探测阻塞，健康路径
+// 零开销。
 func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, datasetIDs []string) {
-	if len(datasetIDs) == 0 {
+	canonical := canonicalDatasetIDs(datasetIDs)
+	if len(canonical) == 0 {
 		return
 	}
+	signature := fmt.Sprintf("%q", canonical)
+
 	// 冷却标记在请求路径同步完成：去重不依赖 goroutine 调度时序。
-	signature := strings.Join(datasetIDs, ",")
 	h.probeMu.Lock()
 	if h.probeCooldown == nil {
 		h.probeCooldown = make(map[string]time.Time)
 	}
-	if time.Since(h.probeCooldown[signature]) < mcpDatasetProbeCooldown {
+	if h.probeSem == nil {
+		h.probeSem = make(chan struct{}, mcpDatasetProbeMaxConcurrent)
+	}
+	// 淘汰过期条目：过期条目语义上等价于不存在（time.Since ≥ cooldown 即
+	// 放行），删除纯属内存卫生，避免 canonical 签名集合长期增长。
+	now := time.Now()
+	for sig, last := range h.probeCooldown {
+		if now.Sub(last) >= mcpDatasetProbeCooldown {
+			delete(h.probeCooldown, sig)
+		}
+	}
+	if now.Sub(h.probeCooldown[signature]) < mcpDatasetProbeCooldown {
 		h.probeMu.Unlock()
 		return
 	}
-	h.probeCooldown[signature] = time.Now()
+	// 全局并发上限：try-acquire，满则跳过且不占用冷却标记（否则满载期
+	// 过后会被误判为已探测）——诊断尽力而为，不排队。
+	select {
+	case h.probeSem <- struct{}{}:
+	default:
+		h.probeMu.Unlock()
+		return
+	}
+	h.probeCooldown[signature] = now
 	h.probeMu.Unlock()
-	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) in background (datasets=%v)", len(datasetIDs), datasetIDs)
+
+	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) in background (datasets=%v)", len(canonical), canonical)
 	go func() {
+		// 信号量释放最先声明（LIFO 最后执行）：panic 被 recover 拦下后本
+		// defer 仍会运行，探测槽位不得泄漏。
+		defer func() { <-h.probeSem }()
 		// 裸 goroutine 不在 gin recovery 覆盖内，诊断路径不得 panic 拖垮进程。
 		defer func() {
 			if r := recover(); r != nil {
@@ -719,7 +771,7 @@ func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, dat
 		// WithTimeout：故障期后台工作总量有界，不逐库累积 client 超时。
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mcpDatasetProbeTimeout)
 		defer cancel()
-		for _, dsID := range datasetIDs {
+		for _, dsID := range canonical {
 			if _, err := h.knowledgeService.GetDataset(probeCtx, dsID); err != nil {
 				log.Printf("knowledge-mcp: dataset probe failed (dataset=%s): %v", dsID, err)
 				continue

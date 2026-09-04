@@ -1446,3 +1446,249 @@ func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeCooldown(t *testing.T) 
 		t.Fatalf("probed = %v, want [kb-live kb-zombie]", got)
 	}
 }
+
+// issue #119 review P1（第三轮）：cooldown 签名必须 canonical——顺序、
+// 重复不得绕过去重（["a","b"] / ["b","a"] / ["a","a","b"] 同一绑定集只
+// 探测一次）。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeSignatureCanonical(t *testing.T) {
+	probeCalls := make(chan string, 16)
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probeCalls <- id
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-a", "kb-b"}})
+
+	// 同一集合的三种参数形态：正常序、乱序、含重复。
+	for _, raw := range []string{
+		`{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-a","kb-b"]}}`,
+		`{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-b","kb-a"]}}`,
+		`{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-a","kb-a","kb-b","kb-a"]}}`,
+	} {
+		rec := postJSONRPC(t, router, "tools/call", json.RawMessage(raw), testValidToken)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !isErrorResult(resp.Result) || !strings.HasPrefix(resultText(resp.Result), "[retrieval_failed]") {
+			t.Fatalf("expected [retrieval_failed], got %v", resp.Result)
+		}
+	}
+
+	var got []string
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-probeCalls:
+			got = append(got, id)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("probe %d/2 not fired (got %v)", i+1, got)
+		}
+	}
+	select {
+	case id := <-probeCalls:
+		t.Fatalf("signature not canonical: extra probe for %s (got %v) — order/duplicate variants must share one cooldown entry", id, got)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if got[0] != "kb-a" || got[1] != "kb-b" {
+		t.Fatalf("probed = %v, want canonical order [kb-a kb-b]", got)
+	}
+}
+
+// newProbeTestHandler 构造可直接触及内部状态的 handler 路由（白盒探测
+// 测试用：expiry / eviction / semaphore）。
+func newProbeTestHandler(svc *fakeKnowledgeMcpService, datasets []string) (*KnowledgeMcpHandler, *gin.Engine) {
+	h := NewKnowledgeMcpHandler(svc, &fakeAgentMcpService{datasets: datasets})
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/v1/knowledge/mcp", testAgentAuthMiddlewareFor("test-agent", testValidToken), h.HandleMessage)
+	return h, router
+}
+
+// postFailingSearch 发一笔默认补全的失败检索并断言 [retrieval_failed] 契约。
+func postFailingSearch(t *testing.T, router *gin.Engine) {
+	t.Helper()
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"q"}}`), testValidToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !isErrorResult(resp.Result) || !strings.HasPrefix(resultText(resp.Result), "[retrieval_failed]") {
+		t.Fatalf("expected [retrieval_failed], got %v", resp.Result)
+	}
+}
+
+// 不同 canonical 集合各自独立冷却：["kb-a"] 与 ["kb-b"] 是不同诊断目标，
+// 各探测一次（到达顺序不作断言——两个 burst 均为异步单库探测）。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeDistinctSets(t *testing.T) {
+	probeCalls := make(chan string, 8)
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probeCalls <- id
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-a", "kb-b"}})
+
+	for _, raw := range []string{
+		`{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-a"]}}`,
+		`{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-b"]}}`,
+	} {
+		rec := postJSONRPC(t, router, "tools/call", json.RawMessage(raw), testValidToken)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	var got []string
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-probeCalls:
+			got = append(got, id)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("probe %d/2 not fired (got %v)", i+1, got)
+		}
+	}
+	select {
+	case id := <-probeCalls:
+		t.Fatalf("unexpected extra probe for %s (got %v)", id, got)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if (got[0] != "kb-a" || got[1] != "kb-b") && (got[0] != "kb-b" || got[1] != "kb-a") {
+		t.Fatalf("probed = %v, want {kb-a, kb-b} one each", got)
+	}
+}
+
+// 冷却窗口过期后，同一集合的下一笔失败恢复探测：时间比较方向锁定
+// （回拨时间戳模拟窗口流逝，不引入可注入时钟）。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeCooldownExpiry(t *testing.T) {
+	probeCalls := make(chan string, 8)
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probeCalls <- id
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	h, router := newProbeTestHandler(svc, []string{"kb-live", "kb-zombie"})
+
+	postFailingSearch(t, router)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-probeCalls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("first burst: probe %d/2 not fired", i+1)
+		}
+	}
+	// 窗口内第二笔失败：不得再探测。
+	postFailingSearch(t, router)
+	select {
+	case id := <-probeCalls:
+		t.Fatalf("cooldown window not enforced: extra probe for %s", id)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// 回拨时间戳模拟窗口流逝。
+	h.probeMu.Lock()
+	for sig := range h.probeCooldown {
+		h.probeCooldown[sig] = time.Now().Add(-2 * mcpDatasetProbeCooldown)
+	}
+	h.probeMu.Unlock()
+	// 窗口过后：恢复探测。
+	postFailingSearch(t, router)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-probeCalls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("post-expiry burst: probe %d/2 not fired", i+1)
+		}
+	}
+}
+
+// 过期条目在下一笔探测路径上被淘汰；新鲜条目与当前签名保留——cooldown
+// map 不随签名集合长期增长（内存卫生语义锁定）。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeEvictsExpired(t *testing.T) {
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	h, router := newProbeTestHandler(svc, []string{"kb-live"})
+
+	h.probeMu.Lock()
+	h.probeCooldown["stale-a"] = time.Now().Add(-2 * mcpDatasetProbeCooldown)
+	h.probeCooldown["stale-b"] = time.Now().Add(-3 * mcpDatasetProbeCooldown)
+	h.probeCooldown["fresh"] = time.Now().Add(30 * time.Second)
+	h.probeMu.Unlock()
+
+	// 同步路径上即完成 sweep + 当前签名标记（无需等后台 goroutine）。
+	postFailingSearch(t, router)
+
+	h.probeMu.Lock()
+	_, hasStaleA := h.probeCooldown["stale-a"]
+	_, hasStaleB := h.probeCooldown["stale-b"]
+	_, hasFresh := h.probeCooldown["fresh"]
+	_, hasCurrent := h.probeCooldown[fmt.Sprintf("%q", []string{"kb-live"})]
+	size := len(h.probeCooldown)
+	h.probeMu.Unlock()
+	if hasStaleA || hasStaleB {
+		t.Fatalf("stale entries not evicted: %#v", h.probeCooldown)
+	}
+	if !hasFresh || !hasCurrent {
+		t.Fatalf("fresh/current entries must survive: %#v", h.probeCooldown)
+	}
+	if size != 2 {
+		t.Fatalf("cooldown map size = %d, want 2", size)
+	}
+}
+
+// 全局信号量满载时新探测直接跳过且不占用冷却标记；释放槽位后恢复探测。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeSkipsWhenSemFull(t *testing.T) {
+	probeCalls := make(chan string, 4)
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probeCalls <- id
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	h, router := newProbeTestHandler(svc, []string{"kb-live"})
+
+	// 预填信号量：模拟全部在途槽位被占。
+	for i := 0; i < mcpDatasetProbeMaxConcurrent; i++ {
+		h.probeSem <- struct{}{}
+	}
+	postFailingSearch(t, router)
+	select {
+	case id := <-probeCalls:
+		t.Fatalf("probe fired despite full semaphore: %s", id)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// 释放一个槽位：下一笔失败恢复探测（也验证满载跳过未占用冷却标记）。
+	<-h.probeSem
+	postFailingSearch(t, router)
+	select {
+	case <-probeCalls:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("probe not fired after a slot was released")
+	}
+}
