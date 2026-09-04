@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
 	"control-panel/pkg/database"
@@ -17,14 +18,15 @@ import (
 )
 
 type fakeKnowledgeEngine struct {
-	retrievalFunc     func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
-	getDatasetFunc    func(ctx context.Context, id string) (*knowledge.Dataset, error)
-	parseDocsFunc     func(ctx context.Context, datasetID string, ids []string) error
-	listDatasetsFunc  func(ctx context.Context, req knowledge.DatasetListRequest) (*knowledge.DatasetListResult, error)
-	downloadFunc      func(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error)
-	imageFunc         func(ctx context.Context, imageID string) (*knowledge.StreamResult, error)
-	createDatasetFunc func(ctx context.Context, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error)
-	updateDatasetFunc func(ctx context.Context, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error)
+	retrievalFunc      func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error)
+	getDatasetFunc     func(ctx context.Context, id string) (*knowledge.Dataset, error)
+	parseDocsFunc      func(ctx context.Context, datasetID string, ids []string) error
+	listDatasetsFunc   func(ctx context.Context, req knowledge.DatasetListRequest) (*knowledge.DatasetListResult, error)
+	downloadFunc       func(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error)
+	imageFunc          func(ctx context.Context, imageID string) (*knowledge.StreamResult, error)
+	createDatasetFunc  func(ctx context.Context, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error)
+	updateDatasetFunc  func(ctx context.Context, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error)
+	deleteDatasetsFunc func(ctx context.Context, req knowledge.DeleteRequest) error
 }
 
 func (f *fakeKnowledgeEngine) Health(ctx context.Context) (*knowledge.HealthStatus, error) {
@@ -58,6 +60,9 @@ func (f *fakeKnowledgeEngine) UpdateDataset(ctx context.Context, id string, req 
 	return &dataset, nil
 }
 func (f *fakeKnowledgeEngine) DeleteDatasets(ctx context.Context, req knowledge.DeleteRequest) error {
+	if f.deleteDatasetsFunc != nil {
+		return f.deleteDatasetsFunc(ctx, req)
+	}
 	return nil
 }
 func (f *fakeKnowledgeEngine) ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error) {
@@ -384,4 +389,78 @@ func TestKnowledgeService_PassThroughBuiltinLayout(t *testing.T) {
 	parserConfig, ok := captured["parser_config"].(map[string]any)
 	require.True(t, ok, "parser_config must remain a map[string]any after translation; got %T", captured["parser_config"])
 	require.Equal(t, "DeepDOC", parserConfig["layout_recognize"])
+}
+
+// setupKnowledgeBindingDB 起 sqlite 内存库并替换 database.DB，建 agents /
+// agent_knowledge_datasets 最小列集（NewAgentRepository 构造时捕获
+// database.GetDB()，必须先换库再构造 service）。bindings 为 datasetID →
+// agentName（一对一，多对多场景由 persistence 测试覆盖）。
+func setupKnowledgeBindingDB(t *testing.T, bindings map[string]string) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`CREATE TABLE agents (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(64) NOT NULL,
+		tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+		created_at DATETIME,
+		updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE agent_knowledge_datasets (
+		agent_id INTEGER NOT NULL,
+		dataset_id VARCHAR(64) NOT NULL,
+		created_at DATETIME,
+		PRIMARY KEY (agent_id, dataset_id)
+	)`).Error)
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+	for datasetID, agentName := range bindings {
+		require.NoError(t, db.Exec(`INSERT INTO agents (name) VALUES (?)`, agentName).Error)
+		require.NoError(t, db.Exec(`INSERT INTO agent_knowledge_datasets (agent_id, dataset_id) VALUES ((SELECT id FROM agents WHERE name = ?), ?)`, agentName, datasetID).Error)
+	}
+}
+
+// issue #122：删除被绑定知识库 → DatasetInUseError 且 engine 零调用。
+func TestKnowledgeService_DeleteDatasets_InUseBlocked(t *testing.T) {
+	setupKnowledgeBindingDB(t, map[string]string{"kb-bound": "pharmaceutical"})
+	engine := &fakeKnowledgeEngine{deleteDatasetsFunc: func(ctx context.Context, req knowledge.DeleteRequest) error {
+		t.Fatalf("engine must not be called when dataset is bound, got req=%+v", req)
+		return nil
+	}}
+	svc := NewKnowledgeService(engine, nil)
+
+	err := svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{IDs: []string{"kb-bound", "kb-free"}})
+	var inUse *agent.DatasetInUseError
+	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
+	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-bound", Agents: []string{"pharmaceutical"}}}, inUse.Datasets)
+}
+
+// 未命中绑定的删除照旧转发（含 cleanIDs 行为不回退）。
+func TestKnowledgeService_DeleteDatasets_UnboundForwards(t *testing.T) {
+	setupKnowledgeBindingDB(t, map[string]string{"kb-other": "some-agent"})
+	var gotReq knowledge.DeleteRequest
+	engine := &fakeKnowledgeEngine{deleteDatasetsFunc: func(ctx context.Context, req knowledge.DeleteRequest) error {
+		gotReq = req
+		return nil
+	}}
+	svc := NewKnowledgeService(engine, nil)
+
+	require.NoError(t, svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{IDs: []string{"kb-free", " "}}))
+	require.Equal(t, []string{"kb-free"}, gotReq.IDs)
+}
+
+// delete_all：任一绑定存在（含指向他库的）即挡。
+func TestKnowledgeService_DeleteDatasets_DeleteAllBlocked(t *testing.T) {
+	setupKnowledgeBindingDB(t, map[string]string{"kb-any": "any-agent"})
+	engine := &fakeKnowledgeEngine{deleteDatasetsFunc: func(ctx context.Context, req knowledge.DeleteRequest) error {
+		t.Fatalf("engine must not be called on blocked delete_all, got req=%+v", req)
+		return nil
+	}}
+	svc := NewKnowledgeService(engine, nil)
+
+	err := svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{DeleteAll: true})
+	var inUse *agent.DatasetInUseError
+	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
+	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-any", Agents: []string{"any-agent"}}}, inUse.Datasets)
 }

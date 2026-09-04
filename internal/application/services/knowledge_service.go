@@ -2,9 +2,13 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
+	repository "control-panel/internal/infrastructure/persistence"
 )
 
 const knowledgeUnavailableMessage = "知识库模块未配置：请设置 MULTIRAG_BASE_URL 和 MULTIRAG_API_KEY"
@@ -12,14 +16,16 @@ const knowledgeUnavailableMessage = "知识库模块未配置：请设置 MULTIR
 type KnowledgeService struct {
 	engine      knowledge.KnowledgeEngine
 	providerSvc *ProviderService
+	agentRepo   *repository.AgentRepository
 }
 
 // NewKnowledgeService wires the MultiRAG knowledge engine and an optional
 // ProviderService used to translate local model_ids into MultiRAG-format
 // references before forwarding. providerSvc may be nil — in that case
-// translation is skipped and refs pass through unchanged.
+// translation is skipped and refs pass through unchanged. agentRepo 为删除
+// 保护反查（issue #122），内部构造对齐 NewToolService 先例。
 func NewKnowledgeService(engine knowledge.KnowledgeEngine, providerSvc *ProviderService) *KnowledgeService {
-	return &KnowledgeService{engine: engine, providerSvc: providerSvc}
+	return &KnowledgeService{engine: engine, providerSvc: providerSvc, agentRepo: repository.NewAgentRepository()}
 }
 
 func (s *KnowledgeService) Health(ctx context.Context) (*knowledge.HealthStatus, error) {
@@ -83,7 +89,45 @@ func (s *KnowledgeService) DeleteDatasets(ctx context.Context, req knowledge.Del
 		return err
 	}
 	req.IDs = cleanIDs(req.IDs)
+	if err := s.guardDatasetInUse(req); err != nil {
+		return err
+	}
 	return engine.DeleteDatasets(ctx, req)
+}
+
+// guardDatasetInUse 拒绝删除仍被 Agent 绑定的知识库（issue #122）：反查
+// 绑定表，命中即返回 DatasetInUseError（handler 映射 409），不触 multirag。
+// 显式 IDs 求交集；delete_all 只要存在任一绑定即挡（含僵尸——恢复路径
+// 恰好是前端 ghost 项）。
+func (s *KnowledgeService) guardDatasetInUse(req knowledge.DeleteRequest) error {
+	bindings, err := s.agentRepo.GetDatasetBindings()
+	if err != nil {
+		return fmt.Errorf("query dataset agent bindings failed: %w", err)
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	var ids []string
+	if req.DeleteAll {
+		for id := range bindings {
+			ids = append(ids, id)
+		}
+	} else {
+		for _, id := range req.IDs {
+			if _, ok := bindings[id]; ok {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	sort.Strings(ids)
+	items := make([]agent.DatasetInUseItem, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, agent.DatasetInUseItem{ID: id, Agents: bindings[id]})
+	}
+	return &agent.DatasetInUseError{Datasets: items}
 }
 
 func (s *KnowledgeService) ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error) {
