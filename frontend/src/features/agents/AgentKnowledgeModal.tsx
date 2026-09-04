@@ -53,12 +53,25 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
   const [targetKeys, setTargetKeys] = useState<string[]>([])
 
   const dataSource: TransferItem[] = useMemo(() => {
-    return (listData?.datasets ?? []).map((ds) => ({
+    const items = (listData?.datasets ?? []).map((ds) => ({
       key: ds.id,
       title: ds.name || '未命名',
       description: ds.description || ''
     }))
-  }, [listData])
+    // issue #122：绑定指向但已不在存活列表的库注入为 ghost 项——可见、
+    // 可左移解除、可保存。不加 disabled（disabled 项不可移动 = 重新不可删）。
+    const liveKeys = new Set(items.map((item) => item.key))
+    for (const id of boundIds) {
+      if (!liveKeys.has(id)) {
+        items.push({
+          key: id,
+          title: `已删除的知识库（${id.slice(0, 8)}…）`,
+          description: '绑定指向的知识库已不存在，左移移除后保存即可恢复部署'
+        })
+      }
+    }
+    return items
+  }, [listData, boundIds])
 
   useEffect(() => {
     if (open) {
