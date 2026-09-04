@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { agentChatApi } from '@/api/agent-chat'
+import { agentChatApi, ApiError, type AttachmentDesc } from '@/api/agent-chat'
 import type { ContentPart } from './types'
 
 export type StreamPhase = 'idle' | 'sending' | 'streaming' | 'done' | 'error'
@@ -24,6 +24,8 @@ export interface StreamState {
       成为错误的唯一展示来源，避免 transient 气泡与持久化消息双份显示。
       传输层错误（HTTP 非 200、网络失败）后端没见过这条流，为 false。 */
   errorPersisted: boolean
+  /** 后端稳定错误码（issue #94）：attachment_missing / runtime_attachment_unsupported 等 */
+  errorCode?: string
 }
 
 const INITIAL: StreamState = { phase: 'idle', parts: [], error: null, retry: null, sessionId: null, errorPersisted: false }
@@ -64,7 +66,13 @@ interface SSEPayload {
 
 interface UseChatStreamReturn {
   state: StreamState
-  send: (agentName: string, sessionId: string, content: string) => Promise<void>
+  send: (
+    agentName: string,
+    sessionId: string,
+    content: string,
+    attachments?: AttachmentDesc[],
+    onEstablished?: () => void
+  ) => Promise<void>
   reset: () => void
 }
 
@@ -104,7 +112,13 @@ export function useChatStream(): UseChatStreamReturn {
     setState(INITIAL)
   }, [])
 
-  const send = useCallback(async (agentName: string, sessionId: string, content: string) => {
+  const send = useCallback(async (
+    agentName: string,
+    sessionId: string,
+    content: string,
+    attachments?: AttachmentDesc[],
+    onEstablished?: () => void
+  ) => {
     // Abort any in-flight stream
     abortRef.current?.abort()
     const ctrl = new AbortController()
@@ -126,7 +140,10 @@ export function useChatStream(): UseChatStreamReturn {
     setState({ phase: 'sending', parts: [], error: null, retry: null, sessionId, errorPersisted: false })
 
     try {
-      const resp = await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal)
+      const resp = await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal, attachments)
+      // fetch 200：SSE 已建立。附件/输入清空时机锚点（issue #94：SSE 成功
+      // 建立后才清空文本、本地文件和 blob URL）。
+      onEstablished?.()
       armIdleTimer() // fetch handshake may take time; re-arm once streaming starts
       setState((s) => ({ ...s, phase: 'streaming' }))
 
@@ -305,7 +322,8 @@ export function useChatStream(): UseChatStreamReturn {
         // User abort: silent
         return
       }
-      setState((s) => ({ ...s, phase: 'error', error: errMsg, errorPersisted: false }))
+      const errorCode = err instanceof ApiError ? err.code : undefined
+      setState((s) => ({ ...s, phase: 'error', error: errMsg, errorPersisted: false, errorCode }))
     } finally {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- idleTimer may legitimately be null when stream errors before arming
       if (idleTimer) clearTimeout(idleTimer)

@@ -70,3 +70,7 @@ export const agentFilesApi = {
     })
   },
 }
+
+/** 管理端附件内容通道：复用 admin files/content 代理（admin|maintainer）。 */
+export const adminFileContentUrl = (agentName: string, path: string): string =>
+  contentUrl(agentName, path)

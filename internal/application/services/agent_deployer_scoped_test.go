@@ -376,7 +376,7 @@ func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 		publicHost: "10.0.0.1",
 		kongSvc:    NewKongGatewayService(newFakeKong(), "agent-runtime", "deploy.example.com", newMemRepo(nil), 60, ModeCasdoor),
 	}
-	dto := s.toDTO("zerone", "assistant", "running", "healthy", "c", 3000, nil, "")
+	dto := s.toDTO("zerone", "assistant", "running", "healthy", "c", "", 3000, nil, "")
 	want := "https://deploy.example.com/zerone/assistant"
 	if dto.RuntimeURL != want {
 		t.Errorf("RuntimeURL = %q, want %q", dto.RuntimeURL, want)
@@ -385,7 +385,7 @@ func TestToDTO_RuntimeURLUsesScopedPath(t *testing.T) {
 
 func TestToDTO_NoKongRunningReturnsRelativeRuntimeURL(t *testing.T) {
 	s := &AgentDeployerService{publicHost: "203.0.113.10"} // kongSvc == nil → no Kong
-	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
+	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", "", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/default/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/default/test", dto.RuntimeURL)
 	}
@@ -395,7 +395,7 @@ func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
 	// builtin mode omits the implicit default tenant from public URLs
 	// (issue #114): /runtime/<name>, not /runtime/default/<name>.
 	s := &AgentDeployerService{publicHost: "203.0.113.10", authMode: ModeBuiltin}
-	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", 32100, nil, "")
+	dto := s.toDTO("default", "test", "running", "healthy", "c-default-test", "", 32100, nil, "")
 	if dto.RuntimeURL != "/runtime/test" {
 		t.Fatalf("RuntimeURL = %q, want /runtime/test", dto.RuntimeURL)
 	}
@@ -403,7 +403,7 @@ func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
 
 func TestToDTO_NotRunning_NoProxyURL(t *testing.T) {
 	s := &AgentDeployerService{publicHost: "203.0.113.10"}
-	dto := s.toDTO("default", "test", "stopped", "unhealthy", "c", 0, nil, "")
+	dto := s.toDTO("default", "test", "stopped", "unhealthy", "c", "", 0, nil, "")
 	if dto.RuntimeURL == "/runtime/default/test" {
 		t.Fatal("non-running deployment must not get a proxy URL")
 	}

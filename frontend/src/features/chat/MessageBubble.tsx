@@ -106,9 +106,10 @@ function formatAigc(aigc: string | undefined): string | null {
 interface MessageBubbleProps {
   message: ChatMessage
   enableStream?: boolean
+  buildAttachmentUrl?: (path: string) => string
 }
 
-function MessageBubbleInner({ message: msg, enableStream }: MessageBubbleProps) {
+function MessageBubbleInner({ message: msg, enableStream, buildAttachmentUrl }: MessageBubbleProps) {
   const { styles } = useStyles()
   const [raw, setRaw] = useState(false)
 
@@ -137,7 +138,7 @@ function MessageBubbleInner({ message: msg, enableStream }: MessageBubbleProps) 
             (() => {
               const parts = parseContent(msg.content)
               if (!parts) return <ChatMarkdown content={msg.content} enableStream={enableStream} />
-              return <ContentParts parts={parts} enableStream={enableStream} />
+              return <ContentParts parts={parts} enableStream={enableStream} buildAttachmentUrl={buildAttachmentUrl} />
             })()
           )}
         </div>

@@ -11,6 +11,7 @@ import (
 type mockChatRepo struct {
 	sessions map[string]*chat.Session
 	messages map[string]*chat.Message
+	uploads  map[string]*chat.UploadRecord
 	listSess []*chat.Session
 }
 
@@ -18,6 +19,7 @@ func newMockChatRepo() *mockChatRepo {
 	return &mockChatRepo{
 		sessions: make(map[string]*chat.Session),
 		messages: make(map[string]*chat.Message),
+		uploads:  make(map[string]*chat.UploadRecord),
 	}
 }
 
@@ -58,6 +60,18 @@ func (m *mockChatRepo) DeleteSession(tenantID, sessionID string) error {
 	if s, ok := m.sessions[sessionID]; ok && s.TenantID == tenantID {
 		delete(m.sessions, sessionID)
 	}
+	// Mirrors the repository transaction (issue #94 review R2 F3): messages
+	// and upload records die with the session.
+	for id, msg := range m.messages {
+		if msg.TenantID == tenantID && msg.SessionID == sessionID {
+			delete(m.messages, id)
+		}
+	}
+	for id, r := range m.uploads {
+		if r.TenantID == tenantID && r.SessionID == sessionID {
+			delete(m.uploads, id)
+		}
+	}
 	return nil
 }
 
@@ -83,6 +97,38 @@ func (m *mockChatRepo) UpdateSessionTitle(tenantID, sessionID, title string) err
 		if s.Title == "" {
 			s.Title = title
 		}
+	}
+	return nil
+}
+
+func (m *mockChatRepo) CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error {
+	for _, r := range records {
+		r.TenantID = tenantID
+		m.uploads[r.ID] = r
+	}
+	return nil
+}
+
+func (m *mockChatRepo) GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error) {
+	r, ok := m.uploads[id]
+	if !ok || r.TenantID != tenantID || r.SessionID != sessionID {
+		return nil, errNotFound
+	}
+	return r, nil
+}
+
+func (m *mockChatRepo) HasUploadRecordPath(tenantID, sessionID, path, containerID string) (bool, error) {
+	for _, r := range m.uploads {
+		if r.TenantID == tenantID && r.SessionID == sessionID && r.Path == path && r.ContainerID == containerID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *mockChatRepo) DeleteMessageByID(tenantID, sessionID, messageID string) error {
+	if msg, ok := m.messages[messageID]; ok && msg.TenantID == tenantID && msg.SessionID == sessionID {
+		delete(m.messages, messageID)
 	}
 	return nil
 }
@@ -145,7 +191,7 @@ func TestSaveUserMessage_StoresContent(t *testing.T) {
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
 	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
-	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "hello")
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "hello", nil)
 	if err != nil {
 		t.Fatalf("SaveUserMessage failed: %v", err)
 	}
@@ -195,10 +241,55 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
 
 	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	repo.uploads["f-1"] = &chat.UploadRecord{
+		ID: "f-1", TenantID: "tenant-a", SessionID: sess.ID, Path: ".zerone-uploads/a.txt",
+	}
 	if err := svc.DeleteSession("tenant-a", "u1", sess.ID); err != nil {
 		t.Fatalf("DeleteSession failed: %v", err)
 	}
 	if _, ok := repo.sessions[sess.ID]; ok {
 		t.Errorf("session still present after delete")
+	}
+	// issue #94 review R2 F3：上传记录（授权锚点）随会话在删除事务内一并清除。
+	if len(repo.uploads) != 0 {
+		t.Errorf("upload records still present after delete: %d", len(repo.uploads))
+	}
+}
+
+func TestSaveUserMessage_FilePartsBeforeText(t *testing.T) {
+	repo := newMockChatRepo()
+	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
+	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
+
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	atts := []AttachmentDesc{{
+		ID: "f-1", Name: "report.pdf", Mime: "application/pdf", Size: 123, Path: ".zerone-uploads/report.pdf",
+	}}
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "请总结", atts)
+	if err != nil {
+		t.Fatalf("SaveUserMessage failed: %v", err)
+	}
+	want := `[{"type":"file","id":"f-1","name":"report.pdf","mime":"application/pdf","size":123,"path":".zerone-uploads/report.pdf"},` +
+		`{"type":"text","text":"请总结"}]`
+	if msg.Content != want {
+		t.Errorf("Content = %q\nwant %q", msg.Content, want)
+	}
+}
+
+func TestSaveUserMessage_PureAttachmentHasNoTextPart(t *testing.T) {
+	repo := newMockChatRepo()
+	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
+	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
+
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	atts := []AttachmentDesc{{
+		ID: "f-1", Name: "a.png", Mime: "image/png", Size: 5, Path: ".zerone-uploads/a.png",
+	}}
+	msg, err := svc.SaveUserMessage("tenant-a", "u1", sess.ID, "", atts)
+	if err != nil {
+		t.Fatalf("SaveUserMessage failed: %v", err)
+	}
+	if msg.Content != `[{"type":"file","id":"f-1","name":"a.png","mime":"image/png","size":5,"path":".zerone-uploads/a.png"}]` {
+		t.Errorf("Content = %q", msg.Content)
 	}
 }

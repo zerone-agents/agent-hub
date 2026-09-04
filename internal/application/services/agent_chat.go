@@ -1,10 +1,12 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"control-panel/internal/domain/agent"
@@ -24,6 +26,10 @@ type chatRepositoryForAgent interface {
 	ListMessages(tenantID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error)
 	UpdateSessionRuntimeSessionID(tenantID, sessionID, runtimeSessionID string) error
 	UpdateSessionTitle(tenantID, sessionID, title string) error
+	CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error
+	GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error)
+	HasUploadRecordPath(tenantID, sessionID, path, containerID string) (bool, error)
+	DeleteMessageByID(tenantID, sessionID, messageID string) error
 }
 
 // agentRepoForChat is the subset of AgentRepository used by AgentChatService.
@@ -44,6 +50,10 @@ type AgentChatService struct {
 	publicHost    string
 	runtimeKey    string
 	upstreamHost  string // cfg.Deployer.DeployerURLHost; "" = fail closed (no-Kong upstream)
+
+	// attachment capability probe cache（15s TTL，issue #94）
+	probeMu    sync.Mutex
+	probeCache map[string]attachmentProbe
 }
 
 // NewAgentChatService constructs an AgentChatService.
@@ -76,6 +86,9 @@ func (s *AgentChatService) PublicHost() string { return s.publicHost }
 
 // Source constant identifying sessions created from the Agent Chatbox page.
 const SourceAgentChatPage = "agent_chat_page"
+
+// attachmentProbeTTL bounds capability probe caching.
+const attachmentProbeTTL = 15 * time.Second
 
 // ListSessions returns sessions for the given (agent, user) pair.
 // source filters the session origin (e.g. "agent_chat_page"); pass empty to list all.
@@ -133,6 +146,17 @@ type contentPart struct {
 	Text string `json:"text"`
 }
 
+// filePart is the canonical attachment shape persisted in Message.Content.
+// Ordered BEFORE the optional text part (issue #94).
+type filePart struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Mime string `json:"mime"`
+	Size int64  `json:"size"`
+	Path string `json:"path"`
+}
+
 // GetMessages returns messages for a session owned by userID.
 func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
@@ -141,7 +165,11 @@ func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page,
 	return s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
 }
 
-// DeleteSession deletes a session owned by userID.
+// DeleteSession deletes a session owned by userID, including its upload
+// records (attachment descriptors are session-scoped authorization anchors —
+// they must not outlive the session). The records are removed inside the
+// repository's DeleteSession transaction (issue #94 review R2 F3), so a
+// partial failure can never leave records behind for a deleted session.
 func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) error {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return fmt.Errorf("session not found: %w", err)
@@ -149,16 +177,24 @@ func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) err
 	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }
 
-// SaveUserMessage persists a user message in the given session.
-// content is wrapped into the canonical JSON array format.
-func (s *AgentChatService) SaveUserMessage(tenantID, userID, sessionID, content string) (*chat.Message, error) {
+// SaveUserMessage persists a user message in the given session. content and
+// attachments are wrapped into the canonical JSON array format: file parts
+// first, then the optional text part (empty content adds no text part).
+func (s *AgentChatService) SaveUserMessage(tenantID, userID, sessionID, content string, attachments []AttachmentDesc) (*chat.Message, error) {
 	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
-	wrapped, _ := json.Marshal([]contentPart{
-		{Type: "text", Text: content},
-	})
+	parts := make([]interface{}, 0, len(attachments)+1)
+	for _, a := range attachments {
+		parts = append(parts, filePart{
+			Type: "file", ID: a.ID, Name: a.Name, Mime: a.Mime, Size: a.Size, Path: a.Path,
+		})
+	}
+	if content != "" {
+		parts = append(parts, contentPart{Type: "text", Text: content})
+	}
+	wrapped, _ := json.Marshal(parts)
 
 	msg := &chat.Message{
 		UserID:    userID,
@@ -265,8 +301,8 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 }
 
 // ResolveRuntime verifies the agent is deployed and running, and returns
-// the runtime base URL and the per-agent runtime API key (decrypted from
-// the agents table).
+// the runtime base URL, the per-agent runtime API key (decrypted from
+// the agents table), and the deployer-reported container id.
 //
 // The base URL is Kong-aware: when Kong gateway is enabled, deployerSvc.toDTO
 // has already populated RuntimeURL with the gateway route (e.g.
@@ -277,20 +313,167 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 // hairpin URL or hub-relative path) is never an internal dial target — the
 // internal upstream URL http://{DeployerURLHost}:{hostPort} is used instead
 // so hub→runtime traffic stays on the deployer network.
-func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, error) {
+//
+// containerID is the immutable deployment-generation anchor (issue #94
+// review R3): Docker assigns a fresh id on every recreate (redeploy) but
+// keeps it across in-place restarts — exactly mirroring the on-disk lifetime
+// of `.zerone-uploads`. Callers bind upload records to it at upload time and
+// re-check it on send/download, so stale-generation records fail closed with
+// no time tolerance. An empty containerID (deployer did not report one)
+// must be treated as "generation unknown" by authorization callers.
+func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, string, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
-		return "", "", fmt.Errorf("get deployment status: %w", err)
+		return "", "", "", fmt.Errorf("get deployment status: %w", err)
 	}
 	if status.Status != "running" {
-		return "", "", fmt.Errorf("agent not running (status=%s)", status.Status)
+		return "", "", "", fmt.Errorf("agent not running (status=%s)", status.Status)
 	}
 	if status.HostPort == 0 {
-		return "", "", fmt.Errorf("agent running but no host port")
+		return "", "", "", fmt.Errorf("agent running but no host port")
 	}
 	baseURL, err := s.resolveBaseURL(s.kongEnabledForChat(), status.RuntimeURL, status.HostPort)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return baseURL, status.APIKey, nil
+	return baseURL, status.APIKey, status.ContainerID, nil
+}
+
+// attachmentProbe caches one capability probe result.
+type attachmentProbe struct {
+	ok bool
+	at time.Time
+}
+
+// ProbeAttachmentSupport probes the runtime /health endpoint (no auth) on an
+// already-resolved base URL. The gate is the capability declaration, not the
+// version string: attachments require the runtime to advertise
+// attachmentExpectedGeneration (runtime >= 2.7.0, the release that shipped
+// the X-Expected-Container-Id atomic generation check — runtime PR #62 /
+// issue #61). A runtime without a capabilities field (all pre-2.7.0) parses
+// as false. Generation binding itself is done via the deployer-reported
+// container id from ResolveRuntime, not via /health (issue #94 review R3).
+func (s *AgentChatService) ProbeAttachmentSupport(ctx context.Context, baseURL string) (bool, error) {
+	info, err := s.runtimeClient.Health(ctx, baseURL)
+	if err != nil {
+		return false, err
+	}
+	return info.Capabilities.AttachmentExpectedGeneration, nil
+}
+
+// AttachmentsSupportedAt is a thin wrapper over ProbeAttachmentSupport for
+// callers that only need the capability verdict.
+func (s *AgentChatService) AttachmentsSupportedAt(ctx context.Context, baseURL string) bool {
+	supported, err := s.ProbeAttachmentSupport(ctx, baseURL)
+	return err == nil && supported
+}
+
+// AttachmentsAvailable reports (15s TTL cache) whether the agent's runtime
+// supports attachments. Probe failures return false — text chat is never
+// blocked by this. The gate is conjunctive (runtime #61 Hub 跟进契约):
+// runtime capability declaration && non-empty deployer containerId — either
+// missing closes the entrance (no upload, no attachment-bearing send).
+func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, agentName string) bool {
+	key := tenantID + "\x00" + agentName
+	s.probeMu.Lock()
+	if hit, ok := s.probeCache[key]; ok && time.Since(hit.at) < attachmentProbeTTL {
+		s.probeMu.Unlock()
+		return hit.ok
+	}
+	s.probeMu.Unlock()
+
+	ok := false
+	// runtime #61 Hub 跟进契约：capability && deployer containerId 非空，二者
+	// 缺一即关闭（不探测）。containerId 在此处门控——deployer 未报告容器 id
+	//（空代次）时上传记录的代次绑定无从谈起，capability 探测通过也不能开入口。
+	if baseURL, _, containerID, err := s.ResolveRuntime(tenantID, agentName); err == nil && containerID != "" {
+		ok = s.AttachmentsSupportedAt(ctx, baseURL)
+	}
+	s.probeMu.Lock()
+	if s.probeCache == nil {
+		s.probeCache = make(map[string]attachmentProbe)
+	}
+	s.probeCache[key] = attachmentProbe{ok: ok, at: time.Now()}
+	s.probeMu.Unlock()
+	return ok
+}
+
+// SessionHasAttachment reports whether path belongs to a server-side upload
+// record of the session created in the CURRENT runtime container generation
+// (containerID from ResolveRuntime — issue #94 review F1/R3: records are
+// written only by the hub at upload time — the unforgeable authorization
+// anchor for the user-facing content proxy; message file parts are
+// display-only). Runtime /v1/files/content can read the whole cwd, so this
+// cross-check must only ever admit paths the runtime handed out to THIS
+// session in THIS container generation. The match is an exact container-id
+// equality — no time tolerance.
+func (s *AgentChatService) SessionHasAttachment(tenantID, userID, sessionID, path, containerID string) (bool, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return false, fmt.Errorf("session not found: %w", err)
+	}
+	if containerID == "" {
+		// Authorization path: fail closed when the generation is unknown
+		// (deployer did not report a container id) rather than treating
+		// every record as current.
+		return false, nil
+	}
+	return s.chatRepo.HasUploadRecordPath(tenantID, sessionID, path, containerID)
+}
+
+// SaveUploadRecords persists the runtime-issued attachment descriptors after
+// a successful upload, binding them to (tenant, session, user) AND the
+// immutable container generation the upload was served by (containerID is
+// captured from ResolveRuntime BEFORE the upload request is issued, so it is
+// naturally the generation that actually processed the upload — an upload
+// interrupted by a recreate leaves no record, and a recreate right after a
+// successful upload marks the record stale). These records — not the
+// client-supplied message descriptors — later authorize both the content
+// proxy and SendMessage attachment acceptance. All descriptors of one
+// upload persist atomically (issue #94 review R2 F4): the runtime has
+// already issued the ids/files, so a partial persist would leave files no
+// record authorizes.
+func (s *AgentChatService) SaveUploadRecords(tenantID, userID, sessionID, containerID string, files []AttachmentDesc) error {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	records := make([]*chat.UploadRecord, 0, len(files))
+	for _, f := range files {
+		records = append(records, &chat.UploadRecord{
+			ID:          f.ID,
+			SessionID:   sessionID,
+			UserID:      userID,
+			Name:        f.Name,
+			Mime:        f.Mime,
+			Size:        f.Size,
+			Path:        f.Path,
+			ContainerID: containerID,
+			CreatedAt:   time.Now().UTC(),
+		})
+	}
+	if err := s.chatRepo.CreateUploadRecords(tenantID, records); err != nil {
+		return fmt.Errorf("create upload records: %w", err)
+	}
+	return nil
+}
+
+// GetUploadRecord returns the server-side upload record for id, scoped to the
+// session owned by userID. Callers compare the record against a client-
+// supplied descriptor; a missing record means the descriptor was never issued
+// by an upload in this session (forged) and must be rejected.
+func (s *AgentChatService) GetUploadRecord(tenantID, userID, sessionID, id string) (*chat.UploadRecord, error) {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+	return s.chatRepo.GetUploadRecord(tenantID, sessionID, id)
+}
+
+// DeleteMessageByID removes one message from a session owned by userID. Used
+// to roll back the optimistic user-message persist when the runtime rejects
+// the run pre-flight (e.g. attachment_missing after a container rebuild) so a
+// retry does not duplicate the user turn.
+func (s *AgentChatService) DeleteMessageByID(tenantID, userID, sessionID, messageID string) error {
+	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	return s.chatRepo.DeleteMessageByID(tenantID, sessionID, messageID)
 }

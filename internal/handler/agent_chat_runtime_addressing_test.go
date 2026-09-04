@@ -41,7 +41,7 @@ func setupRuntimeAddressingDB(t *testing.T, hostPort int) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &agent.AgentConfig{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}, &agent.AgentConfig{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
@@ -90,9 +90,9 @@ func newAgentChatHandlerWithFakes(t *testing.T, runtimeHitPath *string) *AgentCh
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/agents/"+deployKey && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret"}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","hostPort":%d,"runtimeToken":"rt-secret","containerId":"ctr-1"}}`, deployKey, port)))
 		case r.URL.Path == "/api/v1/agents/"+deployKey+"/status" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d}}`, deployKey, port)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"success":true,"data":{"agentName":%q,"status":"running","health":"healthy","hostPort":%d,"containerId":"ctr-1"}}`, deployKey, port)))
 		default:
 			t.Errorf("unexpected deployer request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -149,4 +149,31 @@ func TestSendMessage_AddressesRuntimeWithBareAgentID(t *testing.T) {
 	require.Equal(t, "/v1/agents/min/runs", runtimePath)
 	// The SSE stream was piped through to the client.
 	require.Contains(t, w.Body.String(), `"subtype":"success"`)
+}
+
+// Session-bound-to-other-agent requests must 404 BEFORE persisting anything
+// or dialing the runtime (issue #94 acceptance #1; previously :name was only
+// used for runtime addressing, so a message could land in A's session while
+// streaming from B's runtime).
+func TestSendMessage_RejectsSessionBoundToOtherAgent(t *testing.T) {
+	var runtimePath string
+	h := newAgentChatHandlerWithFakes(t, &runtimePath)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"content":"hi"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	// s-run is bound to agent "min"; address it under a different agent name.
+	c.Params = gin.Params{{Key: "name", Value: "other"}, {Key: "id", Value: "s-run"}}
+
+	h.SendMessage(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Empty(t, runtimePath, "runtime must not be dialed")
+	var count int64
+	require.NoError(t, database.DB.Model(&chat.Message{}).Where("session_id = ?", "s-run").Count(&count).Error)
+	require.Zero(t, count, "no message may be persisted for a binding mismatch")
 }

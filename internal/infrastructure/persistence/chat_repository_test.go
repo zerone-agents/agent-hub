@@ -19,7 +19,7 @@ func setupChatRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
@@ -128,6 +128,12 @@ func TestChatRepository_DeleteSession_CrossTenantNoop(t *testing.T) {
 	db := setupChatRepoTestDB(t)
 	seedChatTenantData(t, db)
 	repo := NewChatRepository()
+	// issue #94 review R2 F3：上传记录（附件授权锚点）必须随会话在同一删除
+	// 事务内一并清除。
+	require.NoError(t, db.Create(&chat.UploadRecord{
+		ID: "up-a", TenantID: "org-a", SessionID: "s-a", UserID: "u-a",
+		Name: "a.txt", Mime: "text/plain", Size: 3, Path: ".zerone-uploads/a.txt",
+	}).Error)
 
 	// org-b 删 org-a 的会话：不删任何行
 	require.NoError(t, repo.DeleteSession("org-b", "s-a"))
@@ -136,13 +142,17 @@ func TestChatRepository_DeleteSession_CrossTenantNoop(t *testing.T) {
 	require.Equal(t, int64(1), cnt, "跨租户删除不得影响目标行")
 	require.NoError(t, db.Model(&chat.Message{}).Where("session_id = ?", "s-a").Count(&cnt).Error)
 	require.Equal(t, int64(1), cnt, "跨租户删除不得影响消息行")
+	require.NoError(t, db.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-a").Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt, "跨租户删除不得影响上传记录行")
 
-	// 同租户删除生效（session + message 都删）
+	// 同租户删除生效（session + message + upload record 都删）
 	require.NoError(t, repo.DeleteSession("org-a", "s-a"))
 	require.NoError(t, db.Model(&chat.Session{}).Where("id = ?", "s-a").Count(&cnt).Error)
 	require.Equal(t, int64(0), cnt)
 	require.NoError(t, db.Model(&chat.Message{}).Where("session_id = ?", "s-a").Count(&cnt).Error)
 	require.Equal(t, int64(0), cnt)
+	require.NoError(t, db.Model(&chat.UploadRecord{}).Where("session_id = ?", "s-a").Count(&cnt).Error)
+	require.Equal(t, int64(0), cnt, "上传记录必须随会话在删除事务内一并清除")
 }
 
 func TestChatRepository_CreateSession_StampsTenant(t *testing.T) {

@@ -178,8 +178,16 @@ func (r *ChatRepository) ListMessages(tenantID, sessionID string, page, pageSize
 	return messages, total, err
 }
 
+// DeleteSession removes a session with its messages and upload records in a
+// single transaction (issue #94 review R2 F3): upload records are the
+// attachment authorization anchors — they must not outlive their session,
+// and a partial failure must never leave records behind for a deleted
+// session.
 func (r *ChatRepository) DeleteSession(tenantID, sessionID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := TenantOwned(tx, tenantID).Where("session_id = ?", sessionID).Delete(&chat.UploadRecord{}).Error; err != nil {
+			return err
+		}
 		if err := TenantOwned(tx, tenantID).Where("session_id = ?", sessionID).Delete(&chat.Message{}).Error; err != nil {
 			return err
 		}
@@ -253,4 +261,52 @@ func (r *ChatRepository) UpdateSessionTitle(tenantID, sessionID, title string) e
 	return TenantOwned(r.db.Model(&chat.Session{}), tenantID).
 		Where("id = ? AND (title IS NULL OR title = '')", sessionID).
 		Update("title", title).Error
+}
+
+// CreateUploadRecords batch-inserts server-side upload records in a single
+// transaction (issue #94 review R2 F4): an upload response persists all of
+// its descriptors or none — the runtime has already issued the ids/files, so
+// a partial batch would leave files no record authorizes. The tenant is
+// always stamped from the tenantID argument — the caller-provided model
+// values are not trusted.
+func (r *ChatRepository) CreateUploadRecords(tenantID string, records []*chat.UploadRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, rec := range records {
+			rec.TenantID = tenantID
+		}
+		return tx.Create(&records).Error
+	})
+}
+
+// GetUploadRecord returns the upload record for (session, id), tenant-scoped.
+// gorm.ErrRecordNotFound when the id was never issued by an upload in the
+// session — i.e. a client-forged descriptor.
+func (r *ChatRepository) GetUploadRecord(tenantID, sessionID, id string) (*chat.UploadRecord, error) {
+	var rec chat.UploadRecord
+	err := TenantOwned(r.db, tenantID).Where("session_id = ? AND id = ?", sessionID, id).First(&rec).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// HasUploadRecordPath reports whether path was registered by a server-side
+// upload record of the session created in the given runtime container
+// generation (exact container_id equality, zero tolerance — records from
+// previous container generations no longer authorize after a recreate;
+// issue #94 review R3).
+func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path, containerID string) (bool, error) {
+	var count int64
+	err := TenantOwned(r.db.Model(&chat.UploadRecord{}), tenantID).
+		Where("session_id = ? AND path = ? AND container_id = ?", sessionID, path, containerID).Count(&count).Error
+	return count > 0, err
+}
+
+// DeleteMessageByID deletes one message of a session (used to roll back the
+// optimistic user-message persist when the runtime rejects the run).
+func (r *ChatRepository) DeleteMessageByID(tenantID, sessionID, messageID string) error {
+	return TenantOwned(r.db, tenantID).Where("session_id = ? AND id = ?", sessionID, messageID).Delete(&chat.Message{}).Error
 }

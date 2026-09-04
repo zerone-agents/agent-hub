@@ -25,7 +25,7 @@ func TestStreamRun_Success(t *testing.T) {
 
 	c := NewClient()
 	body := []byte(`{"message":"hi"}`)
-	rc, err := c.StreamRun(context.Background(), server.URL, "test", "rt-key", body)
+	rc, err := c.StreamRun(context.Background(), server.URL, "test", "rt-key", body, "")
 	if err != nil {
 		t.Fatalf("StreamRun failed: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestStreamRun_Non2xx(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	_, err := c.StreamRun(context.Background(), server.URL, "test", "rt-key", []byte(`{}`))
+	_, err := c.StreamRun(context.Background(), server.URL, "test", "rt-key", []byte(`{}`), "")
 	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
 		t.Errorf("expected HTTP 500 error, got: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStreamRun_NoAPIKey(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	rc, err := c.StreamRun(context.Background(), server.URL, "test", "", []byte(`{}`))
+	rc, err := c.StreamRun(context.Background(), server.URL, "test", "", []byte(`{}`), "")
 	if err != nil {
 		t.Fatalf("StreamRun failed: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestProxyFiles_List(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files?path=src&recursive=true", "")
+	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files?path=src&recursive=true", "", "")
 	if err != nil {
 		t.Fatalf("ProxyFiles failed: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestProxyFiles_Content_HEAD(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	resp, err := c.ProxyFiles(context.Background(), http.MethodHead, server.URL, "rt-key", "/v1/files/content?path=p.json", "")
+	resp, err := c.ProxyFiles(context.Background(), http.MethodHead, server.URL, "rt-key", "/v1/files/content?path=p.json", "", "")
 	if err != nil {
 		t.Fatalf("ProxyFiles HEAD failed: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestProxyFiles_Range(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files/content?path=p.json", "bytes=0-31")
+	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files/content?path=p.json", "bytes=0-31", "")
 	if err != nil {
 		t.Fatalf("ProxyFiles Range failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestProxyFiles_BusinessError_PassesResponseNotError(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files/content?path=missing", "")
+	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files/content?path=missing", "", "")
 	if err != nil {
 		t.Fatalf("404 should return response not error, got err: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestProxyFiles_NetworkError_ReturnsError(t *testing.T) {
 	server.Close() // 立即关闭模拟连接失败
 
 	c := NewClient()
-	_, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files", "")
+	_, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "rt-key", "/v1/files", "", "")
 	if err == nil {
 		t.Errorf("expected network error, got nil")
 	}
@@ -245,7 +245,7 @@ func TestProxyFiles_NoAPIKey(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient()
-	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "", "/v1/files", "")
+	resp, err := c.ProxyFiles(context.Background(), http.MethodGet, server.URL, "", "/v1/files", "", "")
 	if err != nil {
 		t.Fatalf("ProxyFiles failed: %v", err)
 	}

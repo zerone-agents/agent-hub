@@ -10,6 +10,8 @@ vi.mock('react-router', () => ({
 
 vi.mock('@/queries/useAgentChat', () => ({
   useAgentChatMessages: vi.fn(() => ({ data: { items: [], total: 0 } })),
+  // 页面新增 capabilities 消费点（issue #94）；既有断言不依赖附件，保持关闭态
+  useAgentChatCapabilities: () => ({ data: { attachmentsEnabled: false } }),
 }))
 
 // 模拟流状态：每个用例可改写 mockStream.state 覆盖不同场景；

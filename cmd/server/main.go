@@ -425,6 +425,11 @@ func main() {
 		agentsGroup.GET("/:name/chat/sessions/:id/messages", agentChatHandler.ListMessages)
 		agentsGroup.DELETE("/:name/chat/sessions/:id", agentChatHandler.DeleteSession)
 		agentsGroup.POST("/:name/chat/sessions/:id/messages", agentChatHandler.SendMessage)
+
+		// Agent chat attachments (issue #94)
+		agentsGroup.GET("/:name/chat/capabilities", agentChatHandler.Capabilities)
+		agentsGroup.POST("/:name/chat/sessions/:id/uploads", agentChatHandler.UploadAttachments)
+		agentsGroup.GET("/:name/chat/sessions/:id/attachments/content", agentChatHandler.AttachmentContent)
 	}
 
 	// 管理接口：写方法/敏感 GET（files/content）→ write 组；
