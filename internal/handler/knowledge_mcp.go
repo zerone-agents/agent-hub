@@ -358,7 +358,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		return *deny, nil
 	}
 	if len(allowedDatasetIDs) == 0 {
-		return mcpErrorResult(id, "当前 Agent 未启用知识库 MCP"), nil
+		return mcpCodedErrorResult(id, mcpErrNoDatasetBound, "当前 Agent 未绑定任何知识库数据集"), nil
 	}
 
 	datasetIDs := args.DatasetIDs
@@ -366,7 +366,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 		datasetIDs = allowedDatasetIDs
 	}
 	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return mcpErrorResult(id, knowledgeCapabilityDeniedMessage), nil
+		return mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage), nil
 	}
 
 	req := knowledge.RetrievalRequest{
@@ -383,7 +383,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 	if err != nil {
 		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
 		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
-		return mcpErrorResult(id, "知识库检索失败，请稍后重试"), nil
+		return mcpCodedErrorResult(id, mcpErrRetrievalFailed, "知识库检索失败，请稍后重试"), nil
 	}
 
 	text := formatRetrievalResult(result)
@@ -546,7 +546,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		// Values 按 canonical MIME key 取值：header 名大小写变体天然同桶，
 		// 多值即重复头攻击。
 		log.Printf("knowledge-mcp: duplicate %s headers rejected (tenant=%s agent=%s count=%d)", knowledgeCapabilityHeader, tenantID, agentCfg.Name, len(caps))
-		deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+		deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 		return nil, &deny, nil
 	}
 	if len(caps) == 1 {
@@ -554,7 +554,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		if capability == "" {
 			// 呈现但空值 ≠ 缺失：缺失才回退，空值按拒绝。
 			log.Printf("knowledge-mcp: blank %s header rejected (tenant=%s agent=%s)", knowledgeCapabilityHeader, tenantID, agentCfg.Name)
-			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 			return nil, &deny, nil
 		}
 	}
@@ -564,7 +564,7 @@ func (h *KnowledgeMcpHandler) resolveAgentContext(c *gin.Context, id interface{}
 		if errors.Is(err, services.ErrKnowledgeCapabilityDenied) {
 			// 失败原因只进服务端日志；capability 值绝不上日志/响应。
 			log.Printf("knowledge-mcp: capability rejected (tenant=%s agent=%s): %v", tenantID, agentCfg.Name, err)
-			deny := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+			deny := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 			return nil, &deny, nil
 		}
 		// 细节（绑定解析失败原因等）只进服务端日志，客户端拿中性文案。
@@ -592,7 +592,7 @@ func (h *KnowledgeMcpHandler) requireDatasetAccess(c *gin.Context, id interface{
 		return "", capDeny, nil
 	}
 	if !isStringSubset([]string{datasetID}, allowed) {
-		resp := mcpErrorResult(id, knowledgeCapabilityDeniedMessage)
+		resp := mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage)
 		return datasetID, &resp, nil
 	}
 	return datasetID, nil, nil
@@ -622,6 +622,21 @@ func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error)
 			"isError": false,
 		},
 	}, nil
+}
+
+// MCP 工具错误码（issue #119）：调用方（runtime/子 Agent）程序化识别用，
+// 文案保持中性。码是稳定契约，只增不改。capability 拒绝与 dataset 越权
+// 共用 dataset_not_authorized，不区分失败步骤——不给探测 oracle。
+const (
+	mcpErrDatasetNotAuthorized = "dataset_not_authorized"
+	mcpErrNoDatasetBound       = "no_dataset_bound"
+	mcpErrRetrievalFailed      = "retrieval_failed"
+)
+
+// mcpCodedErrorResult 构造带稳定错误码前缀的 isError 工具结果，
+// 文本形态 `[<code>] <中性文案>`。
+func mcpCodedErrorResult(id interface{}, code, msg string) jsonRPCResponse {
+	return mcpErrorResult(id, "["+code+"] "+msg)
 }
 
 func mcpErrorResult(id interface{}, msg string) jsonRPCResponse {

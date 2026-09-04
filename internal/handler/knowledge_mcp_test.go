@@ -290,8 +290,9 @@ func TestKnowledgeMcpHandler_ToolsCall_NoBoundDatasets(t *testing.T) {
 	if !isErrorResult(resp.Result) {
 		t.Fatalf("expected isError=true, got result = %v", resp.Result)
 	}
-	if !strings.Contains(resultText(resp.Result), "未启用知识库 MCP") {
-		t.Fatalf("expected disabled message, got %v", resp.Result)
+	text := resultText(resp.Result)
+	if !strings.HasPrefix(text, "[no_dataset_bound]") || !strings.Contains(text, "当前 Agent 未绑定任何知识库数据集") {
+		t.Fatalf("expected [no_dataset_bound] message, got %q", text)
 	}
 }
 
@@ -525,7 +526,7 @@ func TestKnowledgeMcpHandler_ToolsCall_PerAgentCapabilityAuthorization(t *testin
 	// matrix 7：capability 值不出现在任何响应文本；所有 deny 原因同一文案
 	// （不给探测 oracle），与 dataset 越权拒绝的文案一致。
 	for _, text := range denyTexts {
-		if text != "无权访问部分知识库 dataset" {
+		if text != "[dataset_not_authorized] 无权访问部分知识库 dataset" {
 			t.Fatalf("all capability denies must share the neutral subset-denial message, got %q (all: %v)", text, denyTexts)
 		}
 	}
@@ -1241,5 +1242,60 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_Unauthorized(t *testing.T) {
 	}
 	if !isErrorResult(resp.Result) || !strings.Contains(resultText(resp.Result), "无权访问") {
 		t.Fatalf("expected unauthorized isError, got %v", resp.Result)
+	}
+}
+
+// issue #119：MCP 工具错误文本带稳定机器可识别码前缀 `[<code>] <中性文案>`，
+// 调用方（runtime/子 Agent）按码程序化分支，不解析文案。
+func TestKnowledgeMcpHandler_ToolsCall_ErrorCodesStable(t *testing.T) {
+	cases := []struct {
+		name       string
+		svc        *fakeKnowledgeMcpService
+		agent      *fakeAgentMcpService
+		params     string
+		wantPrefix string
+	}{
+		{
+			name:       "no dataset bound",
+			svc:        &fakeKnowledgeMcpService{},
+			agent:      &fakeAgentMcpService{},
+			params:     `{"name":"knowledge_search","arguments":{"query":"q"}}`,
+			wantPrefix: "[no_dataset_bound]",
+		},
+		{
+			name:       "unauthorized dataset",
+			svc:        &fakeKnowledgeMcpService{},
+			agent:      &fakeAgentMcpService{datasets: []string{"kb1"}},
+			params:     `{"name":"knowledge_search","arguments":{"query":"q","dataset_ids":["kb-other"]}}`,
+			wantPrefix: "[dataset_not_authorized]",
+		},
+		{
+			name: "retrieval upstream failure",
+			svc: &fakeKnowledgeMcpService{retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+				return nil, errors.New("multirag error 100: boom")
+			}},
+			agent:      &fakeAgentMcpService{datasets: []string{"kb1"}},
+			params:     `{"name":"knowledge_search","arguments":{"query":"q"}}`,
+			wantPrefix: "[retrieval_failed]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := setupKnowledgeMcpRouter(tc.svc, tc.agent)
+			rec := postJSONRPC(t, router, "tools/call", json.RawMessage(tc.params), testValidToken)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+			var resp jsonRPCResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !isErrorResult(resp.Result) {
+				t.Fatalf("expected isError=true, got result = %v", resp.Result)
+			}
+			if text := resultText(resp.Result); !strings.HasPrefix(text, tc.wantPrefix) {
+				t.Fatalf("text = %q, want prefix %q", text, tc.wantPrefix)
+			}
+		})
 	}
 }
