@@ -394,8 +394,9 @@ func TestKnowledgeService_PassThroughBuiltinLayout(t *testing.T) {
 // setupKnowledgeBindingDB 起 sqlite 内存库并替换 database.DB，建 agents /
 // agent_knowledge_datasets 最小列集（NewAgentRepository 构造时捕获
 // database.GetDB()，必须先换库再构造 service）。bindings 为 datasetID →
-// agentName（一对一，多对多场景由 persistence 测试覆盖）。
-func setupKnowledgeBindingDB(t *testing.T, bindings map[string]string) {
+// agentName（默认租户 'default' 一对一；他租户/多对多由具体测试自行 INSERT，
+// 多对多场景由 persistence 测试覆盖）。
+func setupKnowledgeBindingDB(t *testing.T, bindings map[string]string) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -419,6 +420,7 @@ func setupKnowledgeBindingDB(t *testing.T, bindings map[string]string) {
 		require.NoError(t, db.Exec(`INSERT INTO agents (name) VALUES (?)`, agentName).Error)
 		require.NoError(t, db.Exec(`INSERT INTO agent_knowledge_datasets (agent_id, dataset_id) VALUES ((SELECT id FROM agents WHERE name = ?), ?)`, agentName, datasetID).Error)
 	}
+	return db
 }
 
 // issue #122：删除被绑定知识库 → DatasetInUseError 且 engine 零调用。
@@ -430,7 +432,7 @@ func TestKnowledgeService_DeleteDatasets_InUseBlocked(t *testing.T) {
 	}}
 	svc := NewKnowledgeService(engine, nil)
 
-	err := svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{IDs: []string{"kb-bound", "kb-free"}})
+	err := svc.DeleteDatasets(context.Background(), "default", knowledge.DeleteRequest{IDs: []string{"kb-bound", "kb-free"}})
 	var inUse *agent.DatasetInUseError
 	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
 	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-bound", Agents: []string{"pharmaceutical"}}}, inUse.Datasets)
@@ -446,7 +448,7 @@ func TestKnowledgeService_DeleteDatasets_UnboundForwards(t *testing.T) {
 	}}
 	svc := NewKnowledgeService(engine, nil)
 
-	require.NoError(t, svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{IDs: []string{"kb-free", " "}}))
+	require.NoError(t, svc.DeleteDatasets(context.Background(), "default", knowledge.DeleteRequest{IDs: []string{"kb-free", " "}}))
 	require.Equal(t, []string{"kb-free"}, gotReq.IDs)
 }
 
@@ -459,8 +461,27 @@ func TestKnowledgeService_DeleteDatasets_DeleteAllBlocked(t *testing.T) {
 	}}
 	svc := NewKnowledgeService(engine, nil)
 
-	err := svc.DeleteDatasets(context.Background(), knowledge.DeleteRequest{DeleteAll: true})
+	err := svc.DeleteDatasets(context.Background(), "default", knowledge.DeleteRequest{DeleteAll: true})
 	var inUse *agent.DatasetInUseError
 	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
 	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-any", Agents: []string{"any-agent"}}}, inUse.Datasets)
+}
+
+// review P1：他租户绑定同样阻断（防误删他租户在用的库），但 409 载荷绝不
+// 透出他租户 Agent 名——只以 Foreign 中性事实出现。
+func TestKnowledgeService_DeleteDatasets_ForeignTenantBlockedWithoutNames(t *testing.T) {
+	db := setupKnowledgeBindingDB(t, nil)
+	require.NoError(t, db.Exec(`INSERT INTO agents (name, tenant_id) VALUES ('outsider', 'other-org')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agent_knowledge_datasets (agent_id, dataset_id) VALUES ((SELECT id FROM agents WHERE name = 'outsider'), 'kb-foreign')`).Error)
+	engine := &fakeKnowledgeEngine{deleteDatasetsFunc: func(ctx context.Context, req knowledge.DeleteRequest) error {
+		t.Fatalf("engine must not be called when dataset is bound by another tenant, got req=%+v", req)
+		return nil
+	}}
+	svc := NewKnowledgeService(engine, nil)
+
+	err := svc.DeleteDatasets(context.Background(), "default", knowledge.DeleteRequest{IDs: []string{"kb-foreign"}})
+	var inUse *agent.DatasetInUseError
+	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
+	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-foreign", Foreign: true}}, inUse.Datasets)
+	require.NotContains(t, inUse.Error(), "outsider", "cross-tenant agent names must never leak")
 }

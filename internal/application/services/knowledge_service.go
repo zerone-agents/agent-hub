@@ -83,13 +83,13 @@ func (s *KnowledgeService) UpdateDataset(ctx context.Context, tenantID string, i
 	return engine.UpdateDataset(ctx, id, req)
 }
 
-func (s *KnowledgeService) DeleteDatasets(ctx context.Context, req knowledge.DeleteRequest) error {
+func (s *KnowledgeService) DeleteDatasets(ctx context.Context, tenantID string, req knowledge.DeleteRequest) error {
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
 	}
 	req.IDs = cleanIDs(req.IDs)
-	if err := s.guardDatasetInUse(req); err != nil {
+	if err := s.guardDatasetInUse(tenantID, req); err != nil {
 		return err
 	}
 	return engine.DeleteDatasets(ctx, req)
@@ -97,24 +97,35 @@ func (s *KnowledgeService) DeleteDatasets(ctx context.Context, req knowledge.Del
 
 // guardDatasetInUse 拒绝删除仍被 Agent 绑定的知识库（issue #122）：反查
 // 绑定表，命中即返回 DatasetInUseError（handler 映射 409），不触 multirag。
-// 显式 IDs 求交集；delete_all 只要存在任一绑定即挡（含僵尸——恢复路径
-// 恰好是前端 ghost 项）。
-func (s *KnowledgeService) guardDatasetInUse(req knowledge.DeleteRequest) error {
-	bindings, err := s.agentRepo.GetDatasetBindings()
+// 防护跨租户（own ∪ foreign 任一命中即挡，防误删他租户在用的库）；载荷按
+// 租户切分（review P1）——Agents 只含请求租户名单，他租户仅以 Foreign
+// 中性事实出现、绝不透名。显式 IDs 求交集；delete_all 只要存在任一绑定
+// 即挡（含僵尸——恢复路径恰好是前端 ghost 项）。
+func (s *KnowledgeService) guardDatasetInUse(tenantID string, req knowledge.DeleteRequest) error {
+	own, foreign, err := s.agentRepo.GetDatasetBindingsScoped(tenantID)
 	if err != nil {
 		return fmt.Errorf("query dataset agent bindings failed: %w", err)
 	}
-	if len(bindings) == 0 {
-		return nil
+	blocked := func(id string) bool {
+		if _, ok := own[id]; ok {
+			return true
+		}
+		_, ok := foreign[id]
+		return ok
 	}
 	var ids []string
 	if req.DeleteAll {
-		for id := range bindings {
+		for id := range own {
 			ids = append(ids, id)
+		}
+		for id := range foreign {
+			if _, ok := own[id]; !ok {
+				ids = append(ids, id)
+			}
 		}
 	} else {
 		for _, id := range req.IDs {
-			if _, ok := bindings[id]; ok {
+			if blocked(id) {
 				ids = append(ids, id)
 			}
 		}
@@ -125,7 +136,8 @@ func (s *KnowledgeService) guardDatasetInUse(req knowledge.DeleteRequest) error 
 	sort.Strings(ids)
 	items := make([]agent.DatasetInUseItem, 0, len(ids))
 	for _, id := range ids {
-		items = append(items, agent.DatasetInUseItem{ID: id, Agents: bindings[id]})
+		_, isForeign := foreign[id]
+		items = append(items, agent.DatasetInUseItem{ID: id, Agents: own[id], Foreign: isForeign})
 	}
 	return &agent.DatasetInUseError{Datasets: items}
 }
