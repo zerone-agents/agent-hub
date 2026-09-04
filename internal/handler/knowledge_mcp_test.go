@@ -1321,3 +1321,65 @@ func TestFormatRetrievalResult_SourceAttribution(t *testing.T) {
 		}
 	}
 }
+
+// issue #119 验收项：不传 dataset_ids 时，请求补全为当前身份的全部绑定
+// 数据集（顺序保持 service 返回序）。
+func TestKnowledgeMcpHandler_ToolsCall_SearchDefaultCompletionUsesAllBoundDatasets(t *testing.T) {
+	var gotDatasetIDs any
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			gotDatasetIDs = map[string]any(req)["dataset_ids"]
+			return &knowledge.RetrievalResult{"chunks": []any{}}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-1", "kb-2"}})
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	ids, ok := gotDatasetIDs.([]string)
+	if !ok || len(ids) != 2 || ids[0] != "kb-1" || ids[1] != "kb-2" {
+		t.Fatalf("dataset_ids = %#v, want [kb-1 kb-2]", gotDatasetIDs)
+	}
+}
+
+// issue #119 失败路径诊断：检索失败时逐个探测本次请求的 dataset 并记录
+// 存活状态（结果只进服务端日志），客户端仍收 [retrieval_failed] 中性文案。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbesBoundDatasets(t *testing.T) {
+	var probed []string
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probed = append(probed, id)
+			if id == "kb-zombie" {
+				return nil, knowledge.NewNotFoundError("dataset 不存在")
+			}
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-live", "kb-zombie"}})
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"PTNB 术前 血小板"}}`)
+	rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp jsonRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !isErrorResult(resp.Result) {
+		t.Fatalf("expected isError=true, got result = %v", resp.Result)
+	}
+	if text := resultText(resp.Result); !strings.HasPrefix(text, "[retrieval_failed]") {
+		t.Fatalf("text = %q, want [retrieval_failed] prefix", text)
+	}
+	want := []string{"kb-live", "kb-zombie"}
+	if len(probed) != len(want) || probed[0] != want[0] || probed[1] != want[1] {
+		t.Fatalf("probed = %v, want %v", probed, want)
+	}
+}

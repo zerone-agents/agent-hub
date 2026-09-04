@@ -383,6 +383,7 @@ func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.
 	if err != nil {
 		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
 		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
+		h.probeDatasetsForDiagnosis(ctx, datasetIDs)
 		return mcpCodedErrorResult(id, mcpErrRetrievalFailed, "知识库检索失败，请稍后重试"), nil
 	}
 
@@ -661,6 +662,24 @@ func isStringSubset(subset, superset []string) bool {
 		}
 	}
 	return true
+}
+
+// probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败时逐个
+// 解析本次请求的 dataset 元数据并把存活状态写进服务端日志——全部 ok 而
+// 组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）→ 僵尸绑定
+// （衔接 issue #122）。仅诊断：不改变客户端可见行为，健康路径零开销。
+func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, datasetIDs []string) {
+	if len(datasetIDs) == 0 {
+		return
+	}
+	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) for diagnosis (datasets=%v)", len(datasetIDs), datasetIDs)
+	for _, dsID := range datasetIDs {
+		if _, err := h.knowledgeService.GetDataset(ctx, dsID); err != nil {
+			log.Printf("knowledge-mcp: dataset probe failed (dataset=%s): %v", dsID, err)
+			continue
+		}
+		log.Printf("knowledge-mcp: dataset probe ok (dataset=%s)", dsID)
+	}
 }
 
 func formatRetrievalResult(result *knowledge.RetrievalResult) string {
