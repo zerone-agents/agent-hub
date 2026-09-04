@@ -1394,3 +1394,55 @@ func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbesBoundDatasets(t *testi
 		t.Fatalf("probed = %v, want [kb-live kb-zombie]", got)
 	}
 }
+
+// issue #119 review P1（第二轮）：持续失败期探测必须跨请求去重——同一
+// dataset 集在冷却窗口内只探测一次，burst 的重复失败不得各自起 goroutine
+// 放大 MultiRAG 压力与日志量。
+func TestKnowledgeMcpHandler_ToolsCall_SearchFailureProbeCooldown(t *testing.T) {
+	probeCalls := make(chan string, 16)
+	svc := &fakeKnowledgeMcpService{
+		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
+			return nil, errors.New("multirag error 102: combined retrieval boom")
+		},
+		getDatasetFunc: func(ctx context.Context, id string) (*knowledge.Dataset, error) {
+			probeCalls <- id
+			return &knowledge.Dataset{"id": id}, nil
+		},
+	}
+	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-live", "kb-zombie"}})
+	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"PTNB 术前 血小板"}}`)
+
+	// burst：同一身份连续 5 次失败检索。
+	for i := 0; i < 5; i++ {
+		rec := postJSONRPC(t, router, "tools/call", params, testValidToken)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, body = %s", i+1, rec.Code, rec.Body.String())
+		}
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !isErrorResult(resp.Result) || !strings.HasPrefix(resultText(resp.Result), "[retrieval_failed]") {
+			t.Fatalf("request %d: expected [retrieval_failed], got %v", i+1, resp.Result)
+		}
+	}
+
+	// 恰好一次 burst：2 个事件，冷却窗口内不得再有新增。
+	var got []string
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-probeCalls:
+			got = append(got, id)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("probe %d/2 not fired (got %v)", i+1, got)
+		}
+	}
+	select {
+	case id := <-probeCalls:
+		t.Fatalf("cooldown violated: extra probe for %s (got %v) — repeated failures must not re-probe within the cooldown window", id, got)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if got[0] != "kb-live" || got[1] != "kb-zombie" {
+		t.Fatalf("probed = %v, want [kb-live kb-zombie]", got)
+	}
+}

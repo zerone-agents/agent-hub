@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"control-panel/internal/application/services"
@@ -113,6 +114,10 @@ func normalizePaging(page, pageSize *int) (int, int) {
 type KnowledgeMcpHandler struct {
 	knowledgeService KnowledgeMcpService
 	agentService     AgentMcpService
+
+	// probeMu 保护 probeCooldown（dataset 集签名 → 上次探测时刻）。
+	probeMu       sync.Mutex
+	probeCooldown map[string]time.Time
 }
 
 // NewKnowledgeMcpHandler creates a new KnowledgeMcpHandler.
@@ -120,6 +125,7 @@ func NewKnowledgeMcpHandler(knowledgeService KnowledgeMcpService, agentService A
 	return &KnowledgeMcpHandler{
 		knowledgeService: knowledgeService,
 		agentService:     agentService,
+		probeCooldown:    make(map[string]time.Time),
 	}
 }
 
@@ -665,21 +671,42 @@ func isStringSubset(subset, superset []string) bool {
 	return true
 }
 
-// mcpDatasetProbeTimeout 界定后台探测的总预算：探测是诊断路径，绝不放大
-// MultiRAG 故障期的等待——retrieval 本身可能已烧掉完整 client 超时，探测
-// 不再逐库继承 ~30s。
-const mcpDatasetProbeTimeout = 5 * time.Second
+const (
+	// mcpDatasetProbeTimeout 界定后台探测的总预算：探测是诊断路径，绝不
+	// 放大 MultiRAG 故障期的等待——retrieval 本身可能已烧掉完整 client
+	// 超时，探测不再逐库继承 ~30s。
+	mcpDatasetProbeTimeout = 5 * time.Second
+
+	// mcpDatasetProbeCooldown 是同一 dataset 集签名的探测冷却窗口（review
+	// P1 第二轮）：持续故障期 burst 的重复失败只在窗口首笔探测一次，后续
+	// 直接跳过，跨请求不累积 goroutine / MultiRAG 请求 / 日志量；并发探测
+	// goroutine 数被「不同失败签名数/窗口」天然封顶，无需额外 semaphore。
+	mcpDatasetProbeCooldown = time.Minute
+)
 
 // probeDatasetsForDiagnosis 是 issue #119 的失败路径诊断：检索失败后在
 // 后台逐个解析本次请求的 dataset 元数据并把存活状态写进服务端日志——
 // 全部 ok 而组合检索失败 → 嫌疑在 MultiRAG 多库检索；个别失败（404 等）
 // → 僵尸绑定（衔接 issue #122）。仅诊断，且不进入请求关键路径（review
-// P1）：goroutine 异步执行、detached ctx + 5s 总预算、串行即并发上限 1，
-// 响应不被探测阻塞，健康路径零开销。
+// P1 两轮）：goroutine 异步执行、detached ctx + 5s 总预算、串行即单任务
+// 并发上限、同一 dataset 集冷却窗口内跨请求去重，响应不被探测阻塞，
+// 健康路径零开销。
 func (h *KnowledgeMcpHandler) probeDatasetsForDiagnosis(ctx context.Context, datasetIDs []string) {
 	if len(datasetIDs) == 0 {
 		return
 	}
+	// 冷却标记在请求路径同步完成：去重不依赖 goroutine 调度时序。
+	signature := strings.Join(datasetIDs, ",")
+	h.probeMu.Lock()
+	if h.probeCooldown == nil {
+		h.probeCooldown = make(map[string]time.Time)
+	}
+	if time.Since(h.probeCooldown[signature]) < mcpDatasetProbeCooldown {
+		h.probeMu.Unlock()
+		return
+	}
+	h.probeCooldown[signature] = time.Now()
+	h.probeMu.Unlock()
 	log.Printf("knowledge-mcp: retrieval failed, probing %d dataset(s) in background (datasets=%v)", len(datasetIDs), datasetIDs)
 	go func() {
 		// 裸 goroutine 不在 gin recovery 覆盖内，诊断路径不得 panic 拖垮进程。
