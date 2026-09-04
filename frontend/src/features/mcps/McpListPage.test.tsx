@@ -213,4 +213,13 @@ describe('McpListPage', () => {
     expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
     expect(screen.queryAllByTitle('删除')).toHaveLength(0)
   })
+
+  it('delete confirm copy reflects in-use guard', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getAllByTitle('删除')[0])
+    expect(
+      await screen.findByText(/已被 Agent 绑定的 MCP 无法删除，请先解除绑定/),
+    ).toBeInTheDocument()
+  })
 })
