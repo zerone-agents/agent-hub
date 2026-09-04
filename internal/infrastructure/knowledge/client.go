@@ -517,7 +517,7 @@ func normalizeRetrievalChunks(raw map[string]any) {
 			normalized = append(normalized, item)
 			continue
 		}
-		normalized = append(normalized, map[string]any(domain.NormalizeChunk(chunkMap)))
+		normalized = append(normalized, map[string]any(domain.NormalizeRetrievalChunk(chunkMap)))
 	}
 	raw["chunks"] = normalized
 }

@@ -769,3 +769,44 @@ func TestGetImage_RejectsJSONErrorResponse(t *testing.T) {
 		t.Fatalf("expected upstream JSON error, got %v", err)
 	}
 }
+
+func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/retrieval" {
+			t.Errorf("path = %q, want /api/v1/retrieval", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"total": 2,
+				"chunks": []map[string]any{
+					{"chunk_id": "ck-1", "content_with_weight": "内容一", "doc_id": "doc-1", "docnm_kwd": "指南.pdf", "similarity": 0.91},
+					{"chunk_id": "ck-2", "content_with_weight": "内容二", "doc_id": "doc-2", "document_keyword": "共识.docx", "similarity": 0.55},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+	result, err := client.Retrieval(context.Background(), domain.RetrievalRequest{
+		"question":    "PTNB 术前",
+		"dataset_ids": []string{"kb-1", "kb-2"},
+	})
+	if err != nil {
+		t.Fatalf("Retrieval failed: %v", err)
+	}
+	raw := map[string]any(*result)
+	chunks, _ := raw["chunks"].([]any)
+	if len(chunks) != 2 {
+		t.Fatalf("chunks len = %d, want 2", len(chunks))
+	}
+	first, _ := chunks[0].(map[string]any)
+	if first["document_name"] != "指南.pdf" || first["document_id"] != "doc-1" {
+		t.Errorf("chunk1 mapping failed: %#v", first)
+	}
+	second, _ := chunks[1].(map[string]any)
+	if second["document_name"] != "共识.docx" || second["document_id"] != "doc-2" {
+		t.Errorf("chunk2 mapping failed: %#v", second)
+	}
+}
