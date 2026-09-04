@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/provider"
 	mcpprobe "control-panel/internal/infrastructure/mcp"
@@ -378,6 +379,15 @@ func (s *McpService) Delete(tenantID, name string) error {
 	if m.IsBuiltin {
 		return fmt.Errorf("MCP '%s' 是内置服务，不可删除", name)
 	}
+
+	own, foreign, err := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
+	if err != nil {
+		return fmt.Errorf("查询 MCP 绑定失败: %w", err)
+	}
+	if len(own) > 0 || foreign {
+		return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
+	}
+
 	return s.repo.Delete(tenantID, m.ID)
 }
 
