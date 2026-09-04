@@ -442,3 +442,34 @@ func TestAgentRepository_GetAllAgentKnowledgeDatasetIDs_TenantIsolation(t *testi
 	require.NoError(t, err)
 	require.Equal(t, map[string][]string{"coder": {"ds-b"}}, bMap)
 }
+
+// issue #122 review P1：反查按租户切分——own 只含请求租户的名单（409 载荷），
+// foreign 只记他租户绑定的 dataset ID 集合（不携带任何他租户身份）。
+func TestAgentRepository_GetDatasetBindingsScoped_TenantSplit(t *testing.T) {
+	db := setupAgentRepoTestDB(t)
+	repo := NewAgentRepository()
+	alpha := &agent.AgentConfig{Name: "alpha"}
+	beta := &agent.AgentConfig{Name: "beta"}
+	gamma := &agent.AgentConfig{Name: "gamma"}
+	require.NoError(t, repo.Create("org-a", alpha))
+	require.NoError(t, repo.Create("org-b", beta))
+	require.NoError(t, repo.Create("org-a", gamma))
+
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: alpha.ID, DatasetID: "kb-shared"}).Error)
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: beta.ID, DatasetID: "kb-shared"}).Error)
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: gamma.ID, DatasetID: "kb-a-only"}).Error)
+	require.NoError(t, db.Create(&agent.AgentKnowledgeDataset{AgentID: beta.ID, DatasetID: "kb-b-only"}).Error)
+
+	own, foreign, err := repo.GetDatasetBindingsScoped("org-a")
+	require.NoError(t, err)
+	// own：org-a 视角只见本租户名单，绝不含 org-b 的 beta。
+	require.Equal(t, map[string][]string{
+		"kb-shared": {"alpha"},
+		"kb-a-only": {"gamma"},
+	}, own)
+	// foreign：org-b 绑定的库 ID 集合（kb-shared 双方都绑、kb-b-only 仅 org-b）。
+	require.Equal(t, map[string]struct{}{
+		"kb-shared": {},
+		"kb-b-only": {},
+	}, foreign)
+}

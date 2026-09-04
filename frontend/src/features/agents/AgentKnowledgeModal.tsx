@@ -6,7 +6,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent } from '@/api/agents'
 import { useAgentKnowledgeDatasets, useUpdateAgentKnowledgeDatasets } from '@/queries/useAgents'
-import { useKnowledgeList } from '@/queries/useKnowledge'
+import { useKnowledgeListAll } from '@/queries/useKnowledge'
 
 interface AgentKnowledgeModalProps {
   open: boolean
@@ -47,18 +47,37 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
   const name = agent?.name ?? ''
 
   const { data: boundIds = [], isLoading: isLoadingBound } = useAgentKnowledgeDatasets(name)
-  const { data: listData, isLoading: isLoadingList } = useKnowledgeList({ page_size: 1000 })
+  const { data: listData, error: listError, isLoading: isLoadingList } = useKnowledgeListAll()
   const updateMutation = useUpdateAgentKnowledgeDatasets()
 
   const [targetKeys, setTargetKeys] = useState<string[]>([])
 
+  // issue #122 review P2：ghost 判定依赖完整目录——列表请求失败或分页未取全
+  //（total > 已取数）时 liveness 未知，宁缺勿假，不注入 ghost。
+  const listComplete = !listError && !!listData && listData.datasets.length >= listData.total
+
   const dataSource: TransferItem[] = useMemo(() => {
-    return (listData?.datasets ?? []).map((ds) => ({
+    const items = (listData?.datasets ?? []).map((ds) => ({
       key: ds.id,
       title: ds.name || '未命名',
       description: ds.description || ''
     }))
-  }, [listData])
+    if (listComplete) {
+      // issue #122：绑定指向但已不在存活列表的库注入为 ghost 项——可见、
+      // 可左移解除、可保存。不加 disabled（disabled 项不可移动 = 重新不可删）。
+      const liveKeys = new Set(items.map((item) => item.key))
+      for (const id of boundIds) {
+        if (!liveKeys.has(id)) {
+          items.push({
+            key: id,
+            title: `已删除的知识库（${id.slice(0, 8)}…）`,
+            description: '绑定指向的知识库已不存在，左移移除后保存即可恢复部署'
+          })
+        }
+      }
+    }
+    return items
+  }, [listData, boundIds, listComplete])
 
   useEffect(() => {
     if (open) {

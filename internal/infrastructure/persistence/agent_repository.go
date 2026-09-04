@@ -288,6 +288,38 @@ func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs(tenantID string) (map[s
 	return result, nil
 }
 
+// GetDatasetBindingsScoped 返回按请求租户切分的绑定视图（issue #122 删除
+// 保护 + review P1：409 载荷不得泄露他租户 Agent 名）。own = 本租户
+// dataset_id → agent 名单（响应载荷）；foreign = 他租户仍绑定的 dataset ID
+// 集合（仅作阻断事实，不携带任何他租户身份）。防护本身保持跨租户：
+// own ∪ foreign 任一命中即阻断删除。
+func (r *AgentRepository) GetDatasetBindingsScoped(tenantID string) (map[string][]string, map[string]struct{}, error) {
+	type row struct {
+		DatasetID string
+		AgentName string
+		TenantID  string
+	}
+	var rows []row
+	err := r.db.Table("agent_knowledge_datasets").
+		Select("agent_knowledge_datasets.dataset_id as dataset_id, agents.name as agent_name, agents.tenant_id as tenant_id").
+		Joins("JOIN agents ON agent_knowledge_datasets.agent_id = agents.id").
+		Order("agents.name ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	own := make(map[string][]string)
+	foreign := make(map[string]struct{})
+	for _, r := range rows {
+		if r.TenantID == tenantID {
+			own[r.DatasetID] = append(own[r.DatasetID], r.AgentName)
+		} else {
+			foreign[r.DatasetID] = struct{}{}
+		}
+	}
+	return own, foreign, nil
+}
+
 // EnsureAgentToolBinding makes sure the agent is bound to the given tool.
 func (r *AgentRepository) EnsureAgentToolBinding(agentID, toolID uint64) error {
 	var count int64

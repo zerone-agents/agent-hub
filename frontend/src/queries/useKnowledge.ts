@@ -17,6 +17,7 @@ export const knowledgeKeys = {
   datasets: () => [...knowledgeKeys.all, 'datasets'] as const,
   datasetList: (params: DatasetListParams) =>
     [...knowledgeKeys.datasets(), 'list', params] as const,
+  datasetListAll: () => [...knowledgeKeys.datasets(), 'list-all'] as const,
   datasetDetail: (id: string) => [...knowledgeKeys.datasets(), 'detail', id] as const,
   documents: (datasetId: string) => [...knowledgeKeys.all, 'documents', datasetId] as const,
   documentList: (datasetId: string, params: DocumentListParams) =>
@@ -35,6 +36,43 @@ export function useKnowledgeList(params: DatasetListParams = {}) {
   return useQuery({
     queryKey: knowledgeKeys.datasetList(params),
     queryFn: () => knowledgeApi.datasets.list(params)
+  })
+}
+
+const KNOWLEDGE_LIST_ALL_PAGE_SIZE = 1000
+const KNOWLEDGE_LIST_ALL_MAX_PAGES = 20
+
+// useKnowledgeListAll 分页取全目录（issue #122 review P2）：ghost 判定依赖
+// 完整目录，单页缺失不能证明知识库已删除。逐页取满 total；页数上限作
+// fail-safe——超限时 datasets.length < total，消费方据此视为「不完整」并
+// 禁止注入 ghost。任一页失败即整体失败（liveness 未知，宁缺勿假）。
+export function useKnowledgeListAll() {
+  return useQuery({
+    queryKey: knowledgeKeys.datasetListAll(),
+    queryFn: async () => {
+      const first = await knowledgeApi.datasets.list({
+        page: 1,
+        page_size: KNOWLEDGE_LIST_ALL_PAGE_SIZE
+      })
+      if (first.datasets.length >= first.total || first.datasets.length === 0) {
+        return first
+      }
+      const datasets = [...first.datasets]
+      const lastPage = Math.min(
+        Math.ceil(first.total / KNOWLEDGE_LIST_ALL_PAGE_SIZE),
+        KNOWLEDGE_LIST_ALL_MAX_PAGES
+      )
+      for (let page = 2; page <= lastPage; page++) {
+        const next = await knowledgeApi.datasets.list({
+          page,
+          page_size: KNOWLEDGE_LIST_ALL_PAGE_SIZE
+        })
+        if (next.datasets.length === 0) break
+        datasets.push(...next.datasets)
+        if (datasets.length >= first.total) break
+      }
+      return { datasets, total: first.total }
+    }
   })
 }
 

@@ -15,16 +15,22 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
+	"control-panel/internal/domain/tenant"
+	"control-panel/pkg/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type handlerFakeKnowledgeEngine struct {
-	listDatasetsFunc func(ctx context.Context, req knowledge.DatasetListRequest) (*knowledge.DatasetListResult, error)
-	listDocsFunc     func(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error)
-	uploadFunc       func(ctx context.Context, datasetID string, upload knowledge.UploadRequest) ([]knowledge.Document, error)
-	downloadFunc     func(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error)
-	imageFunc        func(ctx context.Context, imageID string) (*knowledge.StreamResult, error)
+	listDatasetsFunc   func(ctx context.Context, req knowledge.DatasetListRequest) (*knowledge.DatasetListResult, error)
+	listDocsFunc       func(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error)
+	uploadFunc         func(ctx context.Context, datasetID string, upload knowledge.UploadRequest) ([]knowledge.Document, error)
+	downloadFunc       func(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error)
+	imageFunc          func(ctx context.Context, imageID string) (*knowledge.StreamResult, error)
+	deleteDatasetsFunc func(ctx context.Context, req knowledge.DeleteRequest) error
 }
 
 func (f *handlerFakeKnowledgeEngine) Health(ctx context.Context) (*knowledge.HealthStatus, error) {
@@ -49,6 +55,9 @@ func (f *handlerFakeKnowledgeEngine) UpdateDataset(ctx context.Context, id strin
 	return &dataset, nil
 }
 func (f *handlerFakeKnowledgeEngine) DeleteDatasets(ctx context.Context, req knowledge.DeleteRequest) error {
+	if f.deleteDatasetsFunc != nil {
+		return f.deleteDatasetsFunc(ctx, req)
+	}
 	return nil
 }
 func (f *handlerFakeKnowledgeEngine) ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error) {
@@ -433,4 +442,73 @@ func TestKnowledgeHandler_GetImageMapsUpstreamError(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), "not an image") || !strings.Contains(resp.Body.String(), "image not found") {
 		t.Fatalf("response does not include upstream error: %s", resp.Body.String())
 	}
+}
+
+// issue #122 + review P1：删除被绑定知识库 → 409 + data.datasets 名单（只含
+// 本租户）、engine 零调用；他租户绑定同样阻断但绝不透出他租户 Agent 名。
+func TestKnowledgeHandler_DeleteDatasets_InUseConflict(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`CREATE TABLE agents (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(64) NOT NULL,
+		tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+		created_at DATETIME,
+		updated_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE agent_knowledge_datasets (
+		agent_id INTEGER NOT NULL,
+		dataset_id VARCHAR(64) NOT NULL,
+		created_at DATETIME,
+		PRIMARY KEY (agent_id, dataset_id)
+	)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agents (name) VALUES ('pharmaceutical')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agents (name, tenant_id) VALUES ('outsider', 'other-org')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agent_knowledge_datasets (agent_id, dataset_id) VALUES ((SELECT id FROM agents WHERE name = 'pharmaceutical'), 'kb-bound')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agent_knowledge_datasets (agent_id, dataset_id) VALUES ((SELECT id FROM agents WHERE name = 'outsider'), 'kb-bound')`).Error)
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+
+	engineCalls := 0
+	engine := &handlerFakeKnowledgeEngine{deleteDatasetsFunc: func(ctx context.Context, req knowledge.DeleteRequest) error {
+		engineCalls++
+		return nil
+	}}
+	// setupKnowledgeRouter 无租户中间件（GetTenantID 会得空串）；本用例
+	// 需要可信租户上下文，就地建带租户的路由。
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { tenant.SetTenantID(c, tenant.DefaultID) })
+	admin := router.Group("/api/v1/admin")
+	RegisterKnowledgeRoutes(admin, admin, NewKnowledgeHandler(services.NewKnowledgeService(engine, nil), nil))
+
+	body, _ := json.Marshal(knowledge.DeleteRequest{IDs: []string{"kb-bound"}})
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/knowledge/datasets", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusConflict, resp.Code)
+	var payload struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+		Data    struct {
+			Datasets []struct {
+				ID      string   `json:"id"`
+				Agents  []string `json:"agents"`
+				Foreign bool     `json:"foreign"`
+			} `json:"datasets"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
+	require.False(t, payload.Success)
+	require.Contains(t, payload.Error, "pharmaceutical")
+	require.Contains(t, payload.Error, "另被其他租户使用")
+	require.NotContains(t, payload.Error, "outsider", "cross-tenant agent names must never leak")
+	require.Len(t, payload.Data.Datasets, 1)
+	require.Equal(t, "kb-bound", payload.Data.Datasets[0].ID)
+	require.Equal(t, []string{"pharmaceutical"}, payload.Data.Datasets[0].Agents)
+	require.True(t, payload.Data.Datasets[0].Foreign)
+	require.Zero(t, engineCalls)
 }

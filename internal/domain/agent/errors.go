@@ -38,3 +38,34 @@ type ToolInUseError struct {
 func (e *ToolInUseError) Error() string {
 	return fmt.Sprintf("Tool '%s' 仍被以下 Agent 挂载，请先解除关联：%s", e.ToolName, strings.Join(e.Agents, "、"))
 }
+
+// DatasetInUseItem/DatasetInUseError 删除保护：仍被 Agent 绑定的知识库禁止
+// 删除（issue #122，模式对齐 ToolInUseError #88）。多库批量删除时逐库携带
+// 绑定 Agent 名单；dataset 用裸 ID——元数据在远端 multirag，错误路径不做
+// 上游反查。handler 以 409 + data.datasets 返回。
+// Agents 只含当前请求租户的名单；Foreign 表示他租户也绑定该库（review
+// P1：防护跨租户防误删，但 409 载荷绝不透出他租户 Agent 名，仅中性事实）。
+type DatasetInUseItem struct {
+	ID      string
+	Agents  []string
+	Foreign bool
+}
+
+type DatasetInUseError struct {
+	Datasets []DatasetInUseItem
+}
+
+func (e *DatasetInUseError) Error() string {
+	parts := make([]string, 0, len(e.Datasets))
+	for _, d := range e.Datasets {
+		switch {
+		case len(d.Agents) > 0 && d.Foreign:
+			parts = append(parts, fmt.Sprintf("%s（%s；另被其他租户使用）", d.ID, strings.Join(d.Agents, "、")))
+		case len(d.Agents) > 0:
+			parts = append(parts, fmt.Sprintf("%s（%s）", d.ID, strings.Join(d.Agents, "、")))
+		default:
+			parts = append(parts, fmt.Sprintf("%s（仍被其他租户使用）", d.ID))
+		}
+	}
+	return "知识库仍被 Agent 绑定，请先解除绑定：" + strings.Join(parts, "；")
+}
