@@ -288,28 +288,36 @@ func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs(tenantID string) (map[s
 	return result, nil
 }
 
-// GetDatasetBindings 返回全表 dataset_id → 绑定 agent 名单（issue #122 删除
-// 保护 409 载荷）。跨租户全量：对齐 GetAgentNamesByToolID 先例——in-use 事实
-// 必须跨租户才有效，名单仅作提示。控制面小表，全表拉取由 service 按需过滤。
-func (r *AgentRepository) GetDatasetBindings() (map[string][]string, error) {
+// GetDatasetBindingsScoped 返回按请求租户切分的绑定视图（issue #122 删除
+// 保护 + review P1：409 载荷不得泄露他租户 Agent 名）。own = 本租户
+// dataset_id → agent 名单（响应载荷）；foreign = 他租户仍绑定的 dataset ID
+// 集合（仅作阻断事实，不携带任何他租户身份）。防护本身保持跨租户：
+// own ∪ foreign 任一命中即阻断删除。
+func (r *AgentRepository) GetDatasetBindingsScoped(tenantID string) (map[string][]string, map[string]struct{}, error) {
 	type row struct {
 		DatasetID string
 		AgentName string
+		TenantID  string
 	}
 	var rows []row
 	err := r.db.Table("agent_knowledge_datasets").
-		Select("agent_knowledge_datasets.dataset_id as dataset_id, agents.name as agent_name").
+		Select("agent_knowledge_datasets.dataset_id as dataset_id, agents.name as agent_name, agents.tenant_id as tenant_id").
 		Joins("JOIN agents ON agent_knowledge_datasets.agent_id = agents.id").
 		Order("agents.name ASC").
 		Find(&rows).Error
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	result := make(map[string][]string)
+	own := make(map[string][]string)
+	foreign := make(map[string]struct{})
 	for _, r := range rows {
-		result[r.DatasetID] = append(result[r.DatasetID], r.AgentName)
+		if r.TenantID == tenantID {
+			own[r.DatasetID] = append(own[r.DatasetID], r.AgentName)
+		} else {
+			foreign[r.DatasetID] = struct{}{}
+		}
 	}
-	return result, nil
+	return own, foreign, nil
 }
 
 // EnsureAgentToolBinding makes sure the agent is bound to the given tool.
