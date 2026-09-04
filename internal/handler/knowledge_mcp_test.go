@@ -1299,3 +1299,25 @@ func TestKnowledgeMcpHandler_ToolsCall_ErrorCodesStable(t *testing.T) {
 		})
 	}
 }
+
+// issue #119：检索来源至少含 document_name + document_id；缺 id 时省略该段，
+// 缺名回退「未知文档」。
+func TestFormatRetrievalResult_SourceAttribution(t *testing.T) {
+	result := knowledge.RetrievalResult(map[string]any{
+		"chunks": []interface{}{
+			map[string]any{"document_name": "PTNB指南.pdf", "document_id": "doc-1", "similarity": 0.9123, "content": "内容一"},
+			map[string]any{"document_id": "doc-2", "similarity": 0.5, "content": "内容二"},
+			map[string]any{"document_name": "无ID文档.pdf", "similarity": 0.4, "content": "内容三"},
+		},
+	})
+	text := formatRetrievalResult(&result)
+	for _, want := range []string{
+		"[来源：PTNB指南.pdf | 文档ID：doc-1 | 相似度：0.912]",
+		"[来源：未知文档 | 文档ID：doc-2 | 相似度：0.500]",
+		"[来源：无ID文档.pdf | 相似度：0.400]",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text %q missing %q", text, want)
+		}
+	}
+}

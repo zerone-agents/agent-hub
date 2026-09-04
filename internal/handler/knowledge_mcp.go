@@ -684,9 +684,15 @@ func formatRetrievalResult(result *knowledge.RetrievalResult) string {
 		if docName == "" {
 			docName = "未知文档"
 		}
+		docID, _ := chunk["document_id"].(string)
 		similarity, _ := chunk["similarity"].(float64)
 		content, _ := chunk["content"].(string)
-		sb.WriteString(fmt.Sprintf("[来源：%s | 相似度：%.3f]\n%s\n\n", docName, similarity, content))
+		source := fmt.Sprintf("[来源：%s", docName)
+		if docID != "" {
+			source += fmt.Sprintf(" | 文档ID：%s", docID)
+		}
+		source += fmt.Sprintf(" | 相似度：%.3f]", similarity)
+		sb.WriteString(fmt.Sprintf("%s\n%s\n\n", source, content))
 	}
 	return sb.String()
 }
