@@ -174,3 +174,11 @@ func (r *SkillRepository) ReplaceAgentSkills(agentID uint64, skillIDs []uint64) 
 
 	return tx.Commit().Error
 }
+
+// GetSkillBindingsScoped 返回仍绑定该技能的 Agent 视图（删除保护 #123）：
+// own = 请求租户的 Agent 名单（409 载荷）；foreign = 他租户仍绑定（仅中性
+// 事实，不携带任何他租户身份）。own ∪ foreign 任一命中即阻断删除。
+func (r *SkillRepository) GetSkillBindingsScoped(tenantID string, skillID uint64) ([]string, bool, error) {
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_skills", "skill_id", skillID, tenantID)
+}

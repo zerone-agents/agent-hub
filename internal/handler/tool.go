@@ -27,7 +27,7 @@ func NewToolHandler(service *services.ToolService) *ToolHandler {
 func respondToolError(c *gin.Context, err error) {
 	var inUse *agent.ToolInUseError
 	if errors.As(err, &inUse) {
-		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents}})
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})
 		return
 	}
 	switch {

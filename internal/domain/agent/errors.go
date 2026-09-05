@@ -29,14 +29,64 @@ var (
 )
 
 // ToolInUseError 删除保护：仍被 Agent 关联的自定义工具禁止删除。Agents 携带
-// 关联名单，handler 以 409 + data.agents 返回（issue #88）。
+// 关联名单，handler 以 409 + data.agents 返回（issue #88）。Foreign 表示
+// 他租户也挂载该工具（issue #123 收敛：409 载荷绝不透出他租户 Agent 名，
+// 仅中性事实，对齐 DatasetInUseError review P1）。
 type ToolInUseError struct {
 	ToolName string
 	Agents   []string
+	Foreign  bool
 }
 
 func (e *ToolInUseError) Error() string {
-	return fmt.Sprintf("Tool '%s' 仍被以下 Agent 挂载，请先解除关联：%s", e.ToolName, strings.Join(e.Agents, "、"))
+	switch {
+	case len(e.Agents) > 0 && e.Foreign:
+		return fmt.Sprintf("Tool '%s' 仍被以下 Agent 挂载：%s（另被其他租户使用），请先解除关联", e.ToolName, strings.Join(e.Agents, "、"))
+	case len(e.Agents) > 0:
+		return fmt.Sprintf("Tool '%s' 仍被以下 Agent 挂载：%s，请先解除关联", e.ToolName, strings.Join(e.Agents, "、"))
+	default:
+		return fmt.Sprintf("Tool '%s' 仍被其他租户挂载，请先解除关联", e.ToolName)
+	}
+}
+
+// SkillInUseError 删除保护：仍被 Agent 绑定的技能禁止删除（issue #123）。
+// Agents 只含当前请求租户的名单；Foreign 表示他租户仍绑定（仅中性事实，
+// 不携带任何他租户身份）。handler 以 409 + data{agents, foreign} 返回。
+type SkillInUseError struct {
+	SkillName string
+	Agents    []string
+	Foreign   bool
+}
+
+func (e *SkillInUseError) Error() string {
+	switch {
+	case len(e.Agents) > 0 && e.Foreign:
+		return fmt.Sprintf("技能 '%s' 仍被 Agent 使用：%s（另被其他租户使用），请先解除绑定", e.SkillName, strings.Join(e.Agents, "、"))
+	case len(e.Agents) > 0:
+		return fmt.Sprintf("技能 '%s' 仍被 Agent 使用：%s，请先解除绑定", e.SkillName, strings.Join(e.Agents, "、"))
+	default:
+		return fmt.Sprintf("技能 '%s' 仍被其他租户使用，请先解除绑定", e.SkillName)
+	}
+}
+
+// McpInUseError 删除保护：仍被 Agent 绑定的 MCP 服务器禁止删除（issue #123）。
+// Agents 只含当前请求租户的名单；Foreign 表示他租户仍绑定（仅中性事实，
+// 不携带任何他租户身份）。handler 以 409 + data{agents, foreign} 返回。
+type McpInUseError struct {
+	McpName string
+	Agents  []string
+	Foreign bool
+}
+
+func (e *McpInUseError) Error() string {
+	switch {
+	case len(e.Agents) > 0 && e.Foreign:
+		return fmt.Sprintf("MCP '%s' 仍被 Agent 使用：%s（另被其他租户使用），请先解除绑定", e.McpName, strings.Join(e.Agents, "、"))
+	case len(e.Agents) > 0:
+		return fmt.Sprintf("MCP '%s' 仍被 Agent 使用：%s，请先解除绑定", e.McpName, strings.Join(e.Agents, "、"))
+	default:
+		return fmt.Sprintf("MCP '%s' 仍被其他租户使用，请先解除绑定", e.McpName)
+	}
 }
 
 // DatasetInUseItem/DatasetInUseError 删除保护：仍被 Agent 绑定的知识库禁止

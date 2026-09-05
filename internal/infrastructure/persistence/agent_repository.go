@@ -294,29 +294,20 @@ func (r *AgentRepository) GetAllAgentKnowledgeDatasetIDs(tenantID string) (map[s
 // 集合（仅作阻断事实，不携带任何他租户身份）。防护本身保持跨租户：
 // own ∪ foreign 任一命中即阻断删除。
 func (r *AgentRepository) GetDatasetBindingsScoped(tenantID string) (map[string][]string, map[string]struct{}, error) {
-	type row struct {
-		DatasetID string
-		AgentName string
-		TenantID  string
-	}
-	var rows []row
-	err := r.db.Table("agent_knowledge_datasets").
-		Select("agent_knowledge_datasets.dataset_id as dataset_id, agents.name as agent_name, agents.tenant_id as tenant_id").
-		Joins("JOIN agents ON agent_knowledge_datasets.agent_id = agents.id").
-		Order("agents.name ASC").
-		Find(&rows).Error
+	// 批量反查复用共享行查询（scoped_bindings.go）；分组语义属本方法。
+	rows, err := queryBindingRows(r.db, queryBindingRowsArgs{
+		BindingTable: "agent_knowledge_datasets",
+		ResourceCol:  "dataset_id",
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 	own := make(map[string][]string)
 	foreign := make(map[string]struct{})
-	for _, r := range rows {
-		if r.TenantID == tenantID {
-			own[r.DatasetID] = append(own[r.DatasetID], r.AgentName)
-		} else {
-			foreign[r.DatasetID] = struct{}{}
-		}
-	}
+	// 分类原语唯一实现（scoped_bindings.go）：本方法只塑形为批量 map
+	splitBindingRowsByTenant(rows, tenantID,
+		func(rid, agentName string) { own[rid] = append(own[rid], agentName) },
+		func(rid string) { foreign[rid] = struct{}{} })
 	return own, foreign, nil
 }
 
