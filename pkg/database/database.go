@@ -1069,45 +1069,62 @@ func hasLegacyUnbackfilledRows() bool {
 // review P2）：GORM AutoMigrate 对已存在的同名约束不比较、不更新
 // DELETE_RULE——旧库升级后绑定表资源侧 FK（skill_id / mcp_server_id /
 // tool_id）仍为 ON DELETE CASCADE，守卫检查与删除之间的并发绑定写入窗口
-// 依旧会被级联静默摘除。本迁移按列定位约束名，将这三个资源侧外键重建为
-// ON DELETE RESTRICT（幂等：DELETE_RULE 已是 RESTRICT 即跳过）。Agent 侧
-// FK（agent_id → agents.id）保持 CASCADE 不动（删除 Agent 绑定随行消亡）。
-// 仅 MySQL 生效；SQLite（测试/嵌入式）由 AutoMigrate 直接按模型建表。
+// 依旧会被级联静默摘除。本迁移将迁移范围**精确限定为三个目标关系**（review
+// P3：禁止按列名泛匹配——其他审计/历史/插件表同名列可能有意 CASCADE 或
+// SET NULL），逐 target 定位约束并重建为 ON DELETE RESTRICT（幂等：
+// DELETE_RULE 已是 RESTRICT 即跳过；每个 target 最多一个约束，多于一个
+// fail-fast 以防 schema 漂移）。Agent 侧 FK（agent_id → agents.id）保持
+// CASCADE 不动（删除 Agent 绑定随行消亡）。仅 MySQL 生效；SQLite（测试/
+// 嵌入式）由 AutoMigrate 直接按模型建表。
 func migrateBindingFKRESTRICT() error {
 	if DB == nil || DB.Dialector.Name() != "mysql" {
 		return nil
 	}
+	type targetFK struct {
+		Table  string
+		Column string
+		Ref    string
+	}
+	// 精确白名单：agent_skills.skill_id → skills.id 等三个关系
+	targets := []targetFK{
+		{Table: "agent_skills", Column: "skill_id", Ref: "skills"},
+		{Table: "agent_mcp_servers", Column: "mcp_server_id", Ref: "mcp_servers"},
+		{Table: "agent_tools", Column: "tool_id", Ref: "tools"},
+	}
 	type fk struct {
-		TableName      string
-		ColumnName     string
 		ConstraintName string
-		RefTable       string
 	}
-	var fks []fk
-	err := DB.Raw(`SELECT kcu.TABLE_NAME AS table_name, kcu.COLUMN_NAME AS column_name,
-			kcu.CONSTRAINT_NAME AS constraint_name, rc.REFERENCED_TABLE_NAME AS ref_table
-		FROM information_schema.REFERENTIAL_CONSTRAINTS rc
-		JOIN information_schema.KEY_COLUMN_USAGE kcu
-		  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-		WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
-		  AND rc.DELETE_RULE <> 'RESTRICT'
-		  AND rc.REFERENCED_TABLE_NAME <> 'agents'
-		  AND kcu.COLUMN_NAME IN ('skill_id', 'mcp_server_id', 'tool_id')`).Scan(&fks).Error
-	if err != nil {
-		return fmt.Errorf("query binding FKs: %w", err)
-	}
-	for _, f := range fks {
-		// 拆两条语句：MySQL 不允许同一条 ALTER 中 DROP 后 ADD 同名约束（1826）
-		drop := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", f.TableName, f.ConstraintName)
-		if err := DB.Exec(drop).Error; err != nil {
-			return fmt.Errorf("drop FK %s.%s: %w", f.TableName, f.ConstraintName, err)
+	for _, t := range targets {
+		var fks []fk
+		err := DB.Raw(`SELECT rc.CONSTRAINT_NAME AS constraint_name
+			FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+			JOIN information_schema.KEY_COLUMN_USAGE kcu
+			  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+			WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+			  AND rc.DELETE_RULE <> 'RESTRICT'
+			  AND kcu.TABLE_NAME = ?
+			  AND kcu.COLUMN_NAME = ?
+			  AND rc.REFERENCED_TABLE_NAME = ?`,
+			t.Table, t.Column, t.Ref).Scan(&fks).Error
+		if err != nil {
+			return fmt.Errorf("query binding FK %s.%s: %w", t.Table, t.Column, err)
 		}
-		add := fmt.Sprintf("ALTER TABLE `%s` ADD CONSTRAINT `%s` FOREIGN KEY (`%s`) REFERENCES `%s`(`id`) ON DELETE RESTRICT",
-			f.TableName, f.ConstraintName, f.ColumnName, f.RefTable)
-		if err := DB.Exec(add).Error; err != nil {
-			return fmt.Errorf("rebuild FK %s.%s: %w", f.TableName, f.ConstraintName, err)
+		if len(fks) > 1 {
+			return fmt.Errorf("unexpected multiple FK constraints on %s.%s: schema drift", t.Table, t.Column)
 		}
-		log.Printf("migrateBindingFKRESTRICT: %s.%s → ON DELETE RESTRICT", f.TableName, f.ConstraintName)
+		for _, f := range fks {
+			// 拆两条语句：MySQL 不允许同一条 ALTER 中 DROP 后 ADD 同名约束（1826）
+			drop := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", t.Table, f.ConstraintName)
+			if err := DB.Exec(drop).Error; err != nil {
+				return fmt.Errorf("drop FK %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			add := fmt.Sprintf("ALTER TABLE `%s` ADD CONSTRAINT `%s` FOREIGN KEY (`%s`) REFERENCES `%s`(`id`) ON DELETE RESTRICT",
+				t.Table, f.ConstraintName, t.Column, t.Ref)
+			if err := DB.Exec(add).Error; err != nil {
+				return fmt.Errorf("rebuild FK %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			log.Printf("migrateBindingFKRESTRICT: %s.%s → ON DELETE RESTRICT", t.Table, f.ConstraintName)
+		}
 	}
 	return nil
 }

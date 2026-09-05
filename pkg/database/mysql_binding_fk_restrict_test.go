@@ -58,6 +58,13 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 			PRIMARY KEY (agent_id, tool_id),
 			CONSTRAINT fk_agent_tools_agent FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
 			CONSTRAINT fk_agent_tools_tool FOREIGN KEY (tool_id) REFERENCES tools(id) ON DELETE CASCADE)`,
+		// 负向对照组（review P3）：无关审计表使用同名列 skill_id 但引用不同
+		// 父表（audit_skills），且有意保持 CASCADE——迁移不得改写它
+		"CREATE TABLE audit_skills (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY)",
+		`CREATE TABLE audit_skill_events (
+			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			skill_id BIGINT UNSIGNED NOT NULL,
+			CONSTRAINT fk_audit_skill_events_skill FOREIGN KEY (skill_id) REFERENCES audit_skills(id) ON DELETE CASCADE)`,
 	} {
 		require.NoError(t, db.Exec(stmt).Error, stmt)
 	}
@@ -68,6 +75,8 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 	require.NoError(t, db.Exec("INSERT INTO agent_skills (agent_id, skill_id) VALUES (1, 1)").Error)
 	require.NoError(t, db.Exec("INSERT INTO agent_mcp_servers (agent_id, mcp_server_id) VALUES (1, 1)").Error)
 	require.NoError(t, db.Exec("INSERT INTO agent_tools (agent_id, tool_id) VALUES (1, 1)").Error)
+	require.NoError(t, db.Exec("INSERT INTO audit_skills (id) VALUES (1)").Error)
+	require.NoError(t, db.Exec("INSERT INTO audit_skill_events (skill_id) VALUES (1)").Error)
 
 	// 真实完整迁移链（等价旧库正常升级路径）
 	oldDB, oldBackfill := DB, backfillTenantID
@@ -95,6 +104,9 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 	for table := range map[string]string{"agent_skills": "", "agent_mcp_servers": "", "agent_tools": ""} {
 		require.Equal(t, "CASCADE", deleteRule(table, "agent_id"), fmt.Sprintf("%s.agent_id 必须保持 CASCADE", table))
 	}
+
+	// 负向断言：无关审计表同名列（skill_id → audit_skills）保持 CASCADE 未被改写
+	require.Equal(t, "CASCADE", deleteRule("audit_skill_events", "skill_id"), "无关表的同名列外键不得被迁移改写")
 
 	// 断言 2：绕过守卫直接删除被拒 + 资源与绑定行均保留（并发竞态闭环）
 	err = db.Exec("DELETE FROM skills WHERE id = 1").Error
