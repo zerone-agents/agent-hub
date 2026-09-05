@@ -179,28 +179,6 @@ func (r *SkillRepository) ReplaceAgentSkills(agentID uint64, skillIDs []uint64) 
 // own = 请求租户的 Agent 名单（409 载荷）；foreign = 他租户仍绑定（仅中性
 // 事实，不携带任何他租户身份）。own ∪ foreign 任一命中即阻断删除。
 func (r *SkillRepository) GetSkillBindingsScoped(tenantID string, skillID uint64) ([]string, bool, error) {
-	type row struct {
-		AgentName string
-		TenantID  string
-	}
-	var rows []row
-	err := r.db.Table("agent_skills").
-		Select("agents.name as agent_name, agents.tenant_id as tenant_id").
-		Joins("JOIN agents ON agent_skills.agent_id = agents.id").
-		Where("agent_skills.skill_id = ?", skillID).
-		Order("agents.name ASC").
-		Find(&rows).Error
-	if err != nil {
-		return nil, false, err
-	}
-	var own []string
-	foreign := false
-	for _, r := range rows {
-		if r.TenantID == tenantID {
-			own = append(own, r.AgentName)
-		} else {
-			foreign = true
-		}
-	}
-	return own, foreign, nil
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_skills", "skill_id", skillID, tenantID)
 }

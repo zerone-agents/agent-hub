@@ -201,28 +201,6 @@ func NewMcpRepositoryWithDB(db *gorm.DB) *McpRepository {
 // #123）：own = 请求租户的 Agent 名单（409 载荷）；foreign = 他租户仍绑定
 // （仅中性事实，不携带任何他租户身份）。own ∪ foreign 任一命中即阻断删除。
 func (r *McpRepository) GetMcpBindingsScoped(tenantID string, mcpID uint64) ([]string, bool, error) {
-	type row struct {
-		AgentName string
-		TenantID  string
-	}
-	var rows []row
-	err := r.db.Table("agent_mcp_servers").
-		Select("agents.name as agent_name, agents.tenant_id as tenant_id").
-		Joins("JOIN agents ON agent_mcp_servers.agent_id = agents.id").
-		Where("agent_mcp_servers.mcp_server_id = ?", mcpID).
-		Order("agents.name ASC").
-		Find(&rows).Error
-	if err != nil {
-		return nil, false, err
-	}
-	var own []string
-	foreign := false
-	for _, r := range rows {
-		if r.TenantID == tenantID {
-			own = append(own, r.AgentName)
-		} else {
-			foreign = true
-		}
-	}
-	return own, foreign, nil
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_mcp_servers", "mcp_server_id", mcpID, tenantID)
 }

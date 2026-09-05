@@ -115,30 +115,8 @@ func (r *ToolRepository) GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, e
 // 租户仍挂载（仅中性事实，不携带任何他租户身份）。own ∪ foreign 任一命中
 // 即阻断删除。
 func (r *ToolRepository) GetToolBindingsScoped(tenantID string, toolID uint64) ([]string, bool, error) {
-	type row struct {
-		AgentName string
-		TenantID  string
-	}
-	var rows []row
-	err := r.db.Table("agent_tools").
-		Select("agents.name as agent_name, agents.tenant_id as tenant_id").
-		Joins("JOIN agents ON agent_tools.agent_id = agents.id").
-		Where("agent_tools.tool_id = ?", toolID).
-		Order("agents.name ASC").
-		Find(&rows).Error
-	if err != nil {
-		return nil, false, err
-	}
-	var own []string
-	foreign := false
-	for _, r := range rows {
-		if r.TenantID == tenantID {
-			own = append(own, r.AgentName)
-		} else {
-			foreign = true
-		}
-	}
-	return own, foreign, nil
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_tools", "tool_id", toolID, tenantID)
 }
 
 // GetAllAgentTools 返回本租户内 agent name -> tool names 的映射。
