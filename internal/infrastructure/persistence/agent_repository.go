@@ -304,13 +304,10 @@ func (r *AgentRepository) GetDatasetBindingsScoped(tenantID string) (map[string]
 	}
 	own := make(map[string][]string)
 	foreign := make(map[string]struct{})
-	for _, r := range rows {
-		if r.TenantID == tenantID {
-			own[r.ResourceID] = append(own[r.ResourceID], r.AgentName)
-		} else {
-			foreign[r.ResourceID] = struct{}{}
-		}
-	}
+	// 分类原语唯一实现（scoped_bindings.go）：本方法只塑形为批量 map
+	splitBindingRowsByTenant(rows, tenantID,
+		func(rid, agentName string) { own[rid] = append(own[rid], agentName) },
+		func(rid string) { foreign[rid] = struct{}{} })
 	return own, foreign, nil
 }
 

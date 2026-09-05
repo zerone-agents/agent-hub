@@ -46,18 +46,20 @@ func queryBindingRows(db *gorm.DB, args queryBindingRowsArgs) ([]bindingRow, err
 	return rows, err
 }
 
-// splitBindingRows 将查询行按请求租户切分为 own 名单（保持 ASC 序）与
-// foreign 中性标记。隐私边界（review P1/P3）：own 之外的租户 Agent 名
-// 绝不进入返回值，foreign 仅表达「他租户仍绑定」这一事实。
-func splitBindingRows(rows []bindingRow, tenantID string) (own []string, foreign bool) {
+// splitBindingRowsByTenant 是租户切分语义的**唯一实现**（review P5：
+// 隐私边界单点化——归属判断与「他租户 Agent 名绝不暴露」只能有一处
+// 代码）：逐行遍历，本租户行经 own 回调暴露 AgentName（保持遍历序 =
+// name ASC），他租户行只经 foreign 回调暴露资源存在事实（resourceID
+// 维度，不携带任何他租户身份）。单资源 splitter 与 dataset grouped
+// splitter 只把已安全分类的结果塑形为各自的返回结构，不重复任何判断。
+func splitBindingRowsByTenant(rows []bindingRow, tenantID string, own func(resourceID, agentName string), foreign func(resourceID string)) {
 	for _, r := range rows {
 		if r.TenantID == tenantID {
-			own = append(own, r.AgentName)
+			own(r.ResourceID, r.AgentName)
 		} else {
-			foreign = true
+			foreign(r.ResourceID)
 		}
 	}
-	return own, foreign
 }
 
 // resourceBindingsScoped 单资源删除守卫反查的共享实现：技能/MCP/工具
@@ -67,6 +69,10 @@ func resourceBindingsScoped(db *gorm.DB, bindingTable, idColumn string, resource
 	if err != nil {
 		return nil, false, err
 	}
-	own, foreign := splitBindingRows(rows, tenantID)
+	var own []string
+	foreign := false
+	splitBindingRowsByTenant(rows, tenantID,
+		func(_, agentName string) { own = append(own, agentName) },
+		func(string) { foreign = true })
 	return own, foreign, nil
 }
