@@ -11,6 +11,7 @@ import (
 	"control-panel/pkg/database"
 
 	"github.com/glebarez/sqlite"
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -396,4 +397,36 @@ func TestDeleteTool_ForeignOnlyBlocks(t *testing.T) {
 	require.ErrorAs(t, err, &inUse)
 	require.Empty(t, inUse.Agents)
 	require.True(t, inUse.Foreign)
+}
+
+// TestDeleteTool_FKConflictMapsToInUse 并发后盾（review P1）：
+// RESTRICT 拒绝删除的约束冲突映射为 ToolInUseError（重查绑定给出准确名单）。
+func TestDeleteTool_FKConflictMapsToInUse(t *testing.T) {
+	db := setupToolCustomServiceDB(t)
+	svc, _ := newCustomToolService(t)
+	_, in := customFileInput()
+	_, err := svc.CreateCustomTool("acme", &CreateCustomToolInput{
+		Name:          "SayHello",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+	var tool agent.Tool
+	require.NoError(t, database.GetDB().Where("name = 'SayHello'").First(&tool).Error)
+	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, database.GetDB().Create(a).Error)
+	require.NoError(t, database.GetDB().Create(&agent.AgentTool{AgentID: a.ID, ToolID: tool.ID}).Error)
+
+	forcedFK := &mysql.MySQLError{Number: 1451, Message: "Cannot delete or update a parent row"}
+	require.NoError(t, db.Callback().Delete().Before("gorm:before_delete").Register("test:force_tools_fk", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "tools" {
+			_ = tx.AddError(forcedFK)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Delete().Remove("test:force_tools_fk") })
+
+	err = svc.Delete("acme", "SayHello")
+	var inUse *agent.ToolInUseError
+	require.ErrorAs(t, err, &inUse)
+	require.Equal(t, []string{"bot"}, inUse.Agents)
+	require.False(t, inUse.Foreign)
 }

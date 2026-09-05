@@ -323,6 +323,14 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	// 随之断裂；先删行则最坏情况只是留下一个孤立对象（见下），行与对象始终一致。
 	key := t.FileURL
 	if err := s.repo.Delete(tenantID, t.ID); err != nil {
+		if repository.IsFKConstraintError(err) {
+			// 并发后盾（#123 review P1）：同技能删除——RESTRICT 拒绝 →
+			// 重查绑定给出准确 409 名单。
+			own, foreign, qerr := s.repo.GetToolBindingsScoped(tenantID, t.ID)
+			if qerr == nil {
+				return &agent.ToolInUseError{ToolName: t.Name, Agents: own, Foreign: foreign}
+			}
+		}
 		return fmt.Errorf("delete tool failed: %w", err)
 	}
 	// 行已删成功：残留对象只是无引用方的孤立内容寻址副本，删除失败无害，仅记日志。

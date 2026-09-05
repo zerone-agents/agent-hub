@@ -8,6 +8,7 @@ import (
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/glebarez/sqlite"
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -79,4 +80,30 @@ func TestMcpService_Delete_BuiltinStillBlocked(t *testing.T) {
 	svc := &McpService{repo: repository.NewMcpRepositoryWithDB(db)}
 	err := svc.Delete("acme", "knowledge")
 	require.Contains(t, err.Error(), "是内置服务，不可删除")
+}
+
+// TestMcpService_Delete_FKConflictMapsToInUse 并发后盾（review P1）：
+// RESTRICT 拒绝删除的约束冲突映射为 McpInUseError（重查绑定给出准确名单）。
+func TestMcpService_Delete_FKConflictMapsToInUse(t *testing.T) {
+	db := setupMcpServiceTestDB(t)
+	srv := &mcp.McpServer{Name: "fs", TenantID: "acme", TransportType: "sse", URL: "https://mcp.example.com/sse"}
+	require.NoError(t, db.Create(srv).Error)
+	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, db.Create(a).Error)
+	require.NoError(t, db.Create(&mcp.AgentMcpServer{AgentID: a.ID, McpServerID: srv.ID}).Error)
+
+	forcedFK := &mysql.MySQLError{Number: 1451, Message: "Cannot delete or update a parent row"}
+	require.NoError(t, db.Callback().Delete().Before("gorm:before_delete").Register("test:force_mcps_fk", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "mcp_servers" {
+			_ = tx.AddError(forcedFK)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Delete().Remove("test:force_mcps_fk") })
+
+	svc := &McpService{repo: repository.NewMcpRepositoryWithDB(db)}
+	err := svc.Delete("acme", "fs")
+	var inUse *agent.McpInUseError
+	require.ErrorAs(t, err, &inUse)
+	require.Equal(t, []string{"bot"}, inUse.Agents)
+	require.False(t, inUse.Foreign)
 }

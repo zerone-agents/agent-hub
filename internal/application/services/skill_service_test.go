@@ -14,6 +14,7 @@ import (
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/glebarez/sqlite"
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -328,4 +329,33 @@ func TestDeleteSkill_DBFailureKeepsObjectAndRow(t *testing.T) {
 	require.Contains(t, err.Error(), "删除技能失败")
 	_, exists := uploader.data[ossKey]
 	require.True(t, exists, "DB 删除失败时 OSS 对象必须原封不动")
+}
+
+// TestDeleteSkill_FKConflictMapsToInUse 并发后盾（review P1）：守卫通过后
+// 的瞬间绑定被并发写入 → RESTRICT 拒绝删除 → 约束冲突映射为 SkillInUseError
+// （重查绑定给出准确名单），绝不静默级联摘除。
+func TestDeleteSkill_FKConflictMapsToInUse(t *testing.T) {
+	db := setupSkillServiceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agent.AgentSkill{}))
+	uploader := &mockUploader{data: make(map[string][]byte)}
+	sk := &skill.Skill{Name: "s1", Type: "expert", TenantID: "acme"}
+	require.NoError(t, db.Create(sk).Error)
+	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, db.Create(a).Error)
+	require.NoError(t, db.Create(&agent.AgentSkill{AgentID: a.ID, SkillID: sk.ID}).Error)
+
+	forcedFK := &mysql.MySQLError{Number: 1451, Message: "Cannot delete or update a parent row"}
+	require.NoError(t, db.Callback().Delete().Before("gorm:before_delete").Register("test:force_skills_fk", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "skills" {
+			_ = tx.AddError(forcedFK)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Delete().Remove("test:force_skills_fk") })
+
+	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
+	err := svc.DeleteSkill("acme", "s1")
+	var inUse *agent.SkillInUseError
+	require.ErrorAs(t, err, &inUse)
+	require.Equal(t, []string{"bot"}, inUse.Agents)
+	require.False(t, inUse.Foreign)
 }

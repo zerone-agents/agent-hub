@@ -388,7 +388,18 @@ func (s *McpService) Delete(tenantID, name string) error {
 		return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
 	}
 
-	return s.repo.Delete(tenantID, m.ID)
+	if err := s.repo.Delete(tenantID, m.ID); err != nil {
+		if repository.IsFKConstraintError(err) {
+			// 并发后盾（#123 review P1）：同技能删除——RESTRICT 拒绝 →
+			// 重查绑定给出准确 409 名单。
+			own, foreign, qerr := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
+			if qerr == nil {
+				return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
+			}
+		}
+		return fmt.Errorf("删除 MCP 失败: %w", err)
+	}
+	return nil
 }
 
 // BuiltinKnowledgeAuthHeader is the Authorization header template seeded for the

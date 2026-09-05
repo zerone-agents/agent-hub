@@ -262,6 +262,14 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 	}
 
 	if err := s.repo.Delete(tenantID, sk.ID); err != nil {
+		if repository.IsFKConstraintError(err) {
+			// 并发后盾（#123 review P1）：守卫通过的瞬间绑定被并发写入 →
+			// ON DELETE RESTRICT 拒绝删除 → 重查绑定给出准确 409 名单。
+			own, foreign, qerr := s.repo.GetSkillBindingsScoped(tenantID, sk.ID)
+			if qerr == nil {
+				return &agent.SkillInUseError{SkillName: sk.Name, Agents: own, Foreign: foreign}
+			}
+		}
 		return fmt.Errorf("删除技能失败: %w", err)
 	}
 

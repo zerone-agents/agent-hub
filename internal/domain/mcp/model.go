@@ -48,11 +48,13 @@ func (McpServer) TableName() string {
 
 // AgentMcpServer 是 Agent 与 McpServer 的多对多绑定关系。
 // 不含 enabled 字段——存在即代表启用，删除即代表禁用。
+// 资源侧 FK 用 ON DELETE RESTRICT（#123 review P1）：同 AgentSkill——
+// 守卫与删除之间的并发写入窗口由约束原子关闭，杜绝级联静默摘除。
 type AgentMcpServer struct {
 	AgentID     uint64            `gorm:"primaryKey"`
 	McpServerID uint64            `gorm:"primaryKey;index:idx_mcp_id"`
 	Agent       agent.AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
-	McpServer   McpServer         `gorm:"foreignKey:McpServerID;constraint:OnDelete:CASCADE" json:"-"`
+	McpServer   McpServer         `gorm:"foreignKey:McpServerID;constraint:OnDelete:RESTRICT" json:"-"`
 	CreatedAt   time.Time         `gorm:"column:created_at"`
 }
 
