@@ -147,6 +147,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
+	if err := migrateBindingFKRESTRICT(); err != nil {
+		return fmt.Errorf("failed to migrate binding FK RESTRICT: %w", err)
+	}
+
 	// 未显式指定回填租户（casdoor 模式未配 CASDOOR_ORGANIZATION）：建表后
 	// 从 user_identities 推断。推断不出则保持空串，由 BackfillTenantID 按
 	// 是否存在待回填行决定放行（no-op）或报错（歧义升级需一次性显式配置）。
@@ -1061,6 +1065,53 @@ func hasLegacyUnbackfilledRows() bool {
 // 无法在 sqlite 测试库上运行），已改为每表唯一名（uk_agents_tenant_name
 // 等）。旧库升级后 AutoMigrate 会建好新名索引，这里删掉旧名残留；新库
 // 无旧名索引，纯 no-op，天然幂等。
+// migrateBindingFKRESTRICT 存量 MySQL 绑定表资源侧外键迁移（issue #123
+// review P2）：GORM AutoMigrate 对已存在的同名约束不比较、不更新
+// DELETE_RULE——旧库升级后绑定表资源侧 FK（skill_id / mcp_server_id /
+// tool_id）仍为 ON DELETE CASCADE，守卫检查与删除之间的并发绑定写入窗口
+// 依旧会被级联静默摘除。本迁移按列定位约束名，将这三个资源侧外键重建为
+// ON DELETE RESTRICT（幂等：DELETE_RULE 已是 RESTRICT 即跳过）。Agent 侧
+// FK（agent_id → agents.id）保持 CASCADE 不动（删除 Agent 绑定随行消亡）。
+// 仅 MySQL 生效；SQLite（测试/嵌入式）由 AutoMigrate 直接按模型建表。
+func migrateBindingFKRESTRICT() error {
+	if DB == nil || DB.Dialector.Name() != "mysql" {
+		return nil
+	}
+	type fk struct {
+		TableName      string
+		ColumnName     string
+		ConstraintName string
+		RefTable       string
+	}
+	var fks []fk
+	err := DB.Raw(`SELECT kcu.TABLE_NAME AS table_name, kcu.COLUMN_NAME AS column_name,
+			kcu.CONSTRAINT_NAME AS constraint_name, rc.REFERENCED_TABLE_NAME AS ref_table
+		FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+		JOIN information_schema.KEY_COLUMN_USAGE kcu
+		  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+		WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+		  AND rc.DELETE_RULE <> 'RESTRICT'
+		  AND rc.REFERENCED_TABLE_NAME <> 'agents'
+		  AND kcu.COLUMN_NAME IN ('skill_id', 'mcp_server_id', 'tool_id')`).Scan(&fks).Error
+	if err != nil {
+		return fmt.Errorf("query binding FKs: %w", err)
+	}
+	for _, f := range fks {
+		// 拆两条语句：MySQL 不允许同一条 ALTER 中 DROP 后 ADD 同名约束（1826）
+		drop := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", f.TableName, f.ConstraintName)
+		if err := DB.Exec(drop).Error; err != nil {
+			return fmt.Errorf("drop FK %s.%s: %w", f.TableName, f.ConstraintName, err)
+		}
+		add := fmt.Sprintf("ALTER TABLE `%s` ADD CONSTRAINT `%s` FOREIGN KEY (`%s`) REFERENCES `%s`(`id`) ON DELETE RESTRICT",
+			f.TableName, f.ConstraintName, f.ColumnName, f.RefTable)
+		if err := DB.Exec(add).Error; err != nil {
+			return fmt.Errorf("rebuild FK %s.%s: %w", f.TableName, f.ConstraintName, err)
+		}
+		log.Printf("migrateBindingFKRESTRICT: %s.%s → ON DELETE RESTRICT", f.TableName, f.ConstraintName)
+	}
+	return nil
+}
+
 func migrateDropLegacyUkTenantName() error {
 	if DB == nil {
 		return nil
