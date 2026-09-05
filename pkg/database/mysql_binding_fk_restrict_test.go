@@ -121,3 +121,76 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 	require.NoError(t, AutoMigrate("org-a"))
 	require.Equal(t, "RESTRICT", deleteRule("agent_skills", "skill_id"))
 }
+
+// TestMySQLBindingFKRESTRICT_DriftRefuses review P4：schema 漂移时迁移必须
+// 拒绝而非静默改写——①目标 FK 父列非 id（引用 skills 的其他唯一列）；
+// ②目标列属于复合外键。两场景均要求：返回 error（refusing to rewrite）
+// 且原约束纹丝不动（DELETE_RULE 保持 CASCADE，引用列不变）。
+func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
+	dsn := os.Getenv("TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 迁移测试")
+	}
+
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	sqlDB.SetMaxOpenConns(1)
+
+	oldDB, oldBackfill := DB, backfillTenantID
+	t.Cleanup(func() { DB, backfillTenantID = oldDB, oldBackfill })
+	DB = db
+
+	deleteRule := func(table, col string) string {
+		var rule string
+		require.NoError(t, db.Raw(`SELECT rc.DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+			JOIN information_schema.KEY_COLUMN_USAGE kcu
+			  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+			WHERE rc.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?`, table, col).Scan(&rule).Error)
+		return rule
+	}
+	referencedCol := func(table, col string) string {
+		var refCol string
+		require.NoError(t, db.Raw(`SELECT kcu.REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE kcu
+			WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?
+			  AND kcu.REFERENCED_COLUMN_NAME IS NOT NULL LIMIT 1`, table, col).Scan(&refCol).Error)
+		return refCol
+	}
+
+	t.Run("parent column is not id", func(t *testing.T) {
+		require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_fk_drift_a").Error)
+		require.NoError(t, db.Exec("CREATE DATABASE hub_fk_drift_a").Error)
+		require.NoError(t, db.Exec("USE hub_fk_drift_a").Error)
+		require.NoError(t, db.Exec("CREATE TABLE skills (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, uid BIGINT UNSIGNED NOT NULL, UNIQUE KEY uk_uid (uid))").Error)
+		require.NoError(t, db.Exec(`CREATE TABLE agent_skills (
+			agent_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL,
+			PRIMARY KEY (agent_id, skill_id),
+			CONSTRAINT fk_agent_skills_skill FOREIGN KEY (skill_id) REFERENCES skills(uid) ON DELETE CASCADE)`).Error)
+
+		err := migrateBindingFKRESTRICT()
+		require.Error(t, err, "父列非 id 时迁移必须拒绝")
+		require.Contains(t, err.Error(), "refusing to rewrite")
+		// 原约束纹丝不动：DELETE_RULE 与引用列均保持
+		require.Equal(t, "CASCADE", deleteRule("agent_skills", "skill_id"))
+		require.Equal(t, "uid", referencedCol("agent_skills", "skill_id"))
+	})
+
+	t.Run("composite foreign key", func(t *testing.T) {
+		require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_fk_drift_b").Error)
+		require.NoError(t, db.Exec("CREATE DATABASE hub_fk_drift_b").Error)
+		require.NoError(t, db.Exec("USE hub_fk_drift_b").Error)
+		require.NoError(t, db.Exec("CREATE TABLE mcp_servers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, kind VARCHAR(32) NOT NULL, UNIQUE KEY uk_id_kind (id, kind))").Error)
+		require.NoError(t, db.Exec(`CREATE TABLE agent_mcp_servers (
+			agent_id BIGINT UNSIGNED NOT NULL, mcp_server_id BIGINT UNSIGNED NOT NULL, kind VARCHAR(32) NOT NULL,
+			PRIMARY KEY (agent_id, mcp_server_id),
+			CONSTRAINT fk_agent_mcp_composite FOREIGN KEY (mcp_server_id, kind) REFERENCES mcp_servers(id, kind) ON DELETE CASCADE)`).Error)
+
+		err := migrateBindingFKRESTRICT()
+		require.Error(t, err, "复合外键时迁移必须拒绝")
+		require.Contains(t, err.Error(), "composite")
+		// 复合约束整体保持（单列重建不得发生）
+		require.Equal(t, "CASCADE", deleteRule("agent_mcp_servers", "mcp_server_id"))
+	})
+}

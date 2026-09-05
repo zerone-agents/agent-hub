@@ -1059,12 +1059,6 @@ func hasLegacyUnbackfilledRows() bool {
 	return false
 }
 
-// migrateDropLegacyUkTenantName 清理索引改名残留：复合唯一索引原名
-// uk_tenant_name 在 agents/tools/skills/mcp_servers/scenes 五表共用（MySQL
-// 索引名 table-scoped 合法，SQLite 全局唯一会撞名，导致真实 AutoMigrate
-// 无法在 sqlite 测试库上运行），已改为每表唯一名（uk_agents_tenant_name
-// 等）。旧库升级后 AutoMigrate 会建好新名索引，这里删掉旧名残留；新库
-// 无旧名索引，纯 no-op，天然幂等。
 // migrateBindingFKRESTRICT 存量 MySQL 绑定表资源侧外键迁移（issue #123
 // review P2）：GORM AutoMigrate 对已存在的同名约束不比较、不更新
 // DELETE_RULE——旧库升级后绑定表资源侧 FK（skill_id / mcp_server_id /
@@ -1093,15 +1087,18 @@ func migrateBindingFKRESTRICT() error {
 	}
 	type fk struct {
 		ConstraintName string
+		RefCol         string
 	}
 	for _, t := range targets {
 		var fks []fk
-		err := DB.Raw(`SELECT rc.CONSTRAINT_NAME AS constraint_name
+		err := DB.Raw(`SELECT rc.CONSTRAINT_NAME AS constraint_name, kcu.REFERENCED_COLUMN_NAME AS ref_col
 			FROM information_schema.REFERENTIAL_CONSTRAINTS rc
 			JOIN information_schema.KEY_COLUMN_USAGE kcu
 			  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
 			WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
 			  AND rc.DELETE_RULE <> 'RESTRICT'
+			  AND kcu.TABLE_SCHEMA = DATABASE()
+			  AND kcu.REFERENCED_TABLE_SCHEMA = DATABASE()
 			  AND kcu.TABLE_NAME = ?
 			  AND kcu.COLUMN_NAME = ?
 			  AND rc.REFERENCED_TABLE_NAME = ?`,
@@ -1110,9 +1107,27 @@ func migrateBindingFKRESTRICT() error {
 			return fmt.Errorf("query binding FK %s.%s: %w", t.Table, t.Column, err)
 		}
 		if len(fks) > 1 {
-			return fmt.Errorf("unexpected multiple FK constraints on %s.%s: schema drift", t.Table, t.Column)
+			return fmt.Errorf("unexpected multi-column or duplicate FK on %s.%s: refusing to rewrite", t.Table, t.Column)
 		}
 		for _, f := range fks {
+			// 形状校验（review P4）：父列必须恰为 id——schema 漂移为其他
+			// 唯一列时拒绝改写，绝不静默重建为 skill_id → <table>.id
+			if f.RefCol != "id" {
+				return fmt.Errorf("FK %s.%s references %s.%s, want %s.id: schema drift, refusing to rewrite",
+					t.Table, t.Column, t.Ref, f.RefCol, t.Ref)
+			}
+			// 约束完整形状：该约束的全部 KCU 行数（含其他列）——复合外键
+			// 时按列过滤只看到 1 行，必须整体查证，拒绝单列重建破坏约束
+			var kcuCount int64
+			if err := DB.Raw(`SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+				WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?`,
+				t.Table, f.ConstraintName).Scan(&kcuCount).Error; err != nil {
+				return fmt.Errorf("query FK shape %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			if kcuCount != 1 {
+				return fmt.Errorf("FK %s.%s is composite (%d columns): schema drift, refusing to rewrite",
+					t.Table, f.ConstraintName, kcuCount)
+			}
 			// 拆两条语句：MySQL 不允许同一条 ALTER 中 DROP 后 ADD 同名约束（1826）
 			drop := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", t.Table, f.ConstraintName)
 			if err := DB.Exec(drop).Error; err != nil {
@@ -1129,6 +1144,12 @@ func migrateBindingFKRESTRICT() error {
 	return nil
 }
 
+// migrateDropLegacyUkTenantName 清理索引改名残留：复合唯一索引原名
+// uk_tenant_name 在 agents/tools/skills/mcp_servers/scenes 五表共用（MySQL
+// 索引名 table-scoped 合法，SQLite 全局唯一会撞名，导致真实 AutoMigrate
+// 无法在 sqlite 测试库上运行），已改为每表唯一名（uk_agents_tenant_name
+// 等）。旧库升级后 AutoMigrate 会建好新名索引，这里删掉旧名残留；新库
+// 无旧名索引，纯 no-op，天然幂等。
 func migrateDropLegacyUkTenantName() error {
 	if DB == nil {
 		return nil
