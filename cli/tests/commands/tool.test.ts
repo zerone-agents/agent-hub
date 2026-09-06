@@ -532,6 +532,77 @@ describe("tool update command", () => {
     expect(calls[0][1].body.description).toBe("Advanced math tool");
   });
 
+  test("rejects unknown metadata fields with exit 2 and does not send a request", async () => {
+    const fetchMock = setupFetchMock({});
+    const { ToolUpdateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUpdateCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({ title: "Calculator Pro", isDefault: true });
+    (cmd as any).output = "yaml";
+
+    const origErr = process.stderr.write;
+    const errs: string[] = [];
+    process.stderr.write = ((s: string) => {
+      errs.push(s);
+      return true;
+    }) as any;
+
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(2);
+      expect(errs.join("")).toContain("isDefault");
+    } finally {
+      process.stderr.write = origErr as any;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  test("sends PUT with only title/description from --json, ignoring name", async () => {
+    const fakeTool = {
+      id: 1,
+      name: "calculator",
+      title: "Calculator Pro",
+      description: "Advanced math tool",
+      isDefault: true,
+    };
+    const fetchMock = setupFetchMock(fakeTool);
+
+    const { ToolUpdateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUpdateCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({
+      name: "calculator",
+      title: "Calculator Pro",
+      description: "Advanced math tool",
+    });
+    (cmd as any).output = "yaml";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator");
+    expect(calls[0][1].method).toBe("PUT");
+    expect(calls[0][1].body.title).toBe("Calculator Pro");
+    expect(calls[0][1].body.description).toBe("Advanced math tool");
+    expect("name" in calls[0][1].body).toBe(false);
+    expect("isDefault" in calls[0][1].body).toBe(false);
+  });
+
   test("returns error 2 without --file or --json", async () => {
     const { ToolUpdateCommand } = await import(
       `../../src/commands/tool.ts?t=${Date.now()}`
