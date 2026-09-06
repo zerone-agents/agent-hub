@@ -36,6 +36,22 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # MySQL 8 service：供 pkg/database 的 migration 冒烟/升级测试
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: hub
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      TEST_MYSQL_DSN: root:test@tcp(127.0.0.1:3306)/hub?parseTime=true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

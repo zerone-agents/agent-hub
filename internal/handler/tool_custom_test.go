@@ -164,6 +164,22 @@ func TestToolHandler_DeleteConflict409(t *testing.T) {
 	r.ServeHTTP(resp, httptest.NewRequest(http.MethodDelete, "/api/v1/admin/tools/SayHello", nil))
 	require.Equal(t, http.StatusConflict, resp.Code)
 	require.Contains(t, resp.Body.String(), "\"agents\":[\"bot\"]")
+	require.Contains(t, resp.Body.String(), `"foreign":false`)
+}
+
+func TestToolHandler_DeleteConflict409_CrossTenantNoLeak(t *testing.T) {
+	r := setupToolHandlerRouter(t)
+	tool := &agent.Tool{Name: "X", TenantID: "tenant-a", Source: agent.ToolSourceCustom}
+	require.NoError(t, database.GetDB().Create(tool).Error)
+	fb := &agent.AgentConfig{Name: "sneaky", TenantID: "tenant-b", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, database.GetDB().Create(fb).Error)
+	require.NoError(t, database.GetDB().Create(&agent.AgentTool{AgentID: fb.ID, ToolID: tool.ID}).Error)
+
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, httptest.NewRequest(http.MethodDelete, "/api/v1/admin/tools/X", nil))
+	require.Equal(t, http.StatusConflict, resp.Code)
+	require.NotContains(t, resp.Body.String(), "sneaky")
+	require.Contains(t, resp.Body.String(), `"foreign":true`)
 }
 
 func TestToolHandler_UpdateBuiltinRejected(t *testing.T) {

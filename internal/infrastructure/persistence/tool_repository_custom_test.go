@@ -42,7 +42,7 @@ func TestGetToolRecordsByAgent_ReturnsFullRows(t *testing.T) {
 	require.Equal(t, agent.ToolSourceBuiltin, byName["Bash"].Source)
 }
 
-func TestGetAgentNamesByToolID_SortedNames(t *testing.T) {
+func TestGetToolBindingsScoped_TenantSplit(t *testing.T) {
 	db := setupToolCustomRepoDB(t)
 	tool := &agent.Tool{Name: "SayHello", TenantID: "acme", Source: agent.ToolSourceCustom}
 	require.NoError(t, db.Create(tool).Error)
@@ -51,11 +51,21 @@ func TestGetAgentNamesByToolID_SortedNames(t *testing.T) {
 		require.NoError(t, db.Create(a).Error)
 		require.NoError(t, db.Create(&agent.AgentTool{AgentID: a.ID, ToolID: tool.ID}).Error)
 	}
-	otherTenant := &agent.AgentConfig{Name: "nope", TenantID: "other", ContentHash: "h", SystemPrompt: "p"}
-	require.NoError(t, db.Create(otherTenant).Error) // 未关联
+	// 他租户也挂载了同一工具 → foreign，且不进入 own 名单
+	fb := &agent.AgentConfig{Name: "sneaky", TenantID: "other", ContentHash: "h", SystemPrompt: "p"}
+	require.NoError(t, db.Create(fb).Error)
+	require.NoError(t, db.Create(&agent.AgentTool{AgentID: fb.ID, ToolID: tool.ID}).Error)
 
 	repo := NewToolRepositoryWithDB(db)
-	names, err := repo.GetAgentNamesByToolID(tool.ID)
+	own, foreign, err := repo.GetToolBindingsScoped("acme", tool.ID)
 	require.NoError(t, err)
-	require.Equal(t, []string{"alpha", "mid", "zeta"}, names)
+	require.Equal(t, []string{"alpha", "mid", "zeta"}, own)
+	require.True(t, foreign)
+	// 未挂载工具 → 全空
+	t2 := &agent.Tool{Name: "Other", TenantID: "acme", Source: agent.ToolSourceCustom}
+	require.NoError(t, db.Create(t2).Error)
+	own2, foreign2, err := repo.GetToolBindingsScoped("acme", t2.ID)
+	require.NoError(t, err)
+	require.Empty(t, own2)
+	require.False(t, foreign2)
 }

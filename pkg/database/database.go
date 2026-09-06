@@ -147,6 +147,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
+	if err := migrateBindingFKRESTRICT(); err != nil {
+		return fmt.Errorf("failed to migrate binding FK RESTRICT: %w", err)
+	}
+
 	// 未显式指定回填租户（casdoor 模式未配 CASDOOR_ORGANIZATION）：建表后
 	// 从 user_identities 推断。推断不出则保持空串，由 BackfillTenantID 按
 	// 是否存在待回填行决定放行（no-op）或报错（歧义升级需一次性显式配置）。
@@ -1053,6 +1057,91 @@ func hasLegacyUnbackfilledRows() bool {
 		}
 	}
 	return false
+}
+
+// migrateBindingFKRESTRICT 存量 MySQL 绑定表资源侧外键迁移（issue #123
+// review P2）：GORM AutoMigrate 对已存在的同名约束不比较、不更新
+// DELETE_RULE——旧库升级后绑定表资源侧 FK（skill_id / mcp_server_id /
+// tool_id）仍为 ON DELETE CASCADE，守卫检查与删除之间的并发绑定写入窗口
+// 依旧会被级联静默摘除。本迁移将迁移范围**精确限定为三个目标关系**（review
+// P3：禁止按列名泛匹配——其他审计/历史/插件表同名列可能有意 CASCADE 或
+// SET NULL），逐 target 定位约束并重建为 ON DELETE RESTRICT（幂等：
+// DELETE_RULE 已是 RESTRICT 即跳过；每个 target 最多一个约束，多于一个
+// fail-fast 以防 schema 漂移）。Agent 侧 FK（agent_id → agents.id）保持
+// CASCADE 不动（删除 Agent 绑定随行消亡）。仅 MySQL 生效；SQLite（测试/
+// 嵌入式）由 AutoMigrate 直接按模型建表。
+func migrateBindingFKRESTRICT() error {
+	if DB == nil || DB.Dialector.Name() != "mysql" {
+		return nil
+	}
+	type targetFK struct {
+		Table  string
+		Column string
+		Ref    string
+	}
+	// 精确白名单：agent_skills.skill_id → skills.id 等三个关系
+	targets := []targetFK{
+		{Table: "agent_skills", Column: "skill_id", Ref: "skills"},
+		{Table: "agent_mcp_servers", Column: "mcp_server_id", Ref: "mcp_servers"},
+		{Table: "agent_tools", Column: "tool_id", Ref: "tools"},
+	}
+	type fk struct {
+		ConstraintName string
+		RefCol         string
+	}
+	for _, t := range targets {
+		var fks []fk
+		err := DB.Raw(`SELECT rc.CONSTRAINT_NAME AS constraint_name, kcu.REFERENCED_COLUMN_NAME AS ref_col
+			FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+			JOIN information_schema.KEY_COLUMN_USAGE kcu
+			  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+			WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+			  AND rc.DELETE_RULE <> 'RESTRICT'
+			  AND kcu.TABLE_SCHEMA = DATABASE()
+			  AND kcu.REFERENCED_TABLE_SCHEMA = DATABASE()
+			  AND kcu.TABLE_NAME = ?
+			  AND kcu.COLUMN_NAME = ?
+			  AND rc.REFERENCED_TABLE_NAME = ?`,
+			t.Table, t.Column, t.Ref).Scan(&fks).Error
+		if err != nil {
+			return fmt.Errorf("query binding FK %s.%s: %w", t.Table, t.Column, err)
+		}
+		if len(fks) > 1 {
+			return fmt.Errorf("unexpected multi-column or duplicate FK on %s.%s: refusing to rewrite", t.Table, t.Column)
+		}
+		for _, f := range fks {
+			// 形状校验（review P4）：父列必须恰为 id——schema 漂移为其他
+			// 唯一列时拒绝改写，绝不静默重建为 skill_id → <table>.id
+			if f.RefCol != "id" {
+				return fmt.Errorf("FK %s.%s references %s.%s, want %s.id: schema drift, refusing to rewrite",
+					t.Table, t.Column, t.Ref, f.RefCol, t.Ref)
+			}
+			// 约束完整形状：该约束的全部 KCU 行数（含其他列）——复合外键
+			// 时按列过滤只看到 1 行，必须整体查证，拒绝单列重建破坏约束
+			var kcuCount int64
+			if err := DB.Raw(`SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+				WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?`,
+				t.Table, f.ConstraintName).Scan(&kcuCount).Error; err != nil {
+				return fmt.Errorf("query FK shape %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			if kcuCount != 1 {
+				return fmt.Errorf("FK %s.%s is composite (%d columns): schema drift, refusing to rewrite",
+					t.Table, f.ConstraintName, kcuCount)
+			}
+			// 拆两条语句：MySQL 不允许同一条 ALTER 中 DROP 后 ADD 同名约束（1826）
+			drop := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", t.Table, f.ConstraintName)
+			if err := DB.Exec(drop).Error; err != nil {
+				return fmt.Errorf("drop FK %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			add := fmt.Sprintf("ALTER TABLE `%s` ADD CONSTRAINT `%s` FOREIGN KEY (`%s`) REFERENCES `%s`(`id`) ON DELETE RESTRICT",
+				t.Table, f.ConstraintName, t.Column, t.Ref)
+			if err := DB.Exec(add).Error; err != nil {
+				return fmt.Errorf("rebuild FK %s.%s: %w", t.Table, f.ConstraintName, err)
+			}
+			log.Printf("migrateBindingFKRESTRICT: %s.%s → ON DELETE RESTRICT", t.Table, f.ConstraintName)
+		}
+	}
+	return nil
 }
 
 // migrateDropLegacyUkTenantName 清理索引改名残留：复合唯一索引原名

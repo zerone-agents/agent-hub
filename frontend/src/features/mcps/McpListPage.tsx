@@ -299,7 +299,7 @@ export default function McpListPage() {
                     {!mcp.isBuiltin && (
                       <Popconfirm
                         title="确认删除？"
-                        description={`删除 "${mcp.name}"？所有 Agent 的绑定关系将一并清除。`}
+                        description={`删除 "${mcp.name}"？已被 Agent 绑定的 MCP 无法删除，请先解除绑定。`}
                         okText="删除"
                         okButtonProps={{ danger: true }}
                         cancelText="取消"

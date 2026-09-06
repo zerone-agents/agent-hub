@@ -190,3 +190,17 @@ func (r *McpRepository) GetMcpsByIDs(tenantID string, ids []uint64) ([]*mcp.McpS
 		Where("id IN ?", ids).Find(&items).Error
 	return items, err
 }
+
+// NewMcpRepositoryWithDB builds a McpRepository backed by the given *gorm.DB.
+// Used by tests that need an isolated DB instance（对齐 NewSkillRepositoryWithDB）。
+func NewMcpRepositoryWithDB(db *gorm.DB) *McpRepository {
+	return &McpRepository{db: db}
+}
+
+// GetMcpBindingsScoped 返回仍绑定该 MCP 服务器的 Agent 视图（删除保护
+// #123）：own = 请求租户的 Agent 名单（409 载荷）；foreign = 他租户仍绑定
+// （仅中性事实，不携带任何他租户身份）。own ∪ foreign 任一命中即阻断删除。
+func (r *McpRepository) GetMcpBindingsScoped(tenantID string, mcpID uint64) ([]string, bool, error) {
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_mcp_servers", "mcp_server_id", mcpID, tenantID)
+}

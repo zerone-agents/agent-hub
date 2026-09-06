@@ -311,18 +311,26 @@ func (s *ToolService) Delete(tenantID, name string) error {
 	if t.IsBuiltin() {
 		return agent.ErrToolIsBuiltin
 	}
-	agents, err := s.repo.GetAgentNamesByToolID(t.ID)
+	own, foreign, err := s.repo.GetToolBindingsScoped(tenantID, t.ID)
 	if err != nil {
 		return fmt.Errorf("query tool agent associations failed: %w", err)
 	}
-	if len(agents) > 0 {
-		return &agent.ToolInUseError{ToolName: t.Name, Agents: agents}
+	if len(own) > 0 || foreign {
+		return &agent.ToolInUseError{ToolName: t.Name, Agents: own, Foreign: foreign}
 	}
 	// 顺序契约（expert review Fix 1）：先删 DB 行，后清 OSS 对象。若先删对象
 	// 而行删除失败，会残留指向已删对象的 ready 行（false-ready），下载/部署
 	// 随之断裂；先删行则最坏情况只是留下一个孤立对象（见下），行与对象始终一致。
 	key := t.FileURL
 	if err := s.repo.Delete(tenantID, t.ID); err != nil {
+		if repository.IsFKConstraintError(err) {
+			// 并发后盾（#123 review P1）：同技能删除——RESTRICT 拒绝 →
+			// 重查绑定给出准确 409 名单。
+			own, foreign, qerr := s.repo.GetToolBindingsScoped(tenantID, t.ID)
+			if qerr == nil {
+				return &agent.ToolInUseError{ToolName: t.Name, Agents: own, Foreign: foreign}
+			}
+		}
 		return fmt.Errorf("delete tool failed: %w", err)
 	}
 	// 行已删成功：残留对象只是无引用方的孤立内容寻址副本，删除失败无害，仅记日志。

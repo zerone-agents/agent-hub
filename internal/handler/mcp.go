@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +72,11 @@ func (h *McpHandler) Update(c *gin.Context) {
 func (h *McpHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 	if err := h.service.Delete(tenant.GetTenantID(c), name); err != nil {
+		var inUse *agent.McpInUseError
+		if errors.As(err, &inUse) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})
+			return
+		}
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}

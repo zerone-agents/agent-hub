@@ -110,17 +110,13 @@ func (r *ToolRepository) GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, e
 	return tools, err
 }
 
-// GetAgentNamesByToolID 返回仍挂载该工具的 agent 名单（删除保护 409 载荷）。
-// 跨租户全量：工具归属已由主表校验，名单仅作提示。
-func (r *ToolRepository) GetAgentNamesByToolID(toolID uint64) ([]string, error) {
-	var names []string
-	err := r.db.Table("agent_tools").
-		Select("agents.name").
-		Joins("JOIN agents ON agent_tools.agent_id = agents.id").
-		Where("agent_tools.tool_id = ?", toolID).
-		Order("agents.name ASC").
-		Pluck("agents.name", &names).Error
-	return names, err
+// GetToolBindingsScoped 返回仍挂载该工具的 Agent 视图（删除保护，issue #123
+// 收敛 #88 先例）：own = 请求租户的 Agent 名单（409 载荷）；foreign = 他
+// 租户仍挂载（仅中性事实，不携带任何他租户身份）。own ∪ foreign 任一命中
+// 即阻断删除。
+func (r *ToolRepository) GetToolBindingsScoped(tenantID string, toolID uint64) ([]string, bool, error) {
+	// 共享实现（scoped_bindings.go）：租户切分与隐私边界规则唯一出处
+	return resourceBindingsScoped(r.db, "agent_tools", "tool_id", toolID, tenantID)
 }
 
 // GetAllAgentTools 返回本租户内 agent name -> tool names 的映射。

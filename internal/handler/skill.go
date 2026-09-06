@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/tenant"
 
@@ -201,6 +203,11 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.service.DeleteSkill(tenant.GetTenantID(c), name); err != nil {
+		var inUse *agent.SkillInUseError
+		if errors.As(err, &inUse) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})
+			return
+		}
 		if err == skill.ErrSkillNotFound {
 			respondError(c, http.StatusNotFound, err.Error())
 			return

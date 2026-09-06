@@ -125,11 +125,14 @@ var PresetToolNames = []string{
 	"Config", "TodoWrite", "FindTool",
 }
 
+// AgentTool 是 Agent 与自定义工具的绑定关系。
+// 资源侧 FK 用 ON DELETE RESTRICT（#123 review P1）：同 AgentSkill——
+// 守卫与删除之间的并发写入窗口由约束原子关闭，杜绝级联静默摘除。
 type AgentTool struct {
 	AgentID   uint64      `gorm:"primaryKey"`
 	ToolID    uint64      `gorm:"primaryKey;index:idx_tool_id"`
 	Agent     AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
-	Tool      Tool        `gorm:"foreignKey:ToolID;constraint:OnDelete:CASCADE" json:"-"`
+	Tool      Tool        `gorm:"foreignKey:ToolID;constraint:OnDelete:RESTRICT" json:"-"`
 	CreatedAt time.Time   `gorm:"column:created_at"`
 }
 
@@ -137,11 +140,16 @@ func (AgentTool) TableName() string {
 	return "agent_tools"
 }
 
+// AgentSkill 是 Agent 与 Skill 的多对多绑定关系。
+// 资源侧 FK 用 ON DELETE RESTRICT（#123 review P1）：删除技能时若存在
+// （含并发刚写入的）绑定行，DB 直接拒绝删除——守卫检查与删除之间的
+// 并发写入窗口由约束原子关闭，杜绝级联静默摘除 Agent 能力。Agent 侧
+// 保持 CASCADE：删除 Agent 时绑定随行消亡。
 type AgentSkill struct {
 	AgentID   uint64      `gorm:"primaryKey"`
 	SkillID   uint64      `gorm:"primaryKey;index:idx_skill_id"`
 	Agent     AgentConfig `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
-	Skill     skill.Skill `gorm:"foreignKey:SkillID;constraint:OnDelete:CASCADE" json:"-"`
+	Skill     skill.Skill `gorm:"foreignKey:SkillID;constraint:OnDelete:RESTRICT" json:"-"`
 	CreatedAt time.Time   `gorm:"column:created_at"`
 }
 

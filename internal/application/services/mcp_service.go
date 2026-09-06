@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/provider"
 	mcpprobe "control-panel/internal/infrastructure/mcp"
@@ -378,7 +379,27 @@ func (s *McpService) Delete(tenantID, name string) error {
 	if m.IsBuiltin {
 		return fmt.Errorf("MCP '%s' 是内置服务，不可删除", name)
 	}
-	return s.repo.Delete(tenantID, m.ID)
+
+	own, foreign, err := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
+	if err != nil {
+		return fmt.Errorf("查询 MCP 绑定失败: %w", err)
+	}
+	if len(own) > 0 || foreign {
+		return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
+	}
+
+	if err := s.repo.Delete(tenantID, m.ID); err != nil {
+		if repository.IsFKConstraintError(err) {
+			// 并发后盾（#123 review P1）：同技能删除——RESTRICT 拒绝 →
+			// 重查绑定给出准确 409 名单。
+			own, foreign, qerr := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
+			if qerr == nil {
+				return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
+			}
+		}
+		return fmt.Errorf("删除 MCP 失败: %w", err)
+	}
+	return nil
 }
 
 // BuiltinKnowledgeAuthHeader is the Authorization header template seeded for the
