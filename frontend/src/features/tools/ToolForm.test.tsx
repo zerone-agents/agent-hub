@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
@@ -33,10 +33,17 @@ const customMissingTool: Tool = {
   updatedAt: '2026-01-01T00:00:00Z'
 }
 
+// hoisted: 让测试能断言提交时 mutateAsync 是否被调用（#96 回归用例需要）
+const { createCustomToolMock, uploadToolFileMock, updateToolMock } = vi.hoisted(() => ({
+  createCustomToolMock: vi.fn(),
+  uploadToolFileMock: vi.fn(),
+  updateToolMock: vi.fn()
+}))
+
 vi.mock('@/queries/useTools', () => ({
-  useCreateCustomTool: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUploadToolFile: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateTool: () => ({ mutateAsync: vi.fn(), isPending: false })
+  useCreateCustomTool: () => ({ mutateAsync: createCustomToolMock, isPending: false }),
+  useUploadToolFile: () => ({ mutateAsync: uploadToolFileMock, isPending: false }),
+  useUpdateTool: () => ({ mutateAsync: updateToolMock, isPending: false })
 }))
 
 type FormMode = 'create' | 'edit' | 'upload'
@@ -74,5 +81,33 @@ describe('ToolForm', () => {
   it('upload mode (backfill) requires file', async () => {
     renderForm('upload', customMissingTool)
     expect(screen.getByRole('button', { name: /补\s*传/ })).toBeInTheDocument()
+  })
+
+  it('#96: failed re-selection clears stale selectedFile and blocks submit with old file', async () => {
+    createCustomToolMock.mockClear()
+    const user = userEvent.setup()
+    renderForm('create', null)
+    // rc-upload 每次选择后都会 setState 更换 input 的 key（元素被 React 重建），
+    // 必须每次上传前重新查询，不能缓存引用
+    const uploadInput = () => document.querySelector('input[type="file"]') as HTMLInputElement
+
+    // 先选一个有效文件
+    await user.upload(uploadInput(), new File(['export {}'], 'Hello.ts', { type: 'text/typescript' }))
+    expect(screen.getByText('Hello.ts')).toBeInTheDocument()
+
+    // 再选一个校验失败的文件：按钮应回到占位文案，而不是残留旧的 Hello.ts。
+    // 第二次上传用 fireEvent.change：userEvent.upload 与 rc-upload 的
+    // key={uid} 重建 input 交互有兼容问题（第二次调用不会派发 change，探针实证），
+    // fireEvent.change 是 antd 官方测试的确定性做法，且同样命中 beforeUpload 校验路径
+    fireEvent.change(uploadInput(), { target: { files: [new File(['x'], 'bad.txt', { type: 'text/plain' })] } })
+    expect(screen.getByText('仅支持 .ts / .mts / .js / .mjs 文件')).toBeInTheDocument()
+    expect(screen.queryByText('Hello.ts')).not.toBeInTheDocument()
+    expect(screen.getByText('选择 .ts / .mts / .js / .mjs 文件')).toBeInTheDocument()
+
+    // 提交被拦截：提示重新选择文件，而不是把旧的 Hello.ts 提交上去
+    await user.type(screen.getByLabelText('工具标识'), 'SayHello')
+    await user.click(screen.getByRole('button', { name: /上\s*传/ }))
+    await waitFor(() => expect(screen.getByText('请选择工具文件')).toBeInTheDocument())
+    expect(createCustomToolMock).not.toHaveBeenCalled()
   })
 })
