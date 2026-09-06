@@ -603,6 +603,35 @@ describe("tool update command", () => {
     expect("isDefault" in calls[0][1].body).toBe(false);
   });
 
+  test("rejects non-string title/description with exit 2 and does not send a request", async () => {
+    const fetchMock = setupFetchMock({});
+    const { ToolUpdateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUpdateCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({ title: 123, description: "ok" });
+    (cmd as any).output = "yaml";
+
+    const origErr = process.stderr.write;
+    const errs: string[] = [];
+    process.stderr.write = ((s: string) => {
+      errs.push(s);
+      return true;
+    }) as any;
+
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(2);
+      expect(errs.join("")).toContain("title");
+    } finally {
+      process.stderr.write = origErr as any;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
   test("returns error 2 without --file or --json", async () => {
     const { ToolUpdateCommand } = await import(
       `../../src/commands/tool.ts?t=${Date.now()}`

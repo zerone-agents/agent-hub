@@ -184,6 +184,16 @@ export class ToolUpdateCommand extends Command {
       );
       return 2;
     }
+    // Allowlisted fields must be strings: a non-string value (e.g.
+    // {"title":123}) used to be silently dropped, producing an empty PUT that
+    // reports success while changing nothing — a fake success for scripts.
+    const badType = Object.keys(body).filter((k) => k !== "name" && typeof body[k] !== "string");
+    if (badType.length > 0) {
+      process.stderr.write(
+        `错误：字段类型不正确：${badType.join(", ")}（tool update 的 title/description 必须为字符串）\n`,
+      );
+      return 2;
+    }
     const t = await updateTool(this.name, {
       title: typeof body.title === "string" ? body.title : undefined,
       description: typeof body.description === "string" ? body.description : undefined,
