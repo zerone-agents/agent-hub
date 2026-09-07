@@ -11,6 +11,17 @@ import { setAuthRole } from '@/test/auth-store-mock'
 
 vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
+// 轻量 spy：DeployModal 只消费 useQueryClient().invalidateQueries（用于重部署
+// 成功后失效 ['agents'] 列表缓存，见 I-2）。不引入 QueryClientProvider，避免
+// 扰动既有 19 个用例。
+const { invalidateQueriesMock } = vi.hoisted(() => ({
+  invalidateQueriesMock: vi.fn(),
+}))
+
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
+}))
+
 vi.mock('@/api/agents', () => ({
   agentApi: {
     deploy: vi.fn(),
@@ -67,6 +78,7 @@ const mockResponse = <T,>(data: T) => ({ data: { data, success: true } })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  invalidateQueriesMock.mockClear()
   setAuthRole('admin')
 })
 
@@ -217,6 +229,26 @@ describe('DeployModal', () => {
       // handleDeploy() is invoked with no argument; the defaults
       // `force = false` and `rotateKey = false` are what reach agentApi.deploy.
       expect(agentApi.deploy).toHaveBeenCalledWith('general', false, false)
+    })
+  })
+
+  it('invalidates the agents list query after a successful deploy (I-2)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(mockResponse(makeStatus({ status: 'not_found' })) as never)
+    vi.mocked(agentApi.deploy).mockResolvedValue(mockResponse({}) as never)
+
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /部署/ })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /部署/ }))
+
+    // Badge 数据来自列表页 ['agents'] 缓存（useAgents 无轮询）：重部署成功后
+    // 必须立即失效缓存，否则关闭 modal 后卡片 Badge 残留「待更新」。
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
     })
   })
 

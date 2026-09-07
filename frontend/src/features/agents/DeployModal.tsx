@@ -13,6 +13,7 @@ import {
   PlayIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import { useQueryClient } from '@tanstack/react-query'
 import PrimaryButton from '@/components/PrimaryButton'
 import { agentApi } from '@/api/agents'
 import { copyOrManual } from '@/utils/clipboard'
@@ -277,6 +278,7 @@ function isMidState(s: DeploymentStatus | null): boolean {
 export default function DeployModal({ agent, providers, open, onClose }: DeployModalProps) {
   const { styles } = useStyles()
   const canWrite = useCanWrite()
+  const queryClient = useQueryClient()
   const [status, setStatus] = useState<DeploymentStatus | null>(null)
   // Whether the initial getDeployment request has resolved. Until it does, the
   // footer action buttons are hidden to prevent a flash of the "部署" button
@@ -396,6 +398,9 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       }
       // Kick off fast polling immediately after deploy response
       schedulePoll(POLL_FAST_MS)
+      // 列表卡片 Badge 数据来自 ['agents'] React Query 缓存（useAgents 无轮询）：
+      // 重部署成功后必须立即失效，否则关闭 modal 后卡片仍显示「待更新」（I-2）。
+      void queryClient.invalidateQueries({ queryKey: ['agents'] })
     } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
