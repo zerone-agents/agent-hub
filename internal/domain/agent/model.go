@@ -162,6 +162,7 @@ func (AgentSkill) TableName() string {
 // 供读取时的 pending 比对使用。仅含 custom&&ready Tool 与全部 Skill。
 type DeploymentSnapshot struct {
 	AgentID     uint64            `gorm:"primaryKey"`
+	Agent       AgentConfig       `gorm:"foreignKey:AgentID;constraint:OnDelete:CASCADE" json:"-"`
 	TenantID    string            `gorm:"type:varchar(64);not null;default:'';index"`
 	DeployedAt  time.Time         `gorm:"column:deployed_at;not null"`
 	ToolHashes  map[string]string `gorm:"type:json;serializer:json"`
