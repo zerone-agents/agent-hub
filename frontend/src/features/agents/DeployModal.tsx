@@ -764,12 +764,12 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <Text type="warning">
                 {[
                   ...(status.pendingArtifactUpdates.tools.length > 0
-                    ? [`Tools: ${status.pendingArtifactUpdates.tools.join('、')}`]
+                    ? [`Tools: ${status.pendingArtifactUpdates.tools.join('、')} 已更新`]
                     : []),
                   ...(status.pendingArtifactUpdates.skills.length > 0
-                    ? [`Skills: ${status.pendingArtifactUpdates.skills.join('、')}`]
+                    ? [`Skills: ${status.pendingArtifactUpdates.skills.join('、')} 已更新`]
                     : []),
-                ].join('；')} 已更新，运行中 Agent 仍为旧版，重新部署后生效
+                ].join('；')}，运行中 Agent 仍为旧版，重新部署后生效
               </Text>
             </div>
           )}

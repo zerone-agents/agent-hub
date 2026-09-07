@@ -448,7 +448,22 @@ describe('DeployModal pending artifacts', () => {
     render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
     expect(await screen.findByText(/calc/)).toBeInTheDocument()
     expect(screen.getByText(/qa/)).toBeInTheDocument()
-    expect(screen.getByText(/仍为旧版/)).toBeInTheDocument()
+    // II-4：每段各自带「已更新」，再统一尾句（双段不得只落在后段）。
+    expect(
+      screen.getByText('Tools: calc 已更新；Skills: qa 已更新，运行中 Agent 仍为旧版，重新部署后生效')
+    ).toBeInTheDocument()
+  })
+
+  it('keeps unified tail sentence for single-segment lists (II-4)', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: ['calc'], skills: [] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    expect(
+      // 单段：段自带「已更新」后直接接统一尾句，无「；」拼接。
+      await screen.findByText('Tools: calc 已更新，运行中 Agent 仍为旧版，重新部署后生效')
+    ).toBeInTheDocument()
   })
 
   it('hides pending list when deployment has none', async () => {
