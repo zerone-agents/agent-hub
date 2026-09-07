@@ -205,14 +205,18 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
   const beforeUpload: UploadProps['beforeUpload'] = (file) => {
     const ext = file.name.substring(file.name.lastIndexOf('.'))
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      // 校验失败必须同时清掉已持有的文件，否则按钮仍显示旧文件名、提交会带上旧文件
+      setSelectedFile(null)
       setUploadError('仅支持 .ts / .mts / .js / .mjs 文件')
       return Upload.LIST_IGNORE
     }
     if (file.size === 0) {
+      setSelectedFile(null)
       setUploadError('文件不能为空')
       return Upload.LIST_IGNORE
     }
     if (file.size > MAX_FILE_SIZE) {
+      setSelectedFile(null)
       setUploadError('文件大小不能超过 5MB')
       return Upload.LIST_IGNORE
     }

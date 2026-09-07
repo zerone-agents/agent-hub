@@ -147,16 +147,20 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
 
   const beforeUpload: UploadProps['beforeUpload'] = (file) => {
     if (!file.name.endsWith('.zip')) {
+      // 校验失败必须同时清掉已持有的文件，否则按钮仍显示旧文件名、提交会带上旧文件
+      setSelectedFile(null)
       setUploadError('仅支持 .zip 格式文件')
       return Upload.LIST_IGNORE
     }
     // Filename charset must match the backend identifier rule — fail fast
     // here so the user can rename, instead of bouncing off the API.
     if (!isValidIdentifier(file.name)) {
+      setSelectedFile(null)
       setUploadError('文件名只能包含字母、数字、点、下划线和横线')
       return Upload.LIST_IGNORE
     }
     if (file.size > 50 * 1024 * 1024) {
+      setSelectedFile(null)
       setUploadError('文件大小不能超过 50MB')
       return Upload.LIST_IGNORE
     }
