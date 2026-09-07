@@ -54,6 +54,11 @@ type DeploymentDTO struct {
 	Message     string `json:"message"`
 	HostPort    int    `json:"hostPort"`
 	APIKey      string `json:"apiKey"`
+
+	// PendingArtifactUpdates 是该 Agent 相对最近一次成功部署的待更新工件
+	// （issue #86）：nil = 未部署/无快照（JSON null）；恒数组结构
+	// {tools, skills}，空数组 = 无差异。
+	PendingArtifactUpdates *PendingArtifactUpdates `json:"pendingArtifactUpdates"`
 }
 
 // agentRepository defines the methods needed from the agent repository.

@@ -68,6 +68,17 @@ func (h *AgentHandler) ListAdmin(c *gin.Context) {
 		return
 	}
 
+	// 待更新工件提示（issue #86）：逐 agent 比对快照与当前绑定哈希。
+	for i := range resp.Agents {
+		pending, perr := h.deployerService.ComputePendingArtifacts(c.Request.Context(), tenant.GetTenantID(c), resp.Agents[i].ID)
+		if perr != nil {
+			// fail-open：pending 是提示非授权，记录日志不阻塞列表
+			log.Printf("compute pending artifacts for agent %d failed: %v", resp.Agents[i].ID, perr)
+			continue
+		}
+		resp.Agents[i].PendingArtifactUpdates = pending
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
@@ -84,6 +95,14 @@ func (h *AgentHandler) Get(c *gin.Context) {
 			"error":   err.Error(),
 		})
 		return
+	}
+
+	// 待更新工件提示（issue #86）：fail-open，比对失败只记日志不阻塞详情。
+	pending, perr := h.deployerService.ComputePendingArtifacts(c.Request.Context(), tenant.GetTenantID(c), resp.ID)
+	if perr != nil {
+		log.Printf("compute pending artifacts for agent %s failed: %v", name, perr)
+	} else {
+		resp.PendingArtifactUpdates = pending
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -311,6 +330,15 @@ func (h *AgentHandler) GetDeployment(c *gin.Context) {
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// 待更新工件提示（issue #86）：deploy-status 路径只有 name，走
+	// ByName 解析；fail-open，比对失败只记日志不阻塞状态返回。
+	pending, perr := h.deployerService.ComputePendingArtifactsByName(c.Request.Context(), tenant.GetTenantID(c), name)
+	if perr != nil {
+		log.Printf("compute pending artifacts for agent %s failed: %v", name, perr)
+	} else {
+		resp.PendingArtifactUpdates = pending
 	}
 	respondSuccess(c, resp)
 }

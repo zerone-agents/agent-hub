@@ -99,6 +99,11 @@ type AgentDTO struct {
 	Group          string                 `json:"group"`
 	CreatedAt      string                 `json:"createdAt"`
 	UpdatedAt      string                 `json:"updatedAt"`
+
+	// PendingArtifactUpdates 是该 Agent 相对最近一次成功部署的待更新工件
+	// （issue #86）：nil = 未部署/无快照（JSON null）；恒数组结构
+	// {tools, skills}，空数组 = 无差异。
+	PendingArtifactUpdates *PendingArtifactUpdates `json:"pendingArtifactUpdates"`
 }
 
 // GetManifest returns the agent manifest for the given client platform
