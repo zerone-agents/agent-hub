@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
-import { Popconfirm } from 'antd'
+import { Popconfirm, Tag, Tooltip } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
 import EntityCard from '@/components/EntityCard'
@@ -104,6 +104,9 @@ export default function AgentCard({
     color: 'var(--primary)'
   }
 
+  const hasPending = agent.pendingArtifactUpdates != null &&
+    (agent.pendingArtifactUpdates.tools.length > 0 || agent.pendingArtifactUpdates.skills.length > 0)
+
   return (
     <EntityCard
       icon={icon}
@@ -111,6 +114,11 @@ export default function AgentCard({
       subtitle={agent.name}
       headerExtra={
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          {hasPending && (
+            <Tooltip title="工具/技能已更新，重新部署后生效">
+              <Tag color="orange" data-testid="pending-badge">待更新</Tag>
+            </Tooltip>
+          )}
           {agent.isDefault && <span style={defaultBadgeStyle}>默认</span>}
           {agent.desktopEnabled && <span style={platformBadgeStyle}>桌面端</span>}
           {agent.mobileEnabled && <span style={platformBadgeStyle}>手机端</span>}
