@@ -156,3 +156,20 @@ type AgentSkill struct {
 func (AgentSkill) TableName() string {
 	return "agent_skills"
 }
+
+// DeploymentSnapshot 记录最近一次成功部署时下发到 runtime 的工件哈希集合
+// （issue #86）。每个 Agent 一行（upsert）；哈希来自部署请求的同源数据，
+// 供读取时的 pending 比对使用。仅含 custom&&ready Tool 与全部 Skill。
+type DeploymentSnapshot struct {
+	AgentID     uint64            `gorm:"primaryKey"`
+	TenantID    string            `gorm:"type:varchar(64);not null;default:'';index"`
+	DeployedAt  time.Time         `gorm:"column:deployed_at;not null"`
+	ToolHashes  map[string]string `gorm:"type:json;serializer:json"`
+	SkillHashes map[string]string `gorm:"type:json;serializer:json"`
+	CreatedAt   time.Time         `gorm:"column:created_at"`
+	UpdatedAt   time.Time         `gorm:"column:updated_at"`
+}
+
+func (DeploymentSnapshot) TableName() string {
+	return "agent_deployment_snapshots"
+}

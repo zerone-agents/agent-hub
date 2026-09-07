@@ -125,6 +125,7 @@ func AutoMigrate(backfillTenant string) error {
 		&agent.Tool{},
 		&agent.AgentTool{},
 		&agent.AgentSkill{},
+		&agent.DeploymentSnapshot{},
 		&mcp.McpServer{},
 		&mcp.AgentMcpServer{},
 		&scene.Scene{},
