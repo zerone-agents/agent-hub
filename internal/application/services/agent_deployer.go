@@ -1207,24 +1207,48 @@ func (s *AgentDeployerService) ComputePendingArtifacts(ctx context.Context, tena
 	}
 
 	curTools := map[string]string{}
-	toolRecords, err := s.toolRepo.GetToolRecordsByAgent(agentID)
-	if err != nil {
-		return nil, fmt.Errorf("load tool records failed: %w", err)
-	}
-	for _, t := range toolRecords {
-		if t.Source != agent.ToolSourceCustom || t.ArtifactStatus() != agent.ToolArtifactReady {
-			continue
+	curSkills := map[string]string{}
+	collect := func(id uint64) error {
+		toolRecords, err := s.toolRepo.GetToolRecordsByAgent(id)
+		if err != nil {
+			return fmt.Errorf("load tool records failed: %w", err)
 		}
-		curTools[t.Name] = t.FileHash
+		for _, t := range toolRecords {
+			if t.Source != agent.ToolSourceCustom || t.ArtifactStatus() != agent.ToolArtifactReady {
+				continue
+			}
+			curTools[t.Name] = t.FileHash
+		}
+		skills, err := s.skillRepo.GetAgentSkillsFull(id)
+		if err != nil {
+			return fmt.Errorf("load skill records failed: %w", err)
+		}
+		for _, sk := range skills {
+			curSkills[sk.Name] = sk.FileHash
+		}
+		return nil
 	}
 
-	curSkills := map[string]string{}
-	skills, err := s.skillRepo.GetAgentSkillsFull(agentID)
-	if err != nil {
-		return nil, fmt.Errorf("load skill records failed: %w", err)
+	if err := collect(agentID); err != nil {
+		return nil, err
 	}
-	for _, sk := range skills {
-		curSkills[sk.Name] = sk.FileHash
+
+	// 读侧遍历 subagent closure（写侧 collectArtifactHashes 同构，仅一层）：
+	// subagent 独有的 tool/skill 绑定哈希差异也必须报 pending。GetByName 失败
+	// （subagent 已删除等）按 fail-open 跳过该节点，不阻断其余节点比对。
+	subagentNames, err := s.agentRepo.GetSubagents(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load subagents failed: %w", err)
+	}
+	for _, name := range subagentNames {
+		sub, err := s.agentRepo.GetByName(tenantID, name)
+		if err != nil {
+			log.Printf("skip pending-artifact diff for unresolved subagent %q of agent %d: %v", name, agentID, err)
+			continue
+		}
+		if err := collect(sub.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	return &PendingArtifactUpdates{

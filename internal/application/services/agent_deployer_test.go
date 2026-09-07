@@ -135,9 +135,15 @@ func (m *mockProviderSvc) GetRawAPIKey(tenantID string, id uint64) (string, erro
 	return m.getRawKeyFunc(id)
 }
 
-type mockToolRepo struct{ tools []*agent.Tool }
+type mockToolRepo struct {
+	tools   []*agent.Tool
+	byAgent map[uint64][]*agent.Tool
+}
 
 func (m *mockToolRepo) GetToolRecordsByAgent(agentID uint64) ([]*agent.Tool, error) {
+	if m.byAgent != nil {
+		return m.byAgent[agentID], nil
+	}
 	return m.tools, nil
 }
 
@@ -1117,7 +1123,9 @@ func computePendingFixture(t *testing.T, snapToolHashes, snapSkillHashes map[str
 			t.Fatalf("seed snapshot: %v", err)
 		}
 	}
-	s := &AgentDeployerService{snapshotRepo: snapRepo}
+	// agentRepo 默认空 mock：GetSubagents 返回 nil（无 subagent），保持既有
+	// 用例语义；subagent 闭包场景的用例自行覆盖 agentRepo。
+	s := &AgentDeployerService{agentRepo: &mockAgentRepo{}, snapshotRepo: snapRepo}
 	return s
 }
 
@@ -1262,6 +1270,78 @@ func TestComputePendingArtifacts_CrossTenantIsolation(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("pending = %+v, want nil (cross-tenant snapshot isolation)", got)
+	}
+}
+
+// TestComputePendingArtifacts_SubagentArtifactsReported 覆盖结合 review 后的
+// 读侧闭包（I-1）：subagent 独有的 tool/skill 绑定哈希与快照不符 → pending
+// 报告 subagent 工件名（root 无绑定也能命中）。写侧 collectArtifactHashes 已
+// 记录 subagent 哈希，读侧必须同构遍历 subagent closure。
+func TestComputePendingArtifacts_SubagentArtifactsReported(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"sub-calc": "old"}, map[string]string{"sub-qa": "old"})
+	s.agentRepo = &mockAgentRepo{
+		getSubagentsFunc: func(agentID uint64) ([]string, error) {
+			if agentID != 1 {
+				t.Fatalf("GetSubagents(%d), want 1 (root)", agentID)
+			}
+			return []string{"research"}, nil
+		},
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if tenantID != "tenant-a" || name != "research" {
+				t.Fatalf("GetByName(%q, %q), want (tenant-a, research)", tenantID, name)
+			}
+			return &agent.AgentConfig{ID: 2, Name: "research"}, nil
+		},
+	}
+	s.toolRepo = &mockToolRepo{byAgent: map[uint64][]*agent.Tool{
+		1: nil, // root 无绑定
+		2: {{Name: "sub-calc", Source: agent.ToolSourceCustom, FileName: "sub-calc.ts", FileURL: "tools/acme/sub-calc/sub-calc.ts", FileHash: "new", FileSize: 10}},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{
+		1: nil,
+		2: {{Name: "sub-qa", URL: "https://cdn.example.com/skills/sub-qa/new", FileHash: "new"}},
+	}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Tools) != 1 || got.Tools[0] != "sub-calc" {
+		t.Fatalf("tools = %v, want [sub-calc] (subagent tool hash drift)", got.Tools)
+	}
+	if len(got.Skills) != 1 || got.Skills[0] != "sub-qa" {
+		t.Fatalf("skills = %v, want [sub-qa] (subagent skill hash drift)", got.Skills)
+	}
+}
+
+// TestComputePendingArtifacts_DeletedSubagentSkipped 覆盖 fail-open 语义
+// （I-1）：GetSubagents 返回的名字中某个已删除（GetByName 未找到）→ 跳过该
+// 节点记一行日志，其余节点（root + 存活的 subagent）继续正常比对，不整体失败。
+func TestComputePendingArtifacts_DeletedSubagentSkipped(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "old"}, nil)
+	s.agentRepo = &mockAgentRepo{
+		getSubagentsFunc: func(agentID uint64) ([]string, error) {
+			return []string{"ghost", "research2"}, nil
+		},
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if name == "ghost" {
+				return nil, gorm.ErrRecordNotFound
+			}
+			return &agent.AgentConfig{ID: 3, Name: "research2"}, nil
+		},
+	}
+	s.toolRepo = &mockToolRepo{byAgent: map[uint64][]*agent.Tool{
+		1: {{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/calc.ts", FileHash: "new", FileSize: 10}},
+		3: {{Name: "sub-x", Source: agent.ToolSourceCustom, FileName: "sub-x.ts", FileURL: "tools/acme/sub-x/sub-x.ts", FileHash: "abc", FileSize: 10}},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v (deleted subagent must not fail the diff)", err)
+	}
+	if len(got.Tools) != 2 || got.Tools[0] != "calc" || got.Tools[1] != "sub-x" {
+		t.Fatalf("tools = %v, want [calc sub-x] (root + live subagent still diffed)", got.Tools)
 	}
 }
 
