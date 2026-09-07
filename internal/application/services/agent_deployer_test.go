@@ -1101,3 +1101,234 @@ func TestDeploy_FailureKeepsExistingSnapshot(t *testing.T) {
 		t.Fatalf("hash = %q, want old456 (failure must not overwrite)", snap.ToolHashes["calc"])
 	}
 }
+
+// ── Task 4: ComputePendingArtifacts ──────────────────────────────────
+
+// computePendingFixture 构建 Task 4 的最小 fixture：真实 sqlite snapshot
+// repo + mockToolRepo + snapshotSkillRepo，可注入快照与当前绑定。
+func computePendingFixture(t *testing.T, snapToolHashes, snapSkillHashes map[string]string) *AgentDeployerService {
+	t.Helper()
+	snapRepo := newSnapshotTestRepo(t)
+	if snapToolHashes != nil || snapSkillHashes != nil {
+		if err := snapRepo.Upsert(context.Background(), &agent.DeploymentSnapshot{
+			AgentID: 1, TenantID: "tenant-a", DeployedAt: time.Now(),
+			ToolHashes: snapToolHashes, SkillHashes: snapSkillHashes,
+		}); err != nil {
+			t.Fatalf("seed snapshot: %v", err)
+		}
+	}
+	s := &AgentDeployerService{snapshotRepo: snapRepo}
+	return s
+}
+
+// TestComputePendingArtifacts_NoDifference 覆盖 brief 基础场景：快照与当前
+// 绑定哈希一致 → 空结果（且非 nil）。builtin 工具不入比对集合（source 过滤）。
+func TestComputePendingArtifacts_NoDifference(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "abc"}, nil)
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/calc.ts", FileHash: "abc", FileSize: 10},
+		{Name: "git", Source: agent.ToolSourceBuiltin},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{
+		1: {{Name: "qa", URL: "https://cdn.example.com/skills/qa/def", FileHash: "def"}},
+	}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("deployed agent with snapshot must return non-nil result")
+	}
+	if len(got.Tools) != 0 || len(got.Skills) != 1 {
+		t.Fatalf("pending = {tools:%v skills:%v}, want {tools:[] skills:[qa]}", got.Tools, got.Skills)
+	}
+	if len(got.Skills) > 0 && got.Skills[0] != "qa" {
+		t.Fatalf("skills = %v, want [qa]", got.Skills)
+	}
+}
+
+// TestComputePendingArtifacts_NoSnapshotReturnsNilNil 覆盖 brief 语义：
+// 无快照行（未部署过）→ (nil, nil)，调用方可据此跳过差异提示。
+func TestComputePendingArtifacts_NoSnapshotReturnsNilNil(t *testing.T) {
+	s := computePendingFixture(t, nil, nil)
+	s.toolRepo = &mockToolRepo{}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("pending = %+v, want nil (no snapshot)", got)
+	}
+}
+
+// TestComputePendingArtifacts_ContentReplacementReported 覆盖 brief 行为点：
+// 快照 calc=old、当前 calc=new → tools=[calc]。
+func TestComputePendingArtifacts_ContentReplacementReported(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "old"}, nil)
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/calc.ts", FileHash: "new", FileSize: 10},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Tools) != 1 || got.Tools[0] != "calc" {
+		t.Fatalf("tools = %v, want [calc]", got.Tools)
+	}
+	if len(got.Skills) != 0 {
+		t.Fatalf("skills = %v, want []", got.Skills)
+	}
+}
+
+// TestComputePendingArtifacts_MetadataEditNotReported 覆盖 brief 行为点：
+// 仅 title/description 等元数据变化、哈希不变 → 不报差异（比对维度只有哈希）。
+func TestComputePendingArtifacts_MetadataEditNotReported(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "abc"}, map[string]string{"qa": "def"})
+	// FileName/FileURL 变化不算内容变化（哈希相同）；skill 侧 title 编辑同源。
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc-v2.ts", FileURL: "tools/acme/calc/v2", FileHash: "abc", FileSize: 10},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{
+		1: {{Name: "qa", Title: "QA 新标题", URL: "https://cdn.example.com/skills/qa/def", FileHash: "def"}},
+	}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Tools) != 0 || len(got.Skills) != 0 {
+		t.Fatalf("pending = {tools:%v skills:%v}, want empty (metadata edit only)", got.Tools, got.Skills)
+	}
+}
+
+// TestComputePendingArtifacts_RemovedBindingNotReported 覆盖 brief 行为点：
+// 原绑定（快照含 calc/qa）已解绑、当前为空 → 不报（diff 仅回报当前集合中缺
+// 失或哈希不同的项）。
+func TestComputePendingArtifacts_RemovedBindingNotReported(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "abc"}, map[string]string{"qa": "def"})
+	s.toolRepo = &mockToolRepo{}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("non-nil result expected")
+	}
+	if len(got.Tools) != 0 || len(got.Skills) != 0 {
+		t.Fatalf("pending = {tools:%v skills:%v}, want empty (removed bindings not reported)", got.Tools, got.Skills)
+	}
+}
+
+// TestComputePendingArtifacts_EmptyResultSerializesAsEmptyArray 覆盖 brief
+// 修正点：空集合必须序列化为 [] 而非 null（「空数组=无差异」spec 语义，null
+// 保留给未部署场景）。
+func TestComputePendingArtifacts_EmptyResultSerializesAsEmptyArray(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "abc"}, nil)
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/calc.ts", FileHash: "abc", FileSize: 10},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(raw) != `{"tools":[],"skills":[]}` {
+		t.Fatalf("json = %s, want {\"tools\":[],\"skills\":[]} (empty arrays, not null)", raw)
+	}
+}
+
+// TestComputePendingArtifacts_CrossTenantIsolation 覆盖 brief 行为点：快照
+// 归 tenant-a，tenant-b 查询同一 agentID → 视同无快照 (nil, nil)。
+func TestComputePendingArtifacts_CrossTenantIsolation(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "abc"}, nil)
+	s.toolRepo = &mockToolRepo{}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-b", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("pending = %+v, want nil (cross-tenant snapshot isolation)", got)
+	}
+}
+
+// TestComputePendingArtifactsByName_Delegates 覆盖 brief 行为点：ByName 经
+// GetByName 解析 agent ID 后委托 ComputePendingArtifacts，结果与直呼一致。
+func TestComputePendingArtifactsByName_Delegates(t *testing.T) {
+	s := computePendingFixture(t, map[string]string{"calc": "old"}, nil)
+	s.agentRepo = &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if tenantID != "tenant-a" || name != "general" {
+				t.Fatalf("GetByName(%q, %q)", tenantID, name)
+			}
+			return &agent.AgentConfig{ID: 1, Name: "general"}, nil
+		},
+	}
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/calc.ts", FileHash: "new", FileSize: 10},
+	}}
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{}}
+
+	got, err := s.ComputePendingArtifactsByName(context.Background(), "tenant-a", "general")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Tools) != 1 || got.Tools[0] != "calc" {
+		t.Fatalf("tools = %v, want [calc] (delegated by name)", got.Tools)
+	}
+}
+
+// TestComputePendingArtifactsByName_NotFound 覆盖错误路径：GetByName 失败
+// → 包装错误返回。
+func TestComputePendingArtifactsByName_NotFound(t *testing.T) {
+	s := computePendingFixture(t, nil, nil)
+	s.agentRepo = &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+
+	got, err := s.ComputePendingArtifactsByName(context.Background(), "tenant-a", "ghost")
+	if err == nil {
+		t.Fatal("expected error for missing agent")
+	}
+	if got != nil {
+		t.Fatalf("pending = %+v, want nil on error", got)
+	}
+}
+
+// erroringSnapshotRepo 的 GetByAgent 返回非 NotFound 错误，模拟 DB 故障。
+type erroringSnapshotRepo struct{}
+
+func (r *erroringSnapshotRepo) Upsert(ctx context.Context, s *agent.DeploymentSnapshot) error {
+	return nil
+}
+func (r *erroringSnapshotRepo) GetByAgent(ctx context.Context, tenantID string, agentID uint64) (*agent.DeploymentSnapshot, error) {
+	return nil, fmt.Errorf("snapshot db down")
+}
+
+// TestComputePendingArtifacts_RepoErrorPropagates 覆盖错误路径：快照读取的
+// 非 NotFound 错误（DB 故障）→ (nil, err)。
+func TestComputePendingArtifacts_RepoErrorPropagates(t *testing.T) {
+	s := &AgentDeployerService{snapshotRepo: &erroringSnapshotRepo{}}
+	got, err := s.ComputePendingArtifacts(context.Background(), "tenant-a", 1)
+	if err == nil {
+		t.Fatal("expected error from snapshot repo")
+	}
+	if got != nil {
+		t.Fatalf("pending = %+v, want nil on error", got)
+	}
+}

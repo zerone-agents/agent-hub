@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	providerdomain "control-panel/internal/domain/provider"
@@ -1177,6 +1179,78 @@ func (s *AgentDeployerService) writeArtifactSnapshot(ctx context.Context, tenant
 	}); err != nil {
 		log.Printf("write artifact snapshot failed for agent %s: %v", tenantID+"/"+req.RootAgentID, err)
 	}
+}
+
+// PendingArtifactUpdates 是一个 Agent 的待更新工件清单（issue #86）：
+// 快照哈希集合 vs 当前绑定哈希集合的差集。Tools/Skills 恒为数组（JSON
+// 空数组 = 无差异），nil 指针保留给「未部署/无快照」场景。
+type PendingArtifactUpdates struct {
+	Tools  []string `json:"tools"`
+	Skills []string `json:"skills"`
+}
+
+// AgentPendingArtifacts 计算一个 Agent 的待更新工件（issue #86）。
+// 数据源：最近快照哈希集合 vs 当前绑定哈希集合（source=custom && ready 过滤
+// 与部署组装同源）。返回 nil,nil 表示无快照（未部署过）。
+func (s *AgentDeployerService) ComputePendingArtifacts(ctx context.Context, tenantID string, agentID uint64) (*PendingArtifactUpdates, error) {
+	snap, err := s.snapshotRepo.GetByAgent(ctx, tenantID, agentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load artifact snapshot failed: %w", err)
+	}
+
+	curTools := map[string]string{}
+	toolRecords, err := s.toolRepo.GetToolRecordsByAgent(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load tool records failed: %w", err)
+	}
+	for _, t := range toolRecords {
+		if t.Source != agent.ToolSourceCustom || t.ArtifactStatus() != agent.ToolArtifactReady {
+			continue
+		}
+		curTools[t.Name] = t.FileHash
+	}
+
+	curSkills := map[string]string{}
+	skills, err := s.skillRepo.GetAgentSkillsFull(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load skill records failed: %w", err)
+	}
+	for _, sk := range skills {
+		curSkills[sk.Name] = sk.FileHash
+	}
+
+	return &PendingArtifactUpdates{
+		Tools:  diffNames(snap.ToolHashes, curTools),
+		Skills: diffNames(snap.SkillHashes, curSkills),
+	}, nil
+}
+
+// ComputePendingArtifactsByName 按 agent 名称解析 ID 后委托
+// ComputePendingArtifacts（handler 的 deploy-status 路径只有 name）。
+func (s *AgentDeployerService) ComputePendingArtifactsByName(ctx context.Context, tenantID, name string) (*PendingArtifactUpdates, error) {
+	cfg, err := s.agentRepo.GetByName(tenantID, name)
+	if err != nil {
+		return nil, fmt.Errorf("agent not found: %w", err)
+	}
+	return s.ComputePendingArtifacts(ctx, tenantID, cfg.ID)
+}
+
+// diffNames 返回 current 中存在、但 snapshot 缺失或哈希不同 的 key（排序稳定）。
+// 空集合返回空 slice（非 nil），保证 JSON 序列化为 [] 而非 null——与 spec
+// 「空数组 = 无差异」语义一致（null 保留给「未部署/无快照」）。
+func diffNames(snapshot, current map[string]string) []string {
+	out := make([]string, 0, len(current))
+	for name, hash := range current {
+		old, ok := snapshot[name]
+		if !ok || old != hash {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // appendMcpToolNames adds the SDK-qualified names of probed MCP tools to an
