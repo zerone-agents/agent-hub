@@ -149,6 +149,12 @@ export class ToolCreateCommand extends Command {
   }
 }
 
+// tool update 仅支持 title/description；name 允许出现（复用 create 的同一份
+// 元数据文件）但忽略——name 由命令行位置参数指定。其余字段（如 isDefault）
+// 服务端契约（UpdateToolInput）不接受、会被 Go JSON 解码器静默忽略，
+// 整包转发会造成假成功，故直接报错（对齐 issue #97）。
+const UPDATE_ALLOWED_FIELDS = new Set(["name", "title", "description"]);
+
 export class ToolUpdateCommand extends Command {
   static paths = [["tool", "update"]];
   static usage = Command.Usage({ description: "更新 tool" });
@@ -171,7 +177,27 @@ export class ToolUpdateCommand extends Command {
     if (!body) {
       return 2;
     }
-    const t = await updateTool(this.name, body as { title?: string; description?: string });
+    const unknown = Object.keys(body).filter((k) => !UPDATE_ALLOWED_FIELDS.has(k));
+    if (unknown.length > 0) {
+      process.stderr.write(
+        `错误：不支持的元数据字段：${unknown.join(", ")}（tool update 仅支持 title/description，name 由命令行指定并忽略）\n`,
+      );
+      return 2;
+    }
+    // Allowlisted fields must be strings: a non-string value (e.g.
+    // {"title":123}) used to be silently dropped, producing an empty PUT that
+    // reports success while changing nothing — a fake success for scripts.
+    const badType = Object.keys(body).filter((k) => k !== "name" && typeof body[k] !== "string");
+    if (badType.length > 0) {
+      process.stderr.write(
+        `错误：字段类型不正确：${badType.join(", ")}（tool update 的 title/description 必须为字符串）\n`,
+      );
+      return 2;
+    }
+    const t = await updateTool(this.name, {
+      title: typeof body.title === "string" ? body.title : undefined,
+      description: typeof body.description === "string" ? body.description : undefined,
+    });
     renderTool(t, this.output);
     return 0;
   }
