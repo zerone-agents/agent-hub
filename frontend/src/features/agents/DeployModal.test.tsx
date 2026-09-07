@@ -406,3 +406,29 @@ describe('DeployModal live status', () => {
     }
   })
 })
+
+describe('DeployModal pending artifacts', () => {
+  it('shows pending artifact list when deployment has pending updates', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: ['calc'], skills: ['qa'] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    expect(await screen.findByText(/calc/)).toBeInTheDocument()
+    expect(screen.getByText(/qa/)).toBeInTheDocument()
+    expect(screen.getByText(/仍为旧版/)).toBeInTheDocument()
+  })
+
+  it('hides pending list when deployment has none', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: [], skills: [] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    // 等状态加载：不用 findByText(/健康/)（brief 原文）——healthy 时步骤标题
+    // 「健康检查通过」与状态行「容器运行中 · 健康检查通过」同时命中该正则，
+    // testing-library 报 multiple elements；改用状态行 testid（本文件既有先例）。
+    await screen.findByTestId('deploy-status-line')
+    expect(screen.queryByText(/仍为旧版/)).not.toBeInTheDocument()
+  })
+})

@@ -751,6 +751,24 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           </div>
         )}
 
+        {/* 待更新工件清单（#86）：已部署工件快照与最新配置有差异时，运行中
+            容器仍是旧版；重新部署成功 refetch 后清单自然消失 */}
+        {deploymentStatus === 'running' && status?.pendingArtifactUpdates != null &&
+          (status.pendingArtifactUpdates.tools.length > 0 || status.pendingArtifactUpdates.skills.length > 0) && (
+            <div style={{ marginBottom: 16 }}>
+              <Text type="warning">
+                {[
+                  ...(status.pendingArtifactUpdates.tools.length > 0
+                    ? [`Tools: ${status.pendingArtifactUpdates.tools.join('、')}`]
+                    : []),
+                  ...(status.pendingArtifactUpdates.skills.length > 0
+                    ? [`Skills: ${status.pendingArtifactUpdates.skills.join('、')}`]
+                    : []),
+                ].join('；')} 已更新，运行中 Agent 仍为旧版，重新部署后生效
+              </Text>
+            </div>
+          )}
+
         {deploymentStatus === 'error' && status && (
           <div style={{ marginBottom: 16 }}>
             <Space orientation="vertical" size="small">
