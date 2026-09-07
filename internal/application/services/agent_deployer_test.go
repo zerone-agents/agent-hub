@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
@@ -19,6 +21,7 @@ import (
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/infrastructure/deployer"
 	"control-panel/internal/infrastructure/kong"
+	repository "control-panel/internal/infrastructure/persistence"
 )
 
 func TestWaitForHealthy_DockerHealthyPath(t *testing.T) {
@@ -190,10 +193,12 @@ type deployTokenFixture struct {
 
 // newDeployTokenServer builds a mock deployer. getFound controls the GET
 // /api/v1/agents/<name> probe response (container exists or not); POST
-// /api/v1/agents always succeeds and echoes a container payload. POSTs
-// without a deploymentKey are capability probes (issue #114) — answered with
-// the v3.1.0 sentinel and kept out of the create capture.
-func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *httptest.Server {
+// /api/v1/agents always succeeds and echoes a container payload unless
+// failCreate is set, in which case the create call is answered with a 500
+// mid-flight failure (deployerPreRejected must treat it as non-pre-rejected).
+// POSTs without a deploymentKey are capability probes (issue #114) — answered
+// with the v3.1.0 sentinel and kept out of the create capture.
+func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployTokenFixture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -214,6 +219,11 @@ func newDeployTokenServer(t *testing.T, getFound bool, f *deployTokenFixture) *h
 		if probe.DeploymentKey == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+			return
+		}
+		if failCreate {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"success":false,"error":"boom"}`))
 			return
 		}
 		f.postCalled = true
@@ -279,7 +289,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("reuses stored token when not rotating", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
@@ -300,7 +310,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("rotate without force still reuses stored token", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
@@ -314,7 +324,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("mints new token when rotating with force", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
@@ -339,7 +349,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("mints token on first deploy when nothing stored", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, false, f) // GET probe: no existing container
+		srv := newDeployTokenServer(t, false, false, f) // GET probe: no existing container
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, ""), deployTokenProviderSvc())
@@ -358,7 +368,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("refuses when container exists but token unrecoverable", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f) // GET probe: container exists
+		srv := newDeployTokenServer(t, true, false, f) // GET probe: container exists
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, ""), deployTokenProviderSvc())
@@ -376,7 +386,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("substitutes runtime token placeholder in MCP headers", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
@@ -413,7 +423,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("sends description to deployer (zh preferred)", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		repo := deployTokenAgentRepo(f, storedToken)
@@ -438,7 +448,7 @@ func TestDeploy_RuntimeToken(t *testing.T) {
 
 	t.Run("falls back to agent name when description empty", func(t *testing.T) {
 		f := &deployTokenFixture{}
-		srv := newDeployTokenServer(t, true, f)
+		srv := newDeployTokenServer(t, true, false, f)
 		defer srv.Close()
 
 		// deployTokenAgentRepo returns an AgentConfig with no Description —
@@ -859,7 +869,7 @@ func TestDeploy_CreateAgentFailure_CleanupPolicy(t *testing.T) {
 func TestDeploy_Success_DeregistersStaleRouteAfterCreate(t *testing.T) {
 	const storedToken = "0123456789abcdef0123456789abcdef"
 	f := &deployTokenFixture{}
-	srv := newDeployTokenServer(t, true, f)
+	srv := newDeployTokenServer(t, true, false, f)
 	defer srv.Close()
 
 	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, storedToken), deployTokenProviderSvc())
@@ -939,5 +949,155 @@ func TestDeploy_GraphValidationFailure_DoesNotDeregisterKongRoute(t *testing.T) 
 	}
 	if _, ok := fk.services[svcName(key)]; !ok {
 		t.Error("Kong service must survive a graph validation failure")
+	}
+}
+
+// newSnapshotTestRepo builds an in-memory sqlite-backed DeploymentSnapshot
+// repository for the artifact-snapshot tests below.
+func newSnapshotTestRepo(t *testing.T) *repository.DeploymentSnapshotRepository {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&agent.DeploymentSnapshot{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return repository.NewDeploymentSnapshotRepositoryWithDB(db)
+}
+
+// snapshotSkillRepo returns per-agent skill records; used to verify that a
+// subagent node's mounted skills contribute their hashes to the snapshot.
+type snapshotSkillRepo struct{ byAgent map[uint64][]*skill.Skill }
+
+func (m *snapshotSkillRepo) GetAgentSkills(agentID uint64) ([]string, error) { return nil, nil }
+func (m *snapshotSkillRepo) GetAgentSkillsFull(agentID uint64) ([]*skill.Skill, error) {
+	return m.byAgent[agentID], nil
+}
+
+// TestDeploy_WritesArtifactSnapshot covers the issue #86 success path: a
+// successful deploy must record the artifact hashes of everything sent to the
+// deployer (collected from the same request graph, root + subagent nodes).
+func TestDeploy_WritesArtifactSnapshot(t *testing.T) {
+	snapRepo := newSnapshotTestRepo(t)
+
+	f := &deployTokenFixture{}
+	srv := newDeployTokenServer(t, true, false, f) // fake deployer returns running
+	defer srv.Close()
+
+	providerID := uint64(1)
+	agentRepo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			if name == "child" {
+				return &agent.AgentConfig{ID: 2, Name: "child"}, nil
+			}
+			return &agent.AgentConfig{
+				ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo",
+				RuntimeToken: "0123456789abcdef0123456789abcdef",
+			}, nil
+		},
+		getSubagentsFunc: func(agentID uint64) ([]string, error) {
+			if agentID == 1 {
+				return []string{"child"}, nil
+			}
+			return nil, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error { return nil },
+	}
+	s := newTestAgentDeployerService(t, srv.URL, agentRepo, deployTokenProviderSvc())
+	// 注入可查的工具：custom && ready（FileHash 非空即 ready）
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/abc", FileHash: "abc123", FileSize: 10},
+	}}
+	s.cdnHost = "https://cdn.example.com" // custom&&ready 工具须有 CDN host 才能通过 buildCreateRequest
+	// 仅子 Agent(ID 2) 挂载 skill：SkillHashes 必须来自 subagent 节点
+	s.skillRepo = &snapshotSkillRepo{byAgent: map[uint64][]*skill.Skill{
+		2: {{Name: "websearch", URL: "https://cdn.example.com/skills/websearch/s1", FileHash: "s1"}},
+	}}
+	s.snapshotRepo = snapRepo
+
+	dto, err := s.Deploy("tenant-a", "general", true, false)
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if dto.Status != "running" {
+		t.Fatalf("status = %q", dto.Status)
+	}
+
+	snap, err := snapRepo.GetByAgent(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("snapshot not written: %v", err)
+	}
+	if snap.ToolHashes["calc"] != "abc123" {
+		t.Fatalf("tool hash = %q, want abc123", snap.ToolHashes["calc"])
+	}
+	if snap.SkillHashes["websearch"] != "s1" {
+		t.Fatalf("subagent skill hash = %q, want s1", snap.SkillHashes["websearch"])
+	}
+	if snap.DeployedAt.IsZero() {
+		t.Fatal("snapshot DeployedAt must be set")
+	}
+}
+
+// failingSnapshotRepo always fails Upsert; used to verify that a snapshot
+// write failure never blocks the deploy flow itself.
+type failingSnapshotRepo struct{}
+
+func (r *failingSnapshotRepo) Upsert(ctx context.Context, s *agent.DeploymentSnapshot) error {
+	return fmt.Errorf("boom")
+}
+func (r *failingSnapshotRepo) GetByAgent(ctx context.Context, tenantID string, agentID uint64) (*agent.DeploymentSnapshot, error) {
+	return nil, nil
+}
+
+// TestDeploy_SnapshotWriteFailureDoesNotBlockDeploy covers the issue #86
+// resilience contract: the snapshot is an auxiliary record — a failed upsert
+// must be logged and ignored, not fail the deploy.
+func TestDeploy_SnapshotWriteFailureDoesNotBlockDeploy(t *testing.T) {
+	f := &deployTokenFixture{}
+	srv := newDeployTokenServer(t, true, false, f) // fake deployer returns running
+	defer srv.Close()
+
+	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, "0123456789abcdef0123456789abcdef"), deployTokenProviderSvc())
+	s.snapshotRepo = &failingSnapshotRepo{}
+
+	dto, err := s.Deploy("tenant-a", "general", true, false)
+	if err != nil {
+		t.Fatalf("deploy must succeed despite snapshot write failure: %v", err)
+	}
+	if dto.Status != "running" {
+		t.Fatalf("status = %q", dto.Status)
+	}
+}
+
+// TestDeploy_FailureKeepsExistingSnapshot covers the issue #86 failure path: a
+// failed deploy (mid-flight 5xx, non pre-rejection) must leave a previously
+// recorded snapshot untouched — the snapshot only advances on success.
+func TestDeploy_FailureKeepsExistingSnapshot(t *testing.T) {
+	snapRepo := newSnapshotTestRepo(t)
+	if err := snapRepo.Upsert(context.Background(), &agent.DeploymentSnapshot{
+		AgentID: 1, TenantID: "tenant-a", DeployedAt: time.Now(),
+		ToolHashes: map[string]string{"calc": "old456"},
+	}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// fake deployer 返回 5xx（非预拒绝）→ Deploy 失败
+	f := &deployTokenFixture{}
+	srv := newDeployTokenServer(t, false, true, f) // failCreate: POST create returns 500
+	defer srv.Close()
+
+	s := newTestAgentDeployerService(t, srv.URL, deployTokenAgentRepo(f, "0123456789abcdef0123456789abcdef"), deployTokenProviderSvc())
+	s.snapshotRepo = snapRepo
+
+	if _, err := s.Deploy("tenant-a", "general", true, false); err == nil {
+		t.Fatal("expected deploy error")
+	}
+	snap, err := snapRepo.GetByAgent(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("snapshot lost: %v", err)
+	}
+	if snap.ToolHashes["calc"] != "old456" {
+		t.Fatalf("hash = %q, want old456 (failure must not overwrite)", snap.ToolHashes["calc"])
 	}
 }

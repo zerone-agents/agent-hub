@@ -73,6 +73,14 @@ type skillRepository interface {
 	GetAgentSkillsFull(agentID uint64) ([]*skill.Skill, error)
 }
 
+// snapshotRepository defines the methods needed from the deployment snapshot
+// repository (issue #86): one row per agent keyed by AgentID, upserted on
+// every successful deploy. tenantID is only consulted on read (GetByAgent).
+type snapshotRepository interface {
+	Upsert(ctx context.Context, s *agent.DeploymentSnapshot) error
+	GetByAgent(ctx context.Context, tenantID string, agentID uint64) (*agent.DeploymentSnapshot, error)
+}
+
 // providerService defines the methods needed from the provider service.
 type providerService interface {
 	GetByID(tenantID string, id uint64) (providerdomain.Provider, error)
@@ -110,6 +118,7 @@ type AgentDeployerService struct {
 	agentRepo        agentRepository
 	toolRepo         toolRepository
 	skillRepo        skillRepository
+	snapshotRepo     snapshotRepository
 	providerSvc      providerService
 	mcpSvc           mcpService
 	knowledgeSvc     knowledgeService
@@ -294,6 +303,7 @@ func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 		agentRepo:         repository.NewAgentRepository(),
 		toolRepo:          repository.NewToolRepository(),
 		skillRepo:         repository.NewSkillRepository(),
+		snapshotRepo:      repository.NewDeploymentSnapshotRepository(),
 		providerSvc:       NewProviderService(cfg.EncryptionKey),
 		mcpSvc:            NewMcpService(cfg.EncryptionKey),
 		knowledgeSvc:      cfg.KnowledgeSvc,
@@ -473,6 +483,12 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	if err := s.updateStatus(tenantID, agentCfg, resp.Status, resp.HostPort, &deployedAt); err != nil {
 		return nil, fmt.Errorf("update deployment status failed: %w", err)
 	}
+
+	// Record the artifact hash snapshot on the success path (issue #86): the
+	// hashes come from the same request graph that was just sent to the
+	// deployer, so reads can compare against what is actually live. A write
+	// failure is logged, not fatal — the next successful deploy repairs it.
+	s.writeArtifactSnapshot(ctx, tenantID, agentCfg.ID, req, deployedAt)
 
 	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.ContainerID, resp.HostPort, &deployedAt, "")
 	if resp.Status == "running" && resp.HostPort > 0 {
@@ -1127,6 +1143,40 @@ func (s *AgentDeployerService) buildCreateRequest(
 	s.applyHub(req, tenantID)
 
 	return req, nil
+}
+
+// collectArtifactHashes 从已构建的部署请求图中收集全部工件哈希（root +
+// 一层 subagent），与下发内容同源（req.Agents 即 deployer 收到的图）。
+func collectArtifactHashes(req *deployer.CreateAgentRequest) (map[string]string, map[string]string) {
+	toolHashes := map[string]string{}
+	skillHashes := map[string]string{}
+	for i := range req.Agents {
+		for _, t := range req.Agents[i].CustomTools {
+			toolHashes[t.Name] = t.Hash
+		}
+		for _, s := range req.Agents[i].Skills {
+			skillHashes[s.Name] = s.Hash
+		}
+	}
+	return toolHashes, skillHashes
+}
+
+// writeArtifactSnapshot 在部署成功路径写入/覆盖快照。写入失败仅记日志，
+// 不阻断部署流程（下次成功部署自动修正）。
+func (s *AgentDeployerService) writeArtifactSnapshot(ctx context.Context, tenantID string, agentID uint64, req *deployer.CreateAgentRequest, deployedAt time.Time) {
+	if s.snapshotRepo == nil {
+		return
+	}
+	toolHashes, skillHashes := collectArtifactHashes(req)
+	if err := s.snapshotRepo.Upsert(ctx, &agent.DeploymentSnapshot{
+		AgentID:     agentID,
+		TenantID:    tenantID,
+		DeployedAt:  deployedAt,
+		ToolHashes:  toolHashes,
+		SkillHashes: skillHashes,
+	}); err != nil {
+		log.Printf("write artifact snapshot failed for agent %s: %v", tenantID+"/"+req.RootAgentID, err)
+	}
 }
 
 // appendMcpToolNames adds the SDK-qualified names of probed MCP tools to an
