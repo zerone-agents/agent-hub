@@ -160,6 +160,39 @@ func TestPendingApprovalGuardEndToEnd(t *testing.T) {
 		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/agents", "any-jwt"))
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("casdoor 空角色可读配置端点、业务端点仍拦截", func(t *testing.T) {
+		p := &pendingFakeProvider{
+			user: &auth.AuthUser{ID: "u1", Username: "pending-user", Roles: []string{}},
+			mode: "casdoor",
+		}
+		r := gin.New()
+		r.GET("/api/v1/providers/runtime-config", AuthMiddlewareWithCLI(nil, p), PendingApprovalGuard(), func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+		r.GET("/api/v1/agents/my-agent/chat/sessions", AuthMiddlewareWithCLI(nil, p), PendingApprovalGuard(), func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+		// 同步线上 POST /:name/chat/sessions（CreateSession）路由形态。
+		r.POST("/api/v1/agents/my-agent/chat/sessions", AuthMiddlewareWithCLI(nil, p), PendingApprovalGuard(), func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/providers/runtime-config", "any-jwt"))
+		require.Equal(t, http.StatusOK, w.Code, "配置端点应放行")
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/agents/my-agent/chat/sessions", "any-jwt"))
+		require.Equal(t, http.StatusForbidden, w.Code, "chat 端点应拦截")
+		assert.Contains(t, w.Body.String(), "PENDING_APPROVAL")
+		// newPendingRequestWithBearer 固定 GET，POST 业务端点手写请求。
+		w = httptest.NewRecorder()
+		postReq, err := http.NewRequest(http.MethodPost, "/api/v1/agents/my-agent/chat/sessions", nil)
+		require.NoError(t, err)
+		postReq.Header.Set("Authorization", "Bearer any-jwt")
+		r.ServeHTTP(w, postReq)
+		require.Equal(t, http.StatusForbidden, w.Code, "chat POST 端点应拦截")
+		assert.Contains(t, w.Body.String(), "PENDING_APPROVAL")
+	})
 }
 
 // TestPendingApprovalGuardConfigWhitelist 覆盖 issue #132：空角色 casdoor/cli

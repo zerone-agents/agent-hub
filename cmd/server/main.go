@@ -405,9 +405,12 @@ func main() {
 	}
 
 	// PendingApprovalGuard 紧跟鉴权中间件挂载（同一链）：casdoor 待审批用户
-	// （角色为空）除白名单（/auth/userinfo、/auth/logout、/health*）外一律 403，
-	// 前端据此渲染等待审批页。builtin 用户必有角色，guard 直接放行，行为零变化。
-	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
+	// （角色为空）除既有白名单（/auth/userinfo、/auth/logout、/health*）与
+	// issue #132 配置读取端点（GET /api/v1/providers[/runtime-config]、
+	// /api/v1/agents[/manifest|/{name}]、/api/v1/skills[/{name}[/download]]）
+	// 外一律 403，前端据此渲染等待审批页；桌面 App 依赖这些端点完成
+	// 模型/Agent/SKILL 配置同步（未审批用户仅可读配置，不可写）。
+	// builtin 用户必有角色，guard 直接放行，行为零变化。
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
 	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
