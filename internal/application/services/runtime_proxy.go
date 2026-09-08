@@ -136,10 +136,10 @@ func canonicalizePath(escaped, decoded string) (string, bool) {
 	return decoded, true
 }
 
-// matchAllowlist 返回首个 method+path 均命中的路由。潜语义：path 命中但
+// matchAllowlist 返回切片序中首个 method+path 均命中的路由。潜语义：path 命中但
 // method 不符时仍继续扫描且 pathMatched=true——当前矩阵无重叠路径（每个
-// pattern 唯一），故行为正确；未来新增与既有 pattern 重叠的模式时，此处
-// 会静默取最后匹配行（多条同时命中时靠切片序），新增时需注意。
+// pattern 唯一），故行为正确；未来新增与既有 pattern 重叠的模式时，切片序
+// 靠前的路由胜出（first match wins，非「取最后匹配行」），新增时需注意。
 func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodOK bool) {
 	req := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for _, r := range proxyAllowlist {

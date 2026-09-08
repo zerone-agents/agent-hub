@@ -3,6 +3,7 @@ package services
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -208,5 +209,42 @@ func TestResolveLegacyInvalidNames(t *testing.T) {
 	// 对照：合规命名仍放行（default/test 在 newTestRepo 中为 running）。
 	if _, pe := svc.Resolve("default", "test", "GET", "/health", "/health"); pe != nil {
 		t.Fatalf("conforming name must keep passing, got %v", pe)
+	}
+}
+
+// TestMatchAllowlistFirstMatchWins 锁定 matchAllowlist 的重叠路径语义（issue #91
+// 审查 P3）：切片序中第一个 method+path 均命中的路由胜出——注释与实现一致，
+// 防未来「取最后匹配行」的误解回归。
+func TestMatchAllowlistFirstMatchWins(t *testing.T) {
+	// 模拟未来重叠模式：/v1/agents/:id 与 /v1/agents/special 同时命中
+	// /v1/agents/special（param 通配 + 字面量）。切片序靠前者胜出。
+	saved := proxyAllowlist
+	defer func() { proxyAllowlist = saved }()
+	proxyAllowlist = []proxyRoute{
+		{methods: []string{http.MethodGet}, pattern: "/v1/agents/:id", timeout: 120 * time.Second},
+		{methods: []string{http.MethodGet}, pattern: "/v1/agents/special", timeout: 9 * time.Second},
+	}
+
+	route, pathMatched, methodOK := matchAllowlist(http.MethodGet, "/v1/agents/special")
+	if !pathMatched || !methodOK {
+		t.Fatalf("overlap must match, got pathMatched=%v methodOK=%v", pathMatched, methodOK)
+	}
+	if route.pattern != "/v1/agents/:id" {
+		t.Fatalf("first match wins: pattern = %q, want /v1/agents/:id", route.pattern)
+	}
+	if route.timeout != 120*time.Second {
+		t.Fatalf("first match wins: timeout = %v, want 120s", route.timeout)
+	}
+
+	// method 不符时不返回路由，但 pathMatched 保留（潜语义注释所述）。
+	route, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
+	if !pathMatched {
+		t.Fatal("path matched flag must persist on method mismatch")
+	}
+	if methodOK {
+		t.Fatal("POST must not match GET-only route")
+	}
+	if route.pattern != "" {
+		t.Fatalf("no route may be returned on method mismatch, got %q", route.pattern)
 	}
 }
