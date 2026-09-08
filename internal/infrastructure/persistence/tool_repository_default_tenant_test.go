@@ -23,6 +23,7 @@ func setupToolDefaultTestDB(t *testing.T) *gorm.DB {
 			tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 			title VARCHAR(128),
 			description TEXT,
+			description_en TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME
