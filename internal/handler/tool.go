@@ -87,7 +87,7 @@ func parseToolFile(c *gin.Context) (input *services.ToolFileInput, closeFn func(
 	}, func() { _ = file.Close() }
 }
 
-// Create 处理自定义工具创建（multipart：name/title/description/file）。
+// Create 处理自定义工具创建（multipart：name/title/description/descriptionEn/file）。
 func (h *ToolHandler) Create(c *gin.Context) {
 	name := c.PostForm("name")
 	if name == "" {
@@ -104,6 +104,7 @@ func (h *ToolHandler) Create(c *gin.Context) {
 		Name:          name,
 		Title:         c.PostForm("title"),
 		Description:   c.PostForm("description"),
+		DescriptionEn: c.PostForm("descriptionEn"),
 		ToolFileInput: *in,
 	})
 	if err != nil {
