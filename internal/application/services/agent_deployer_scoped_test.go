@@ -402,10 +402,13 @@ func TestToDTO_BuiltinNoKongReturnsBareRuntimeURL(t *testing.T) {
 }
 
 func TestToDTO_NotRunning_NoProxyURL(t *testing.T) {
+	// 非 running 部署不得有任何公网代理 URL：legacy 形态即空串
+	// （runtimeURL(port==0) → ""；非 running 也不进入 /runtime 覆写分支）。
+	// 精确钉住该值，而非仅断言不等于代理路径。
 	s := &AgentDeployerService{publicHost: "203.0.113.10"}
 	dto := s.toDTO("default", "test", "stopped", "unhealthy", "c", "", 0, nil, "")
-	if dto.RuntimeURL == "/runtime/default/test" {
-		t.Fatal("non-running deployment must not get a proxy URL")
+	if dto.RuntimeURL != "" {
+		t.Fatalf("RuntimeURL = %q, want \"\" (no public URL for non-running deployment)", dto.RuntimeURL)
 	}
 }
 

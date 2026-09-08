@@ -47,11 +47,13 @@ func TestDeployerURLHostNotConfigurable(t *testing.T) {
 	}
 }
 
-// UpstreamHost 现有 override/fallback 语义回归不变（Kong 不受影响）。
-func TestUpstreamHostSemanticsUnchanged(t *testing.T) {
+// 真实语义：钉住 deriveDeployerURLHost 派生 host 的回归——它是运行时
+// 配置钩子回填 DeployerURLHost 的唯一派生点（config.go:247,260），供
+// no-Kong runtime proxy / chat 解析使用，且从不回退 PublicHost。UpstreamHost
+// override/fallback 属既有行为，由 TestDeployerURLHostNotConfigurable 与
+// 上游 config 测试覆盖；本测试从未触碰 UpstreamHost，Kong 链路不受影响。
+func TestResolveBaseURLHostSemantics(t *testing.T) {
 	if got := deriveDeployerURLHost("http://agent-deployer:8080"); got != "agent-deployer" {
 		t.Fatalf("unexpected host %q", got)
 	}
-	// 显式 upstream_host 与 PublicHost fallback 属 UpstreamHost 既有行为，
-	// 由现有 config 测试覆盖；本任务不得改动 config.go:214-224 的既有派生。
 }

@@ -80,6 +80,11 @@ func TestKongEnabledForChat(t *testing.T) {
 	if !withKong.kongEnabledForChat() {
 		t.Fatal("kong-enabled deployerSvc must report true")
 	}
+	// 非 nil deployerSvc + nil kongSvc → false（常态 no-Kong 分支）
+	noKong := &AgentChatService{deployerSvc: &AgentDeployerService{}}
+	if noKong.kongEnabledForChat() {
+		t.Fatal("non-nil deployerSvc with nil kongSvc must report false")
+	}
 }
 
 // resolveBaseURL 严格按模式分支（issue #77 验收 #10：Kong 链路零变化）。
