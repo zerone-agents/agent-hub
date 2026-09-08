@@ -348,7 +348,7 @@ func (s *AgentDeployerService) probeHost() (string, error) {
 // WaitForHealthy polls the deployer and actively probes /health until the agent
 // is ready or timeout is reached. It returns the current host port.
 func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, timeout time.Duration) (int, error) {
-	probeHost, err := s.probeHost()
+	target, err := s.probeHost()
 	if err != nil {
 		return 0, err // fail closed: never dial without a valid probe host
 	}
@@ -362,7 +362,7 @@ func (s *AgentDeployerService) WaitForHealthy(ctx context.Context, name string, 
 			if st.Health == "healthy" {
 				return st.HostPort, nil
 			}
-			if st.HostPort > 0 && s.healthProbe(ctx, probeHost, st.HostPort) {
+			if st.HostPort > 0 && s.healthProbe(ctx, target, st.HostPort) {
 				return st.HostPort, nil
 			}
 		}

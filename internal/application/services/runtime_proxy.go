@@ -62,6 +62,9 @@ var proxyAllowlist = []proxyRoute{
 // 无法跨包引用，故在此重复声明并锚定来源）；动机见彼处注释——org 用于拼接
 // 部署键与 URL 路径段，禁止连字符/大写/下划线/前导数字消除跨租户键歧义。
 // agent 名契约复用同包 agent_validator.go 的 validAgentNamePattern，不重复声明。
+// agent 名无独立长度校验：org 契约 ^[a-z][a-z0-9]{0,62}$ 内嵌 ≤63，
+// agent 名依赖创建路径的 ≤64 校验；代理门无界仅意味着超长名多走一次
+// GetByName 才 404，行为无差异。
 var proxyOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,62}$`)
 
 type RuntimeProxyService struct {
@@ -133,6 +136,10 @@ func canonicalizePath(escaped, decoded string) (string, bool) {
 	return decoded, true
 }
 
+// matchAllowlist 返回首个 method+path 均命中的路由。潜语义：path 命中但
+// method 不符时仍继续扫描且 pathMatched=true——当前矩阵无重叠路径（每个
+// pattern 唯一），故行为正确；未来新增与既有 pattern 重叠的模式时，此处
+// 会静默取最后匹配行（多条同时命中时靠切片序），新增时需注意。
 func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodOK bool) {
 	req := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for _, r := range proxyAllowlist {

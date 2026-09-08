@@ -261,6 +261,9 @@ func TestProxyRangeRoundTrip(t *testing.T) {
 	if got := w.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
 	}
+	if got := w.Body.String(); got != "file" {
+		t.Fatalf("206 body = %q, want %q", got, "file")
+	}
 }
 
 // SSE 实时逐 chunk flush（专家二轮 3b）：gin engine 挂真实 httptest.Server，
