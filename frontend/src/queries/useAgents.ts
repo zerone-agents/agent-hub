@@ -56,6 +56,8 @@ export function useUpdateSubagents() {
       agentApi.updateSubagents(name, subagents),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      // v5 前缀匹配：['agents'] 已覆盖 ['agents', name, 'detail']，
+      // 无需显式失效 detail（避免重复 refetch）。
       message.success('子代理已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -69,6 +71,7 @@ export function useUpdateAgentTools() {
       agentApi.updateTools(name, toolNames),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      // v5 前缀匹配：['agents'] 已覆盖 ['agents', name, 'detail']，无需显式失效。
       message.success('工具已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -82,6 +85,7 @@ export function useUpdateAgentSkills() {
       agentApi.updateSkills(name, skillNames),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      // v5 前缀匹配：['agents'] 已覆盖 ['agents', name, 'detail']，无需显式失效。
       message.success('技能已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -106,6 +110,7 @@ export function useUpdateAgentKnowledgeDatasets() {
     onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'knowledge'] })
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      // v5 前缀匹配：['agents'] 已覆盖 ['agents', name, 'detail']，无需显式失效。
       message.success('知识库已更新')
     },
     onError: (err) => message.error(parseApiError(err))

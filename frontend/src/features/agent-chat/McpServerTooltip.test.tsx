@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import { McpServerTooltipOverlay } from './McpServerTooltip'
+import McpServerTooltip from './McpServerTooltip'
 import type { McpServerSummary } from '@/api/agents'
 
 function renderWith(ui: React.ReactElement) {
@@ -65,5 +66,45 @@ describe('McpServerTooltipOverlay', () => {
     renderWith(<McpServerTooltipOverlay name="srv" server={server} />)
 
     expect(screen.getByText('--port=8080 --verbose --log=debug')).toBeInTheDocument()
+  })
+
+  it('renders sanitized failure reason when the server errored (issue #131)', () => {
+    const server: McpServerSummary = {
+      transport: 'http',
+      url: 'https://mcp.example.com/http',
+      connectionStatus: 'error',
+      error: 'MCP server "remote" failed to connect',
+    }
+    renderWith(<McpServerTooltipOverlay name="remote" server={server} />)
+
+    expect(screen.getByText('remote')).toBeInTheDocument()
+    expect(screen.getByText('MCP server "remote" failed to connect')).toBeInTheDocument()
+  })
+})
+
+describe('McpServerTooltip tag', () => {
+  it('shows a degraded marker when connectionStatus is error (issue #131)', () => {
+    const server: McpServerSummary = {
+      transport: 'http',
+      url: 'https://mcp.example.com/http',
+      connectionStatus: 'error',
+      error: 'MCP server "remote" failed to connect',
+    }
+    renderWith(<McpServerTooltip name="remote" server={server} />)
+
+    expect(screen.getByText(/连接失败/)).toBeInTheDocument()
+    // Sanitized reason is inside the tooltip overlay, not the tag itself.
+    expect(screen.queryByText('MCP server "remote" failed to connect')).not.toBeInTheDocument()
+  })
+
+  it('renders plain tag when the server is connected (no false degraded marker)', () => {
+    const server: McpServerSummary = {
+      transport: 'http',
+      url: 'https://mcp.example.com/http',
+      connectionStatus: 'connected',
+    }
+    renderWith(<McpServerTooltip name="remote" server={server} />)
+
+    expect(screen.queryByText(/连接失败/)).not.toBeInTheDocument()
   })
 })

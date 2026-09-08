@@ -78,6 +78,10 @@ export function useUpdateAgentMcps() {
       mcpApi.updateAgentMcps(agentName, mcpNames),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['agent-mcps'] })
+      // AgentCard 的 "N MCP" 计数来自 ['agents']（useAgents）。v5 invalidate
+      // 默认前缀匹配：['agents'] 同时覆盖 ['agents', name, 'detail']（chat 页
+      // AgentDetailBar）——不必再显式失效 detail，否则触发重复 refetch。
+      void qc.invalidateQueries({ queryKey: ['agents'] })
       message.success('Agent MCP 关系已更新')
     },
     onError: (err) => message.error(parseApiError(err))
