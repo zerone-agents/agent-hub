@@ -300,27 +300,29 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 	return runtimeURL, nil
 }
 
-// ResolveRuntime verifies the agent is deployed and running, and returns
-// the runtime base URL, the per-agent runtime API key (decrypted from
-// the agents table), and the deployer-reported container id.
+// ResolveRuntime 按模式分支定位 runtime 目标（issue #77），返回
+// (baseURL, APIKey, ContainerID, error)。前置门：deployer 状态必须
+// running 且 HostPort > 0，否则 fail-closed 返回 error。
 //
-// The base URL is Kong-aware: when Kong gateway is enabled, deployerSvc.toDTO
-// has already populated RuntimeURL with the gateway route (e.g.
-// "https://agents.example.com/zerone/pharmaceutical"). The runtime client appends
-// /v1/agents/{name}/runs to this base; Kong's StripPath strips the
-// agent-name prefix and forwards the canonical runtime API path to the
-// container. When Kong is not configured, the public RuntimeURL (absolute
-// hairpin URL or hub-relative path) is never an internal dial target — the
-// internal upstream URL http://{DeployerURLHost}:{hostPort} is used instead
-// so hub→runtime traffic stays on the deployer network.
+// baseURL 按网关模式分支：
 //
-// containerID is the immutable deployment-generation anchor (issue #94
-// review R3): Docker assigns a fresh id on every recreate (redeploy) but
-// keeps it across in-place restarts — exactly mirroring the on-disk lifetime
-// of `.zerone-uploads`. Callers bind upload records to it at upload time and
-// re-check it on send/download, so stale-generation records fail closed with
-// no time tolerance. An empty containerID (deployer did not report one)
-// must be treated as "generation unknown" by authorization callers.
+//	① Kong 模式（deployerSvc 非 nil 且 kongEnabled）→ 信任 toDTO 已填充的
+//	   网关 RuntimeURL（kong routing URL，如 "https://agents.example.com/
+//	   zerone/pharmaceutical"）；RuntimeURL 空的预注册边缘（Kong 已启用但
+//	   路由尚未注册完成）→ 回退 http://{publicHost}:{hostPort} 公网地址，
+//	   绝不回落 deployer 内网回源（issue #77 验收 #10：Kong 链路零变化）。
+//	② 无 Kong（kong 未启用；deployerSvc 非 nil 但 kongEnabled() 为 false——
+//	   首行 GetStatus 已先解引用）→ 公开 RuntimeURL（hairpin
+//	   绝对 URL 或相对路径）永远不是内部拨号目标，一律走
+//	   http://{upstreamHost}:{hostPort} deployer 网络内网回源（issue #77
+//	   验收 #8）。runtime client 在 baseURL 后追加 /v1/agents/{name}/runs，
+//	   Kong 的 StripPath 剥掉 agent 名前缀后转发规范 runtime API 路径。
+//
+// containerID 是部署代际锚点（issue #94 review R3）：Docker 每次重建
+// （redeploy）分配新 id、原地重启保持不变——与 .zerone-uploads 磁盘
+// 生命周期一致。调用方上传时绑定、发送/下载时复检，存量代际记录
+// fail-closed，零时间容忍；空 containerID（deployer 未报告）须按
+// 「代际未知」处理。
 func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, string, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {

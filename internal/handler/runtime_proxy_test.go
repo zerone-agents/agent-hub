@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -25,6 +26,8 @@ type fakeRuntime struct {
 	lastPath      string
 	lastQuery     string
 	lastHeader    http.Header
+	lastHost      string      // upstream 收到的请求 Host（net/http 的 r.Header 不含 Host，独立字段）
+	lastBody      []byte      // "/" handler 最近一次收到的请求 body（POST 透传断言）
 	lastFileRange string      // /v1/files/content 收到的 Range 头
 	body          chan string // SSE chunk 管道
 	gotCancel     chan struct{}
@@ -85,16 +88,20 @@ func newFakeRuntime(t *testing.T) *fakeRuntime {
 	// 含敏感 headers 的 JSON 断言脱敏输出。
 	mux.HandleFunc("/v1/agents/", func(w http.ResponseWriter, r *http.Request) {
 		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		f.lastHost = r.Host
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, f.agentListBody)
 	})
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		f.lastHost = r.Host
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, f.agentListBody)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		f.lastMethod, f.lastPath, f.lastQuery, f.lastHeader = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		f.lastHost = r.Host
+		f.lastBody, _ = io.ReadAll(r.Body)
 		_, _ = io.WriteString(w, "ok")
 	})
 	f.srv = httptest.NewServer(mux)
@@ -147,6 +154,14 @@ func TestProxyForwardsStrippedPathQueryAndHeaders(t *testing.T) {
 	req.Header.Set("X-User-Name", "alice")
 	req.Header.Set("X-Org", "forged")
 	req.Header.Set("Authorization", "Bearer hub-jwt")
+	// 客户端伪造的代理链头：必须被删除而不是透传（spec 3.4）。
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	req.Header.Set("X-Forwarded-Host", "forged.example")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Port", "443")
+	req.Header.Set("X-Forwarded-Server", "forged-server")
+	req.Header.Set("Forwarded", "for=1.2.3.4")
+	req.Header.Set("Via", "1.1 forged-proxy")
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -170,6 +185,37 @@ func TestProxyForwardsStrippedPathQueryAndHeaders(t *testing.T) {
 	}
 	if f.lastHeader.Get("Authorization") != "" {
 		t.Fatal("Authorization must be dropped")
+	}
+	// 转发链头必须全部删除（spec 3.4）：客户端伪造的代理链信息不得透传。
+	for _, hdr := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Forwarded-Server", "Forwarded", "Via"} {
+		if f.lastHeader.Get(hdr) != "" {
+			t.Fatalf("%s must be dropped, got %q", hdr, f.lastHeader.Get(hdr))
+		}
+	}
+	// Host 必须精确重写为 upstream host:port（不是客户端 Host）。
+	wantHost := strings.TrimPrefix(f.srv.URL, "http://")
+	if f.lastHost != wantHost {
+		t.Fatalf("Host = %q, want upstream host %q", f.lastHost, wantHost)
+	}
+}
+
+// POST body 透传（issue #91）：body 必须原样到达 upstream。不选
+// /v1/agents/my-agent/runs 作目标——runs 在 fake 里是永不结束的 SSE 流
+// （无 chunk 喂入时 handler 阻塞在 channel 读），同步 ServeHTTP 永不会返回，
+// 断言无法落地；同走 POST 放行链路的 /v1/runs/<id>/cancel 由 fake 的 "/"
+// handler 立即返回，可同步完成。
+func TestProxyForwardsPostBody(t *testing.T) {
+	f := newFakeRuntime(t)
+	r := newProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/runtime/default/test/v1/runs/run-123/cancel", strings.NewReader(`{"prompt":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if !bytes.Equal(f.lastBody, []byte(`{"prompt":"hello"}`)) {
+		t.Fatalf("upstream body = %q, want %q", f.lastBody, `{"prompt":"hello"}`)
 	}
 }
 
@@ -215,6 +261,9 @@ func TestProxyRangeRoundTrip(t *testing.T) {
 	}
 	if got := w.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
+	}
+	if got := w.Body.String(); got != "file" {
+		t.Fatalf("206 body = %q, want %q", got, "file")
 	}
 }
 
