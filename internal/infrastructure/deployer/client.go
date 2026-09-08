@@ -157,6 +157,11 @@ type AgentResponse struct {
 	ContainerSkillsDir string `json:"containerSkillsDir,omitempty"`
 	ToolsDir           string `json:"toolsDir,omitempty"`
 	RuntimeToken       string `json:"runtimeToken"`
+	// HTTPStatus carries the deployer's response status code (non-wire,
+	// populated by the client). 201 Created means a NEW container was
+	// created; 200 OK means an idempotent reuse of the existing container
+	// (issue #86 review P2 — the authoritative create-vs-reuse signal).
+	HTTPStatus int `json:"-"`
 }
 
 // AgentStatusResponse is the response for agent status queries.
@@ -311,6 +316,7 @@ func (c *Client) CreateAgent(ctx context.Context, req *CreateAgentRequest, force
 	if err := decodeSuccess(resp, &result); err != nil {
 		return nil, err
 	}
+	result.HTTPStatus = resp.StatusCode
 	return &result, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -198,8 +199,11 @@ type deployTokenFixture struct {
 	// getContainerID / createContainerID 控制 GET 探测与 POST 创建响应的
 	// containerId（issue #86 review P1）：真实重建时两者不同；idempotent
 	// 复用时 create 返回与 GET 相同的 id。默认不同（正常重建语义）。
+	// createStatus 控制 POST 的 HTTP 状态（review P2 权威信号）：
+	// 201 = 新建容器（快照推进）、200 = 幂等复用（快照保留）。默认 201。
 	getContainerID    string
 	createContainerID string
+	createStatus      int
 }
 
 // newDeployTokenServer builds a mock deployer. getFound controls the GET
@@ -218,6 +222,10 @@ func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployToke
 	createCid := f.createContainerID
 	if createCid == "" {
 		createCid = "new-cid"
+	}
+	createStatus := f.createStatus
+	if createStatus == 0 {
+		createStatus = http.StatusCreated
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -247,6 +255,7 @@ func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployToke
 		}
 		f.postCalled = true
 		f.postBody = body
+		w.WriteHeader(createStatus)
 		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"` + createCid + `","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
 	}))
 }
@@ -1070,9 +1079,11 @@ func (r *failingSnapshotRepo) GetByAgent(ctx context.Context, tenantID string, a
 }
 
 // TestDeploy_IdempotentReuse_KeepsSnapshot is the issue #86 review P1
-// regression: an idempotent create (force=false) reuses the running container
+// regression: an idempotent create (HTTP 200) reuses the running container
 // with the OLD artifacts, so the pending marker must survive — the snapshot
-// must NOT be overwritten with the new request's hashes.
+// must NOT be overwritten with the new request's hashes. The POST carries a
+// different containerId than the GET probe (concurrent-window shape, review
+// P2): the HTTP status — not the container id — is the authoritative signal.
 func TestDeploy_IdempotentReuse_KeepsSnapshot(t *testing.T) {
 	snapRepo := newSnapshotTestRepo(t)
 	// 预置快照：上次成功部署的工件是 calc=old456（当前已更新为新的，尚未部署）
@@ -1083,9 +1094,9 @@ func TestDeploy_IdempotentReuse_KeepsSnapshot(t *testing.T) {
 		t.Fatalf("seed snapshot: %v", err)
 	}
 
-	// idempotent 复用：deployer 的 GET（旧容器探测）与 POST（create 响应）
-	// 返回同一个 containerId —— 容器没有重建，工件没有更换。
-	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-1"}
+	// idempotent 复用：deployer 返回 HTTP 200（复用运行中容器）。
+	// GET 探测为旧 id、POST 响应为新 id —— 并发窗口形态，容器 id 比较会误判。
+	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-2", createStatus: http.StatusOK}
 	srv := newDeployTokenServer(t, true, false, f) // getFound=true 模拟已有容器
 	defer srv.Close()
 
@@ -1120,13 +1131,13 @@ func TestDeploy_IdempotentReuse_KeepsSnapshot(t *testing.T) {
 		t.Fatalf("snapshot lost: %v", err)
 	}
 	if got := snap.ToolHashes["calc"]; got != "old456" {
-		t.Fatalf("snapshot hash = %q, want old456 — idempotent reuse must keep the previous snapshot so the pending marker survives", got)
+		t.Fatalf("snapshot hash = %q, want old456 — HTTP 200 idempotent reuse must keep the previous snapshot so the pending marker survives", got)
 	}
 }
 
 // TestDeploy_ContainerRecreated_WritesSnapshot covers the normal recreate
-// path: containerId changes between the pre-deploy probe and the create
-// response, so the snapshot must advance to the new hashes.
+// path: the deployer answers HTTP 201 Created (new container), so the
+// snapshot must advance to the new hashes.
 func TestDeploy_ContainerRecreated_WritesSnapshot(t *testing.T) {
 	snapRepo := newSnapshotTestRepo(t)
 	// 预置快照：calc=old456
@@ -1137,8 +1148,8 @@ func TestDeploy_ContainerRecreated_WritesSnapshot(t *testing.T) {
 		t.Fatalf("seed snapshot: %v", err)
 	}
 
-	// 正常重建：GET 返回 cid-1（旧容器）、POST 返回 cid-2（新容器）
-	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-2"}
+	// 新建容器：HTTP 201
+	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-2", createStatus: http.StatusCreated}
 	srv := newDeployTokenServer(t, true, false, f)
 	defer srv.Close()
 
@@ -1172,7 +1183,88 @@ func TestDeploy_ContainerRecreated_WritesSnapshot(t *testing.T) {
 		t.Fatalf("snapshot lost: %v", err)
 	}
 	if got := snap.ToolHashes["calc"]; got != "new789" {
-		t.Fatalf("snapshot hash = %q, want new789 — recreated container must advance the snapshot", got)
+		t.Fatalf("snapshot hash = %q, want new789 — HTTP 201 created container must advance the snapshot", got)
+	}
+}
+
+// TestDeploy_ConcurrentIdempotentReuse_KeepsSnapshot is the issue #86 review
+// P2 probe: two concurrent deploys of the same agent both receive HTTP 200
+// (idempotent reuse). A pre-create GET probe would read a stale container id
+// in one of the goroutines and wrongly treat the response container id as a
+// recreation; the HTTP-status signal has no such window. The snapshot must
+// stay at the seeded value.
+func TestDeploy_ConcurrentIdempotentReuse_KeepsSnapshot(t *testing.T) {
+	snapRepo := newSnapshotTestRepo(t)
+	if err := snapRepo.Upsert(context.Background(), &agent.DeploymentSnapshot{
+		AgentID: 1, TenantID: "tenant-a", DeployedAt: time.Now(),
+		ToolHashes: map[string]string{"calc": "old456"},
+	}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// 专用并发 fixture：GET 恒返回 cid-1（并发窗口下的过期探测），
+	// POST 恒返回 HTTP 200 + cid-2 —— 按 id 比较会误判重建，按状态正确判复用。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"cid-1","status":"running","hostPort":3000}}`))
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			DeploymentKey string `json:"deploymentKey"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		if probe.DeploymentKey == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"success":false,"error":"deploymentKey is required"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK) // idempotent reuse
+		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"cid-2","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
+	}))
+	defer srv.Close()
+
+	providerID := uint64(1)
+	agentRepo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return &agent.AgentConfig{
+				ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo",
+				RuntimeToken: "0123456789abcdef0123456789abcdef",
+			}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error { return nil },
+	}
+	s := newTestAgentDeployerService(t, srv.URL, agentRepo, deployTokenProviderSvc())
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/abc", FileHash: "new789", FileSize: 10},
+	}}
+	s.cdnHost = "https://cdn.example.com"
+	s.snapshotRepo = snapRepo
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.Deploy("tenant-a", "general", false, false); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("concurrent deploy: %v", err)
+	}
+
+	snap, err := snapRepo.GetByAgent(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("snapshot lost: %v", err)
+	}
+	if got := snap.ToolHashes["calc"]; got != "old456" {
+		t.Fatalf("snapshot hash = %q, want old456 — concurrent HTTP 200 reuses must not advance the snapshot", got)
 	}
 }
 

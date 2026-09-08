@@ -446,26 +446,6 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 		return nil, err
 	}
 
-	// Probe the current container generation BEFORE the create (issue #86
-	// review P1): an idempotent create may reuse the running container with
-	// the OLD artifacts, so the snapshot must only advance when the container
-	// is actually recreated. containerKnown=false means the probe itself
-	// failed (network/5xx) — fail closed and keep the previous snapshot.
-	prevContainerID := ""
-	containerKnown := true
-	if cur, err := s.client.GetAgent(ctx, key); err != nil {
-		var httpErr *deployer.HTTPError
-		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-			// No previous container: first deployment, nothing to reuse.
-			prevContainerID = ""
-		} else {
-			containerKnown = false
-			log.Printf("deploy %s: container probe failed, artifact snapshot kept: %v", key, err)
-		}
-	} else {
-		prevContainerID = cur.ContainerID
-	}
-
 	// Call deployer. Nothing is deregistered from Kong before this point: a
 	// pre-rejection (4xx protocol validation, 503 runtime floor) must leave a
 	// currently healthy deployment fully intact — container, DB status and
@@ -512,17 +492,17 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	}
 
 	// Record the artifact hash snapshot on the success path (issue #86) — but
-	// ONLY when the container generation actually changed (review P1): an
-	// idempotent create reuses the running container with the OLD artifacts,
-	// so advancing the snapshot would wrongly clear the pending marker. When
-	// the probe was inconclusive (containerKnown=false) or the container id
-	// is unchanged, keep the previous snapshot; the pending state survives
-	// until a deploy that truly recreates the container. A write failure is
+	// ONLY when the deployer actually created a new container (HTTP 201,
+	// review P1/P2): an idempotent create (HTTP 200) reuses the running
+	// container with the OLD artifacts, so advancing the snapshot would
+	// wrongly clear the pending marker. The HTTP status is the authoritative
+	// create-vs-reuse signal — no pre-create probe, so concurrent deploys
+	// cannot race a stale container-id read (review P2). A write failure is
 	// logged, not fatal — the next successful deploy repairs it.
-	if containerKnown && resp.ContainerID != "" && resp.ContainerID != prevContainerID {
+	if resp.HTTPStatus == http.StatusCreated {
 		s.writeArtifactSnapshot(ctx, tenantID, agentCfg.ID, req, deployedAt)
-	} else if containerKnown && resp.ContainerID == prevContainerID {
-		log.Printf("deploy %s: container unchanged (%s), artifact snapshot kept", key, resp.ContainerID)
+	} else {
+		log.Printf("deploy %s: idempotent create (HTTP %d), artifact snapshot kept", key, resp.HTTPStatus)
 	}
 
 	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.ContainerID, resp.HostPort, &deployedAt, "")
