@@ -40,24 +40,24 @@ type presetToolSpec struct {
 }
 
 var presetToolSpecs = []presetToolSpec{
-	{agent.Tool{Name: "Skill", Title: "技能加载", Description: "加载专门的技能，为特定任务提供领域专用指令和工作流程", IsDefault: false}, true},
-	{agent.Tool{Name: "Task", Title: "任务派发", Description: "将子任务派发给指定的子 Agent 执行，获取其结果", IsDefault: false}, true},
-	{agent.Tool{Name: "MultiTask", Title: "并行任务派发", Description: "一次性将多个子任务并行派发给子 Agent 执行", IsDefault: false}, true},
-	{agent.Tool{Name: "Bash", Title: "执行命令", Description: "在持久化的 shell 会话中执行 bash 命令，支持超时和工作目录设置", IsDefault: false}, false},
-	{agent.Tool{Name: "Read", Title: "读取文件", Description: "读取文件内容，支持文本文件、图片和 PDF，带行号显示", IsDefault: false}, false},
-	{agent.Tool{Name: "Write", Title: "写入文件", Description: "将内容写入指定文件，不存在则创建，存在则覆盖", IsDefault: false}, false},
-	{agent.Tool{Name: "Edit", Title: "编辑文件", Description: "对文件执行精确的字符串替换，支持多行匹配", IsDefault: false}, false},
-	{agent.Tool{Name: "Glob", Title: "搜索文件", Description: "按 glob 模式匹配查找文件，支持递归搜索", IsDefault: false}, false},
-	{agent.Tool{Name: "Grep", Title: "搜索内容", Description: "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行", IsDefault: false}, false},
-	{agent.Tool{Name: "WebFetch", Title: "获取网页", Description: "从 URL 获取内容并返回文本。支持 HTML 页面、JSON API 和普通文本，自动去除 HTML 标签以便阅读。", IsDefault: false}, false},
-	{agent.Tool{Name: "WebSearch", Title: "网络搜索", Description: "使用 Exa AI 搜索实时网络信息，返回标题、URL 和摘要。适用于当前事件、最新数据或知识截止日期之后的信息。", IsDefault: false}, false},
-	{agent.Tool{Name: "AskUserQuestion", Title: "用户提问", Description: "向用户提出问题并要求选择答案，支持单选和多选，适用于需要用户做决策的场景。", IsDefault: false}, false},
-	{agent.Tool{Name: "CronCreate", Title: "创建定时任务", Description: "创建定时任务，支持周期性任务（cron 表达式）和一次性任务（延迟秒数）。", IsDefault: false}, false},
-	{agent.Tool{Name: "CronDelete", Title: "删除定时任务", Description: "删除一个已创建的定时任务。", IsDefault: false}, false},
-	{agent.Tool{Name: "CronList", Title: "列出定时任务", Description: "列出所有已创建的定时任务。", IsDefault: false}, false},
-	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", IsDefault: false}, false},
-	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", IsDefault: false}, false},
-	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", IsDefault: false}, false},
+	{agent.Tool{Name: "Skill", Title: "技能加载", Description: "加载专门的技能，为特定任务提供领域专用指令和工作流程", DescriptionEn: "Load a specialized skill that provides domain-specific instructions and workflows for a given task", IsDefault: false}, true},
+	{agent.Tool{Name: "Task", Title: "任务派发", Description: "将子任务派发给指定的子 Agent 执行，获取其结果", DescriptionEn: "Dispatch a subtask to a designated sub-agent and retrieve its result", IsDefault: false}, true},
+	{agent.Tool{Name: "MultiTask", Title: "并行任务派发", Description: "一次性将多个子任务并行派发给子 Agent 执行", DescriptionEn: "Dispatch multiple subtasks to sub-agents in parallel and collect their results", IsDefault: false}, true},
+	{agent.Tool{Name: "Bash", Title: "执行命令", Description: "在持久化的 shell 会话中执行 bash 命令，支持超时和工作目录设置", DescriptionEn: "Execute bash commands in a persistent shell session, with timeout and working-directory support", IsDefault: false}, false},
+	{agent.Tool{Name: "Read", Title: "读取文件", Description: "读取文件内容，支持文本文件、图片和 PDF，带行号显示", DescriptionEn: "Read file contents — text files, images and PDFs — with line numbers", IsDefault: false}, false},
+	{agent.Tool{Name: "Write", Title: "写入文件", Description: "将内容写入指定文件，不存在则创建，存在则覆盖", DescriptionEn: "Write content to a file; creates it if missing, overwrites it if present", IsDefault: false}, false},
+	{agent.Tool{Name: "Edit", Title: "编辑文件", Description: "对文件执行精确的字符串替换，支持多行匹配", DescriptionEn: "Apply precise string replacements to a file, with multi-line matching support", IsDefault: false}, false},
+	{agent.Tool{Name: "Glob", Title: "搜索文件", Description: "按 glob 模式匹配查找文件，支持递归搜索", DescriptionEn: "Find files matching a glob pattern, with recursive search support", IsDefault: false}, false},
+	{agent.Tool{Name: "Grep", Title: "搜索内容", Description: "使用正则表达式搜索文件内容，支持文件类型过滤和上下文行", DescriptionEn: "Search file contents with regular expressions, supporting file-type filters and context lines", IsDefault: false}, false},
+	{agent.Tool{Name: "WebFetch", Title: "获取网页", Description: "从 URL 获取内容并返回文本。支持 HTML 页面、JSON API 和普通文本，自动去除 HTML 标签以便阅读。", DescriptionEn: "Fetch content from a URL and return it as text; supports HTML pages, JSON APIs and plain text", IsDefault: false}, false},
+	{agent.Tool{Name: "WebSearch", Title: "网络搜索", Description: "使用 Exa AI 搜索实时网络信息，返回标题、URL 和摘要。适用于当前事件、最新数据或知识截止日期之后的信息。", DescriptionEn: "Search the web in real time with Exa AI, returning titles, URLs and summaries", IsDefault: false}, false},
+	{agent.Tool{Name: "AskUserQuestion", Title: "用户提问", Description: "向用户提出问题并要求选择答案，支持单选和多选，适用于需要用户做决策的场景。", DescriptionEn: "Ask the user a structured question with predefined choices; supports single and multi-select", IsDefault: false}, false},
+	{agent.Tool{Name: "CronCreate", Title: "创建定时任务", Description: "创建定时任务，支持周期性任务（cron 表达式）和一次性任务（延迟秒数）。", DescriptionEn: "Create a scheduled task, supporting cron expressions and one-shot delays", IsDefault: false}, false},
+	{agent.Tool{Name: "CronDelete", Title: "删除定时任务", Description: "删除一个已创建的定时任务。", DescriptionEn: "Delete an existing scheduled task by its task ID", IsDefault: false}, false},
+	{agent.Tool{Name: "CronList", Title: "列出定时任务", Description: "列出所有已创建的定时任务。", DescriptionEn: "List all currently scheduled tasks with their next-fire times", IsDefault: false}, false},
+	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", DescriptionEn: "Get or set configuration values, with session-scoped settings support", IsDefault: false}, false},
+	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", DescriptionEn: "Create and manage a structured task list for the current session, tracking progress and status", IsDefault: false}, false},
+	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", DescriptionEn: "Find and activate tools that exist but are not yet loaded, by exact name or keyword search", IsDefault: false}, false},
 }
 
 func init() {
@@ -115,6 +115,7 @@ type ToolDTO struct {
 	Name           string `json:"name"`
 	Title          string `json:"title"`
 	Description    string `json:"description"`
+	DescriptionEn  string `json:"descriptionEn"`
 	IsDefault      bool   `json:"isDefault"`
 	Source         string `json:"source"`
 	ArtifactStatus string `json:"artifactStatus"`
@@ -132,6 +133,7 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 		Name:           t.Name,
 		Title:          t.Title,
 		Description:    t.Description,
+		DescriptionEn:  t.DescriptionEn,
 		IsDefault:      t.IsDefault,
 		Source:         t.Source,
 		ArtifactStatus: t.ArtifactStatus(),
@@ -149,15 +151,17 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 
 // CreateCustomToolInput 创建请求：展示元数据 + 内嵌制品三元组（ToolFileInput）。
 type CreateCustomToolInput struct {
-	Name        string
-	Title       string
-	Description string
+	Name          string
+	Title         string
+	Description   string
+	DescriptionEn string
 	ToolFileInput
 }
 
 type UpdateToolInput struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
+	Title         *string `json:"title"`
+	Description   *string `json:"description"`
+	DescriptionEn *string `json:"descriptionEn"`
 }
 
 func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
@@ -221,14 +225,15 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 		return nil, fmt.Errorf("upload tool file failed: %w", err)
 	}
 	t := &agent.Tool{
-		Name:        input.Name,
-		Title:       input.Title,
-		Description: input.Description,
-		Source:      agent.ToolSourceCustom,
-		FileName:    input.FileName,
-		FileURL:     ossKey,
-		FileHash:    hash,
-		FileSize:    int64(len(data)),
+		Name:          input.Name,
+		Title:         input.Title,
+		Description:   input.Description,
+		DescriptionEn: input.DescriptionEn,
+		Source:        agent.ToolSourceCustom,
+		FileName:      input.FileName,
+		FileURL:       ossKey,
+		FileHash:      hash,
+		FileSize:      int64(len(data)),
 	}
 	if err := s.repo.Create(tenantID, t); err != nil {
 		_ = s.uploader.Delete(ctx, ossKey)
@@ -251,6 +256,9 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 	}
 	if input.Description != nil {
 		t.Description = *input.Description
+	}
+	if input.DescriptionEn != nil {
+		t.DescriptionEn = *input.DescriptionEn
 	}
 	if err := s.repo.Update(tenantID, t); err != nil {
 		return nil, fmt.Errorf("update tool failed: %w", err)
@@ -448,16 +456,49 @@ func (s *ToolService) SeedIfEmpty() error {
 			continue
 		}
 		t := &agent.Tool{
-			Name:        p.tool.Name,
-			Title:       p.tool.Title,
-			Description: p.tool.Description,
-			Source:      agent.ToolSourceBuiltin,
+			Name:          p.tool.Name,
+			Title:         p.tool.Title,
+			Description:   p.tool.Description,
+			DescriptionEn: p.tool.DescriptionEn,
+			Source:        agent.ToolSourceBuiltin,
 		}
 		if err := s.repo.Create(sysTenant, t); err != nil {
 			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", t.Name, err)
 		}
 	}
 
+	return nil
+}
+
+// BackfillBuiltinDescriptionEn 为存量内置行补齐英文展示描述（issue #93）：
+// 仅当行存在且 description_en 为空时写入预设英文；非空行与用户自定义
+// title/description 一律不动；幂等，可在启动 seed 链中重复执行。
+func (s *ToolService) BackfillBuiltinDescriptionEn() error {
+	const sysTenant = ""
+	for i := range presetToolSpecs {
+		p := &presetToolSpecs[i]
+		if p.tool.DescriptionEn == "" {
+			continue // 预设本身缺英文：跳过（不该发生，防御）
+		}
+		exists, err := s.repo.ExistsByName(sysTenant, p.tool.Name)
+		if err != nil {
+			return fmt.Errorf("check builtin %s tool failed: %w", p.tool.Name, err)
+		}
+		if !exists {
+			continue // 空表首种由 SeedBuiltins/SeedIfEmpty 负责（已带英文）
+		}
+		got, err := s.repo.GetByName(sysTenant, p.tool.Name)
+		if err != nil {
+			return err
+		}
+		if got.DescriptionEn != "" {
+			continue
+		}
+		got.DescriptionEn = p.tool.DescriptionEn
+		if err := s.repo.Update(sysTenant, got); err != nil {
+			return fmt.Errorf("backfill %s description_en failed: %w", p.tool.Name, err)
+		}
+	}
 	return nil
 }
 

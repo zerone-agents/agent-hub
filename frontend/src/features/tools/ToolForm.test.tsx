@@ -11,6 +11,7 @@ const customReadyTool: Tool = {
   name: 'SayHello',
   title: '问候',
   description: '问候工具',
+  descriptionEn: 'Greeting tool',
   isDefault: false,
   source: 'custom',
   artifactStatus: 'ready',
@@ -109,5 +110,52 @@ describe('ToolForm', () => {
     await user.click(screen.getByRole('button', { name: /上\s*传/ }))
     await waitFor(() => expect(screen.getByText('请选择工具文件')).toBeInTheDocument())
     expect(createCustomToolMock).not.toHaveBeenCalled()
+  })
+
+  it('#93: edit mode prefills the English description field', async () => {
+    renderForm('edit', customReadyTool)
+    expect(screen.getByLabelText('Description (EN)')).toHaveValue('Greeting tool')
+  })
+
+  it('#93: create submit passes descriptionEn through', async () => {
+    createCustomToolMock.mockClear()
+    const user = userEvent.setup()
+    renderForm('create', null)
+    await user.type(screen.getByLabelText('工具标识'), 'SayHello')
+    await user.type(screen.getByLabelText('功能描述'), '问候工具')
+    await user.type(screen.getByLabelText('Description (EN)'), 'Greeting tool')
+    // 与 #96 用例同款确定性做法：单次文件选择用 fireEvent.change
+    const uploadInput = () => document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(uploadInput(), {
+      target: { files: [new File(['export {}'], 'Hello.ts', { type: 'text/typescript' })] }
+    })
+    await user.click(screen.getByRole('button', { name: /上\s*传/ }))
+    await waitFor(() => {
+      expect(createCustomToolMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'SayHello',
+          description: '问候工具',
+          descriptionEn: 'Greeting tool'
+        })
+      )
+    })
+  })
+
+  it('#93: edit submit passes descriptionEn through', async () => {
+    updateToolMock.mockClear()
+    const user = userEvent.setup()
+    renderForm('edit', customReadyTool)
+    const enField = screen.getByLabelText('Description (EN)')
+    await user.clear(enField)
+    await user.type(enField, 'Greeting tool v2')
+    await user.click(screen.getByRole('button', { name: /更\s*新/ }))
+    await waitFor(() => {
+      expect(updateToolMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'SayHello',
+          data: expect.objectContaining({ descriptionEn: 'Greeting tool v2' })
+        })
+      )
+    })
   })
 })

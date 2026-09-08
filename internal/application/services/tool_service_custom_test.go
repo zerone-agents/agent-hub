@@ -430,3 +430,43 @@ func TestDeleteTool_FKConflictMapsToInUse(t *testing.T) {
 	require.Equal(t, []string{"bot"}, inUse.Agents)
 	require.False(t, inUse.Foreign)
 }
+
+// issue #93：DescriptionEn 展示元数据经 create → GetByName 全链路透传。
+func TestCreateCustomTool_DescriptionEnRoundTrip(t *testing.T) {
+	setupToolCustomServiceDB(t)
+	svc, _ := newCustomToolService(t)
+	_, in := customFileInput()
+	dto, err := svc.CreateCustomTool("tenant-a", &CreateCustomToolInput{
+		Name:          "calc",
+		Title:         "计算器",
+		Description:   "算术工具",
+		DescriptionEn: "Arithmetic tool",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "Arithmetic tool", dto.DescriptionEn, "create 必须透传 DescriptionEn")
+
+	got, err := svc.GetByName("tenant-a", "calc")
+	require.NoError(t, err)
+	require.Equal(t, "Arithmetic tool", got.DescriptionEn, "GetByName 必须回读 DescriptionEn")
+}
+
+func TestUpdateTool_DescriptionEn(t *testing.T) {
+	setupToolCustomServiceDB(t)
+	svc, _ := newCustomToolService(t)
+	_, in := customFileInput()
+	_, err := svc.CreateCustomTool("tenant-a", &CreateCustomToolInput{
+		Name:          "calc",
+		Title:         "t",
+		Description:   "d",
+		ToolFileInput: ToolFileInput{FileName: in.FileName, File: in.File, FileSize: in.FileSize},
+	})
+	require.NoError(t, err)
+	en := "Calculator v2"
+	_, err = svc.Update("tenant-a", "calc", &UpdateToolInput{DescriptionEn: &en})
+	require.NoError(t, err)
+
+	got, err := svc.GetByName("tenant-a", "calc")
+	require.NoError(t, err)
+	require.Equal(t, "Calculator v2", got.DescriptionEn, "Update 必须支持 descriptionEn")
+}

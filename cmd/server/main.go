@@ -314,6 +314,9 @@ func main() {
 	if err := toolService.SeedBuiltins(); err != nil {
 		log.Fatalf("Failed to seed builtin tools: %v", err)
 	}
+	if err := toolService.BackfillBuiltinDescriptionEn(); err != nil {
+		log.Fatalf("Failed to backfill builtin tool English descriptions: %v", err)
+	}
 	if err := toolService.BackfillSubagentToolBindings(); err != nil {
 		log.Fatalf("Failed to backfill subagent tool bindings: %v", err)
 	}

@@ -171,7 +171,7 @@ export default function ToolListPage() {
     } else {
       const kw = keywords.toLowerCase()
       result = tools.filter((tool) => {
-        const fields = [tool.title, tool.name, tool.description]
+        const fields = [tool.title, tool.name, tool.description, tool.descriptionEn ?? '']
         return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }
@@ -227,7 +227,10 @@ export default function ToolListPage() {
             <span className={styles.artifactBadge}>已上传</span>
           )
         }
-        description={tool.description || '暂无描述'}
+        description={
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- D2: empty EN string must also fall back to CN, `??` would pass it through
+          tool.descriptionEn || tool.description || '暂无描述'
+        }
         bodyExtra={
           <div className={styles.fileMeta}>
             {tool.fileName ?? '-'} · {formatFileSize(tool.fileSize)}
@@ -337,7 +340,10 @@ export default function ToolListPage() {
                   title={tool.title || tool.name}
                   subtitle={tool.name}
                   headerExtra={tool.isDefault ? <span className={styles.artifactBadge}>默认</span> : null}
-                  description={tool.description || '暂无描述'}
+                  description={
+                    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- D2: empty EN string must also fall back to CN, `??` would pass it through
+                    tool.descriptionEn || tool.description || '暂无描述'
+                  }
                   footerLeft={formatTime(tool.createdAt)}
                 />
               ))}

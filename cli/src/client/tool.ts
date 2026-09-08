@@ -8,6 +8,7 @@ export interface Tool {
   name: string;
   title: string;
   description: string;
+  descriptionEn?: string;
   isDefault: boolean;
   source?: string;
   artifactStatus?: string;
@@ -22,6 +23,7 @@ export interface CustomToolInput {
   name: string;
   title?: string;
   description?: string;
+  descriptionEn?: string;
   fileBuffer: Buffer;
   fileName: string;
 }
@@ -39,10 +41,10 @@ export async function getTool(name: string): Promise<Tool> {
   return apiRequest<Tool>(`/api/v1/admin/tools/${encodeURIComponent(name)}`);
 }
 
-// updateTool 仅更新展示元数据（title/description）；isDefault 已随 issue #88 移除。
+// updateTool 仅更新展示元数据（title/description/descriptionEn）；isDefault 已随 issue #88 移除。
 export async function updateTool(
   name: string,
-  body: { title?: string; description?: string },
+  body: { title?: string; description?: string; descriptionEn?: string },
 ): Promise<Tool> {
   return apiRequest<Tool>(`/api/v1/admin/tools/${encodeURIComponent(name)}`, {
     method: "PUT",
@@ -91,6 +93,7 @@ async function uploadToolPackage(
   if (!isUpdate) formData.append("name", input.name);
   if (input.title) formData.append("title", input.title);
   if (input.description) formData.append("description", input.description);
+  if (input.descriptionEn) formData.append("descriptionEn", input.descriptionEn);
 
   const blob = new Blob([new Uint8Array(input.fileBuffer)]);
   formData.append("file", blob, input.fileName);

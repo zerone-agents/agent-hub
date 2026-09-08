@@ -319,3 +319,46 @@ func TestToolHandler_AgentToolsAgentMissing404(t *testing.T) {
 	r.ServeHTTP(resp2, httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/NoSuchAgent/tools", nil))
 	require.Equal(t, http.StatusNotFound, resp2.Code)
 }
+
+// ---------- issue #93：descriptionEn 展示元数据的 Create form / Update JSON 绑定 ----------
+
+// TestToolHandler_CreateAcceptsDescriptionEnFormField 锁定 multipart 表单
+// descriptionEn 字段经 handler → service → ToolDTO 透传（响应 data.descriptionEn）。
+func TestToolHandler_CreateAcceptsDescriptionEnFormField(t *testing.T) {
+	r := setupToolHandlerRouter(t)
+	req := multipartToolRequest(t, map[string]string{"name": "calc", "descriptionEn": "Arithmetic tool"}, "file", "calc.ts", "export default { name: 'calc' }")
+	req.URL.Path = "/api/v1/admin/tools"
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusCreated, resp.Code)
+
+	var body struct {
+		Success bool `json:"success"`
+		Data    struct {
+			DescriptionEn string `json:"descriptionEn"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	require.True(t, body.Success)
+	require.Equal(t, "Arithmetic tool", body.Data.DescriptionEn)
+}
+
+// TestToolHandler_UpdateAcceptsDescriptionEnJSON 锁定 JSON PUT 的 descriptionEn
+// 经 ShouldBindJSON（UpdateToolInput json tag）自动绑定，响应与 GET 回读一致。
+func TestToolHandler_UpdateAcceptsDescriptionEnJSON(t *testing.T) {
+	r := setupToolHandlerRouter(t)
+	require.NoError(t, database.GetDB().Create(&agent.Tool{Name: "calc", TenantID: "tenant-a", Source: agent.ToolSourceCustom}).Error)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/tools/calc", bytes.NewBufferString(`{"descriptionEn":"Calculator v2"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+	require.Contains(t, resp.Body.String(), `"descriptionEn":"Calculator v2"`)
+
+	// GET 回读确认已持久化
+	resp2 := httptest.NewRecorder()
+	r.ServeHTTP(resp2, httptest.NewRequest(http.MethodGet, "/api/v1/admin/tools/calc", nil))
+	require.Equal(t, http.StatusOK, resp2.Code)
+	require.Contains(t, resp2.Body.String(), `"descriptionEn":"Calculator v2"`)
+}
