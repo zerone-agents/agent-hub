@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
 	providerdomain "control-panel/internal/domain/provider"
@@ -52,6 +54,11 @@ type DeploymentDTO struct {
 	Message     string `json:"message"`
 	HostPort    int    `json:"hostPort"`
 	APIKey      string `json:"apiKey"`
+
+	// PendingArtifactUpdates 是该 Agent 相对最近一次成功部署的待更新工件
+	// （issue #86）：nil = 未部署/无快照（JSON null）；恒数组结构
+	// {tools, skills}，空数组 = 无差异。
+	PendingArtifactUpdates *PendingArtifactUpdates `json:"pendingArtifactUpdates"`
 }
 
 // agentRepository defines the methods needed from the agent repository.
@@ -71,6 +78,14 @@ type toolRepository interface {
 type skillRepository interface {
 	GetAgentSkills(agentID uint64) ([]string, error)
 	GetAgentSkillsFull(agentID uint64) ([]*skill.Skill, error)
+}
+
+// snapshotRepository defines the methods needed from the deployment snapshot
+// repository (issue #86): one row per agent keyed by AgentID, upserted on
+// every successful deploy. tenantID is only consulted on read (GetByAgent).
+type snapshotRepository interface {
+	Upsert(ctx context.Context, s *agent.DeploymentSnapshot) error
+	GetByAgent(ctx context.Context, tenantID string, agentID uint64) (*agent.DeploymentSnapshot, error)
 }
 
 // providerService defines the methods needed from the provider service.
@@ -110,6 +125,7 @@ type AgentDeployerService struct {
 	agentRepo        agentRepository
 	toolRepo         toolRepository
 	skillRepo        skillRepository
+	snapshotRepo     snapshotRepository
 	providerSvc      providerService
 	mcpSvc           mcpService
 	knowledgeSvc     knowledgeService
@@ -294,6 +310,7 @@ func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 		agentRepo:         repository.NewAgentRepository(),
 		toolRepo:          repository.NewToolRepository(),
 		skillRepo:         repository.NewSkillRepository(),
+		snapshotRepo:      repository.NewDeploymentSnapshotRepository(),
 		providerSvc:       NewProviderService(cfg.EncryptionKey),
 		mcpSvc:            NewMcpService(cfg.EncryptionKey),
 		knowledgeSvc:      cfg.KnowledgeSvc,
@@ -472,6 +489,20 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	agentCfg.RuntimeToken = encryptedToken
 	if err := s.updateStatus(tenantID, agentCfg, resp.Status, resp.HostPort, &deployedAt); err != nil {
 		return nil, fmt.Errorf("update deployment status failed: %w", err)
+	}
+
+	// Record the artifact hash snapshot on the success path (issue #86) — but
+	// ONLY when the deployer actually created a new container (HTTP 201,
+	// review P1/P2): an idempotent create (HTTP 200) reuses the running
+	// container with the OLD artifacts, so advancing the snapshot would
+	// wrongly clear the pending marker. The HTTP status is the authoritative
+	// create-vs-reuse signal — no pre-create probe, so concurrent deploys
+	// cannot race a stale container-id read (review P2). A write failure is
+	// logged, not fatal — the next successful deploy repairs it.
+	if resp.HTTPStatus == http.StatusCreated {
+		s.writeArtifactSnapshot(ctx, tenantID, agentCfg.ID, req, deployedAt)
+	} else {
+		log.Printf("deploy %s: idempotent create (HTTP %d), artifact snapshot kept", key, resp.HTTPStatus)
 	}
 
 	dto := s.toDTO(tenantID, name, resp.Status, "", resp.ContainerName, resp.ContainerID, resp.HostPort, &deployedAt, "")
@@ -1127,6 +1158,136 @@ func (s *AgentDeployerService) buildCreateRequest(
 	s.applyHub(req, tenantID)
 
 	return req, nil
+}
+
+// collectArtifactHashes 从已构建的部署请求图中收集全部工件哈希（root +
+// 一层 subagent），与下发内容同源（req.Agents 即 deployer 收到的图）。
+func collectArtifactHashes(req *deployer.CreateAgentRequest) (map[string]string, map[string]string) {
+	toolHashes := map[string]string{}
+	skillHashes := map[string]string{}
+	for i := range req.Agents {
+		for _, t := range req.Agents[i].CustomTools {
+			toolHashes[t.Name] = t.Hash
+		}
+		for _, s := range req.Agents[i].Skills {
+			skillHashes[s.Name] = s.Hash
+		}
+	}
+	return toolHashes, skillHashes
+}
+
+// writeArtifactSnapshot 在部署成功路径写入/覆盖快照。写入失败仅记日志，
+// 不阻断部署流程（下次成功部署自动修正）。
+func (s *AgentDeployerService) writeArtifactSnapshot(ctx context.Context, tenantID string, agentID uint64, req *deployer.CreateAgentRequest, deployedAt time.Time) {
+	if s.snapshotRepo == nil {
+		return
+	}
+	toolHashes, skillHashes := collectArtifactHashes(req)
+	if err := s.snapshotRepo.Upsert(ctx, &agent.DeploymentSnapshot{
+		AgentID:     agentID,
+		TenantID:    tenantID,
+		DeployedAt:  deployedAt,
+		ToolHashes:  toolHashes,
+		SkillHashes: skillHashes,
+	}); err != nil {
+		log.Printf("write artifact snapshot failed for agent %s: %v", tenantID+"/"+req.RootAgentID, err)
+	}
+}
+
+// PendingArtifactUpdates 是一个 Agent 的待更新工件清单（issue #86）：
+// 快照哈希集合 vs 当前绑定哈希集合的差集。Tools/Skills 恒为数组（JSON
+// 空数组 = 无差异），nil 指针保留给「未部署/无快照」场景。
+type PendingArtifactUpdates struct {
+	Tools  []string `json:"tools"`
+	Skills []string `json:"skills"`
+}
+
+// AgentPendingArtifacts 计算一个 Agent 的待更新工件（issue #86）。
+// 数据源：最近快照哈希集合 vs 当前绑定哈希集合（source=custom && ready 过滤
+// 与部署组装同源）。返回 nil,nil 表示无快照（未部署过）。
+func (s *AgentDeployerService) ComputePendingArtifacts(ctx context.Context, tenantID string, agentID uint64) (*PendingArtifactUpdates, error) {
+	snap, err := s.snapshotRepo.GetByAgent(ctx, tenantID, agentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load artifact snapshot failed: %w", err)
+	}
+
+	curTools := map[string]string{}
+	curSkills := map[string]string{}
+	collect := func(id uint64) error {
+		toolRecords, err := s.toolRepo.GetToolRecordsByAgent(id)
+		if err != nil {
+			return fmt.Errorf("load tool records failed: %w", err)
+		}
+		for _, t := range toolRecords {
+			if t.Source != agent.ToolSourceCustom || t.ArtifactStatus() != agent.ToolArtifactReady {
+				continue
+			}
+			curTools[t.Name] = t.FileHash
+		}
+		skills, err := s.skillRepo.GetAgentSkillsFull(id)
+		if err != nil {
+			return fmt.Errorf("load skill records failed: %w", err)
+		}
+		for _, sk := range skills {
+			curSkills[sk.Name] = sk.FileHash
+		}
+		return nil
+	}
+
+	if err := collect(agentID); err != nil {
+		return nil, err
+	}
+
+	// 读侧遍历 subagent closure（写侧 collectArtifactHashes 同构，仅一层）：
+	// subagent 独有的 tool/skill 绑定哈希差异也必须报 pending。GetByName 失败
+	// （subagent 已删除等）按 fail-open 跳过该节点，不阻断其余节点比对。
+	subagentNames, err := s.agentRepo.GetSubagents(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load subagents failed: %w", err)
+	}
+	for _, name := range subagentNames {
+		sub, err := s.agentRepo.GetByName(tenantID, name)
+		if err != nil {
+			log.Printf("skip pending-artifact diff for unresolved subagent %q of agent %d: %v", name, agentID, err)
+			continue
+		}
+		if err := collect(sub.ID); err != nil {
+			return nil, err
+		}
+	}
+
+	return &PendingArtifactUpdates{
+		Tools:  diffNames(snap.ToolHashes, curTools),
+		Skills: diffNames(snap.SkillHashes, curSkills),
+	}, nil
+}
+
+// ComputePendingArtifactsByName 按 agent 名称解析 ID 后委托
+// ComputePendingArtifacts（handler 的 deploy-status 路径只有 name）。
+func (s *AgentDeployerService) ComputePendingArtifactsByName(ctx context.Context, tenantID, name string) (*PendingArtifactUpdates, error) {
+	cfg, err := s.agentRepo.GetByName(tenantID, name)
+	if err != nil {
+		return nil, fmt.Errorf("agent not found: %w", err)
+	}
+	return s.ComputePendingArtifacts(ctx, tenantID, cfg.ID)
+}
+
+// diffNames 返回 current 中存在、但 snapshot 缺失或哈希不同 的 key（排序稳定）。
+// 空集合返回空 slice（非 nil），保证 JSON 序列化为 [] 而非 null——与 spec
+// 「空数组 = 无差异」语义一致（null 保留给「未部署/无快照」）。
+func diffNames(snapshot, current map[string]string) []string {
+	out := make([]string, 0, len(current))
+	for name, hash := range current {
+		old, ok := snapshot[name]
+		if !ok || old != hash {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // appendMcpToolNames adds the SDK-qualified names of probed MCP tools to an

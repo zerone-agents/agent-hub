@@ -11,6 +11,17 @@ import { setAuthRole } from '@/test/auth-store-mock'
 
 vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
+// 轻量 spy：DeployModal 只消费 useQueryClient().invalidateQueries（用于重部署
+// 成功后失效 ['agents'] 列表缓存，见 I-2）。不引入 QueryClientProvider，避免
+// 扰动既有 19 个用例。
+const { invalidateQueriesMock } = vi.hoisted(() => ({
+  invalidateQueriesMock: vi.fn(),
+}))
+
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
+}))
+
 vi.mock('@/api/agents', () => ({
   agentApi: {
     deploy: vi.fn(),
@@ -67,6 +78,7 @@ const mockResponse = <T,>(data: T) => ({ data: { data, success: true } })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  invalidateQueriesMock.mockClear()
   setAuthRole('admin')
 })
 
@@ -217,6 +229,26 @@ describe('DeployModal', () => {
       // handleDeploy() is invoked with no argument; the defaults
       // `force = false` and `rotateKey = false` are what reach agentApi.deploy.
       expect(agentApi.deploy).toHaveBeenCalledWith('general', false, false)
+    })
+  })
+
+  it('invalidates the agents list query after a successful deploy (I-2)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(mockResponse(makeStatus({ status: 'not_found' })) as never)
+    vi.mocked(agentApi.deploy).mockResolvedValue(mockResponse({}) as never)
+
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /部署/ })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /部署/ }))
+
+    // Badge 数据来自列表页 ['agents'] 缓存（useAgents 无轮询）：重部署成功后
+    // 必须立即失效缓存，否则关闭 modal 后卡片 Badge 残留「待更新」。
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
     })
   })
 
@@ -404,5 +436,46 @@ describe('DeployModal live status', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('DeployModal pending artifacts', () => {
+  it('shows pending artifact list when deployment has pending updates', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: ['calc'], skills: ['qa'] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    expect(await screen.findByText(/calc/)).toBeInTheDocument()
+    expect(screen.getByText(/qa/)).toBeInTheDocument()
+    // II-4：每段各自带「已更新」，再统一尾句（双段不得只落在后段）。
+    expect(
+      screen.getByText('Tools: calc 已更新；Skills: qa 已更新，运行中 Agent 仍为旧版，重新部署后生效')
+    ).toBeInTheDocument()
+  })
+
+  it('keeps unified tail sentence for single-segment lists (II-4)', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: ['calc'], skills: [] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    expect(
+      // 单段：段自带「已更新」后直接接统一尾句，无「；」拼接。
+      await screen.findByText('Tools: calc 已更新，运行中 Agent 仍为旧版，重新部署后生效')
+    ).toBeInTheDocument()
+  })
+
+  it('hides pending list when deployment has none', async () => {
+    vi.mocked(agentApi.getDeployment).mockResolvedValue(
+      mockResponse(makeStatus({ status: 'running', health: 'healthy',
+        pendingArtifactUpdates: { tools: [], skills: [] } })) as never
+    )
+    render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+    // 等状态加载：不用 findByText(/健康/)（brief 原文）——healthy 时步骤标题
+    // 「健康检查通过」与状态行「容器运行中 · 健康检查通过」同时命中该正则，
+    // testing-library 报 multiple elements；改用状态行 testid（本文件既有先例）。
+    await screen.findByTestId('deploy-status-line')
+    expect(screen.queryByText(/仍为旧版/)).not.toBeInTheDocument()
   })
 })

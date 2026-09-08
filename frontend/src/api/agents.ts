@@ -26,6 +26,12 @@ export interface AgentConfig {
   updatedAt?: string
 }
 
+/** 已部署工件与最新配置的差异（#86）。null=未部署/无快照，空数组=无差异。 */
+export interface PendingArtifactUpdates {
+  tools: string[]
+  skills: string[]
+}
+
 export interface DeploymentStatus {
   /** Known values: running, stopped, exited, not_found, error, unknown. May include other Docker container states. */
   status: string
@@ -36,6 +42,7 @@ export interface DeploymentStatus {
   deployedAt?: string
   message?: string
   apiKey?: string
+  pendingArtifactUpdates?: PendingArtifactUpdates | null
 }
 
 export interface Agent {
@@ -57,6 +64,7 @@ export interface Agent {
   group?: string
   createdAt?: string
   updatedAt?: string
+  pendingArtifactUpdates?: PendingArtifactUpdates | null
 }
 
 export const agentApi = {

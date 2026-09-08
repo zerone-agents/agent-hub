@@ -252,7 +252,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 func deployGraphParent(t *testing.T, fx *graphFixture) (map[string]any, *deployTokenFixture) {
 	t.Helper()
 	f := &deployTokenFixture{}
-	srv := newDeployTokenServer(t, false, f)
+	srv := newDeployTokenServer(t, false, false, f)
 	t.Cleanup(srv.Close)
 	s := fx.world.service(t, srv.URL)
 	if _, err := s.Deploy("tenant-a", "parent", false, false); err != nil {
@@ -524,7 +524,7 @@ func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 			tc.mutate(fx)
 
 			f := &deployTokenFixture{}
-			srv := newDeployTokenServer(t, false, f)
+			srv := newDeployTokenServer(t, false, false, f)
 			t.Cleanup(srv.Close)
 			s := fx.world.service(t, srv.URL)
 
@@ -586,7 +586,7 @@ func TestDeploy_FailFastOnCapabilityArtifacts(t *testing.T) {
 			tc.mutate(fx)
 
 			f := &deployTokenFixture{}
-			srv := newDeployTokenServer(t, false, f)
+			srv := newDeployTokenServer(t, false, false, f)
 			t.Cleanup(srv.Close)
 			s := fx.world.service(t, srv.URL)
 
