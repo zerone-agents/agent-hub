@@ -4,6 +4,7 @@ package services
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"control-panel/internal/domain/agent"
 )
@@ -36,25 +37,30 @@ func TestResolveAllowlistMatrix(t *testing.T) {
 		method  string
 		decoded string
 		wantOK  bool
-		timeout string // "plain" | "file" | "sse" | ""
+		timeout time.Duration // 期望超时：plain=120s、file=10min、sse=0
 	}{
-		{"health", "GET", "/health", true, "plain"},
-		{"agents list", "GET", "/v1/agents", true, "plain"},
-		{"agent detail", "GET", "/v1/agents/my-agent", true, "plain"},
-		{"sse run", "POST", "/v1/agents/my-agent/runs", true, "sse"},
-		{"cancel", "POST", "/v1/runs/run-123/cancel", true, "plain"},
-		{"sessions", "GET", "/v1/sessions", true, "plain"},
-		{"session detail", "GET", "/v1/sessions/s-1", true, "plain"},
-		{"session delete", "DELETE", "/v1/sessions/s-1", true, "plain"},
-		{"files list", "GET", "/v1/files", true, "plain"},
-		{"file get", "GET", "/v1/files/content", true, "file"},
-		{"file head", "HEAD", "/v1/files/content", true, "file"},
-		{"metrics excluded", "GET", "/v1/metrics", false, ""},
-		{"cron excluded", "POST", "/v1/cron/jobs", false, ""},
-		{"bare root excluded", "GET", "/", false, ""},
-		{"unknown path", "GET", "/v1/unknown", false, ""},
-		{"method mismatch 405", "POST", "/health", false, ""},
-		{"method mismatch on files", "PUT", "/v1/files/content", false, ""},
+		{"health", "GET", "/health", true, 120 * time.Second},
+		{"agents list", "GET", "/v1/agents", true, 120 * time.Second},
+		{"agent detail", "GET", "/v1/agents/my-agent", true, 120 * time.Second},
+		{"sse run", "POST", "/v1/agents/my-agent/runs", true, 0},
+		{"cancel", "POST", "/v1/runs/run-123/cancel", true, 120 * time.Second},
+		{"sessions", "GET", "/v1/sessions", true, 120 * time.Second},
+		{"session detail", "GET", "/v1/sessions/s-1", true, 120 * time.Second},
+		{"session delete", "DELETE", "/v1/sessions/s-1", true, 120 * time.Second},
+		{"files list", "GET", "/v1/files", true, 120 * time.Second},
+		{"file get", "GET", "/v1/files/content", true, 10 * time.Minute},
+		{"file head", "HEAD", "/v1/files/content", true, 10 * time.Minute},
+		{"metrics excluded", "GET", "/v1/metrics", false, 0},
+		{"cron excluded", "POST", "/v1/cron/jobs", false, 0},
+		{"bare root excluded", "GET", "/", false, 0},
+		{"unknown path", "GET", "/v1/unknown", false, 0},
+		{"method mismatch 405", "POST", "/health", false, 0},
+		{"method mismatch on files", "PUT", "/v1/files/content", false, 0},
+		// 尾斜杠/空段：不得被 :param 模式吞掉（issue #91，T3 锁定现状）。
+		{"trailing slash 404", "GET", "/v1/agents/", false, 0},
+		{"empty segment 404", "GET", "/v1//agents", false, 0},
+		{"double slash 404", "GET", "/v1/agents//my-agent", false, 0},
+		{"file trailing slash 404", "GET", "/v1/files/content/", false, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,11 +81,11 @@ func TestResolveAllowlistMatrix(t *testing.T) {
 			if pe != nil {
 				t.Fatalf("unexpected error: %v", pe)
 			}
-			if d.Timeout == 0 && !d.IsSSE {
-				t.Fatalf("plain/file endpoints must carry a timeout, got 0")
+			if d.Timeout != tc.timeout {
+				t.Fatalf("%s: timeout = %v, want %v", tc.name, d.Timeout, tc.timeout)
 			}
-			if tc.timeout == "sse" != d.IsSSE {
-				t.Fatalf("IsSSE = %v, want %v", d.IsSSE, tc.timeout == "sse")
+			if d.IsSSE != (tc.timeout == 0) {
+				t.Fatalf("%s: IsSSE = %v, want %v", tc.name, d.IsSSE, tc.timeout == 0)
 			}
 		})
 	}
