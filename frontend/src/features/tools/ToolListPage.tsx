@@ -171,7 +171,7 @@ export default function ToolListPage() {
     } else {
       const kw = keywords.toLowerCase()
       result = tools.filter((tool) => {
-        const fields = [tool.title, tool.name, tool.description]
+        const fields = [tool.title, tool.name, tool.description, tool.descriptionEn ?? '']
         return fields.some((f) => f.toLowerCase().includes(kw))
       })
     }

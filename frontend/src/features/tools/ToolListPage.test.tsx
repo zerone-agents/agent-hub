@@ -96,4 +96,21 @@ describe('ToolListPage', () => {
     // Bash / Legacy 的 descriptionEn 为空 → 回退显示 description
     expect(screen.getAllByText('d')).toHaveLength(2)
   })
+
+  it('#93 follow-up: search matches English description (descriptionEn)', async () => {
+    const user = userEvent.setup()
+    renderToolListPage()
+    await screen.findByText('SayHello')
+
+    // 键入英文描述关键词并回车触发搜索（NameSearch 默认回车/按钮触发）
+    const box = screen.getByPlaceholderText('搜索工具名称')
+    await user.type(box, 'Greeting')
+    await user.keyboard('{Enter}')
+
+    // SayHello 的 descriptionEn 含 Greeting → 英文关键词命中
+    expect(screen.getByText('SayHello')).toBeInTheDocument()
+    expect(screen.getByText('Greeting tool')).toBeInTheDocument()
+    // Bash（descriptionEn 为空）无英文可匹配 → 被过滤
+    expect(screen.queryByText('执行命令')).not.toBeInTheDocument()
+  })
 })
