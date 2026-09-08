@@ -26,8 +26,8 @@ type fakeRuntime struct {
 	lastPath      string
 	lastQuery     string
 	lastHeader    http.Header
-	lastHost      string // upstream 收到的请求 Host（net/http 的 r.Header 不含 Host，独立字段）
-	lastBody      []byte // "/" handler 最近一次收到的请求 body（POST 透传断言）
+	lastHost      string      // upstream 收到的请求 Host（net/http 的 r.Header 不含 Host，独立字段）
+	lastBody      []byte      // "/" handler 最近一次收到的请求 body（POST 透传断言）
 	lastFileRange string      // /v1/files/content 收到的 Range 头
 	body          chan string // SSE chunk 管道
 	gotCancel     chan struct{}
