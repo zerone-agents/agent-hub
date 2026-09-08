@@ -70,6 +70,7 @@ func setupSubagentToolsTestDB(t *testing.T) *gorm.DB {
 			tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 			title VARCHAR(128) DEFAULT '',
 			description TEXT,
+			description_en TEXT,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			source VARCHAR(16) NOT NULL DEFAULT 'custom',
 			file_name VARCHAR(255),

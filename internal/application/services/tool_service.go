@@ -115,6 +115,7 @@ type ToolDTO struct {
 	Name           string `json:"name"`
 	Title          string `json:"title"`
 	Description    string `json:"description"`
+	DescriptionEn  string `json:"descriptionEn"`
 	IsDefault      bool   `json:"isDefault"`
 	Source         string `json:"source"`
 	ArtifactStatus string `json:"artifactStatus"`
@@ -132,6 +133,7 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 		Name:           t.Name,
 		Title:          t.Title,
 		Description:    t.Description,
+		DescriptionEn:  t.DescriptionEn,
 		IsDefault:      t.IsDefault,
 		Source:         t.Source,
 		ArtifactStatus: t.ArtifactStatus(),
@@ -149,15 +151,17 @@ func toolToDTO(t *agent.Tool) *ToolDTO {
 
 // CreateCustomToolInput 创建请求：展示元数据 + 内嵌制品三元组（ToolFileInput）。
 type CreateCustomToolInput struct {
-	Name        string
-	Title       string
-	Description string
+	Name          string
+	Title         string
+	Description   string
+	DescriptionEn string
 	ToolFileInput
 }
 
 type UpdateToolInput struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
+	Title         *string `json:"title"`
+	Description   *string `json:"description"`
+	DescriptionEn *string `json:"descriptionEn"`
 }
 
 func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
@@ -221,14 +225,15 @@ func (s *ToolService) CreateCustomTool(tenantID string, input *CreateCustomToolI
 		return nil, fmt.Errorf("upload tool file failed: %w", err)
 	}
 	t := &agent.Tool{
-		Name:        input.Name,
-		Title:       input.Title,
-		Description: input.Description,
-		Source:      agent.ToolSourceCustom,
-		FileName:    input.FileName,
-		FileURL:     ossKey,
-		FileHash:    hash,
-		FileSize:    int64(len(data)),
+		Name:          input.Name,
+		Title:         input.Title,
+		Description:   input.Description,
+		DescriptionEn: input.DescriptionEn,
+		Source:        agent.ToolSourceCustom,
+		FileName:      input.FileName,
+		FileURL:       ossKey,
+		FileHash:      hash,
+		FileSize:      int64(len(data)),
 	}
 	if err := s.repo.Create(tenantID, t); err != nil {
 		_ = s.uploader.Delete(ctx, ossKey)
@@ -251,6 +256,9 @@ func (s *ToolService) Update(tenantID, name string, input *UpdateToolInput) (*To
 	}
 	if input.Description != nil {
 		t.Description = *input.Description
+	}
+	if input.DescriptionEn != nil {
+		t.DescriptionEn = *input.DescriptionEn
 	}
 	if err := s.repo.Update(tenantID, t); err != nil {
 		return nil, fmt.Errorf("update tool failed: %w", err)
