@@ -89,3 +89,55 @@ func TestSeedBuiltins_PreservesExistingSkillWhenAddingTasks(t *testing.T) {
 		assert.Equal(t, name, got.Name)
 	}
 }
+
+// TestBackfillBuiltinDescriptionEn_FillsEmptyOnly 覆盖 issue #93 存量路径：
+// 已存在的内置行 description_en 为空时回填预设英文；非空行不动；
+// 用户自定义 title/description 绝不被覆盖；二次执行幂等。
+func TestBackfillBuiltinDescriptionEn_FillsEmptyOnly(t *testing.T) {
+	db := setupToolServiceTestDB(t)
+	svc := NewToolService(nil)
+
+	// 存量形态：Skill 行已存在（含用户改动过的自定义 title），description_en 为空
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Skill", Title: "我的技能", Description: "自定义中", Source: agent.ToolSourceBuiltin,
+	}).Error)
+	// Bash 行已存在且已有英文（模拟已补齐）——回填不得动它
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Bash", Title: "执行命令", Description: "中文", DescriptionEn: "existing-en", Source: agent.ToolSourceBuiltin,
+	}).Error)
+
+	require.NoError(t, svc.BackfillBuiltinDescriptionEn())
+	require.NoError(t, svc.BackfillBuiltinDescriptionEn()) // 幂等
+
+	repo := repository.NewToolRepository()
+	skill, err := repo.GetByName("", "Skill")
+	require.NoError(t, err)
+	assert.Equal(t, "我的技能", skill.Title, "回填不得覆盖用户自定义 title")
+	assert.Equal(t, "自定义中", skill.Description, "回填不得覆盖 description")
+	if skill.DescriptionEn == "" {
+		t.Fatal("Skill 的 description_en 必须被回填")
+	}
+
+	// Bash 行英文已存在 → 保持原值
+	bash, err := repo.GetByName("", "Bash")
+	require.NoError(t, err)
+	assert.Equal(t, "existing-en", bash.DescriptionEn, "非空 description_en 不得被覆盖")
+}
+
+// TestBackfillBuiltinDescriptionEn_CoversAllPresets 断言 18 条预设全部有英文。
+func TestBackfillBuiltinDescriptionEn_CoversAllPresets(t *testing.T) {
+	db := setupToolServiceTestDB(t)
+	svc := NewToolService(nil)
+	for _, p := range presetToolSpecs { // 与实现同包，直接引用
+		require.NoError(t, db.Create(&agent.Tool{Name: p.tool.Name, Title: "t", Description: "d", Source: agent.ToolSourceBuiltin}).Error)
+	}
+	require.NoError(t, svc.BackfillBuiltinDescriptionEn())
+	repo := repository.NewToolRepository()
+	for _, p := range presetToolSpecs {
+		got, err := repo.GetByName("", p.tool.Name)
+		require.NoError(t, err)
+		if got.DescriptionEn == "" {
+			t.Errorf("%s 缺英文描述", p.tool.Name)
+		}
+	}
+}
