@@ -102,6 +102,48 @@ describe("tool list command", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("shows descriptionEn in table, falling back to description when absent", async () => {
+    const fakeTools = [
+      {
+        id: 1,
+        name: "calculator",
+        title: "Calculator",
+        description: "数学工具",
+        descriptionEn: "Math tool",
+        isDefault: true,
+      },
+      {
+        id: 2,
+        name: "weather",
+        title: "Weather",
+        description: "天气工具",
+        isDefault: false,
+      },
+    ];
+    setupFetchMock(fakeTools);
+
+    const { ToolListCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolListCommand();
+    (cmd as any).output = "table";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const out = logs.join("\n");
+    expect(out).toContain("Math tool");
+    expect(out).not.toContain("数学工具");
+    expect(out).toContain("天气工具");
+  });
+
   test("defaults to table output", async () => {
     const fakeTools = [
       {
@@ -202,6 +244,41 @@ describe("tool get command", () => {
     expect(out).toContain("isDefault: true");
     expect(out).toContain("createdAt");
     expect(out).toContain("updatedAt");
+  });
+
+  test("prints tool details in yaml including descriptionEn", async () => {
+    const fakeTool = {
+      id: 1,
+      name: "calculator",
+      title: "Calculator",
+      description: "数学工具",
+      descriptionEn: "Math tool",
+      isDefault: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    setupFetchMock(fakeTool);
+
+    const { ToolGetCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolGetCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).output = "yaml";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const out = logs.join("\n");
+    expect(out).toContain("description: 数学工具");
+    expect(out).toContain("descriptionEn: Math tool");
   });
 
   test("defaults to yaml output", async () => {
@@ -356,6 +433,54 @@ describe("tool create command", () => {
     expect(calls[0][1].method).toBe("POST");
     expect(calls[0][1].body).toBeInstanceOf(FormData);
     expect(calls[0][1].body.get("name")).toBe("weather");
+    const file = calls[0][1].body.get("file");
+    expect((file as File).name).toBe("tool.ts");
+  });
+
+  test("sends POST with descriptionEn from --json metadata", async () => {
+    const fakeTool = {
+      id: 2,
+      name: "weather",
+      title: "Weather",
+      description: "天气工具",
+      descriptionEn: "Weather tool",
+      isDefault: false,
+    };
+    const fetchMock = setupFetchMock(fakeTool);
+    const sourcePath = writeTempSource("export const x = 1;\n");
+
+    const { ToolCreateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolCreateCommand();
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({
+      name: "weather",
+      title: "Weather",
+      description: "天气工具",
+      descriptionEn: "Weather tool",
+    });
+    (cmd as any).source = sourcePath;
+    (cmd as any).output = "yaml";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools");
+    expect(calls[0][1].method).toBe("POST");
+    expect(calls[0][1].body).toBeInstanceOf(FormData);
+    expect(calls[0][1].body.get("name")).toBe("weather");
+    expect(calls[0][1].body.get("title")).toBe("Weather");
+    expect(calls[0][1].body.get("description")).toBe("天气工具");
+    expect(calls[0][1].body.get("descriptionEn")).toBe("Weather tool");
     const file = calls[0][1].body.get("file");
     expect((file as File).name).toBe("tool.ts");
   });
@@ -530,6 +655,46 @@ describe("tool update command", () => {
     expect(calls[0][1].method).toBe("PUT");
     expect(calls[0][1].body.title).toBe("Calculator Pro");
     expect(calls[0][1].body.description).toBe("Advanced math tool");
+  });
+
+  test("sends PUT with title + descriptionEn from --json", async () => {
+    const fakeTool = {
+      id: 1,
+      name: "calculator",
+      title: "Calculator Pro",
+      description: "高级数学工具",
+      descriptionEn: "Advanced math tool",
+      isDefault: true,
+    };
+    const fetchMock = setupFetchMock(fakeTool);
+
+    const { ToolUpdateCommand } = await import(
+      `../../src/commands/tool.ts?t=${Date.now()}`
+    );
+    const cmd = new ToolUpdateCommand();
+    (cmd as any).name = "calculator";
+    (cmd as any).file = undefined;
+    (cmd as any).json = JSON.stringify({
+      title: "Calculator Pro",
+      descriptionEn: "Advanced math tool",
+    });
+    (cmd as any).output = "yaml";
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (s: string) => logs.push(s);
+    try {
+      const code = await cmd.execute();
+      expect(code).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const calls = fetchMock.mock.calls as any[][];
+    expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator");
+    expect(calls[0][1].method).toBe("PUT");
+    expect(calls[0][1].body.title).toBe("Calculator Pro");
+    expect(calls[0][1].body.descriptionEn).toBe("Advanced math tool");
   });
 
   test("rejects unknown metadata fields with exit 2 and does not send a request", async () => {
