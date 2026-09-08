@@ -130,7 +130,7 @@ describe('ToolForm', () => {
       target: { files: [new File(['export {}'], 'Hello.ts', { type: 'text/typescript' })] }
     })
     await user.click(screen.getByRole('button', { name: /上\s*传/ }))
-    await waitFor(() =>
+    await waitFor(() => {
       expect(createCustomToolMock).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'SayHello',
@@ -138,7 +138,7 @@ describe('ToolForm', () => {
           descriptionEn: 'Greeting tool'
         })
       )
-    )
+    })
   })
 
   it('#93: edit submit passes descriptionEn through', async () => {
@@ -149,13 +149,13 @@ describe('ToolForm', () => {
     await user.clear(enField)
     await user.type(enField, 'Greeting tool v2')
     await user.click(screen.getByRole('button', { name: /更\s*新/ }))
-    await waitFor(() =>
+    await waitFor(() => {
       expect(updateToolMock).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'SayHello',
           data: expect.objectContaining({ descriptionEn: 'Greeting tool v2' })
         })
       )
-    )
+    })
   })
 })

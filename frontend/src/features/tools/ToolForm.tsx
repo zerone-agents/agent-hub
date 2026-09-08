@@ -198,6 +198,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
           name: editingTool.name,
           title: editingTool.title || '',
           description: editingTool.description || '',
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- D2: empty EN string must also fall back to CN, `??` would pass it through
           descriptionEn: editingTool.descriptionEn || ''
         })
       }
