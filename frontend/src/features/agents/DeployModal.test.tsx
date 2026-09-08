@@ -247,15 +247,15 @@ describe('DeployModal', () => {
 
     // Badge 数据来自列表页 ['agents'] 缓存（useAgents 无轮询）：重部署成功后
     // 必须立即失效缓存，否则关闭 modal 后卡片 Badge 残留「待更新」。
+    // v5 前缀匹配：['agents'] 同时覆盖 ['agents', name, 'detail']（chat 页
+    // AgentDetailBar）——显式再失效 detail 会触发重复 refetch（P3）。
     await waitFor(() => {
       expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
     })
-    // chat 页 AgentDetailBar 计数来自 ['agents', name, 'detail']：部署后
-    // runtime 重建（tools/MCP/skills 数量可能变化），必须一并失效
-    // （issue #131 同源可观测性）。
-    await waitFor(() => {
-      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'general', 'detail'] })
-    })
+    const detailCalls = invalidateQueriesMock.mock.calls.filter(
+      (args: unknown[]) => (args[0] as { queryKey?: unknown[] | null }).queryKey?.[2] === 'detail'
+    )
+    expect(detailCalls).toHaveLength(0)
   })
 
   it('clicking stop triggers API call', async () => {

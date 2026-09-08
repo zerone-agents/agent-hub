@@ -400,11 +400,9 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       schedulePoll(POLL_FAST_MS)
       // 列表卡片 Badge 数据来自 ['agents'] React Query 缓存（useAgents 无轮询）：
       // 重部署成功后必须立即失效，否则关闭 modal 后卡片仍显示「待更新」（I-2）。
+      // v5 前缀匹配：['agents'] 已覆盖 ['agents', name, 'detail']（chat 页
+      // AgentDetailBar 在部署重建后同步刷新），无需显式失效 detail。
       void queryClient.invalidateQueries({ queryKey: ['agents'] })
-      // chat 页 AgentDetailBar 计数来自 ['agents', name, 'detail']：部署后
-      // runtime 重建（tools/MCP/skills 数量可能变化），必须一并失效
-      // （issue #131 同源可观测性）。
-      void queryClient.invalidateQueries({ queryKey: ['agents', agent.name, 'detail'] })
     } catch (e: unknown) {
       setError(parseApiError(e))
     } finally {
