@@ -50,6 +50,24 @@ const useStyles = createStyles(({ css }) => ({
   redacted: css`
     color: var(--mcp-tooltip-text-subtle);
   `,
+  // Failed-server error row (issue #131): amber to signal degraded
+  // capability without claiming the whole agent is unavailable.
+  errorRow: css`
+    color: #d48806;
+  `,
+  // Degraded marker on the trigger Tag (issue #131): a small amber dot so a
+  // failed server is visible at a glance without a red alarm.
+  degradedDot: css`
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 4px;
+    background: #d48806;
+  `,
+  degradedText: css`
+    color: #d48806;
+  `,
   // Tag styling for the trigger Tag (overrides antd default)
   triggerTag: css`
     cursor: help;
@@ -110,6 +128,11 @@ export function McpServerTooltipOverlay({ name, server }: Props) {
         <span>{name}</span>
         <span className={styles.transport}>{server.transport}</span>
       </div>
+      {server.error && (
+        <div className={styles.errorRow}>
+          <span role="img" aria-label="错误">⚠</span> {server.error}
+        </div>
+      )}
       {rows.map((r) => (
         <div key={r.k} className={styles.row}>
           <div className={styles.rowKey}>{r.k}</div>
@@ -125,13 +148,18 @@ export function McpServerTooltipOverlay({ name, server }: Props) {
 /**
  * Default export: a Tag that shows the MCP server name + transport, with
  * a Tooltip on hover revealing the (already-redacted) full configuration.
+ * A failed server (issue #131) gets an amber dot + "连接失败" marker so the
+ * degradation is visible at a glance without a red whole-agent alarm.
  */
 export default function McpServerTooltip({ name, server }: Props) {
   const { styles } = useStyles()
+  const degraded = server.connectionStatus === 'error' || server.error !== undefined
   return (
     <Tooltip title={<McpServerTooltipOverlay name={name} server={server} />} placement="bottom">
       <Tag className={styles.triggerTag} tabIndex={0}>
+        {degraded && <span className={styles.degradedDot} aria-label="连接失败" />}
         {name} · {server.transport}
+        {degraded && <span className={styles.degradedText}> 连接失败</span>}
       </Tag>
     </Tooltip>
   )

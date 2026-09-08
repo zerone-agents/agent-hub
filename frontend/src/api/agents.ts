@@ -135,6 +135,12 @@ export interface McpServerSummary {
   // sse / http-specific (only present when transport === 'sse' | 'http')
   url?: string
   headers?: Record<string, string>  // values pre-redacted to "***" by runtime
+  // Live per-server connection state (runtime issue #47 §4): a remote MCP
+  // being down degrades that server only — the agent stays ready, its
+  // status is NOT downgraded (runtime #73). "error" carries a sanitized
+  // reason in `error`; "connected" (or absent) means no known problem.
+  connectionStatus?: 'connected' | 'error'
+  error?: string                    // sanitized failure reason when connectionStatus === 'error'
 }
 
 export interface AgentDetailSkill {
