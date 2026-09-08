@@ -74,6 +74,9 @@ func TestResolveAllowlistMatrix(t *testing.T) {
 					if pe.Code != 405 {
 						t.Fatalf("want 405, got %d", pe.Code)
 					}
+					if pe.AllowHeader == "" {
+						t.Fatalf("405 must carry Allow header, got %q", pe.AllowHeader)
+					}
 				} else if pe.Code != 404 {
 					t.Fatalf("want 404, got %d (%s)", pe.Code, pe.Reason)
 				}
@@ -237,6 +240,8 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 	}
 
 	// method 不符时不返回路由，但 pathMatched 保留（潜语义注释所述）。
+	// 批次三（#91）：route 返回第一条 path 命中的路由（供 405 Allow 头），
+	// 不再是零值。
 	route, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
 	if !pathMatched {
 		t.Fatal("path matched flag must persist on method mismatch")
@@ -244,7 +249,10 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 	if methodOK {
 		t.Fatal("POST must not match GET-only route")
 	}
-	if route.pattern != "" {
-		t.Fatalf("no route may be returned on method mismatch, got %q", route.pattern)
+	if route.pattern != "/v1/agents/:id" {
+		t.Fatalf("method mismatch must carry first path-matched route, got %q", route.pattern)
+	}
+	if len(route.methods) != 1 || route.methods[0] != http.MethodGet {
+		t.Fatalf("first path-matched route methods = %v, want [GET]", route.methods)
 	}
 }

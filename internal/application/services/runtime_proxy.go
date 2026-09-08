@@ -23,6 +23,8 @@ type RuntimeProxyAgentRepo interface {
 type ProxyError struct {
 	Code   int
 	Reason string
+	// AllowHeader 是 405 响应的 Allow 头值（如 "GET, HEAD"）；仅 405 填充。
+	AllowHeader string
 }
 
 func (e *ProxyError) Error() string { return fmt.Sprintf("runtime proxy: %d %s", e.Code, e.Reason) }
@@ -106,7 +108,7 @@ func (s *RuntimeProxyService) Resolve(org, agentName, method, escapedRemainder, 
 		return nil, notFound
 	}
 	if !methodOK {
-		return nil, &ProxyError{Code: 405, Reason: "method not allowed"}
+		return nil, &ProxyError{Code: 405, Reason: "method not allowed", AllowHeader: strings.Join(route.methods, ", ")}
 	}
 	// Fail closed BEFORE any URL construction: DB may retain running state
 	// from before a config change (spec, round-5 finding).
@@ -137,9 +139,10 @@ func canonicalizePath(escaped, decoded string) (string, bool) {
 }
 
 // matchAllowlist 返回切片序中首个 method+path 均命中的路由。潜语义：path 命中但
-// method 不符时仍继续扫描且 pathMatched=true——当前矩阵无重叠路径（每个
-// pattern 唯一），故行为正确；未来新增与既有 pattern 重叠的模式时，切片序
-// 靠前的路由胜出（first match wins，非「取最后匹配行」），新增时需注意。
+// method 不符时仍继续扫描且 pathMatched=true、route 携带第一条 path 命中路由
+// （供 405 Allow 头，批次三 #91）——当前矩阵无重叠路径（每个 pattern 唯一），
+// 故行为正确；未来新增与既有 pattern 重叠的模式时，切片序靠前的路由胜出
+// （first match wins，非「取最后匹配行」），新增时需注意。
 func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodOK bool) {
 	req := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for _, r := range proxyAllowlist {
@@ -165,11 +168,14 @@ func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodO
 			continue
 		}
 		pathMatched = true
+		if route.pattern == "" {
+			route = r // 第一条 path 命中的路由；method 不符时返回供 Allow 头（#91 batch3）
+		}
 		for _, m := range r.methods {
 			if m == method {
 				return r, true, true
 			}
 		}
 	}
-	return proxyRoute{}, pathMatched, false
+	return route, pathMatched, false
 }
