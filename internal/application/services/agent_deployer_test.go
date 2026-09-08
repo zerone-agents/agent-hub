@@ -195,6 +195,11 @@ type deployTokenFixture struct {
 	postBody   []byte
 	postCalled bool
 	persisted  string
+	// getContainerID / createContainerID 控制 GET 探测与 POST 创建响应的
+	// containerId（issue #86 review P1）：真实重建时两者不同；idempotent
+	// 复用时 create 返回与 GET 相同的 id。默认不同（正常重建语义）。
+	getContainerID    string
+	createContainerID string
 }
 
 // newDeployTokenServer builds a mock deployer. getFound controls the GET
@@ -206,6 +211,14 @@ type deployTokenFixture struct {
 // with the v3.1.0 sentinel and kept out of the create capture.
 func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployTokenFixture) *httptest.Server {
 	t.Helper()
+	getCid := f.getContainerID
+	if getCid == "" {
+		getCid = "old-cid"
+	}
+	createCid := f.createContainerID
+	if createCid == "" {
+		createCid = "new-cid"
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
@@ -214,7 +227,7 @@ func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployToke
 				w.Write([]byte(`{"success":false,"error":"agent not found"}`))
 				return
 			}
-			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000}}`))
+			w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"` + getCid + `","status":"running","hostPort":3000}}`))
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
@@ -234,7 +247,7 @@ func newDeployTokenServer(t *testing.T, getFound, failCreate bool, f *deployToke
 		}
 		f.postCalled = true
 		f.postBody = body
-		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"id","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
+		w.Write([]byte(`{"success":true,"data":{"agentName":"general","containerName":"c","containerId":"` + createCid + `","status":"running","hostPort":3000,"runtimeToken":"echoed"}}`))
 	}))
 }
 
@@ -1054,6 +1067,113 @@ func (r *failingSnapshotRepo) Upsert(ctx context.Context, s *agent.DeploymentSna
 }
 func (r *failingSnapshotRepo) GetByAgent(ctx context.Context, tenantID string, agentID uint64) (*agent.DeploymentSnapshot, error) {
 	return nil, nil
+}
+
+// TestDeploy_IdempotentReuse_KeepsSnapshot is the issue #86 review P1
+// regression: an idempotent create (force=false) reuses the running container
+// with the OLD artifacts, so the pending marker must survive — the snapshot
+// must NOT be overwritten with the new request's hashes.
+func TestDeploy_IdempotentReuse_KeepsSnapshot(t *testing.T) {
+	snapRepo := newSnapshotTestRepo(t)
+	// 预置快照：上次成功部署的工件是 calc=old456（当前已更新为新的，尚未部署）
+	if err := snapRepo.Upsert(context.Background(), &agent.DeploymentSnapshot{
+		AgentID: 1, TenantID: "tenant-a", DeployedAt: time.Now(),
+		ToolHashes: map[string]string{"calc": "old456"},
+	}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// idempotent 复用：deployer 的 GET（旧容器探测）与 POST（create 响应）
+	// 返回同一个 containerId —— 容器没有重建，工件没有更换。
+	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-1"}
+	srv := newDeployTokenServer(t, true, false, f) // getFound=true 模拟已有容器
+	defer srv.Close()
+
+	providerID := uint64(1)
+	agentRepo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return &agent.AgentConfig{
+				ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo",
+				RuntimeToken: "0123456789abcdef0123456789abcdef",
+			}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error { return nil },
+	}
+	s := newTestAgentDeployerService(t, srv.URL, agentRepo, deployTokenProviderSvc())
+	// 当前工件已更新为 calc=new789（custom && ready）
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/abc", FileHash: "new789", FileSize: 10},
+	}}
+	s.cdnHost = "https://cdn.example.com"
+	s.snapshotRepo = snapRepo
+
+	dto, err := s.Deploy("tenant-a", "general", false, false) // force=false！复用旧容器
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if dto.Status != "running" {
+		t.Fatalf("status = %q", dto.Status)
+	}
+
+	snap, err := snapRepo.GetByAgent(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("snapshot lost: %v", err)
+	}
+	if got := snap.ToolHashes["calc"]; got != "old456" {
+		t.Fatalf("snapshot hash = %q, want old456 — idempotent reuse must keep the previous snapshot so the pending marker survives", got)
+	}
+}
+
+// TestDeploy_ContainerRecreated_WritesSnapshot covers the normal recreate
+// path: containerId changes between the pre-deploy probe and the create
+// response, so the snapshot must advance to the new hashes.
+func TestDeploy_ContainerRecreated_WritesSnapshot(t *testing.T) {
+	snapRepo := newSnapshotTestRepo(t)
+	// 预置快照：calc=old456
+	if err := snapRepo.Upsert(context.Background(), &agent.DeploymentSnapshot{
+		AgentID: 1, TenantID: "tenant-a", DeployedAt: time.Now(),
+		ToolHashes: map[string]string{"calc": "old456"},
+	}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// 正常重建：GET 返回 cid-1（旧容器）、POST 返回 cid-2（新容器）
+	f := &deployTokenFixture{getContainerID: "cid-1", createContainerID: "cid-2"}
+	srv := newDeployTokenServer(t, true, false, f)
+	defer srv.Close()
+
+	providerID := uint64(1)
+	agentRepo := &mockAgentRepo{
+		getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+			return &agent.AgentConfig{
+				ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-5-turbo",
+				RuntimeToken: "0123456789abcdef0123456789abcdef",
+			}, nil
+		},
+		updateFunc: func(tenantID string, a *agent.AgentConfig) error { return nil },
+	}
+	s := newTestAgentDeployerService(t, srv.URL, agentRepo, deployTokenProviderSvc())
+	s.toolRepo = &mockToolRepo{tools: []*agent.Tool{
+		{Name: "calc", Source: agent.ToolSourceCustom, FileName: "calc.ts", FileURL: "tools/acme/calc/abc", FileHash: "new789", FileSize: 10},
+	}}
+	s.cdnHost = "https://cdn.example.com"
+	s.snapshotRepo = snapRepo
+
+	dto, err := s.Deploy("tenant-a", "general", true, false)
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if dto.Status != "running" {
+		t.Fatalf("status = %q", dto.Status)
+	}
+
+	snap, err := snapRepo.GetByAgent(context.Background(), "tenant-a", 1)
+	if err != nil {
+		t.Fatalf("snapshot lost: %v", err)
+	}
+	if got := snap.ToolHashes["calc"]; got != "new789" {
+		t.Fatalf("snapshot hash = %q, want new789 — recreated container must advance the snapshot", got)
+	}
 }
 
 // TestDeploy_SnapshotWriteFailureDoesNotBlockDeploy covers the issue #86
