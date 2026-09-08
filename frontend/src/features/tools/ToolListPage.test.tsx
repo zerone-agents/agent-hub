@@ -13,7 +13,7 @@ vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).cr
 
 const mockTools: Tool[] = [
   { id: 1, name: 'Bash', title: '执行命令', description: 'd', isDefault: false, source: 'builtin', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-  { id: 2, name: 'SayHello', title: '问候', description: 'd', isDefault: false, source: 'custom', artifactStatus: 'ready', fileName: 'say.ts', fileHash: 'abcd1234abcd1234', fileSize: 1024, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+  { id: 2, name: 'SayHello', title: '问候', description: 'd', descriptionEn: 'Greeting tool', isDefault: false, source: 'custom', artifactStatus: 'ready', fileName: 'say.ts', fileHash: 'abcd1234abcd1234', fileSize: 1024, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
   { id: 3, name: 'Legacy', title: '存量', description: 'd', isDefault: false, source: 'custom', artifactStatus: 'missing', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' }
 ]
 
@@ -87,5 +87,13 @@ describe('ToolListPage', () => {
     expect(screen.queryAllByTitle('删除')).toHaveLength(0)
     expect(screen.queryAllByTitle('补传文件')).toHaveLength(0)
     expect(screen.queryAllByTitle('替换文件')).toHaveLength(0)
+  })
+
+  it('#93: shows descriptionEn when present, falls back to description otherwise', async () => {
+    renderToolListPage()
+    // SayHello 有 descriptionEn → 显示英文（英文优先，D2 决策）
+    expect(await screen.findByText('Greeting tool')).toBeInTheDocument()
+    // Bash / Legacy 的 descriptionEn 为空 → 回退显示 description
+    expect(screen.getAllByText('d')).toHaveLength(2)
   })
 })

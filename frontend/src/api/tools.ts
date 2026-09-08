@@ -5,6 +5,7 @@ export interface Tool {
   name: string
   title: string
   description: string
+  descriptionEn?: string
   isDefault: boolean
   source: string // 'builtin' | 'custom'
   artifactStatus?: string // 'ready' | 'missing'（custom 才有）
@@ -19,6 +20,7 @@ export interface CustomToolCreateInput {
   name: string
   title?: string
   description?: string
+  descriptionEn?: string
   file: File
 }
 
@@ -37,10 +39,11 @@ export const toolApi = {
     formData.append('name', data.name)
     if (data.title) formData.append('title', data.title)
     if (data.description) formData.append('description', data.description)
+    if (data.descriptionEn) formData.append('descriptionEn', data.descriptionEn)
     formData.append('file', data.file)
     return apiClient.post('/api/v1/admin/tools', formData, { headers: multipartHeaders })
   },
-  update: (name: string, data: { title?: string; description?: string }) =>
+  update: (name: string, data: { title?: string; description?: string; descriptionEn?: string }) =>
     apiClient.put(`/api/v1/admin/tools/${encodeURIComponent(name)}`, data),
   uploadFile: (name: string, file: File) => {
     const formData = new FormData()

@@ -16,7 +16,7 @@ export function useTools() {
 export function useCreateCustomTool() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { name: string; title?: string; description?: string; file: File }) =>
+    mutationFn: (data: { name: string; title?: string; description?: string; descriptionEn?: string; file: File }) =>
       toolApi.createCustom(data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tools'] })
@@ -41,7 +41,7 @@ export function useUploadToolFile() {
 export function useUpdateTool() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, data }: { name: string; data: { title?: string; description?: string } }) =>
+    mutationFn: ({ name, data }: { name: string; data: { title?: string; description?: string; descriptionEn?: string } }) =>
       toolApi.update(name, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tools'] })

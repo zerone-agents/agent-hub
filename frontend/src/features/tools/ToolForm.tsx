@@ -171,6 +171,7 @@ interface FormValues {
   name: string
   title: string
   description: string
+  descriptionEn: string
 }
 
 export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormProps) {
@@ -196,7 +197,8 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         form.setFieldsValue({
           name: editingTool.name,
           title: editingTool.title || '',
-          description: editingTool.description || ''
+          description: editingTool.description || '',
+          descriptionEn: editingTool.descriptionEn || ''
         })
       }
     }
@@ -248,6 +250,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         name: values.name,
         title: values.title,
         description: values.description,
+        descriptionEn: values.descriptionEn,
         file
       })
     } else {
@@ -255,7 +258,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
       // 先更新元数据，再（可选）上传替换文件
       await updateTool.mutateAsync({
         name: editingTool.name,
-        data: { title: values.title, description: values.description }
+        data: { title: values.title, description: values.description, descriptionEn: values.descriptionEn }
       })
       if (file) {
         await uploadToolFile.mutateAsync({ name: editingTool.name, file })
@@ -304,6 +307,9 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
             </Form.Item>
             <Form.Item label="功能描述" name="description">
               <Input.TextArea placeholder="描述此工具的功能用途" rows={3} />
+            </Form.Item>
+            <Form.Item label="Description (EN)" name="descriptionEn">
+              <Input.TextArea placeholder="Tool description in English (optional)" rows={3} />
             </Form.Item>
           </>
         )}
