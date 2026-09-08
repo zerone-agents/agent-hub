@@ -23,7 +23,7 @@ Thanks for your interest in contributing to agent-hub! 🎉
   - DB fields: `snake_case`
   - JSON fields: `camelCase` (exception: MCP protocol payloads — tool schemas, arguments, and tool-result JSON use `snake_case` per the MCP ecosystem convention and the pre-existing `knowledge_search` contract, e.g. `dataset_ids`/`top_k`)
   - Go fields: `PascalCase`
-- **i18n**: Core entities maintain both Chinese (`description`) and English (`descriptionEn`) fields; the runtime-facing tool description comes from the tool file itself (issue #88/#93)
+- **i18n**: Core entities maintain both Chinese (`description`) and English (`descriptionEn`) fields; the runtime-facing tool description comes from the tool file itself (issue #88/#93).
 - **Error messages**: User-facing errors in Chinese; internal errors in English with stack
 
 ## License
