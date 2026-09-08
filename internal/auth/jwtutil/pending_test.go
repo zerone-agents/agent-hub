@@ -240,6 +240,9 @@ func TestPendingApprovalGuardConfigWhitelist(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer any-jwt")
 			r.ServeHTTP(w, req)
 			require.Equal(t, tc.wantStatus, w.Code, "path=%s method=%s", tc.path, tc.method)
+			if tc.wantStatus == http.StatusOK {
+				assert.Contains(t, w.Body.String(), `"success":true`)
+			}
 			if tc.wantStatus == http.StatusForbidden {
 				assert.Contains(t, w.Body.String(), "PENDING_APPROVAL")
 			}

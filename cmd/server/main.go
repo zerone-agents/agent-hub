@@ -411,6 +411,7 @@ func main() {
 	// 外一律 403，前端据此渲染等待审批页；桌面 App 依赖这些端点完成
 	// 模型/Agent/SKILL 配置同步（未审批用户仅可读配置，不可写）。
 	// builtin 用户必有角色，guard 直接放行，行为零变化。
+	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
 	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
