@@ -482,7 +482,7 @@ func (s *ToolService) BackfillBuiltinDescriptionEn() error {
 		}
 		exists, err := s.repo.ExistsByName(sysTenant, p.tool.Name)
 		if err != nil {
-			return fmt.Errorf("检查内置 %s tool 失败: %w", p.tool.Name, err)
+			return fmt.Errorf("check builtin %s tool failed: %w", p.tool.Name, err)
 		}
 		if !exists {
 			continue // 空表首种由 SeedBuiltins/SeedIfEmpty 负责（已带英文）
@@ -496,7 +496,7 @@ func (s *ToolService) BackfillBuiltinDescriptionEn() error {
 		}
 		got.DescriptionEn = p.tool.DescriptionEn
 		if err := s.repo.Update(sysTenant, got); err != nil {
-			return fmt.Errorf("回填 %s description_en 失败: %w", p.tool.Name, err)
+			return fmt.Errorf("backfill %s description_en failed: %w", p.tool.Name, err)
 		}
 	}
 	return nil
