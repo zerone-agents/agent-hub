@@ -39,11 +39,13 @@ func TestPendingApprovalGuard(t *testing.T) {
 		{name: "白名单 /health/:service 放行", path: "/health/mysql", roles: []string{}, authMethod: "casdoor", setKeys: true, wantStatus: http.StatusOK},
 
 		// ---- 非白名单 + 空 roles + casdoor → 403 ----
-		{name: "casdoor 空 roles 访问业务 API 拦截", path: "/api/v1/agents", roles: []string{}, authMethod: "casdoor", setKeys: true, wantStatus: http.StatusForbidden, wantBlocked: true},
+		// 注：/api/v1/agents 的 GET 自 #132 起属配置白名单放行端点，
+		// 故拦截示例改用 /api/v1/scenes（非白名单业务 API，语义不变）。
+		{name: "casdoor 空 roles 访问业务 API 拦截", path: "/api/v1/scenes", roles: []string{}, authMethod: "casdoor", setKeys: true, wantStatus: http.StatusForbidden, wantBlocked: true},
 		{name: "casdoor 空 roles（nil）访问管理 API 拦截", path: "/api/v1/admin/users", roles: nil, authMethod: "casdoor", setKeys: true, wantStatus: http.StatusForbidden, wantBlocked: true},
 
 		// ---- 非白名单 + 空 roles + cli → 403（casdoor 用户的 cli token 同样拦截）----
-		{name: "cli 空 roles 访问业务 API 拦截", path: "/api/v1/agents", roles: []string{}, authMethod: "cli", setKeys: true, wantStatus: http.StatusForbidden, wantBlocked: true},
+		{name: "cli 空 roles 访问业务 API 拦截", path: "/api/v1/scenes", roles: []string{}, authMethod: "cli", setKeys: true, wantStatus: http.StatusForbidden, wantBlocked: true},
 
 		// ---- builtin → 放行（无待审批概念）----
 		{name: "builtin 空 roles 放行", path: "/api/v1/agents", roles: []string{}, authMethod: "builtin", setKeys: true, wantStatus: http.StatusOK},
@@ -134,11 +136,13 @@ func TestPendingApprovalGuardEndToEnd(t *testing.T) {
 			mode: "casdoor",
 		}
 		r := gin.New()
-		r.GET("/api/v1/agents", AuthMiddlewareWithCLI(nil, p), PendingApprovalGuard(), func(c *gin.Context) {
+		// 注：/api/v1/agents GET 自 #132 起属配置白名单放行端点，
+		// 拦截示例改用 /api/v1/scenes（非白名单业务 API，语义不变）。
+		r.GET("/api/v1/scenes", AuthMiddlewareWithCLI(nil, p), PendingApprovalGuard(), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true})
 		})
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/agents", "any-jwt"))
+		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/scenes", "any-jwt"))
 		require.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "PENDING_APPROVAL")
 	})
@@ -156,4 +160,56 @@ func TestPendingApprovalGuardEndToEnd(t *testing.T) {
 		r.ServeHTTP(w, newPendingRequestWithBearer("/api/v1/agents", "any-jwt"))
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+}
+
+// TestPendingApprovalGuardConfigWhitelist 覆盖 issue #132：空角色 casdoor/cli
+// 用户可读桌面配置端点（仅 GET），其余业务端点仍 403。
+func TestPendingApprovalGuardConfigWhitelist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		// ---- 放行：8 个配置端点 GET ----
+		{name: "providers 列表", method: http.MethodGet, path: "/api/v1/providers", wantStatus: http.StatusOK},
+		{name: "providers runtime-config", method: http.MethodGet, path: "/api/v1/providers/runtime-config", wantStatus: http.StatusOK},
+		{name: "agents manifest", method: http.MethodGet, path: "/api/v1/agents/manifest", wantStatus: http.StatusOK},
+		{name: "agents 列表", method: http.MethodGet, path: "/api/v1/agents", wantStatus: http.StatusOK},
+		{name: "agents 详情", method: http.MethodGet, path: "/api/v1/agents/my-agent", wantStatus: http.StatusOK},
+		{name: "skills 列表", method: http.MethodGet, path: "/api/v1/skills", wantStatus: http.StatusOK},
+		{name: "skills 详情", method: http.MethodGet, path: "/api/v1/skills/websearch", wantStatus: http.StatusOK},
+		{name: "skills 下载", method: http.MethodGet, path: "/api/v1/skills/websearch/download", wantStatus: http.StatusOK},
+		// ---- 仍 403 ----
+		{name: "chat 会话 POST 拦截", method: http.MethodPost, path: "/api/v1/agents/my-agent/chat/sessions", wantStatus: http.StatusForbidden},
+		{name: "chat 消息 GET 拦截", method: http.MethodGet, path: "/api/v1/agents/my-agent/chat/sessions/1/messages", wantStatus: http.StatusForbidden},
+		{name: "admin 拦截", method: http.MethodGet, path: "/api/v1/admin/agents", wantStatus: http.StatusForbidden},
+		{name: "scenes 拦截", method: http.MethodGet, path: "/api/v1/scenes", wantStatus: http.StatusForbidden},
+		{name: "mcps 拦截", method: http.MethodGet, path: "/api/v1/mcps", wantStatus: http.StatusForbidden},
+		{name: "providers 详情 :id 拦截", method: http.MethodGet, path: "/api/v1/providers/2", wantStatus: http.StatusForbidden},
+		{name: "同路径 GET 配 POST 拦截", method: http.MethodPost, path: "/api/v1/providers", wantStatus: http.StatusForbidden},
+		{name: "空段非法路径 403", method: http.MethodGet, path: "/api/v1/skills/websearch/", wantStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.Handle(tc.method, tc.path, AuthMiddlewareWithCLI(nil, &pendingFakeProvider{
+				user: &auth.AuthUser{ID: "u1", Username: "pending-user", Roles: []string{}},
+				mode: "casdoor",
+			}), PendingApprovalGuard(), func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"success": true})
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer any-jwt")
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.wantStatus, w.Code, "path=%s method=%s", tc.path, tc.method)
+			if tc.wantStatus == http.StatusForbidden {
+				assert.Contains(t, w.Body.String(), "PENDING_APPROVAL")
+			}
+		})
+	}
 }
