@@ -79,19 +79,20 @@ type Tool struct {
 	ID       uint64 `gorm:"primaryKey;autoIncrement"`
 	Name     string `gorm:"type:varchar(64);uniqueIndex:uk_tools_tenant_name,priority:2;not null"`
 	TenantID string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_tools_tenant_name,priority:1;index"`
-	// Title/Description 仅为控制台展示元数据（issue #88）：Runtime 使用的工具
-	// 描述来自工具文件自身，控制台单语中文，故刻意豁免双语字段约定（见
-	// CONTRIBUTING.md i18n 条目的 Tool 例外）。
-	Title       string    `gorm:"type:varchar(128)"`
-	Description string    `gorm:"type:text"`
-	IsDefault   bool      `gorm:"column:is_default;not null;default:false"`
-	Source      string    `gorm:"type:varchar(16);not null;default:'custom'"`
-	FileName    string    `gorm:"column:file_name;type:varchar(255)"` // 上传原始文件名（展示/审计，扩展名来源）
-	FileURL     string    `gorm:"column:file_url;type:varchar(512)"`  // OSS object key（非完整 URL，同 skill.URL）
-	FileHash    string    `gorm:"column:file_hash;type:varchar(128)"` // sha256 hex
-	FileSize    int64     `gorm:"column:file_size"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;index"`
+	// Title/Description/DescriptionEn 仅为控制台展示元数据（issue #88 + #93）：
+	// Runtime 使用的工具描述来自工具文件自身；descriptionEn 是控制台英文展示
+	// 描述（issue #93 补齐，对齐 CONTRIBUTING.md 核心实体双语约定）。
+	Title         string    `gorm:"type:varchar(128)"`
+	Description   string    `gorm:"type:text"`
+	DescriptionEn string    `gorm:"column:description_en;type:text" json:"descriptionEn"`
+	IsDefault     bool      `gorm:"column:is_default;not null;default:false"`
+	Source        string    `gorm:"type:varchar(16);not null;default:'custom'"`
+	FileName      string    `gorm:"column:file_name;type:varchar(255)"` // 上传原始文件名（展示/审计，扩展名来源）
+	FileURL       string    `gorm:"column:file_url;type:varchar(512)"`  // OSS object key（非完整 URL，同 skill.URL）
+	FileHash      string    `gorm:"column:file_hash;type:varchar(128)"` // sha256 hex
+	FileSize      int64     `gorm:"column:file_size"`
+	CreatedAt     time.Time `gorm:"column:created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;index"`
 }
 
 func (Tool) TableName() string {
