@@ -311,7 +311,8 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 //	   zerone/pharmaceutical"）；RuntimeURL 空的预注册边缘（Kong 已启用但
 //	   路由尚未注册完成）→ 回退 http://{publicHost}:{hostPort} 公网地址，
 //	   绝不回落 deployer 内网回源（issue #77 验收 #10：Kong 链路零变化）。
-//	② 无 Kong（kong 未启用，含 deployerSvc nil）→ 公开 RuntimeURL（hairpin
+//	② 无 Kong（kong 未启用；deployerSvc 非 nil 但 kongEnabled() 为 false——
+//	   首行 GetStatus 已先解引用）→ 公开 RuntimeURL（hairpin
 //	   绝对 URL 或相对路径）永远不是内部拨号目标，一律走
 //	   http://{upstreamHost}:{hostPort} deployer 网络内网回源（issue #77
 //	   验收 #8）。runtime client 在 baseURL 后追加 /v1/agents/{name}/runs，

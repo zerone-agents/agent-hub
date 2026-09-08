@@ -192,9 +192,10 @@ func TestProxyForwardsStrippedPathQueryAndHeaders(t *testing.T) {
 			t.Fatalf("%s must be dropped, got %q", hdr, f.lastHeader.Get(hdr))
 		}
 	}
-	// Host 必须重写为 upstream host（不是客户端 Host）。
-	if !strings.Contains(f.lastHost, "127.0.0.1") {
-		t.Fatalf("Host = %q, want upstream host", f.lastHost)
+	// Host 必须精确重写为 upstream host:port（不是客户端 Host）。
+	wantHost := strings.TrimPrefix(f.srv.URL, "http://")
+	if f.lastHost != wantHost {
+		t.Fatalf("Host = %q, want upstream host %q", f.lastHost, wantHost)
 	}
 }
 
