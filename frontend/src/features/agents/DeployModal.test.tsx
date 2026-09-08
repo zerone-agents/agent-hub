@@ -250,6 +250,12 @@ describe('DeployModal', () => {
     await waitFor(() => {
       expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
     })
+    // chat 页 AgentDetailBar 计数来自 ['agents', name, 'detail']：部署后
+    // runtime 重建（tools/MCP/skills 数量可能变化），必须一并失效
+    // （issue #131 同源可观测性）。
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'general', 'detail'] })
+    })
   })
 
   it('clicking stop triggers API call', async () => {

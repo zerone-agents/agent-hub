@@ -76,8 +76,13 @@ export function useUpdateAgentMcps() {
   return useMutation({
     mutationFn: ({ agentName, mcpNames }: { agentName: string; mcpNames: string[] }) =>
       mcpApi.updateAgentMcps(agentName, mcpNames),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agent-mcps'] })
+      // AgentCard 的 "N MCP" 计数来自 ['agents']（useAgents）；chat 页
+      // AgentDetailBar 计数来自 ['agents', name, 'detail']。两者都必须
+      // 立即失效，否则绑定修改后数量不刷新（issue #131 同源可观测性）。
+      void qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents', variables.agentName, 'detail'] })
       message.success('Agent MCP 关系已更新')
     },
     onError: (err) => message.error(parseApiError(err))

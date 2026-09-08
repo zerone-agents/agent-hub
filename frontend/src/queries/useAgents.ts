@@ -54,8 +54,11 @@ export function useUpdateSubagents() {
   return useMutation({
     mutationFn: ({ name, subagents }: { name: string; subagents: string[] }) =>
       agentApi.updateSubagents(name, subagents),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      // chat 页 AgentDetailBar 计数来自 ['agents', name, 'detail']：绑定类
+      // mutation 必须一并失效，否则保存后详情条不刷新（issue #131 同源）。
+      void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'detail'] })
       message.success('子代理已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -67,8 +70,9 @@ export function useUpdateAgentTools() {
   return useMutation({
     mutationFn: ({ name, toolNames }: { name: string; toolNames: string[] }) =>
       agentApi.updateTools(name, toolNames),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'detail'] })
       message.success('工具已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -80,8 +84,9 @@ export function useUpdateAgentSkills() {
   return useMutation({
     mutationFn: ({ name, skillNames }: { name: string; skillNames: string[] }) =>
       agentApi.updateSkills(name, skillNames),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'detail'] })
       message.success('技能已更新')
     },
     onError: (err) => message.error(parseApiError(err))
@@ -106,6 +111,7 @@ export function useUpdateAgentKnowledgeDatasets() {
     onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'knowledge'] })
       void qc.invalidateQueries({ queryKey: ['agents'] })
+      void qc.invalidateQueries({ queryKey: ['agents', variables.name, 'detail'] })
       message.success('知识库已更新')
     },
     onError: (err) => message.error(parseApiError(err))
