@@ -145,6 +145,52 @@ func portOf(rawURL string) int {
 	return n
 }
 
+// 共享 transport 的池配置（批次三 #91）：单一 transport 服务于 chat/SSH/
+// 文件/清单全部代理链路（NewRuntimeProxyHandler 注释），Go 默认 MaxIdleConns
+// PerHost=2 在并发负载下会产生连接 churn——固定 32 是 spec D1 的明确值。
+func TestNewRuntimeProxyHandlerTransportConfig(t *testing.T) {
+	svc := services.NewRuntimeProxyService(nil, "agent-deployer")
+	h := NewRuntimeProxyHandler(svc)
+	if h.transport.MaxIdleConnsPerHost != 32 {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want 32", h.transport.MaxIdleConnsPerHost)
+	}
+}
+
+// 405 必须携带 Allow 头（批次三 #91）：PUT 到仅 GET/HEAD 的 /v1/files/content，
+// 响应首部 Allow 应为第一条 path 命中路由的方法清单 "GET, HEAD"。
+func TestProxyMethodNotAllowedCarriesAllowHeader(t *testing.T) {
+	f := newFakeRuntime(t)
+	r := newProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/runtime/default/test/v1/files/content", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+	if got := w.Header().Get("Allow"); got != "GET, HEAD" {
+		t.Fatalf("Allow = %q, want %q", got, "GET, HEAD")
+	}
+}
+
+func TestProxyMethodNotAllowedAllowAggregatesAllRows(t *testing.T) {
+	// P2 regression (review): /v1/sessions/:sessionId is defined in two
+	// allowlist rows (GET + DELETE). A disallowed method (PUT) must get
+	// Allow: GET, DELETE — not just the first row's methods.
+	f := newFakeRuntime(t)
+	r := newProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/runtime/default/test/v1/sessions/s-1", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+	if got := w.Header().Get("Allow"); got != "GET, DELETE" {
+		t.Fatalf("Allow = %q, want %q (all matching allowlist rows)", got, "GET, DELETE")
+	}
+}
+
 func TestProxyForwardsStrippedPathQueryAndHeaders(t *testing.T) {
 	f := newFakeRuntime(t)
 	r := newProxyEngine(portOf(f.srv.URL))

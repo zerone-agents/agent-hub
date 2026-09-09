@@ -74,6 +74,9 @@ func TestResolveAllowlistMatrix(t *testing.T) {
 					if pe.Code != 405 {
 						t.Fatalf("want 405, got %d", pe.Code)
 					}
+					if pe.AllowHeader == "" {
+						t.Fatalf("405 must carry Allow header, got %q", pe.AllowHeader)
+					}
 				} else if pe.Code != 404 {
 					t.Fatalf("want 404, got %d (%s)", pe.Code, pe.Reason)
 				}
@@ -225,7 +228,7 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 		{methods: []string{http.MethodGet}, pattern: "/v1/agents/special", timeout: 9 * time.Second},
 	}
 
-	route, pathMatched, methodOK := matchAllowlist(http.MethodGet, "/v1/agents/special")
+	route, allowed, pathMatched, methodOK := matchAllowlist(http.MethodGet, "/v1/agents/special")
 	if !pathMatched || !methodOK {
 		t.Fatalf("overlap must match, got pathMatched=%v methodOK=%v", pathMatched, methodOK)
 	}
@@ -235,16 +238,27 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 	if route.timeout != 120*time.Second {
 		t.Fatalf("first match wins: timeout = %v, want 120s", route.timeout)
 	}
+	if len(allowed) != 1 || allowed[0] != http.MethodGet {
+		t.Fatalf("allowed methods = %v, want [GET]", allowed)
+	}
 
 	// method 不符时不返回路由，但 pathMatched 保留（潜语义注释所述）。
-	route, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
+	// 批次三（#91）：route 返回第一条 path 命中的路由（供诊断），
+	// allowed 聚合所有 path 命中行的方法（供 405 Allow 头，RFC 9110）。
+	route, allowed, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
 	if !pathMatched {
 		t.Fatal("path matched flag must persist on method mismatch")
 	}
 	if methodOK {
 		t.Fatal("POST must not match GET-only route")
 	}
-	if route.pattern != "" {
-		t.Fatalf("no route may be returned on method mismatch, got %q", route.pattern)
+	if route.pattern != "/v1/agents/:id" {
+		t.Fatalf("method mismatch must carry first path-matched route, got %q", route.pattern)
+	}
+	if len(route.methods) != 1 || route.methods[0] != http.MethodGet {
+		t.Fatalf("first path-matched route methods = %v, want [GET]", route.methods)
+	}
+	if len(allowed) != 1 || allowed[0] != http.MethodGet {
+		t.Fatalf("allowed methods on mismatch = %v, want [GET]", allowed)
 	}
 }

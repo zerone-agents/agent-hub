@@ -31,9 +31,11 @@ func NewRuntimeProxyHandler(svc *services.RuntimeProxyService) *RuntimeProxyHand
 	// One shared transport: ResponseHeaderTimeout gives every endpoint fast
 	// first-byte failure; overall deadlines are per-request contexts
 	// (ReverseProxy.Transport is a RoundTripper — no Client.Timeout exists).
+	// MaxIdleConnsPerHost: 32 — 单一共享 transport 服务于 chat/SSH/文件/
+	// 清单全部代理链路，Go 默认 2 在并发负载下连接 churn（issue #91 批次三）。
 	return &RuntimeProxyHandler{
 		svc:       svc,
-		transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second},
+		transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second, MaxIdleConnsPerHost: 32},
 	}
 }
 
@@ -78,6 +80,11 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 	start := time.Now()
 	decision, perr := h.svc.Resolve(org, agentName, c.Request.Method, escaped, decoded)
 	if perr != nil {
+		// 405 携带第一条 path 命中路由的 Allow 头（issue #91 批次三，
+		// ProxyError.AllowHeader 由 service 层填充）；其他错误分支零变化。
+		if perr.Code == http.StatusMethodNotAllowed && perr.AllowHeader != "" {
+			c.Header("Allow", perr.AllowHeader)
+		}
 		respondError(c, perr.Code, perr.Reason)
 		auditRuntimeProxy(c, org, agentName, perr.Code, start, "")
 		return
