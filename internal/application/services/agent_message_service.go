@@ -37,6 +37,7 @@ type AgentMessageService struct {
 	relationRepo *repository.AgentRelationRepository
 	messageRepo  *repository.AgentMessageRepository
 	agentRepo    *repository.AgentRepository
+	relationSvc  *AgentRelationService
 	runner       AgentMessageRunner
 	active       sync.Map // tenantID + NUL + agent id; prevents recursive delivery loops
 	targetQueues sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
@@ -47,10 +48,13 @@ type agentMessageTargetQueue struct {
 }
 
 func NewAgentMessageService(runner AgentMessageRunner) *AgentMessageService {
+	relationRepo := repository.NewAgentRelationRepository()
+	agentRepo := repository.NewAgentRepository()
 	return &AgentMessageService{
-		relationRepo: repository.NewAgentRelationRepository(),
+		relationRepo: relationRepo,
 		messageRepo:  repository.NewAgentMessageRepository(),
-		agentRepo:    repository.NewAgentRepository(),
+		agentRepo:    agentRepo,
+		relationSvc:  &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
 		runner:       runner,
 	}
 }
@@ -61,7 +65,13 @@ func newAgentMessageService(
 	agentRepo *repository.AgentRepository,
 	runner AgentMessageRunner,
 ) *AgentMessageService {
-	return &AgentMessageService{relationRepo: relationRepo, messageRepo: messageRepo, agentRepo: agentRepo, runner: runner}
+	return &AgentMessageService{
+		relationRepo: relationRepo,
+		messageRepo:  messageRepo,
+		agentRepo:    agentRepo,
+		relationSvc:  &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
+		runner:       runner,
+	}
 }
 
 type SendAgentMessageInput struct {
@@ -105,6 +115,13 @@ func (s *AgentMessageService) Relations(tenantID string, source *agent.AgentConf
 	return result, nil
 }
 
+func (s *AgentMessageService) SignalRelation(tenantID string, source *agent.AgentConfig, targetAgent, scope string, input *RecordAgentRelationEventInput) (*AgentRelationEventResultDTO, error) {
+	if source == nil {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	return s.relationSvc.RecordEventForAgent(tenantID, source.ID, source.Name, targetAgent, scope, input)
+}
+
 func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source *agent.AgentConfig, input SendAgentMessageInput) (*AgentMessageDTO, error) {
 	if source == nil {
 		return nil, agentrelation.ErrAgentNotFound
@@ -133,6 +150,12 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	if err != nil {
 		return nil, err
 	}
+	// The target must act from its own directional view of the sender. The
+	// authorizing A -> B edge is not evidence of how B feels about A.
+	recipientView, err := s.relationRepo.FindEnabledEdge(tenantID, relation.Scope, target.ID, source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("读取接收方关系状态失败: %w", err)
+	}
 
 	sharedContext := relationContext(relation.ContextPolicy, input.ContextSummary, input.SharedContext)
 	message := &agentrelation.AgentMessage{
@@ -155,7 +178,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		return nil, fmt.Errorf("记录组织消息失败: %w", err)
 	}
 
-	envelope := buildAgentMessageEnvelope(source, target, relation, input.Action, input.Message, sharedContext)
+	envelope := buildAgentMessageEnvelope(source, target, relation, recipientView, input.Action, input.Message, sharedContext)
 	if relation.DeliveryPolicy == "async" {
 		dto := agentMessageToDTO(message)
 		go func() {
@@ -299,10 +322,15 @@ func truncateRunes(value string, limit int) string {
 	return string(runes[:limit])
 }
 
-func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agentrelation.AgentRelation, action, message, sharedContext string) string {
+func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation, recipientView *agentrelation.AgentRelation, action, message, sharedContext string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[SPEEDING 组织消息]\n消息ID由 Hub 管理。你是接收方 %s；发送方是 %s。\n", target.Name, source.Name)
-	fmt.Fprintf(&b, "关系范围：%s\n结构关系：%s\n立场：%s\n动作：%s\n上下文策略：%s\n", relation.Scope, relation.RelationType, relation.Stance, action, relation.ContextPolicy)
+	fmt.Fprintf(&b, "关系范围：%s\n结构关系：%s\n动作：%s\n上下文策略：%s\n", relation.Scope, relation.RelationType, action, relation.ContextPolicy)
+	if recipientView == nil {
+		b.WriteString("你对发送方的当前关系：neutral（0，尚无反向关系状态）\n")
+	} else {
+		fmt.Fprintf(&b, "你对发送方的当前关系：%s（%d）\n", recipientView.Stance, recipientView.RelationshipScore)
+	}
 	if strings.TrimSpace(relation.Constraint) != "" {
 		fmt.Fprintf(&b, "这条关系的强制约束：%s\n", relation.Constraint)
 	}

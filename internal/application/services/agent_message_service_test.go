@@ -98,17 +98,18 @@ func addTypedMessageRelation(
 ) agentrelation.AgentRelation {
 	t.Helper()
 	relation := agentrelation.AgentRelation{
-		TenantID:       source.TenantID,
-		Scope:          scope,
-		SourceAgentID:  source.ID,
-		TargetAgentID:  target.ID,
-		RelationType:   relationType,
-		Stance:         stance,
-		AllowedActions: actions,
-		ContextPolicy:  contextPolicy,
-		DeliveryPolicy: delivery,
-		Constraint:     "先核对事实，再给出独立判断",
-		Enabled:        true,
+		TenantID:          source.TenantID,
+		Scope:             scope,
+		SourceAgentID:     source.ID,
+		TargetAgentID:     target.ID,
+		RelationType:      relationType,
+		Stance:            stance,
+		RelationshipScore: agentrelation.InitialScoreForStance(stance),
+		AllowedActions:    actions,
+		ContextPolicy:     contextPolicy,
+		DeliveryPolicy:    delivery,
+		Constraint:        "先核对事实，再给出独立判断",
+		Enabled:           true,
 	}
 	require.NoError(t, f.db.Create(&relation).Error)
 	return relation
@@ -141,6 +142,7 @@ func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := setupAgentMessageService(t)
 			addTypedMessageRelation(t, f, f.a, f.b, "speeding-hq", tt.relationType, tt.stance, tt.delivery, tt.contextPolicy, tt.action)
+			addTypedMessageRelation(t, f, f.b, f.a, "speeding-hq", "peer", tt.stance, "async", "summary_only", "inform")
 
 			got, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
 				TargetAgent:    f.b.Name,
@@ -165,7 +167,7 @@ func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
 			calls := f.runner.snapshot()
 			require.Len(t, calls, 1)
 			require.Contains(t, calls[0].message, "结构关系："+tt.relationType)
-			require.Contains(t, calls[0].message, "立场："+tt.stance)
+			require.Contains(t, calls[0].message, "你对发送方的当前关系："+tt.stance)
 			require.Contains(t, calls[0].message, "动作："+tt.action)
 		})
 	}

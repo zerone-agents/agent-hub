@@ -10,7 +10,7 @@ import type {
   DeliveryPolicy,
   RelationAction,
   RelationStance,
-  RelationType
+  RelationType,
 } from '@/api/agent-relations'
 import type { Agent } from '@/api/agents'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -20,12 +20,9 @@ import {
   DEFAULT_ACTIONS,
   DELIVERY_POLICIES,
   RELATION_TYPES,
-  STANCES
+  STANCES,
 } from './relationOptions'
-import {
-  useCreateAgentRelation,
-  useUpdateAgentRelation
-} from '@/queries/useAgentRelations'
+import { useCreateAgentRelation, useUpdateAgentRelation } from '@/queries/useAgentRelations'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -59,8 +56,14 @@ const useStyles = createStyles(({ css }) => ({
     background: ${t.inkSubtle};
     color: ${t.textTertiary};
     cursor: pointer;
-    &:hover { color: ${t.text}; background: ${t.inkLight}; }
-    &:focus-visible { outline: 2px solid ${t.ink}; outline-offset: 2px; }
+    &:hover {
+      color: ${t.text};
+      background: ${t.inkLight};
+    }
+    &:focus-visible {
+      outline: 2px solid ${t.ink};
+      outline-offset: 2px;
+    }
   `,
   body: css`
     max-height: min(68vh, 720px);
@@ -79,7 +82,9 @@ const useStyles = createStyles(({ css }) => ({
     display: grid;
     grid-template-columns: 1fr 1fr;
     column-gap: 16px;
-    @media (max-width: 640px) { grid-template-columns: 1fr; }
+    @media (max-width: 640px) {
+      grid-template-columns: 1fr;
+    }
   `,
   asymmetryHint: css`
     grid-column: 2;
@@ -88,7 +93,9 @@ const useStyles = createStyles(({ css }) => ({
     color: ${t.textMuted};
     font-size: ${t.textXs};
     line-height: 1.5;
-    @media (max-width: 640px) { grid-column: 1; }
+    @media (max-width: 640px) {
+      grid-column: 1;
+    }
   `,
   directionRow: css`
     display: grid;
@@ -114,7 +121,11 @@ const useStyles = createStyles(({ css }) => ({
     color: ${t.textSecondary};
     font-size: ${t.textSm};
     font-weight: 600;
-    & > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    & > span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   `,
   foot: css`
     display: flex;
@@ -122,7 +133,7 @@ const useStyles = createStyles(({ css }) => ({
     gap: 10px;
     padding: 14px 24px;
     border-top: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
-  `
+  `,
 }))
 
 interface RelationFormProps {
@@ -150,12 +161,7 @@ function agentTitle(agent: Agent): string {
   return agent.config.title?.zh ?? agent.config.title?.en ?? agent.name
 }
 
-export default function RelationForm({
-  open,
-  editingRelation,
-  agents,
-  onClose
-}: RelationFormProps) {
+export default function RelationForm({ open, editingRelation, agents, onClose }: RelationFormProps) {
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const sourceAgentId = Form.useWatch('sourceAgentId', form)
@@ -179,7 +185,7 @@ export default function RelationForm({
         contextPolicy: editingRelation.contextPolicy,
         deliveryPolicy: editingRelation.deliveryPolicy,
         constraint: editingRelation.constraint,
-        enabled: editingRelation.enabled
+        enabled: editingRelation.enabled,
       })
       return
     }
@@ -195,13 +201,13 @@ export default function RelationForm({
       contextPolicy: 'summary_only',
       deliveryPolicy: 'async',
       constraint: '',
-      enabled: true
+      enabled: true,
     })
   }, [editingRelation, form, open])
 
   const options = agents.map((agent) => ({
     label: `${agentTitle(agent)} · ${agent.name}`,
-    value: agent.id
+    value: agent.id,
   }))
   const targetOptions = options.filter((option) => option.value !== sourceAgentId)
   const supportsBidirectional = relationType === 'peer' || relationType === 'opponent' || relationType === 'external'
@@ -212,14 +218,19 @@ export default function RelationForm({
       const payload: AgentRelationUpdatePayload = {
         scope: values.scope.trim(),
         relationType: values.relationType,
-        stance: values.stance,
         allowedActions: values.allowedActions,
         contextPolicy: values.contextPolicy,
         deliveryPolicy: values.deliveryPolicy,
         constraint: values.constraint.trim(),
-        enabled: values.enabled
+        enabled: values.enabled,
       }
-      await updateRelation.mutateAsync({ id: editingRelation.id, data: payload })
+      if (values.stance !== editingRelation.stance) {
+        payload.stance = values.stance
+      }
+      await updateRelation.mutateAsync({
+        id: editingRelation.id,
+        data: payload,
+      })
     } else {
       if (values.sourceAgentId === null || values.targetAgentId === null) return
       const payload: AgentRelationCreatePayload = {
@@ -233,7 +244,7 @@ export default function RelationForm({
         deliveryPolicy: values.deliveryPolicy,
         constraint: values.constraint.trim(),
         enabled: values.enabled,
-        bidirectional: values.direction === 'two_way'
+        bidirectional: values.direction === 'two_way',
       }
       await createRelation.mutateAsync(payload)
     }
@@ -254,7 +265,9 @@ export default function RelationForm({
         <div>
           <div className={styles.title}>{editingRelation ? '编辑有向关系' : '新建 Agent 关系'}</div>
           <div className={styles.subtitle}>
-            {editingRelation ? '关系两端不可更换；需要换人时请新建一条关系。' : '先确定关系方向，再约定这条边允许发生什么。'}
+            {editingRelation
+              ? '关系两端不可更换；需要换人时请新建一条关系。'
+              : '先确定关系方向，再约定这条边允许发生什么。'}
           </div>
         </div>
         <button type="button" className={styles.closeButton} aria-label="关闭" onClick={onClose}>
@@ -267,7 +280,9 @@ export default function RelationForm({
         {editingRelation ? (
           <div className={styles.lockedEdge}>
             <span>{editingRelation.sourceAgentName}</span>
-            <span className={styles.arrow}><ArrowRightIcon size={16} /></span>
+            <span className={styles.arrow}>
+              <ArrowRightIcon size={16} />
+            </span>
             <span>{editingRelation.targetAgentName}</span>
           </div>
         ) : (
@@ -280,7 +295,9 @@ export default function RelationForm({
               >
                 <Select placeholder="谁发起沟通" showSearch={{ optionFilterProp: 'label' }} options={options} />
               </Form.Item>
-              <span className={styles.arrow}><ArrowRightIcon size={18} /></span>
+              <span className={styles.arrow}>
+                <ArrowRightIcon size={18} />
+              </span>
               <Form.Item
                 label="接收方 Agent"
                 name="targetAgentId"
@@ -293,7 +310,9 @@ export default function RelationForm({
             <Form.Item label="方向" name="direction">
               <Radio.Group optionType="button" buttonStyle="solid">
                 <Radio.Button value="one_way">单向 A → B</Radio.Button>
-                <Radio.Button value="two_way" disabled={!supportsBidirectional}>双向 A ⇄ B</Radio.Button>
+                <Radio.Button value="two_way" disabled={!supportsBidirectional}>
+                  双向 A ⇄ B
+                </Radio.Button>
               </Radio.Group>
             </Form.Item>
             {direction === 'two_way' && (
@@ -315,7 +334,10 @@ export default function RelationForm({
             tooltip="同一对 Agent 可在不同组织或项目范围内拥有不同关系"
             rules={[
               { required: true, message: '请输入关系范围' },
-              { pattern: /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/, message: '使用字母、数字、点、横线、下划线或冒号' }
+              {
+                pattern: /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/,
+                message: '使用字母、数字、点、横线、下划线或冒号',
+              },
             ]}
           >
             <Input placeholder="global" />
@@ -325,7 +347,7 @@ export default function RelationForm({
               options={RELATION_TYPES.map((item) => ({
                 value: item.value,
                 label: item.label,
-                title: item.description
+                title: item.description,
               }))}
               onChange={(value: RelationType) => {
                 if (!editingRelation) {
@@ -348,7 +370,14 @@ export default function RelationForm({
               非对称关系需要分别配置两个方向，避免把“下属”和“负责人”等语义错误镜像。
             </div>
           )}
-          <Form.Item label="立场" name="stance" rules={[{ required: true }]}>
+          <Form.Item
+            label={editingRelation ? '重设立场' : '初始立场'}
+            name="stance"
+            tooltip={
+              editingRelation ? '修改后会把动态关系分值重设到该立场的起始值' : '创建后，事件将继续改变分值与当前立场'
+            }
+            rules={[{ required: true }]}
+          >
             <Select options={STANCES.map(({ value, label }) => ({ value, label }))} />
           </Form.Item>
           <Form.Item label="投递方式" name="deliveryPolicy" rules={[{ required: true }]}>
@@ -359,7 +388,14 @@ export default function RelationForm({
           label="允许动作"
           name="allowedActions"
           tooltip="MCP 执行通信时只能调用这里明确允许的动作"
-          rules={[{ required: true, type: 'array', min: 1, message: '请至少选择一个允许动作' }]}
+          rules={[
+            {
+              required: true,
+              type: 'array',
+              min: 1,
+              message: '请至少选择一个允许动作',
+            },
+          ]}
         >
           <Select mode="multiple" placeholder="选择该方向允许的动作" options={ACTIONS} />
         </Form.Item>

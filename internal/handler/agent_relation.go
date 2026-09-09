@@ -29,6 +29,20 @@ func (h *AgentRelationHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": relations})
 }
 
+func (h *AgentRelationHandler) ListEvents(c *gin.Context) {
+	id, ok := parseRelationID(c)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
+	events, err := h.service.Events(tenant.GetTenantID(c), id, limit)
+	if err != nil {
+		writeAgentRelationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": events})
+}
+
 type createAgentRelationReq struct {
 	SourceAgentID  uint64   `json:"sourceAgentId" binding:"required"`
 	TargetAgentID  uint64   `json:"targetAgentId" binding:"required"`
@@ -82,6 +96,38 @@ type updateAgentRelationReq struct {
 	DeliveryPolicy *string   `json:"deliveryPolicy"`
 	Constraint     *string   `json:"constraint"`
 	Enabled        *bool     `json:"enabled"`
+}
+
+type recordAgentRelationEventReq struct {
+	EventType      string `json:"eventType" binding:"required"`
+	Severity       int    `json:"severity"`
+	Reason         string `json:"reason"`
+	Visibility     string `json:"visibility"`
+	SourceKind     string `json:"sourceKind"`
+	SourceID       string `json:"sourceId"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+func (h *AgentRelationHandler) RecordEvent(c *gin.Context) {
+	id, ok := parseRelationID(c)
+	if !ok {
+		return
+	}
+	var req recordAgentRelationEventReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	result, err := h.service.RecordEvent(tenant.GetTenantID(c), id, &services.RecordAgentRelationEventInput{
+		EventType: req.EventType, Severity: req.Severity, Reason: req.Reason,
+		Visibility: req.Visibility, SourceKind: req.SourceKind, SourceID: req.SourceID,
+		IdempotencyKey: req.IdempotencyKey,
+	}, "admin", "")
+	if err != nil {
+		writeAgentRelationError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": result})
 }
 
 func (h *AgentRelationHandler) Update(c *gin.Context) {

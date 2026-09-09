@@ -122,6 +122,7 @@ func AutoMigrate(backfillTenant string) error {
 	err := DB.AutoMigrate(
 		&agent.AgentConfig{},
 		&agentrelation.AgentRelation{},
+		&agentrelation.AgentRelationEvent{},
 		&agentrelation.AgentMessage{},
 		&agent.AgentSubagent{},
 		&agent.AgentKnowledgeDataset{},
@@ -149,6 +150,10 @@ func AutoMigrate(backfillTenant string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
+	}
+
+	if err := backfillAgentRelationScores(); err != nil {
+		return fmt.Errorf("failed to backfill agent relation scores: %w", err)
 	}
 
 	if err := migrateBindingFKRESTRICT(); err != nil {
@@ -239,6 +244,25 @@ func AutoMigrate(backfillTenant string) error {
 	}
 
 	log.Println("Database migration completed successfully")
+	return nil
+}
+
+// backfillAgentRelationScores initializes the numeric state for relationship
+// rows created before dynamic scoring existed. New rows always set
+// last_changed_at in AgentRelationService, so the NULL predicate makes this
+// migration idempotent without disturbing relationships that have evolved.
+func backfillAgentRelationScores() error {
+	now := time.Now().UTC()
+	for stance := range agentrelation.Stances {
+		if err := DB.Model(&agentrelation.AgentRelation{}).
+			Where("last_changed_at IS NULL AND stance = ?", stance).
+			UpdateColumns(map[string]interface{}{
+				"relationship_score": agentrelation.InitialScoreForStance(stance),
+				"last_changed_at":    now,
+			}).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -436,6 +436,7 @@ var builtinKnowledgeTools = []McpTool{
 var builtinOrganizationTools = []McpTool{
 	{Name: "agent_relations", Description: "列出当前 Agent 的入向与出向组织关系及动作白名单"},
 	{Name: "agent_send", Description: "按有向关系和动作白名单向另一个 Agent 投递消息"},
+	{Name: "agent_relation_signal", Description: "按固定规则记录关系事件并更新当前 Agent 对目标的关系分值"},
 	{Name: "agent_message_status", Description: "查询同步或异步组织消息的状态与回复"},
 	{Name: "agent_inbox", Description: "列出当前 Agent 最近的组织消息记录"},
 }

@@ -31,7 +31,7 @@ func setupAgentRelationHTTPTest(t *testing.T) (*gin.Engine, agent.AgentConfig, a
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}))
 
 	oldDB := database.DB
 	database.DB = db
@@ -49,10 +49,61 @@ func setupAgentRelationHTTPTest(t *testing.T) (*gin.Engine, agent.AgentConfig, a
 		c.Next()
 	})
 	router.GET("/api/v1/admin/agent-relations", h.List)
+	router.GET("/api/v1/admin/agent-relations/:id/events", h.ListEvents)
 	router.POST("/api/v1/admin/agent-relations", h.Create)
+	router.POST("/api/v1/admin/agent-relations/:id/events", h.RecordEvent)
 	router.PATCH("/api/v1/admin/agent-relations/:id", h.Update)
 	router.DELETE("/api/v1/admin/agent-relations/:id", h.Delete)
 	return router, source, target
+}
+
+func TestAgentRelationHTTPRecordsAndListsDynamicEvents(t *testing.T) {
+	router, source, target := setupAgentRelationHTTPTest(t)
+	createBody := fmt.Sprintf(`{
+		"sourceAgentId": %d,
+		"targetAgentId": %d,
+		"scope": "speeding-hq",
+		"relationType": "peer",
+		"stance": "friendly",
+		"allowedActions": ["inform"]
+	}`, source.ID, target.ID)
+	createdResponse := agentRelationHTTPRequest(t, router, http.MethodPost, "/api/v1/admin/agent-relations", createBody)
+	require.Equal(t, http.StatusCreated, createdResponse.Code)
+	var created agentRelationHTTPEnvelope
+	require.NoError(t, json.Unmarshal(createdResponse.Body.Bytes(), &created))
+	require.Len(t, created.Data, 1)
+
+	eventPath := fmt.Sprintf("/api/v1/admin/agent-relations/%d/events", created.Data[0].ID)
+	recordedResponse := agentRelationHTTPRequest(t, router, http.MethodPost, eventPath, `{
+		"eventType": "promise_broken",
+		"severity": 1,
+		"reason": "答应提供证据但没有交付",
+		"visibility": "participants",
+		"idempotencyKey": "meeting-7-promise"
+	}`)
+	require.Equal(t, http.StatusCreated, recordedResponse.Code)
+	var recorded struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Relation services.AgentRelationDTO      `json:"relation"`
+			Event    services.AgentRelationEventDTO `json:"event"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recordedResponse.Body.Bytes(), &recorded))
+	require.True(t, recorded.Success)
+	require.Equal(t, 20, recorded.Data.Relation.RelationshipScore)
+	require.Equal(t, "neutral", recorded.Data.Relation.Stance)
+	require.Equal(t, -20, recorded.Data.Event.Delta)
+
+	listedResponse := agentRelationHTTPRequest(t, router, http.MethodGet, eventPath, "")
+	require.Equal(t, http.StatusOK, listedResponse.Code)
+	var listed struct {
+		Success bool                             `json:"success"`
+		Data    []services.AgentRelationEventDTO `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(listedResponse.Body.Bytes(), &listed))
+	require.Len(t, listed.Data, 1)
+	require.Equal(t, "meeting-7-promise", listed.Data[0].IdempotencyKey)
 }
 
 func agentRelationHTTPRequest(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {

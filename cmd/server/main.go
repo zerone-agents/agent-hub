@@ -559,7 +559,9 @@ func main() {
 	adminRelationsReadGroup := adminRead.Group("/agent-relations")
 	{
 		adminRelationsReadGroup.GET("", agentRelationHandler.List)
+		adminRelationsReadGroup.GET("/:id/events", agentRelationHandler.ListEvents)
 		adminRelationsGroup.POST("", agentRelationHandler.Create)
+		adminRelationsGroup.POST("/:id/events", agentRelationHandler.RecordEvent)
 		adminRelationsGroup.PUT("/:id", agentRelationHandler.Update)
 		adminRelationsGroup.DELETE("/:id", agentRelationHandler.Delete)
 	}

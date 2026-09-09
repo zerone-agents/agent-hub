@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"control-panel/internal/domain/agentrelation"
 	repository "control-panel/internal/infrastructure/persistence"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -53,21 +55,63 @@ type UpdateAgentRelationInput struct {
 }
 
 type AgentRelationDTO struct {
-	ID              uint64   `json:"id"`
-	Scope           string   `json:"scope"`
-	SourceAgentID   uint64   `json:"sourceAgentId"`
-	SourceAgentName string   `json:"sourceAgentName"`
-	TargetAgentID   uint64   `json:"targetAgentId"`
-	TargetAgentName string   `json:"targetAgentName"`
-	RelationType    string   `json:"relationType"`
-	Stance          string   `json:"stance"`
-	AllowedActions  []string `json:"allowedActions"`
-	ContextPolicy   string   `json:"contextPolicy"`
-	DeliveryPolicy  string   `json:"deliveryPolicy"`
-	Constraint      string   `json:"constraint"`
-	Enabled         bool     `json:"enabled"`
-	CreatedAt       string   `json:"createdAt"`
-	UpdatedAt       string   `json:"updatedAt"`
+	ID                uint64   `json:"id"`
+	Scope             string   `json:"scope"`
+	SourceAgentID     uint64   `json:"sourceAgentId"`
+	SourceAgentName   string   `json:"sourceAgentName"`
+	TargetAgentID     uint64   `json:"targetAgentId"`
+	TargetAgentName   string   `json:"targetAgentName"`
+	RelationType      string   `json:"relationType"`
+	Stance            string   `json:"stance"`
+	RelationshipScore int      `json:"relationshipScore"`
+	LastChangedAt     *string  `json:"lastChangedAt,omitempty"`
+	AllowedActions    []string `json:"allowedActions"`
+	ContextPolicy     string   `json:"contextPolicy"`
+	DeliveryPolicy    string   `json:"deliveryPolicy"`
+	Constraint        string   `json:"constraint"`
+	Enabled           bool     `json:"enabled"`
+	CreatedAt         string   `json:"createdAt"`
+	UpdatedAt         string   `json:"updatedAt"`
+}
+
+type RecordAgentRelationEventInput struct {
+	EventType      string
+	Severity       int
+	Reason         string
+	Visibility     string
+	SourceKind     string
+	SourceID       string
+	IdempotencyKey string
+}
+
+type AgentRelationEventDTO struct {
+	ID             string `json:"id"`
+	RelationID     uint64 `json:"relationId"`
+	Scope          string `json:"scope"`
+	SourceAgentID  uint64 `json:"sourceAgentId"`
+	TargetAgentID  uint64 `json:"targetAgentId"`
+	EventType      string `json:"eventType"`
+	Severity       int    `json:"severity"`
+	Delta          int    `json:"delta"`
+	ScoreBefore    int    `json:"scoreBefore"`
+	ScoreAfter     int    `json:"scoreAfter"`
+	StanceBefore   string `json:"stanceBefore"`
+	StanceAfter    string `json:"stanceAfter"`
+	Reason         string `json:"reason"`
+	Visibility     string `json:"visibility"`
+	ActorType      string `json:"actorType"`
+	ActorID        string `json:"actorId,omitempty"`
+	SourceKind     string `json:"sourceKind"`
+	SourceID       string `json:"sourceId,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey"`
+	RuleVersion    string `json:"ruleVersion"`
+	OccurredAt     string `json:"occurredAt"`
+	CreatedAt      string `json:"createdAt"`
+}
+
+type AgentRelationEventResultDTO struct {
+	Relation *AgentRelationDTO      `json:"relation"`
+	Event    *AgentRelationEventDTO `json:"event"`
 }
 
 func (s *AgentRelationService) List(tenantID string) ([]*AgentRelationDTO, error) {
@@ -111,18 +155,21 @@ func (s *AgentRelationService) Create(tenantID string, input *CreateAgentRelatio
 	}
 
 	relations := make([]*agentrelation.AgentRelation, 0, len(edges))
+	now := time.Now().UTC()
 	for _, edge := range edges {
 		relations = append(relations, &agentrelation.AgentRelation{
-			Scope:          input.Scope,
-			SourceAgentID:  edge[0],
-			TargetAgentID:  edge[1],
-			RelationType:   input.RelationType,
-			Stance:         input.Stance,
-			AllowedActions: append([]string(nil), input.AllowedActions...),
-			ContextPolicy:  input.ContextPolicy,
-			DeliveryPolicy: input.DeliveryPolicy,
-			Constraint:     input.Constraint,
-			Enabled:        input.Enabled,
+			Scope:             input.Scope,
+			SourceAgentID:     edge[0],
+			TargetAgentID:     edge[1],
+			RelationType:      input.RelationType,
+			Stance:            input.Stance,
+			RelationshipScore: agentrelation.InitialScoreForStance(input.Stance),
+			LastChangedAt:     &now,
+			AllowedActions:    append([]string(nil), input.AllowedActions...),
+			ContextPolicy:     input.ContextPolicy,
+			DeliveryPolicy:    input.DeliveryPolicy,
+			Constraint:        input.Constraint,
+			Enabled:           input.Enabled,
 		})
 	}
 	if err := s.repo.CreateMany(tenantID, relations); err != nil {
@@ -145,6 +192,8 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 	if err != nil {
 		return nil, agentrelation.ErrNotFound
 	}
+	originalStance := relation.Stance
+	requestedStance := originalStance
 
 	if input.Scope != nil {
 		relation.Scope = strings.TrimSpace(*input.Scope)
@@ -153,7 +202,8 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 		relation.RelationType = strings.TrimSpace(*input.RelationType)
 	}
 	if input.Stance != nil {
-		relation.Stance = strings.TrimSpace(*input.Stance)
+		requestedStance = strings.TrimSpace(*input.Stance)
+		relation.Stance = requestedStance
 	}
 	if input.AllowedActions != nil {
 		relation.AllowedActions = normalizeActions(*input.AllowedActions)
@@ -185,6 +235,29 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 		}
 	}
 
+	if requestedStance != originalStance {
+		now := time.Now().UTC()
+		eventID := uuid.NewString()
+		updated, _, err := s.repo.UpdateAndResetScore(tenantID, relation, &agentrelation.AgentRelationEvent{
+			ID:             eventID,
+			RelationID:     relation.ID,
+			EventType:      "admin_stance_reset",
+			Severity:       1,
+			Reason:         fmt.Sprintf("管理员将关系立场重设为 %s", requestedStance),
+			Visibility:     "private",
+			ActorType:      "admin",
+			SourceKind:     "configuration",
+			IdempotencyKey: eventID,
+			RuleVersion:    agentrelation.RelationshipRuleV1,
+			OccurredAt:     now,
+			CreatedAt:      now,
+		}, agentrelation.InitialScoreForStance(requestedStance))
+		if err != nil {
+			return nil, fmt.Errorf("更新 Agent 关系失败: %w", err)
+		}
+		return relationToDTO(updated), nil
+	}
+
 	if err := s.repo.Update(tenantID, relation); err != nil {
 		return nil, fmt.Errorf("更新 Agent 关系失败: %w", err)
 	}
@@ -193,6 +266,151 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 		return nil, fmt.Errorf("读取更新后的 Agent 关系失败: %w", err)
 	}
 	return relationToDTO(updated), nil
+}
+
+// RecordEvent applies one bounded, deterministic relationship event to an
+// existing directed edge. Arbitrary score deltas are intentionally not part of
+// the input contract.
+func (s *AgentRelationService) RecordEvent(tenantID string, relationID uint64, input *RecordAgentRelationEventInput, actorType, actorID string) (*AgentRelationEventResultDTO, error) {
+	if input == nil {
+		return nil, agentrelation.ErrInvalidEventType
+	}
+	normalizeRelationEventInput(input)
+	if err := validateRelationEventInput(input); err != nil {
+		return nil, err
+	}
+	delta, ok := agentrelation.EventDelta(input.EventType, input.Severity)
+	if !ok {
+		return nil, agentrelation.ErrInvalidEventType
+	}
+	now := time.Now().UTC()
+	event := &agentrelation.AgentRelationEvent{
+		ID:             uuid.NewString(),
+		RelationID:     relationID,
+		EventType:      input.EventType,
+		Severity:       input.Severity,
+		Delta:          delta,
+		Reason:         input.Reason,
+		Visibility:     input.Visibility,
+		ActorType:      strings.TrimSpace(actorType),
+		ActorID:        truncateRelationEventField(actorID, 128),
+		SourceKind:     input.SourceKind,
+		SourceID:       input.SourceID,
+		IdempotencyKey: input.IdempotencyKey,
+		RuleVersion:    agentrelation.RelationshipRuleV1,
+		OccurredAt:     now,
+		CreatedAt:      now,
+	}
+	if event.ActorType == "" {
+		event.ActorType = "system"
+	}
+	if event.IdempotencyKey == "" {
+		event.IdempotencyKey = event.ID
+	}
+	relation, applied, err := s.repo.ApplyEvent(tenantID, event)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, agentrelation.ErrNotFound
+		}
+		return nil, fmt.Errorf("记录关系事件失败: %w", err)
+	}
+	return &AgentRelationEventResultDTO{Relation: relationToDTO(relation), Event: relationEventToDTO(applied)}, nil
+}
+
+// RecordEventForAgent only permits a runtime agent to change its own view of
+// a target reachable by an enabled outgoing edge.
+func (s *AgentRelationService) RecordEventForAgent(tenantID string, sourceAgentID uint64, sourceAgentName, targetAgentName, scope string, input *RecordAgentRelationEventInput) (*AgentRelationEventResultDTO, error) {
+	target, err := s.agentRepo.GetByName(tenantID, NormalizeAgentName(targetAgentName))
+	if err != nil {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	scope = strings.TrimSpace(scope)
+	var relation *agentrelation.AgentRelation
+	if scope != "" {
+		relation, err = s.repo.GetEnabledEdge(tenantID, scope, sourceAgentID, target.ID)
+	} else {
+		relations, listErr := s.repo.ListEnabledForAgent(tenantID, sourceAgentID)
+		if listErr != nil {
+			return nil, fmt.Errorf("读取组织关系失败: %w", listErr)
+		}
+		for _, candidate := range relations {
+			if candidate.SourceAgentID != sourceAgentID || candidate.TargetAgentID != target.ID {
+				continue
+			}
+			if relation != nil {
+				return nil, fmt.Errorf("%w：存在多个范围，请明确 scope", agentrelation.ErrRouteNotFound)
+			}
+			relation = candidate
+		}
+		if relation == nil {
+			err = gorm.ErrRecordNotFound
+		}
+	}
+	if err != nil {
+		return nil, agentrelation.ErrRouteNotFound
+	}
+	return s.RecordEvent(tenantID, relation.ID, input, "agent", sourceAgentName)
+}
+
+func (s *AgentRelationService) Events(tenantID string, relationID uint64, limit int) ([]*AgentRelationEventDTO, error) {
+	if _, err := s.repo.GetByID(tenantID, relationID); err != nil {
+		return nil, agentrelation.ErrNotFound
+	}
+	events, err := s.repo.ListEvents(tenantID, relationID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("读取关系事件失败: %w", err)
+	}
+	result := make([]*AgentRelationEventDTO, 0, len(events))
+	for _, event := range events {
+		result = append(result, relationEventToDTO(event))
+	}
+	return result, nil
+}
+
+func normalizeRelationEventInput(input *RecordAgentRelationEventInput) {
+	input.EventType = strings.TrimSpace(input.EventType)
+	if input.Severity == 0 {
+		input.Severity = agentrelation.DefaultEventSeverity
+	}
+	input.Reason = strings.TrimSpace(input.Reason)
+	input.Visibility = strings.TrimSpace(input.Visibility)
+	if input.Visibility == "" {
+		input.Visibility = "private"
+	}
+	input.SourceKind = truncateRelationEventField(input.SourceKind, 32)
+	if input.SourceKind == "" {
+		input.SourceKind = "manual"
+	}
+	input.SourceID = truncateRelationEventField(input.SourceID, 128)
+	input.IdempotencyKey = truncateRelationEventField(input.IdempotencyKey, 191)
+}
+
+func validateRelationEventInput(input *RecordAgentRelationEventInput) error {
+	if _, ok := agentrelation.RelationEventBaseDeltas[input.EventType]; !ok {
+		return agentrelation.ErrInvalidEventType
+	}
+	if input.Severity < 1 || input.Severity > 3 {
+		return agentrelation.ErrInvalidSeverity
+	}
+	if _, ok := agentrelation.RelationEventVisibilities[input.Visibility]; !ok {
+		return agentrelation.ErrInvalidVisibility
+	}
+	if input.Reason == "" {
+		return agentrelation.ErrEventReasonRequired
+	}
+	if utf8.RuneCountInString(input.Reason) > 2000 {
+		return agentrelation.ErrEventReasonTooLong
+	}
+	return nil
+}
+
+func truncateRelationEventField(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) > limit {
+		return string(runes[:limit])
+	}
+	return value
 }
 
 func (s *AgentRelationService) Delete(tenantID string, id uint64) error {
@@ -291,21 +509,43 @@ func validateRelation(sourceAgentID, targetAgentID uint64, scope, relationType, 
 }
 
 func relationToDTO(relation *agentrelation.AgentRelation) *AgentRelationDTO {
-	return &AgentRelationDTO{
-		ID:              relation.ID,
-		Scope:           relation.Scope,
-		SourceAgentID:   relation.SourceAgentID,
-		SourceAgentName: relation.SourceAgent.Name,
-		TargetAgentID:   relation.TargetAgentID,
-		TargetAgentName: relation.TargetAgent.Name,
-		RelationType:    relation.RelationType,
-		Stance:          relation.Stance,
-		AllowedActions:  append([]string(nil), relation.AllowedActions...),
-		ContextPolicy:   relation.ContextPolicy,
-		DeliveryPolicy:  relation.DeliveryPolicy,
-		Constraint:      relation.Constraint,
-		Enabled:         relation.Enabled,
-		CreatedAt:       relation.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:       relation.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	dto := &AgentRelationDTO{
+		ID:                relation.ID,
+		Scope:             relation.Scope,
+		SourceAgentID:     relation.SourceAgentID,
+		SourceAgentName:   relation.SourceAgent.Name,
+		TargetAgentID:     relation.TargetAgentID,
+		TargetAgentName:   relation.TargetAgent.Name,
+		RelationType:      relation.RelationType,
+		Stance:            relation.Stance,
+		RelationshipScore: relation.RelationshipScore,
+		AllowedActions:    append([]string(nil), relation.AllowedActions...),
+		ContextPolicy:     relation.ContextPolicy,
+		DeliveryPolicy:    relation.DeliveryPolicy,
+		Constraint:        relation.Constraint,
+		Enabled:           relation.Enabled,
+		CreatedAt:         relation.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:         relation.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	if relation.LastChangedAt != nil {
+		value := relation.LastChangedAt.UTC().Format(time.RFC3339)
+		dto.LastChangedAt = &value
+	}
+	return dto
+}
+
+func relationEventToDTO(event *agentrelation.AgentRelationEvent) *AgentRelationEventDTO {
+	return &AgentRelationEventDTO{
+		ID: event.ID, RelationID: event.RelationID, Scope: event.Scope,
+		SourceAgentID: event.SourceAgentID, TargetAgentID: event.TargetAgentID,
+		EventType: event.EventType, Severity: event.Severity, Delta: event.Delta,
+		ScoreBefore: event.ScoreBefore, ScoreAfter: event.ScoreAfter,
+		StanceBefore: event.StanceBefore, StanceAfter: event.StanceAfter,
+		Reason: event.Reason, Visibility: event.Visibility,
+		ActorType: event.ActorType, ActorID: event.ActorID,
+		SourceKind: event.SourceKind, SourceID: event.SourceID,
+		IdempotencyKey: event.IdempotencyKey, RuleVersion: event.RuleVersion,
+		OccurredAt: event.OccurredAt.UTC().Format(time.RFC3339),
+		CreatedAt:  event.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
