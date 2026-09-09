@@ -39,6 +39,11 @@ type AgentMessageService struct {
 	agentRepo    *repository.AgentRepository
 	runner       AgentMessageRunner
 	active       sync.Map // tenantID + NUL + agent id; prevents recursive delivery loops
+	targetQueues sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
+}
+
+type agentMessageTargetQueue struct {
+	token chan struct{}
 }
 
 func NewAgentMessageService(runner AgentMessageRunner) *AgentMessageService {
@@ -228,14 +233,21 @@ func (s *AgentMessageService) resolveRelation(tenantID string, sourceID, targetI
 
 func (s *AgentMessageService) execute(ctx context.Context, tenantID string, targetAgentID uint64, message *agentrelation.AgentMessage, envelope string) {
 	key := agentMessageActiveKey(tenantID, targetAgentID)
-	if _, loaded := s.active.LoadOrStore(key, struct{}{}); loaded {
+	queueValue, _ := s.targetQueues.LoadOrStore(key, &agentMessageTargetQueue{token: make(chan struct{}, 1)})
+	queue := queueValue.(*agentMessageTargetQueue)
+	select {
+	case queue.token <- struct{}{}:
+		defer func() { <-queue.token }()
+	case <-ctx.Done():
 		message.Status = agentrelation.MessageStatusFailed
-		message.Error = "目标 Agent 正在处理另一条组织消息"
+		message.Error = "目标 Agent 排队等待超时"
 		now := time.Now().UTC()
 		message.CompletedAt = &now
 		_ = s.messageRepo.Save(tenantID, message)
 		return
 	}
+
+	s.active.Store(key, struct{}{})
 	defer s.active.Delete(key)
 
 	started := time.Now().UTC()

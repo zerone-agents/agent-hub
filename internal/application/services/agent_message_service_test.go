@@ -86,14 +86,24 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 }
 
 func addMessageRelation(t *testing.T, f agentMessageFixture, source, target agent.AgentConfig, scope, delivery, contextPolicy string, actions ...string) agentrelation.AgentRelation {
+	return addTypedMessageRelation(t, f, source, target, scope, "peer", "friendly", delivery, contextPolicy, actions...)
+}
+
+func addTypedMessageRelation(
+	t *testing.T,
+	f agentMessageFixture,
+	source, target agent.AgentConfig,
+	scope, relationType, stance, delivery, contextPolicy string,
+	actions ...string,
+) agentrelation.AgentRelation {
 	t.Helper()
 	relation := agentrelation.AgentRelation{
 		TenantID:       source.TenantID,
 		Scope:          scope,
 		SourceAgentID:  source.ID,
 		TargetAgentID:  target.ID,
-		RelationType:   "peer",
-		Stance:         "friendly",
+		RelationType:   relationType,
+		Stance:         stance,
 		AllowedActions: actions,
 		ContextPolicy:  contextPolicy,
 		DeliveryPolicy: delivery,
@@ -102,6 +112,63 @@ func addMessageRelation(t *testing.T, f agentMessageFixture, source, target agen
 	}
 	require.NoError(t, f.db.Create(&relation).Error)
 	return relation
+}
+
+// TestAgentMessageServiceRoutesEveryOrganizationRelationship is the compact
+// regression matrix for the contracts exposed by the relationship editor.
+// Each case proves that the structural label, stance, action whitelist,
+// context policy, and delivery mode survive all the way into a real dispatch.
+func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
+	tests := []struct {
+		name          string
+		relationType  string
+		stance        string
+		action        string
+		contextPolicy string
+		delivery      string
+	}{
+		{name: "subordinate reports to leader", relationType: "reports_to", stance: "allied", action: "report", contextPolicy: "summary_only", delivery: "async"},
+		{name: "leader reviews subordinate", relationType: "oversight", stance: "friendly", action: "review", contextPolicy: "summary_only", delivery: "sync"},
+		{name: "peer hands off work", relationType: "peer", stance: "friendly", action: "handoff", contextPolicy: "shared_thread", delivery: "async"},
+		{name: "leader consults advisor", relationType: "advisor", stance: "friendly", action: "consult", contextPolicy: "shared_thread", delivery: "sync"},
+		{name: "reviewer challenges leader", relationType: "reviewer", stance: "wary", action: "challenge", contextPolicy: "none", delivery: "async"},
+		{name: "representative reports to regulator", relationType: "representative", stance: "neutral", action: "report", contextPolicy: "shared_thread", delivery: "sync"},
+		{name: "opponent challenges proposal", relationType: "opponent", stance: "hostile", action: "challenge", contextPolicy: "summary_only", delivery: "async"},
+		{name: "external stakeholder consults", relationType: "external", stance: "competitive", action: "consult", contextPolicy: "summary_only", delivery: "async"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := setupAgentMessageService(t)
+			addTypedMessageRelation(t, f, f.a, f.b, "speeding-hq", tt.relationType, tt.stance, tt.delivery, tt.contextPolicy, tt.action)
+
+			got, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+				TargetAgent:    f.b.Name,
+				Scope:          "speeding-hq",
+				Action:         tt.action,
+				Message:        "执行关系案例",
+				ContextSummary: "关系案例摘要",
+				SharedContext:  "关系案例完整会话",
+			})
+			require.NoError(t, err)
+
+			if tt.delivery == "sync" {
+				require.Equal(t, agentrelation.MessageStatusCompleted, got.Status)
+			} else {
+				require.Equal(t, agentrelation.MessageStatusQueued, got.Status)
+				require.Eventually(t, func() bool {
+					status, statusErr := f.service.Get("tenant-a", &f.a, got.ID)
+					return statusErr == nil && status.Status == agentrelation.MessageStatusCompleted
+				}, time.Second, 10*time.Millisecond)
+			}
+
+			calls := f.runner.snapshot()
+			require.Len(t, calls, 1)
+			require.Contains(t, calls[0].message, "结构关系："+tt.relationType)
+			require.Contains(t, calls[0].message, "立场："+tt.stance)
+			require.Contains(t, calls[0].message, "动作："+tt.action)
+		})
+	}
 }
 
 func TestAgentMessageServiceSyncDeliveryUsesDirectedAuthorizedRoute(t *testing.T) {
@@ -203,6 +270,45 @@ func TestAgentMessageServiceAsyncCanBePolledByEitherParty(t *testing.T) {
 	foreign := agent.AgentConfig{ID: f.a.ID, Name: f.a.Name, TenantID: "tenant-b"}
 	_, err = f.service.Get("tenant-b", &foreign, got.ID)
 	require.ErrorIs(t, err, agentrelation.ErrMessageNotFound)
+}
+
+func TestAgentMessageServiceQueuesConcurrentDeliveriesToSameTarget(t *testing.T) {
+	f := setupAgentMessageService(t)
+	release := make(chan struct{})
+	f.runner.blocking = release
+	addMessageRelation(t, f, f.a, f.b, "speeding-hq", "async", "summary_only", "consult")
+	addMessageRelation(t, f, f.c, f.b, "speeding-hq", "async", "summary_only", "challenge")
+
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "speeding-hq", Action: "consult", Message: "第一条消息",
+	})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(f.runner.snapshot()) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	second, err := f.service.Send(context.Background(), "tenant-a", &f.c, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "speeding-hq", Action: "challenge", Message: "第二条消息",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusQueued, second.Status)
+	time.Sleep(30 * time.Millisecond)
+	require.Len(t, f.runner.snapshot(), 1, "the second delivery must wait instead of failing or entering the runtime concurrently")
+
+	queued, err := f.service.Get("tenant-a", &f.c, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusQueued, queued.Status)
+	require.Empty(t, queued.Error)
+
+	close(release)
+	require.Eventually(t, func() bool {
+		firstStatus, firstErr := f.service.Get("tenant-a", &f.a, first.ID)
+		secondStatus, secondErr := f.service.Get("tenant-a", &f.c, second.ID)
+		return firstErr == nil && secondErr == nil &&
+			firstStatus.Status == agentrelation.MessageStatusCompleted &&
+			secondStatus.Status == agentrelation.MessageStatusCompleted
+	}, time.Second, 10*time.Millisecond)
+	require.Len(t, f.runner.snapshot(), 2)
 }
 
 func TestAgentMessageServicePreventsNestedDispatchFromDeliveredTarget(t *testing.T) {
