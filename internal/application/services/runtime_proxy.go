@@ -103,12 +103,12 @@ func (s *RuntimeProxyService) Resolve(org, agentName, method, escapedRemainder, 
 	if cfg.RuntimePort <= 0 {
 		return nil, &ProxyError{Code: 502, Reason: "runtime upstream unavailable"}
 	}
-	route, matched, methodOK := matchAllowlist(method, canon)
+	route, allowedMethods, matched, methodOK := matchAllowlist(method, canon)
 	if !matched {
 		return nil, notFound
 	}
 	if !methodOK {
-		return nil, &ProxyError{Code: 405, Reason: "method not allowed", AllowHeader: strings.Join(route.methods, ", ")}
+		return nil, &ProxyError{Code: 405, Reason: "method not allowed", AllowHeader: strings.Join(allowedMethods, ", ")}
 	}
 	// Fail closed BEFORE any URL construction: DB may retain running state
 	// from before a config change (spec, round-5 finding).
@@ -138,13 +138,18 @@ func canonicalizePath(escaped, decoded string) (string, bool) {
 	return decoded, true
 }
 
-// matchAllowlist 返回切片序中首个 method+path 均命中的路由。潜语义：path 命中但
-// method 不符时仍继续扫描且 pathMatched=true、route 携带第一条 path 命中路由
-// （供 405 Allow 头，批次三 #91）——当前矩阵无重叠路径（每个 pattern 唯一），
-// 故行为正确；未来新增与既有 pattern 重叠的模式时，切片序靠前的路由胜出
-// （first match wins，非「取最后匹配行」），新增时需注意。
-func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodOK bool) {
+// matchAllowlist 返回切片序中首个 method+path 均命中的路由，以及聚合
+// （union）的允许方法集。潜语义：path 命中但 method 不符时仍继续扫描且
+// pathMatched=true、route 携带第一条 path 命中路由、allowedMethods 收集
+// **所有** path 命中行的 methods（按 allowlist 定义序、去重）——405
+// Allow 头须列出目标资源的全部允许方法（RFC 9110，issue #91 批次三 P2），
+// 例如 /v1/sessions/:sessionId 在 allowlist 中同时有 GET 与 DELETE 两行。
+// 当前矩阵无重叠路径（每个 pattern 唯一），故行为正确；未来新增与既有
+// pattern 重叠的模式时，切片序靠前的路由胜出（first match wins，非
+// 「取最后匹配行」），新增时需注意。
+func matchAllowlist(method, path string) (route proxyRoute, allowedMethods []string, pathMatched, methodOK bool) {
 	req := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	seen := make(map[string]bool)
 	for _, r := range proxyAllowlist {
 		pat := strings.Split(strings.TrimPrefix(r.pattern, "/"), "/")
 		if len(req) != len(pat) {
@@ -169,13 +174,17 @@ func matchAllowlist(method, path string) (route proxyRoute, pathMatched, methodO
 		}
 		pathMatched = true
 		if route.pattern == "" {
-			route = r // 第一条 path 命中的路由；method 不符时返回供 Allow 头（#91 batch3）
+			route = r // 第一条 path 命中的路由；method 不符时返回供诊断（#91 batch3）
 		}
 		for _, m := range r.methods {
+			if !seen[m] {
+				seen[m] = true
+				allowedMethods = append(allowedMethods, m)
+			}
 			if m == method {
-				return r, true, true
+				return r, allowedMethods, true, true
 			}
 		}
 	}
-	return route, pathMatched, false
+	return route, allowedMethods, pathMatched, false
 }

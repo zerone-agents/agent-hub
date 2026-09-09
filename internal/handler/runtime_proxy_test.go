@@ -173,6 +173,24 @@ func TestProxyMethodNotAllowedCarriesAllowHeader(t *testing.T) {
 	}
 }
 
+func TestProxyMethodNotAllowedAllowAggregatesAllRows(t *testing.T) {
+	// P2 regression (review): /v1/sessions/:sessionId is defined in two
+	// allowlist rows (GET + DELETE). A disallowed method (PUT) must get
+	// Allow: GET, DELETE — not just the first row's methods.
+	f := newFakeRuntime(t)
+	r := newProxyEngine(portOf(f.srv.URL))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/runtime/default/test/v1/sessions/s-1", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", w.Code)
+	}
+	if got := w.Header().Get("Allow"); got != "GET, DELETE" {
+		t.Fatalf("Allow = %q, want %q (all matching allowlist rows)", got, "GET, DELETE")
+	}
+}
+
 func TestProxyForwardsStrippedPathQueryAndHeaders(t *testing.T) {
 	f := newFakeRuntime(t)
 	r := newProxyEngine(portOf(f.srv.URL))

@@ -228,7 +228,7 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 		{methods: []string{http.MethodGet}, pattern: "/v1/agents/special", timeout: 9 * time.Second},
 	}
 
-	route, pathMatched, methodOK := matchAllowlist(http.MethodGet, "/v1/agents/special")
+	route, allowed, pathMatched, methodOK := matchAllowlist(http.MethodGet, "/v1/agents/special")
 	if !pathMatched || !methodOK {
 		t.Fatalf("overlap must match, got pathMatched=%v methodOK=%v", pathMatched, methodOK)
 	}
@@ -238,11 +238,14 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 	if route.timeout != 120*time.Second {
 		t.Fatalf("first match wins: timeout = %v, want 120s", route.timeout)
 	}
+	if len(allowed) != 1 || allowed[0] != http.MethodGet {
+		t.Fatalf("allowed methods = %v, want [GET]", allowed)
+	}
 
 	// method 不符时不返回路由，但 pathMatched 保留（潜语义注释所述）。
-	// 批次三（#91）：route 返回第一条 path 命中的路由（供 405 Allow 头），
-	// 不再是零值。
-	route, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
+	// 批次三（#91）：route 返回第一条 path 命中的路由（供诊断），
+	// allowed 聚合所有 path 命中行的方法（供 405 Allow 头，RFC 9110）。
+	route, allowed, pathMatched, methodOK = matchAllowlist(http.MethodPost, "/v1/agents/special")
 	if !pathMatched {
 		t.Fatal("path matched flag must persist on method mismatch")
 	}
@@ -254,5 +257,8 @@ func TestMatchAllowlistFirstMatchWins(t *testing.T) {
 	}
 	if len(route.methods) != 1 || route.methods[0] != http.MethodGet {
 		t.Fatalf("first path-matched route methods = %v, want [GET]", route.methods)
+	}
+	if len(allowed) != 1 || allowed[0] != http.MethodGet {
+		t.Fatalf("allowed methods on mismatch = %v, want [GET]", allowed)
 	}
 }
