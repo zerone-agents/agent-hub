@@ -1,7 +1,5 @@
 package provider
 
-import "fmt"
-
 // AttrRule describes a single provider-specific config attribute for a
 // given protocol. It is the data-driven source of truth consumed by both
 // the backend validator (ValidateAttributes) and the frontend dynamic form
@@ -68,7 +66,7 @@ func ValidateAttributes(protocol string, attrs map[string]AttrValue) error {
 		v, ok := attrs[rule.Key]
 
 		if rule.Required && (!ok || v.Value == "") {
-			return fmt.Errorf("protocol %s 要求必填属性: %s", protocol, rule.Key)
+			return NewValidationErrorf("protocol %s 要求必填属性: %s", protocol, rule.Key)
 		}
 		if !ok {
 			continue
@@ -77,20 +75,20 @@ func ValidateAttributes(protocol string, attrs map[string]AttrValue) error {
 		switch rule.Type {
 		case AttrTypeBool:
 			if v.Value != "true" && v.Value != "false" {
-				return fmt.Errorf("属性 %s 必须是 bool（true/false），收到: %s", rule.Key, v.Value)
+				return NewValidationErrorf("属性 %s 必须是 bool（true/false），收到: %s", rule.Key, v.Value)
 			}
 		case AttrTypeInt:
 			if !isInt(v.Value) {
-				return fmt.Errorf("属性 %s 必须是整数，收到: %s", rule.Key, v.Value)
+				return NewValidationErrorf("属性 %s 必须是整数，收到: %s", rule.Key, v.Value)
 			}
 		case AttrTypeString:
 			// any string is acceptable
 		default:
-			return fmt.Errorf("属性 %s 类型不支持: %s", rule.Key, rule.Type)
+			return NewValidationErrorf("属性 %s 类型不支持: %s", rule.Key, rule.Type)
 		}
 		// Enum allow-list
 		if len(rule.Enum) > 0 && !contains(rule.Enum, v.Value) {
-			return fmt.Errorf("属性 %s 取值不支持: %s（可选: %v）", rule.Key, v.Value, rule.Enum)
+			return NewValidationErrorf("属性 %s 取值不支持: %s（可选: %v）", rule.Key, v.Value, rule.Enum)
 		}
 	}
 	return nil

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -27,6 +28,31 @@ func NewProviderHandler(service *services.ProviderService, multiragClient provid
 	return &ProviderHandler{service: service, multiragClient: multiragClient}
 }
 
+// respondProviderError 映射 Provider 领域错误（issue #95 P2：英文化后
+// 内部诊断只进服务端日志，HTTP 边界返回中性中文文案，不向用户泄漏
+// DB/加解密等底层细节）。领域 sentinel 走用户面文案（404/503），
+// 用户面校验错误（ValidationError）保留 400 原文，其余一律 500 中性，
+// 完整错误链由服务端日志承载。
+func respondProviderError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, provider.ErrProviderNotFound):
+		respondError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, provider.ErrMultiRAGConfigMissing):
+		respondError(c, http.StatusServiceUnavailable, "MultiRAG 未配置")
+	default:
+		var ve *provider.ValidationError
+		if errors.As(err, &ve) {
+			// 返回完整错误链（err.Error() 而非 ve.Error()）：批量校验的
+			// 外层 wrap 携带模型索引/名称上下文（defaultModels[i](id)），
+			// 只取内层消息会丢失用户识别目标（review #5599426234 P3）。
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[ProviderHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
+}
+
 // ── Public endpoints (for Electron app, JWTAuth required) ───────
 
 func (h *ProviderHandler) List(c *gin.Context) {
@@ -36,7 +62,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 	}
 	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -44,7 +70,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 	for _, p := range providers {
 		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondProviderError(c, err)
 			return
 		}
 		items = append(items, dto)
@@ -61,17 +87,13 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 
 	p, err := h.service.GetByID(tenant.GetTenantID(c), id)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
 	dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -86,7 +108,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 	}
 	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -94,7 +116,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 	for _, p := range providers {
 		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondProviderError(c, err)
 			return
 		}
 		items = append(items, dto)
@@ -152,7 +174,7 @@ func (h *ProviderHandler) Create(c *gin.Context) {
 		LockedAPIKey:  req.LockedAPIKey,
 	})
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondCreated(c, dto)
@@ -201,11 +223,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 		LockedAPIKey:  req.LockedAPIKey,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -219,11 +237,7 @@ func (h *ProviderHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.Delete(tenant.GetTenantID(c), id); err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Provider 已删除")
@@ -249,11 +263,7 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 
 	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)
@@ -294,7 +304,7 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	configs, err := h.service.ListRuntimeConfigs(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -315,11 +325,7 @@ func (h *ProviderHandler) RevealAPIKey(c *gin.Context) {
 
 	apiKey, err := h.service.RevealAPIKey(tenant.GetTenantID(c), id)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -377,11 +383,7 @@ func (h *ProviderHandler) AddModel(c *gin.Context) {
 		Efforts:       req.Efforts,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondCreated(c, dto)
@@ -417,11 +419,7 @@ func (h *ProviderHandler) UpdateModel(c *gin.Context) {
 		Efforts:       req.Efforts,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -437,11 +435,7 @@ func (h *ProviderHandler) DeleteModel(c *gin.Context) {
 	}
 	selectionID := c.Param("selectionId")
 	if err := h.service.DeleteModel(tenant.GetTenantID(c), id, selectionID); err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Model 已删除")
@@ -473,15 +467,7 @@ func (h *ProviderHandler) SyncToMultiRAG(c *gin.Context) {
 
 	result, err := h.service.SyncProviderToMultiRAG(c.Request.Context(), tenant.GetTenantID(c), id, h.multiragClient, req.VerifyOnly, req.ModelIds)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		if err == provider.ErrMultiRAGConfigMissing {
-			respondError(c, http.StatusServiceUnavailable, "MultiRAG 未配置")
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)
