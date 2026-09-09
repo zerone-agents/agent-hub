@@ -140,7 +140,9 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
     renderForm(null)
 
     expect(screen.getByText('人格光谱')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /稳健执行者/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('combobox', { name: '人格模板' })).toBeInTheDocument()
+    expect(screen.getByText('稳健执行者')).toBeInTheDocument()
+    expect(screen.queryByLabelText('高级人格参数')).not.toBeInTheDocument()
 
     await user.type(screen.getByLabelText('代理标识'), 'steady-agent')
     await user.click(screen.getByRole('button', { name: '创建代理' }))
@@ -164,8 +166,9 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
     const user = userEvent.setup()
     renderForm(null)
 
-    await user.click(screen.getByRole('button', { name: /政治投机者/ }))
-    expect(screen.getByRole('button', { name: /政治投机者/ })).toHaveAttribute('aria-pressed', 'true')
+    const templateSelect = screen.getByRole('combobox', { name: '人格模板' })
+    await user.click(templateSelect)
+    await user.click(await screen.findByText('政治投机者'))
     await user.type(screen.getByLabelText('代理标识'), 'climber-agent')
     await user.click(screen.getByRole('button', { name: '创建代理' }))
 

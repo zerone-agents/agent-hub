@@ -1,4 +1,6 @@
-import { Slider } from 'antd'
+import { useMemo, useState } from 'react'
+import { Select, Slider } from 'antd'
+import { CaretDownIcon, SlidersHorizontalIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { BehaviorProfile } from '@/api/agents'
 import {
@@ -56,58 +58,95 @@ const useStyles = createStyles(({ css }) => ({
     font-size: 10px;
     font-weight: 600;
   `,
-  presets: css`
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 7px;
-    padding: 12px 16px 4px;
-
-    @media (max-width: 640px) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+  template: css`
+    padding: 14px 16px;
   `,
-  preset: css`
-    min-width: 0;
-    padding: 8px 9px;
-    border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
-    border-radius: 6px;
+  templateLabelRow: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+  `,
+  templateLabel: css`
     color: var(--text-secondary);
-    background: var(--background);
-    text-align: left;
-    cursor: pointer;
-    transition:
-      border-color 0.15s,
-      background 0.15s,
-      color 0.15s;
-
-    &:hover {
-      border-color: color-mix(in srgb, var(--primary) 40%, transparent);
-      color: var(--text);
-    }
-  `,
-  presetActive: css`
-    border-color: color-mix(in srgb, var(--primary) 55%, transparent);
-    color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 7%, var(--background));
-  `,
-  presetName: css`
-    display: block;
-    margin-bottom: 2px;
     font-size: 11px;
     font-weight: 600;
   `,
-  presetDesc: css`
-    display: block;
+  templateStatus: css`
+    color: var(--text-tertiary);
+    font-size: 10px;
+  `,
+  templateSelect: css`
+    width: 100%;
+
+    .ant-select-selector {
+      min-height: 42px !important;
+      padding-inline: 12px !important;
+      border-color: color-mix(in srgb, var(--foreground) 11%, transparent) !important;
+      background: var(--background) !important;
+      box-shadow: none !important;
+    }
+
+    &.ant-select-focused .ant-select-selector,
+    &:hover .ant-select-selector {
+      border-color: color-mix(in srgb, var(--primary) 55%, transparent) !important;
+    }
+  `,
+  option: css`
+    display: grid;
+    gap: 2px;
+    padding-block: 3px;
+  `,
+  optionName: css`
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+  `,
+  optionDesc: css`
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.4;
+  `,
+  templateFoot: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 8px;
+  `,
+  templateDescription: css`
+    min-width: 0;
     overflow: hidden;
     color: var(--text-muted);
-    font-size: 9px;
-    line-height: 1.35;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  tuneButton: css`
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    border: 0;
+    color: var(--primary);
+    background: transparent;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
   `,
   traitGrid: css`
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    padding: 12px 16px 16px;
+    padding: 2px 16px 16px;
 
     @media (max-width: 640px) {
       grid-template-columns: 1fr;
@@ -158,13 +197,45 @@ export default function BehaviorProfileEditor({
   onChange,
 }: BehaviorProfileEditorProps) {
   const { styles } = useStyles()
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const profile = cloneBehaviorProfile(value)
+  const selectedPreset = BEHAVIOR_PRESETS.find((preset) =>
+    profilesEqual(profile, preset.profile),
+  )
+  const selectedTemplateId = selectedPreset?.id ?? 'custom'
+  const templateOptions = useMemo(
+    () => [
+      ...BEHAVIOR_PRESETS.map((preset) => ({
+        value: preset.id,
+        label: preset.name,
+        description: preset.description,
+      })),
+      {
+        value: 'custom',
+        label: '自定义参数',
+        description: '点击“调整参数”后手动修改，自动生成',
+        disabled: true,
+      },
+    ],
+    [],
+  )
 
   const setScore = (
     key: keyof Omit<BehaviorProfile, 'version'>,
     score: number,
   ) => {
     onChange?.({ ...profile, [key]: score })
+  }
+
+  const selectTemplate = (templateId: string) => {
+    if (templateId === 'custom') {
+      setAdvancedOpen(true)
+      return
+    }
+    const preset = BEHAVIOR_PRESETS.find((item) => item.id === templateId)
+    if (preset) {
+      onChange?.(cloneBehaviorProfile(preset.profile))
+    }
   }
 
   return (
@@ -179,28 +250,51 @@ export default function BehaviorProfileEditor({
         <span className={styles.version}>Schema v{profile.version}</span>
       </div>
 
-      <div className={styles.presets} aria-label="行为人格预设">
-        {BEHAVIOR_PRESETS.map((preset) => {
-          const active = profilesEqual(profile, preset.profile)
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              className={`${styles.preset} ${active ? styles.presetActive : ''}`}
-              aria-pressed={active}
-              title={preset.description}
-              onClick={() => {
-                onChange?.(cloneBehaviorProfile(preset.profile))
-              }}
-            >
-              <span className={styles.presetName}>{preset.name}</span>
-              <span className={styles.presetDesc}>{preset.description}</span>
-            </button>
-          )
-        })}
+      <div className={styles.template}>
+        <div className={styles.templateLabelRow}>
+          <label className={styles.templateLabel} htmlFor="behavior-profile-template">
+            人格模板
+          </label>
+          <span className={styles.templateStatus}>
+            {selectedPreset ? '已套用模板' : '已调整为自定义参数'}
+          </span>
+        </div>
+        <Select
+          id="behavior-profile-template"
+          aria-label="人格模板"
+          className={styles.templateSelect}
+          value={selectedTemplateId}
+          options={templateOptions}
+          suffix={<CaretDownIcon size={14} />}
+          showSearch={{ optionFilterProp: 'label' }}
+          popupMatchSelectWidth
+          optionRender={(option) => (
+            <div className={styles.option}>
+              <span className={styles.optionName}>{option.label}</span>
+              <span className={styles.optionDesc}>
+                {option.data.description}
+              </span>
+            </div>
+          )}
+          onChange={selectTemplate}
+        />
+        <div className={styles.templateFoot}>
+          <span className={styles.templateDescription}>
+            {selectedPreset?.description ?? '当前参数是该 Agent 的独立自定义配置'}
+          </span>
+          <button
+            type="button"
+            className={styles.tuneButton}
+            aria-expanded={advancedOpen}
+            onClick={() => { setAdvancedOpen((open) => !open) }}
+          >
+            <SlidersHorizontalIcon size={13} />
+            {advancedOpen ? '收起参数' : '调整参数'}
+          </button>
+        </div>
       </div>
 
-      <div className={styles.traitGrid}>
+      {advancedOpen && <div className={styles.traitGrid} aria-label="高级人格参数">
         {BEHAVIOR_TRAITS.map((trait) => (
           <div className={styles.trait} key={trait.key}>
             <div className={styles.traitHead}>
@@ -225,7 +319,7 @@ export default function BehaviorProfileEditor({
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   )
 }
