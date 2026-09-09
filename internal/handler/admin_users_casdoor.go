@@ -2,9 +2,7 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"control-panel/internal/directory"
 	"control-panel/internal/domain/tenant"
@@ -20,18 +18,22 @@ type UserDirectory interface {
 	ResetPassword(tenantID, userID, actorID string) (string, error)
 }
 
+// LoginURLBuilder 按组织生成一次性的 OAuth 授权登录链接（带 client_id、
+// PKCE S256、redirect_uri）。实现注入（main.go 传 auth.GenerateLoginURL），
+// handler 不直接依赖 auth 包，测试可注入 fake。
+type LoginURLBuilder func(org string) (string, error)
+
 // CasdoorUserHandler serves the admin user-management endpoints backed by a
 // casdoor directory.
 type CasdoorUserHandler struct {
-	dir             UserDirectory
-	casdoorEndpoint string
+	dir        UserDirectory
+	loginURLFn LoginURLBuilder
 }
 
-// NewCasdoorUserHandler constructs the handler. casdoorEndpoint is the base
-// URL of the casdoor instance; the signup URL is built per-request from the
-// caller's tenant (multi-tenant: each org has its own /signup/<org> page).
-func NewCasdoorUserHandler(dir UserDirectory, casdoorEndpoint string) *CasdoorUserHandler {
-	return &CasdoorUserHandler{dir: dir, casdoorEndpoint: casdoorEndpoint}
+// NewCasdoorUserHandler constructs the handler. loginURLFn builds the
+// per-tenant OAuth authorize URL (each org resolves its own client creds).
+func NewCasdoorUserHandler(dir UserDirectory, loginURLFn LoginURLBuilder) *CasdoorUserHandler {
+	return &CasdoorUserHandler{dir: dir, loginURLFn: loginURLFn}
 }
 
 // ListUsers serves GET /admin/users for casdoor mode.
@@ -91,12 +93,19 @@ func (h *CasdoorUserHandler) ResetUserPassword(c *gin.Context) {
 	respondSuccess(c, gin.H{"password": plain})
 }
 
-// SignupURL serves GET /admin/users/signup-url. The URL is built per-request:
-// the org segment comes from the caller's tenant (casdoor organization), so
-// each tenant's admins hand out their own org's signup page.
-func (h *CasdoorUserHandler) SignupURL(c *gin.Context) {
-	signupURL := fmt.Sprintf("%s/signup/%s", strings.TrimRight(h.casdoorEndpoint, "/"), tenant.GetTenantID(c))
-	respondSuccess(c, gin.H{"signupUrl": signupURL})
+// LoginURL serves GET /admin/users/login-url. The URL is built per-request
+// for the caller's tenant: each org resolves its own OAuth client creds in
+// tenant_oauth_clients, so admins hand out an authorize link that lands new
+// users on their org's login/register flow (instead of a static signup page).
+func (h *CasdoorUserHandler) LoginURL(c *gin.Context) {
+	loginURL, err := h.loginURLFn(tenant.GetTenantID(c))
+	if err != nil {
+		// 生成失败通常表示本组织未注册 OAuth client（配置缺失），详情给
+		// 管理员排障；与登录入口的 404 中性文案不同，这里是管理端工具。
+		respondError(c, http.StatusBadGateway, "生成登录链接失败: "+err.Error())
+		return
+	}
+	respondSuccess(c, gin.H{"loginUrl": loginURL})
 }
 
 // respondDirectoryError maps directory sentinel errors to HTTP status codes.

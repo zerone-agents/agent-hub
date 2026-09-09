@@ -11,7 +11,7 @@ import PageHeader from '@/components/PageHeader'
 import PrimaryButton from '@/components/PrimaryButton'
 import BorderedTable from '@/components/BorderedTable'
 import CreateInviteModal from './CreateInviteModal'
-import SignupLinkModal from './SignupLinkModal'
+import LoginLinkModal from './LoginLinkModal'
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
@@ -39,7 +39,7 @@ export default function UsersPage() {
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
-  const [signupLinkModalOpen, setSignupLinkModalOpen] = useState(false)
+  const [loginLinkModalOpen, setLoginLinkModalOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<{ password: string } | null>(null)
 
   const { data: authMode } = useQuery({
@@ -57,10 +57,12 @@ export default function UsersPage() {
     queryFn: usersApi.listInvites,
     enabled: !isCasdoor
   })
-  const { data: signupUrlData } = useQuery({
-    queryKey: ['admin', 'signup-url'],
-    queryFn: usersApi.getSignupUrl,
-    enabled: isCasdoor
+  // 登录链接是一次性的（回调消费后失效），每次打开弹窗重新获取，
+  // 避免展示已被使用过的旧链接。
+  const { data: loginUrlData } = useQuery({
+    queryKey: ['admin', 'login-url'],
+    queryFn: usersApi.getLoginUrl,
+    enabled: isCasdoor && loginLinkModalOpen
   })
 
   const invalidateAll = async () => {
@@ -237,8 +239,8 @@ export default function UsersPage() {
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
           isCasdoor ? (
-            <PrimaryButton onClick={() => { setSignupLinkModalOpen(true); }}>
-              注册链接
+            <PrimaryButton onClick={() => { setLoginLinkModalOpen(true); }}>
+              登录链接
             </PrimaryButton>
           ) : (
             <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
@@ -275,10 +277,10 @@ export default function UsersPage() {
       )}
 
       {isCasdoor && (
-        <SignupLinkModal
-          open={signupLinkModalOpen}
-          signupUrl={signupUrlData?.signupUrl}
-          onClose={() => { setSignupLinkModalOpen(false); }}
+        <LoginLinkModal
+          open={loginLinkModalOpen}
+          loginUrl={loginUrlData?.loginUrl}
+          onClose={() => { setLoginLinkModalOpen(false); }}
         />
       )}
 
