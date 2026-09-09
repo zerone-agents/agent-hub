@@ -99,6 +99,10 @@ type mcpService interface {
 	GetClientMcpsByAgent(tenantID, name string) (map[string]*McpClientDTO, error)
 }
 
+type organizationMcpProvider interface {
+	GetBuiltinOrganization(tenantID string) (*McpClientDTO, error)
+}
+
 // knowledgeService defines the methods needed from the knowledge service.
 type knowledgeService interface {
 	GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error)
@@ -128,6 +132,7 @@ type AgentDeployerService struct {
 	snapshotRepo     snapshotRepository
 	providerSvc      providerService
 	mcpSvc           mcpService
+	relationRepo     *repository.AgentRelationRepository
 	knowledgeSvc     knowledgeService
 	kongSvc          *KongGatewayService
 	aigcSvc          aigcConfigProvider
@@ -313,6 +318,7 @@ func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 		snapshotRepo:      repository.NewDeploymentSnapshotRepository(),
 		providerSvc:       NewProviderService(cfg.EncryptionKey),
 		mcpSvc:            NewMcpService(cfg.EncryptionKey),
+		relationRepo:      repository.NewAgentRelationRepository(),
 		knowledgeSvc:      cfg.KnowledgeSvc,
 		kongSvc:           cfg.KongSvc,
 		authMode:          cfg.AuthMode,
@@ -947,6 +953,32 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 	mcpServers, err := s.mcpSvc.GetClientMcpsByAgent(tenantID, cfg.Name)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load mcp servers failed: %w", err)
+	}
+	if mcpServers == nil {
+		mcpServers = make(map[string]*McpClientDTO)
+	}
+	// Organization messaging is a system capability derived from the relation
+	// graph, not an administrator-managed per-agent checkbox. Automatically
+	// mount it whenever this agent participates in at least one enabled edge.
+	if s.relationRepo != nil {
+		related, err := s.relationRepo.HasEnabledForAgent(tenantID, cfg.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load agent relations failed: %w", err)
+		}
+		if related {
+			provider, ok := s.mcpSvc.(organizationMcpProvider)
+			if !ok {
+				return nil, nil, fmt.Errorf("organization MCP provider unavailable")
+			}
+			organizationMCP, err := provider.GetBuiltinOrganization(tenantID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("load organization MCP failed: %w", err)
+			}
+			if strings.TrimSpace(organizationMCP.URL) == "" {
+				return nil, nil, fmt.Errorf("内置 organization MCP 未配置可达地址，请设置 ORGANIZATION_MCP_URL（完整路径需包含 /api/v1/organization/mcp），重启 Hub 后重新部署 Agent")
+			}
+			mcpServers["organization"] = organizationMCP
+		}
 	}
 	toolNames := make([]string, 0, len(toolRecords))
 	customToolSources := make([]deployer.ToolSource, 0)

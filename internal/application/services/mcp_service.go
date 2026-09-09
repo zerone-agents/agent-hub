@@ -409,6 +409,11 @@ func (s *McpService) Delete(tenantID, name string) error {
 // AgentDeployerService.resolveMcpHeaders.
 const BuiltinKnowledgeAuthHeader = "Bearer $agent_runtime_token"
 
+// BuiltinOrganizationAuthHeader is resolved per deployment exactly like the
+// knowledge MCP credential. The Hub derives the caller identity from this
+// token; agent_send never accepts a source_agent argument.
+const BuiltinOrganizationAuthHeader = "Bearer $agent_runtime_token"
+
 var builtinKnowledgeTools = []McpTool{
 	{
 		Name:        "knowledge_search",
@@ -426,6 +431,13 @@ var builtinKnowledgeTools = []McpTool{
 		Name:        "knowledge_chunks",
 		Description: "按页读取文档分块原文，page/page_size 自控节奏",
 	},
+}
+
+var builtinOrganizationTools = []McpTool{
+	{Name: "agent_relations", Description: "列出当前 Agent 的入向与出向组织关系及动作白名单"},
+	{Name: "agent_send", Description: "按有向关系和动作白名单向另一个 Agent 投递消息"},
+	{Name: "agent_message_status", Description: "查询同步或异步组织消息的状态与回复"},
+	{Name: "agent_inbox", Description: "列出当前 Agent 最近的组织消息记录"},
 }
 
 // BuiltinKnowledgeToolNames 返回内置 knowledge MCP 种子的工具名集合，
@@ -479,14 +491,23 @@ func applyBuiltinMetadata(existing, definition *mcp.McpServer) bool {
 
 // SeedBuiltins ensures built-in MCP servers exist in the database.
 // It is idempotent and should be called once at service startup.
-func (s *McpService) SeedBuiltins(knowledgeMCPURL ...string) error {
-	mcpURL := ""
-	if len(knowledgeMCPURL) > 0 {
-		mcpURL = strings.TrimSpace(knowledgeMCPURL[0])
+func (s *McpService) SeedBuiltins(mcpURLs ...string) error {
+	knowledgeMCPURL := ""
+	organizationMCPURL := ""
+	if len(mcpURLs) > 0 {
+		knowledgeMCPURL = strings.TrimSpace(mcpURLs[0])
 	}
-	if mcpURL != "" {
-		if err := validateMcpConfig(mcp.TransportHTTP, mcpURL); err != nil {
+	if len(mcpURLs) > 1 {
+		organizationMCPURL = strings.TrimSpace(mcpURLs[1])
+	}
+	if knowledgeMCPURL != "" {
+		if err := validateMcpConfig(mcp.TransportHTTP, knowledgeMCPURL); err != nil {
 			return fmt.Errorf("invalid KNOWLEDGE_MCP_URL: %w", err)
+		}
+	}
+	if organizationMCPURL != "" {
+		if err := validateMcpConfig(mcp.TransportHTTP, organizationMCPURL); err != nil {
+			return fmt.Errorf("invalid ORGANIZATION_MCP_URL: %w", err)
 		}
 	}
 	headersEnc, err := s.encryptMap(map[string]string{
@@ -500,7 +521,7 @@ func (s *McpService) SeedBuiltins(knowledgeMCPURL ...string) error {
 		Title:         "知识库检索",
 		Description:   "基于知识库进行文本检索，为 Agent 提供文档问答能力",
 		TransportType: mcp.TransportHTTP,
-		URL:           mcpURL,
+		URL:           knowledgeMCPURL,
 		Headers:       headersEnc,
 		IsBuiltin:     true,
 		ToolsJSON:     mustMarshalMcpTools(builtinKnowledgeTools),
@@ -508,7 +529,36 @@ func (s *McpService) SeedBuiltins(knowledgeMCPURL ...string) error {
 	}); err != nil {
 		return err
 	}
+	organizationHeaders, err := s.encryptMap(map[string]string{
+		"Authorization": BuiltinOrganizationAuthHeader,
+	})
+	if err != nil {
+		return fmt.Errorf("encrypt builtin organization headers failed: %w", err)
+	}
+	if err := s.seedBuiltinMcp(&mcp.McpServer{
+		Name:          "organization",
+		Title:         "组织通信",
+		Description:   "按 Agent 有向关系、动作白名单和上下文策略投递消息",
+		TransportType: mcp.TransportHTTP,
+		URL:           organizationMCPURL,
+		Headers:       organizationHeaders,
+		IsBuiltin:     true,
+		ToolsJSON:     mustMarshalMcpTools(builtinOrganizationTools),
+		ProbeStatus:   "success",
+	}); err != nil {
+		return err
+	}
 	return nil
+}
+
+// GetBuiltinOrganization returns the shared organization MCP definition for
+// deployment-time automatic mounting on agents that participate in a relation.
+func (s *McpService) GetBuiltinOrganization(tenantID string) (*McpClientDTO, error) {
+	server, err := s.repo.GetByName(tenantID, "organization")
+	if err != nil {
+		return nil, err
+	}
+	return s.toClientDTO(server)
 }
 
 // seedBuiltinMcp 是系统路径（tenantID=”）：内置行写入/刷新为共享行。

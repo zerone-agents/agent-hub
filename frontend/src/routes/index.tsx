@@ -46,6 +46,11 @@ export const router = createBrowserRouter(
             import('@/features/agents/AgentListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'relations',
+          lazy: () =>
+            import('@/features/relations/RelationListPage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'tools',
           lazy: () => import('@/features/tools/ToolListPage').then((m) => ({ Component: m.default }))
         },

@@ -24,17 +24,18 @@ func Get() *Config {
 }
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Auth      AuthConfig      `mapstructure:"auth"`
-	Casdoor   CasdoorConfig   `mapstructure:"casdoor"`
-	OSS       OSSConfig       `mapstructure:"oss"`
-	Provider  ProviderConfig  `mapstructure:"provider"`
-	Deployer  DeployerConfig  `mapstructure:"deployer"`
-	Knowledge KnowledgeConfig `mapstructure:"knowledge"`
-	Kong      KongConfig      `mapstructure:"kong"`
-	Ops       OpsConfig       `mapstructure:"ops"`
-	ChatPush  ChatPushConfig  `mapstructure:"chat_push"`
+	Server       ServerConfig       `mapstructure:"server"`
+	Database     DatabaseConfig     `mapstructure:"database"`
+	Auth         AuthConfig         `mapstructure:"auth"`
+	Casdoor      CasdoorConfig      `mapstructure:"casdoor"`
+	OSS          OSSConfig          `mapstructure:"oss"`
+	Provider     ProviderConfig     `mapstructure:"provider"`
+	Deployer     DeployerConfig     `mapstructure:"deployer"`
+	Knowledge    KnowledgeConfig    `mapstructure:"knowledge"`
+	Organization OrganizationConfig `mapstructure:"organization"`
+	Kong         KongConfig         `mapstructure:"kong"`
+	Ops          OpsConfig          `mapstructure:"ops"`
+	ChatPush     ChatPushConfig     `mapstructure:"chat_push"`
 }
 
 // OpsConfig 是运维端点（/api/v1/ops/*）配置。APIKey 可选：为空时 ops 端点
@@ -129,6 +130,12 @@ type KnowledgeConfig struct {
 	CapabilitySecret string `mapstructure:"capability_secret"`
 }
 
+// OrganizationConfig points deployed runtimes at the Hub-owned MCP endpoint
+// that enforces directed Agent relations and delivers messages to peers.
+type OrganizationConfig struct {
+	MCPURL string `mapstructure:"mcp_url"`
+}
+
 type ProviderConfig struct {
 	EncryptionKey string `mapstructure:"encryption_key"`
 }
@@ -189,6 +196,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("knowledge.multirag_base_url", "MULTIRAG_BASE_URL")
 	viper.BindEnv("knowledge.multirag_api_key", "MULTIRAG_API_KEY")
 	viper.BindEnv("knowledge.mcp_url", "KNOWLEDGE_MCP_URL")
+	viper.BindEnv("organization.mcp_url", "ORGANIZATION_MCP_URL")
 	viper.BindEnv("knowledge.capability_secret", "KNOWLEDGE_CAPABILITY_SECRET")
 	viper.BindEnv("knowledge.timeout_seconds", "MULTIRAG_TIMEOUT_SECONDS")
 	viper.BindEnv("knowledge.upload_timeout_seconds", "MULTIRAG_UPLOAD_TIMEOUT_SECONDS")

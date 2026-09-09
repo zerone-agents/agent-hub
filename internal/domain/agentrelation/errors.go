@@ -1,0 +1,25 @@
+package agentrelation
+
+import "errors"
+
+var (
+	ErrNotFound          = errors.New("Agent 关系不存在")
+	ErrAlreadyExists     = errors.New("相同范围内的 Agent 关系已存在")
+	ErrAgentNotFound     = errors.New("关系中的 Agent 不存在")
+	ErrSelfRelation      = errors.New("不能创建 Agent 指向自身的关系")
+	ErrInvalidScope      = errors.New("关系范围格式无效")
+	ErrInvalidType       = errors.New("关系类型无效")
+	ErrInvalidStance     = errors.New("关系立场无效")
+	ErrInvalidAction     = errors.New("关系动作无效")
+	ErrActionsRequired   = errors.New("请至少选择一个允许动作")
+	ErrInvalidContext    = errors.New("上下文策略无效")
+	ErrInvalidDelivery   = errors.New("投递策略无效")
+	ErrConstraintTooLong = errors.New("关系约束不能超过 2000 个字符")
+	ErrBidirectionalType = errors.New("该关系类型不能自动创建双向关系，请分别配置两个方向")
+	ErrRouteNotFound     = errors.New("当前 Agent 到目标 Agent 没有已启用的关系")
+	ErrActionNotAllowed  = errors.New("当前关系不允许执行该动作")
+	ErrMessageNotFound   = errors.New("组织消息不存在")
+	ErrMessageRequired   = errors.New("组织消息内容不能为空")
+	ErrMessageTooLong    = errors.New("组织消息内容不能超过 16000 个字符")
+	ErrNestedDispatch    = errors.New("当前 Agent 正在处理组织消息，不能在同一轮继续转发")
+)

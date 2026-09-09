@@ -154,8 +154,9 @@ func (m *mockSkillRepo) GetAgentSkills(agentID uint64) ([]string, error)        
 func (m *mockSkillRepo) GetAgentSkillsFull(agentID uint64) ([]*skill.Skill, error) { return nil, nil }
 
 type mockMcpSvc struct {
-	mcps map[string]*McpClientDTO
-	err  error
+	mcps         map[string]*McpClientDTO
+	organization *McpClientDTO
+	err          error
 }
 
 func (m *mockMcpSvc) GetClientMcpsByAgent(tenantID, name string) (map[string]*McpClientDTO, error) {
@@ -163,6 +164,16 @@ func (m *mockMcpSvc) GetClientMcpsByAgent(tenantID, name string) (map[string]*Mc
 		return m.mcps, m.err
 	}
 	return nil, nil
+}
+
+func (m *mockMcpSvc) GetBuiltinOrganization(tenantID string) (*McpClientDTO, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.organization != nil {
+		return m.organization, nil
+	}
+	return &McpClientDTO{Name: "organization", Type: "http"}, nil
 }
 
 type mockKnowledgeSvc struct{}

@@ -264,6 +264,8 @@ func main() {
 
 	sceneService := services.NewSceneService()
 	sceneHandler := handler.NewSceneHandler(sceneService)
+	agentRelationService := services.NewAgentRelationService()
+	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
 
 	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
 	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
@@ -309,7 +311,7 @@ func main() {
 	}
 
 	mcpService := services.NewMcpService(cfg.Provider.EncryptionKey)
-	if err := mcpService.SeedBuiltins(cfg.Knowledge.MCPURL); err != nil {
+	if err := mcpService.SeedBuiltins(cfg.Knowledge.MCPURL, cfg.Organization.MCPURL); err != nil {
 		log.Fatalf("Failed to seed builtin MCPs: %v", err)
 	}
 	if err := toolService.SeedBuiltins(); err != nil {
@@ -324,6 +326,8 @@ func main() {
 	mcpHandler := handler.NewMcpHandler(mcpService)
 
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
+	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
+	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
 
 	// ==================== 路由管理 ====================
 
@@ -549,10 +553,24 @@ func main() {
 		adminScenesGroup.DELETE("/:name", sceneHandler.Delete)
 	}
 
+	// ---------- Agent 组织关系 ----------
+	// 一条记录是一条有向边；双向关系由创建接口原子写入两条边。
+	adminRelationsGroup := adminWrite.Group("/agent-relations")
+	adminRelationsReadGroup := adminRead.Group("/agent-relations")
+	{
+		adminRelationsReadGroup.GET("", agentRelationHandler.List)
+		adminRelationsGroup.POST("", agentRelationHandler.Create)
+		adminRelationsGroup.PUT("/:id", agentRelationHandler.Update)
+		adminRelationsGroup.DELETE("/:id", agentRelationHandler.Delete)
+	}
+
 	// ---------- Knowledge MCP 运行时 ----------
 	// This endpoint is called by the agent runtime with an Agent Runtime Token,
 	// not a user JWT, so it must not be under the JWTAuthWithCLI middleware group.
 	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
+	// Organization MCP shares runtime-token authentication with knowledge MCP,
+	// but authorizes every send against the directed relation table.
+	r.POST("/api/v1/organization/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), organizationMcpHandler.HandleMessage)
 
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组

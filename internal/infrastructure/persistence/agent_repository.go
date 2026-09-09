@@ -2,6 +2,7 @@ package repository
 
 import (
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/mcp"
 	"control-panel/pkg/database"
 
@@ -14,6 +15,10 @@ type AgentRepository struct {
 
 func NewAgentRepository() *AgentRepository {
 	return &AgentRepository{db: database.GetDB()}
+}
+
+func NewAgentRepositoryWithDB(db *gorm.DB) *AgentRepository {
+	return &AgentRepository{db: db}
 }
 
 // mustOwnAgent 写路径统一入口校验：agent 不属于该租户则返回
@@ -119,6 +124,14 @@ func (r *AgentRepository) Delete(tenantID string, id uint64) error {
 		}
 		if err := tx.Where("agent_id = ?", id).Delete(&agent.AgentKnowledgeDataset{}).Error; err != nil {
 			return err
+		}
+		// Older unit-test schemas and pre-migration databases may not have the
+		// relation table yet. Once present, clear both directed sides explicitly;
+		// the FK cascade remains the database-level backstop.
+		if tx.Migrator().HasTable(&agentrelation.AgentRelation{}) {
+			if err := tx.Where("source_agent_id = ? OR target_agent_id = ?", id, id).Delete(&agentrelation.AgentRelation{}).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&agent.AgentConfig{}).Error
 	})

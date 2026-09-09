@@ -8,7 +8,8 @@ import {
   CubeIcon,
   FilmSlateIcon,
   BooksIcon,
-  ChatsIcon
+  ChatsIcon,
+  ShareNetworkIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -24,6 +25,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'dashboard', label: '仪表盘', path: '/dashboard', icon: GaugeIcon },
   { id: 'agents', label: 'Agent管理', path: '/agents', icon: RobotIcon },
+  { id: 'relations', label: '组织关系', path: '/relations', icon: ShareNetworkIcon },
   { id: 'tools', label: '工具管理', path: '/tools', icon: WrenchIcon },
   { id: 'mcps', label: 'MCP配置', path: '/mcps', icon: PlugsConnectedIcon },
   { id: 'skills', label: '技能管理', path: '/skills', icon: SparkleIcon },

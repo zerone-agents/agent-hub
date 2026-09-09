@@ -10,6 +10,7 @@ import (
 
 	"control-panel/internal/config"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/aigc"
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/chat"
@@ -120,6 +121,8 @@ func AutoMigrate(backfillTenant string) error {
 
 	err := DB.AutoMigrate(
 		&agent.AgentConfig{},
+		&agentrelation.AgentRelation{},
+		&agentrelation.AgentMessage{},
 		&agent.AgentSubagent{},
 		&agent.AgentKnowledgeDataset{},
 		&agent.Tool{},
@@ -908,15 +911,20 @@ func migrateProvidersTenantID() error {
 		return nil
 	}
 	m := DB.Migrator()
+	// uk_key is the one-time migration marker. Once it has been removed,
+	// tenant_id='' rows are the intentional shared provider templates seeded
+	// after migration and must stay shared. Re-running BackfillTenantID on every
+	// restart would collide with a tenant-specific provider using the same key.
+	if !m.HasIndex(&provider.ProviderSummary{}, "uk_key") {
+		return nil
+	}
 	if err := BackfillTenantID(DB, "provider_summaries"); err != nil {
 		return err
 	}
-	if m.HasIndex(&provider.ProviderSummary{}, "uk_key") {
-		if err := m.DropIndex(&provider.ProviderSummary{}, "uk_key"); err != nil {
-			return fmt.Errorf("drop provider_summaries.uk_key: %w", err)
-		}
-		log.Println("Dropped provider_summaries.uk_key (replaced by uk_tenant_key)")
+	if err := m.DropIndex(&provider.ProviderSummary{}, "uk_key"); err != nil {
+		return fmt.Errorf("drop provider_summaries.uk_key: %w", err)
 	}
+	log.Println("Dropped provider_summaries.uk_key (replaced by uk_tenant_key)")
 	return nil
 }
 
