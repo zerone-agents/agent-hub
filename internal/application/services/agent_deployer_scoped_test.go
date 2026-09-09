@@ -412,6 +412,32 @@ func TestToDTO_NotRunning_NoProxyURL(t *testing.T) {
 	}
 }
 
+// TestRuntimeURL_JoinHostPort 锁定 runtimeURL 的 host:port 拼接（issue #91
+// 批次四）：JoinHostPort 保证 IPv6 publicHost 产出带方括号的合法 URL，
+// IPv4/hostname 输出不变（照抄 healthProbeURL #90 已验证形态）。
+func TestRuntimeURL_JoinHostPort(t *testing.T) {
+	s := &AgentDeployerService{publicHost: "2001:db8::1"}
+	if got := s.runtimeURL(8080); got != "http://[2001:db8::1]:8080" {
+		t.Fatalf("IPv6 = %q, want http://[2001:db8::1]:8080", got)
+	}
+
+	s = &AgentDeployerService{publicHost: "127.0.0.1"}
+	if got := s.runtimeURL(8080); got != "http://127.0.0.1:8080" {
+		t.Fatalf("IPv4 = %q, want http://127.0.0.1:8080", got)
+	}
+
+	s = &AgentDeployerService{publicHost: "hub.example.com"}
+	if got := s.runtimeURL(8080); got != "http://hub.example.com:8080" {
+		t.Fatalf("hostname = %q, want http://hub.example.com:8080", got)
+	}
+
+	// port==0 → 空串（既有语义保持）。
+	s = &AgentDeployerService{publicHost: "203.0.113.10"}
+	if got := s.runtimeURL(0); got != "" {
+		t.Fatalf("port 0 = %q, want empty", got)
+	}
+}
+
 // registerWhenHealthyFixture builds a service whose deployer reports a healthy
 // container, plus a Kong service with an empty routeHost (skips the post-
 // register probe loop so the test stays fast).

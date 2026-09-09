@@ -1365,11 +1365,13 @@ func (s *AgentDeployerService) updateStatus(tenantID string, cfg *agent.AgentCon
 }
 
 // runtimeURL returns the public runtime URL for an agent given its host port.
+// JoinHostPort（与 healthProbeURL #90 同款）保证 IPv6 publicHost 产出带
+// 方括号的合法 URL；IPv4/hostname 输出逐字节不变。
 func (s *AgentDeployerService) runtimeURL(port int) string {
 	if port == 0 {
 		return ""
 	}
-	return fmt.Sprintf("http://%s:%d", s.publicHost, port)
+	return "http://" + net.JoinHostPort(s.publicHost, strconv.Itoa(port))
 }
 
 // buildArtifactURL turns a stored OSS object key into a public http(s) URL the
