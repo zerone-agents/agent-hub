@@ -42,7 +42,10 @@ func respondProviderError(c *gin.Context, err error) {
 	default:
 		var ve *provider.ValidationError
 		if errors.As(err, &ve) {
-			respondError(c, http.StatusBadRequest, ve.Error())
+			// 返回完整错误链（err.Error() 而非 ve.Error()）：批量校验的
+			// 外层 wrap 携带模型索引/名称上下文（defaultModels[i](id)），
+			// 只取内层消息会丢失用户识别目标（review #5599426234 P3）。
+			respondError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		log.Printf("[ProviderHandler] internal error: %v", err)

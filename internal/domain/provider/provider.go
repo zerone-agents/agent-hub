@@ -170,7 +170,7 @@ func (b *BaseProvider) syncAsAddLLMWithNestedKey(
 ) (*SyncResult, error) {
 	models := b.defaultModels
 	if len(models) == 0 {
-		return nil, fmt.Errorf("C 类 provider %s 没有 models (no models to sync)", factoryName)
+		return nil, NewValidationErrorf("C 类 provider %s 没有 models (no models to sync)", factoryName)
 	}
 	first := models[0]
 	apiKeyJSON, err := json.Marshal(nestedKey)
