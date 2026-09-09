@@ -395,7 +395,12 @@ func main() {
 		} else {
 			orgCheckHandler := handler.NewOrgCheckHandler(tenantOAuthRepo)
 			rl := middleware.IPRateLimit(10, time.Minute)
-			authGroup.GET("/mode", rl, orgCheckHandler.CasdoorMode)
+			// /auth/mode 是登录页渲染依据的只读端点，必须与登录/预检/刷新
+			// 隔离限流：共享 rl 时用户正常登录操作（org-check/login/refresh）
+			// 会挤占额度把 mode 打成 429，前端拿不到 mode 会 fail-open 到
+			// builtin 表单（casdoor 部署无本地登录端点，表单不可用）。
+			rlMode := middleware.IPRateLimit(60, time.Minute)
+			authGroup.GET("/mode", rlMode, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", rl, handler.Login)
 			authGroup.GET("/callback", handler.Callback(casdoorProvider))

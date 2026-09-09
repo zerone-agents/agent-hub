@@ -162,7 +162,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const token = getAccessToken()
   const { data: user, isLoading } = useUserInfo({ enabled: !!token })
-  const { data: mode, isLoading: modeLoading } = useAuthMode()
+  const { data: mode, isLoading: modeLoading, isError: modeError, refetch: refetchMode } = useAuthMode()
   const loginWithPassword = useAuthStore((s) => s.loginWithPassword)
 
   useEffect(() => {
@@ -225,7 +225,32 @@ export default function LoginPage() {
     )
   }
 
-  const isCasdoor = mode?.mode === 'casdoor'
+  // fail-closed：mode 查询失败（如 /auth/mode 429）时绝不 fallback 到 builtin
+  // 表单——casdoor 部署没有本地登录端点，渲染该表单必失败且误导用户以为
+  // 系统切成了本地账号体系。展示错误与重试，限流窗口过后可自行恢复。
+  if (modeError || !mode) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.card}>
+          <div className={styles.body}>
+            <div className={styles.bodyTitle}>无法获取登录方式</div>
+            <div className={styles.bodySubtitle}>请稍后重试，或联系平台管理员</div>
+            {error && <div className={styles.error}>{error}</div>}
+            <button
+              type="button"
+              className={styles.loginBtn}
+              onClick={() => { void refetchMode() }}
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 走到此处 mode 已非空（fail-closed 分支已排除 modeError/!mode）。
+  const isCasdoor = mode.mode === 'casdoor'
 
   return (
     <div className={styles.page}>
