@@ -100,7 +100,7 @@ type UpdateProviderInput struct {
 func (s *ProviderService) SeedIfEmpty() error {
 	count, err := s.repo.Count()
 	if err != nil {
-		return fmt.Errorf("检查 provider 表失败: %w", err)
+		return fmt.Errorf("check provider table failed: %w", err)
 	}
 	if count > 0 {
 		return nil
@@ -115,7 +115,7 @@ func (s *ProviderService) SeedIfEmpty() error {
 		if summary.LockedAPIKey != "" {
 			encryptedKey, err := provider.Encrypt(summary.LockedAPIKey, s.encryptionKey)
 			if err != nil {
-				return fmt.Errorf("加密 LockedAPIKey 失败: %w", err)
+				return fmt.Errorf("encrypt LockedAPIKey failed: %w", err)
 			}
 			summary.LockedAPIKey = encryptedKey
 		}
@@ -224,7 +224,7 @@ func dedupeSummariesTenantFirst(summaries []*provider.ProviderSummary, tenantID 
 func (s *ProviderService) ListAll(tenantID string, typeFilter string) ([]provider.Provider, error) {
 	summaries, err := s.repo.ListAll(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Provider 列表失败: %w", err)
+		return nil, fmt.Errorf("list providers failed: %w", err)
 	}
 	summaries = dedupeSummariesTenantFirst(summaries, tenantID)
 
@@ -232,7 +232,7 @@ func (s *ProviderService) ListAll(tenantID string, typeFilter string) ([]provide
 	// when the provider list grows.
 	allModels, err := s.repo.ListAllModels(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	modelsByProvider := make(map[uint64][]provider.ProviderModel, len(summaries))
 	providerHasType := make(map[uint64]bool)
@@ -353,7 +353,7 @@ func (s *ProviderService) repairSelectionIDs(tenantID string, owned bool, p prov
 	}
 	rows := toProviderModelRows(p.ID(), repaired)
 	if err := s.repo.ReplaceModels(tenantID, p.ID(), rows); err != nil {
-		return nil, fmt.Errorf("回写 selectionId 失败: %w", err)
+		return nil, fmt.Errorf("write back selectionId failed: %w", err)
 	}
 	return p, nil
 }
@@ -403,7 +403,7 @@ func (s *ProviderService) GetByID(tenantID string, id uint64) (provider.Provider
 	}
 	rows, err := s.repo.ListModels(tenantID, id)
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	// Set models as-loaded; repairSelectionIDs will fill any missing
 	// SelectionIDs and persist the fix.
@@ -429,7 +429,7 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 
 	exists, err := s.repo.ExistsByKey(tenantID, input.Key)
 	if err != nil {
-		return nil, fmt.Errorf("检查 Provider 存在性失败: %w", err)
+		return nil, fmt.Errorf("check provider existence failed: %w", err)
 	}
 	if exists {
 		return nil, fmt.Errorf("Provider '%s' 已存在", input.Key)
@@ -460,11 +460,11 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 
 	fieldsJSON, err := json.Marshal(input.Fields)
 	if err != nil {
-		return nil, fmt.Errorf("序列化 fields 失败: %w", err)
+		return nil, fmt.Errorf("serialize fields failed: %w", err)
 	}
 	encryptedKey, err := provider.Encrypt(input.LockedAPIKey, s.encryptionKey)
 	if err != nil {
-		return nil, fmt.Errorf("加密 LockedAPIKey 失败: %w", err)
+		return nil, fmt.Errorf("encrypt LockedAPIKey failed: %w", err)
 	}
 
 	base := p.Base()
@@ -481,15 +481,15 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 		Builtin:       input.Builtin,
 		LockedAPIKey:  encryptedKey,
 	}); err != nil {
-		return nil, fmt.Errorf("加载 Provider 摘要失败: %w", err)
+		return nil, fmt.Errorf("load provider summary failed: %w", err)
 	}
 
 	summary := p.ToSummary()
 	if err := s.repo.Create(tenantID, summary); err != nil {
-		return nil, fmt.Errorf("创建 Provider 失败: %w", err)
+		return nil, fmt.Errorf("create provider failed: %w", err)
 	}
 	if err := base.SetSummary(summary); err != nil {
-		return nil, fmt.Errorf("加载 Provider 摘要失败: %w", err)
+		return nil, fmt.Errorf("load provider summary failed: %w", err)
 	}
 
 	// Persist default models to the provider_models table.
@@ -500,20 +500,20 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 			return nil, err
 		}
 		if err := s.repo.ReplaceModels(tenantID, summary.ID, rows); err != nil {
-			return nil, fmt.Errorf("写入 provider_models 失败: %w", err)
+			return nil, fmt.Errorf("write provider_models failed: %w", err)
 		}
 	}
 
 	// Load the persisted models back into the provider so ToDTO reflects them.
 	rows, err := s.repo.ListModels(tenantID, summary.ID)
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	base.SetDefaultModels(provider.EnsureSelectionIDs(toCatalogModels(rows)))
 
 	if len(input.Attributes) > 0 {
 		if err := s.repo.SetAttributes(tenantID, p.ID(), input.Attributes); err != nil {
-			return nil, fmt.Errorf("写入 Provider 属性失败: %w", err)
+			return nil, fmt.Errorf("write provider fields failed: %w", err)
 		}
 	}
 
@@ -584,13 +584,13 @@ func (s *ProviderService) Update(tenantID string, id uint64, input *UpdateProvid
 			return nil, err
 		}
 		if err := s.repo.ReplaceModels(tenantID, id, rows); err != nil {
-			return nil, fmt.Errorf("替换 provider_models 失败: %w", err)
+			return nil, fmt.Errorf("replace provider_models failed: %w", err)
 		}
 	}
 	if input.Fields != nil {
 		fieldsJSON, err := json.Marshal(*input.Fields)
 		if err != nil {
-			return nil, fmt.Errorf("序列化 fields 失败: %w", err)
+			return nil, fmt.Errorf("serialize fields failed: %w", err)
 		}
 		summary.Fields = string(fieldsJSON)
 	}
@@ -599,36 +599,36 @@ func (s *ProviderService) Update(tenantID string, id uint64, input *UpdateProvid
 		if *input.LockedAPIKey != "" && summary.LockedAPIKey != "" {
 			storedKey, err := provider.Decrypt(summary.LockedAPIKey, s.encryptionKey)
 			if err != nil {
-				return nil, fmt.Errorf("解密 LockedAPIKey 失败: %w", err)
+				return nil, fmt.Errorf("decrypt LockedAPIKey failed: %w", err)
 			}
 			shouldUpdate = *input.LockedAPIKey != maskSecret(storedKey)
 		}
 		if shouldUpdate {
 			encrypted, err := provider.Encrypt(*input.LockedAPIKey, s.encryptionKey)
 			if err != nil {
-				return nil, fmt.Errorf("加密 LockedAPIKey 失败: %w", err)
+				return nil, fmt.Errorf("encrypt LockedAPIKey failed: %w", err)
 			}
 			summary.LockedAPIKey = encrypted
 		}
 	}
 
 	if err := s.repo.Update(tenantID, summary); err != nil {
-		return nil, fmt.Errorf("更新 Provider 失败: %w", err)
+		return nil, fmt.Errorf("update provider failed: %w", err)
 	}
 	if err := p.Base().SetSummary(summary); err != nil {
-		return nil, fmt.Errorf("加载 Provider 摘要失败: %w", err)
+		return nil, fmt.Errorf("load provider summary failed: %w", err)
 	}
 
 	// (Re)load the persisted models so ToDTO reflects the post-update state.
 	rows, err := s.repo.ListModels(tenantID, p.ID())
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	p.Base().SetDefaultModels(provider.EnsureSelectionIDs(toCatalogModels(rows)))
 
 	if input.Attributes != nil {
 		if err := s.repo.SetAttributes(tenantID, p.ID(), input.Attributes); err != nil {
-			return nil, fmt.Errorf("更新 Provider 属性失败: %w", err)
+			return nil, fmt.Errorf("update provider fields failed: %w", err)
 		}
 	}
 
@@ -663,7 +663,7 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 
 	storedKey, err := provider.Decrypt(p.LockedAPIKey(), s.encryptionKey)
 	if err != nil {
-		return nil, fmt.Errorf("解密 LockedAPIKey 失败: %w", err)
+		return nil, fmt.Errorf("decrypt LockedAPIKey failed: %w", err)
 	}
 
 	apiKey := apiKeyOverride
@@ -680,7 +680,7 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 	if len(models) == 0 {
 		rows, err := s.repo.ListModels(tenantID, id)
 		if err != nil {
-			return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+			return nil, fmt.Errorf("load provider_models failed: %w", err)
 		}
 		models = toCatalogModels(rows)
 	}
@@ -769,7 +769,7 @@ func (s *ProviderService) ToDTO(tenantID string, p provider.Provider) (*Provider
 
 	attributes, err := s.repo.GetAttributes(tenantID, p.ID())
 	if err != nil {
-		return nil, fmt.Errorf("读取 Provider 属性失败: %w", err)
+		return nil, fmt.Errorf("read provider fields failed: %w", err)
 	}
 	if attributes == nil {
 		attributes = map[string]provider.AttrValue{}
@@ -952,7 +952,7 @@ type ProviderRuntimeConfig struct {
 func (s *ProviderService) ListRuntimeConfigs(tenantID string) ([]*ProviderRuntimeConfig, error) {
 	summaries, err := s.repo.ListAll(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Provider 列表失败: %w", err)
+		return nil, fmt.Errorf("list providers failed: %w", err)
 	}
 	summaries = dedupeSummariesTenantFirst(summaries, tenantID)
 
@@ -1011,7 +1011,7 @@ func (s *ProviderService) SyncProviderToMultiRAG(ctx context.Context, tenantID s
 	if p.LockedAPIKey() != "" {
 		plaintext, err := provider.Decrypt(p.LockedAPIKey(), s.encryptionKey)
 		if err != nil {
-			return nil, fmt.Errorf("解密 LockedAPIKey 失败: %w", err)
+			return nil, fmt.Errorf("decrypt LockedAPIKey failed: %w", err)
 		}
 		p.Base().SetLockedAPIKey(plaintext)
 	}
@@ -1119,7 +1119,7 @@ func (s *ProviderService) AddModel(tenantID string, providerID uint64, input *Ad
 	// so the last row's SortOrder (if any) is the current maximum.
 	existingRows, err := s.repo.ListModels(tenantID, providerID)
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	maxSortOrder := 0
 	for _, m := range existingRows {
@@ -1133,7 +1133,7 @@ func (s *ProviderService) AddModel(tenantID string, providerID uint64, input *Ad
 	// snapshot must span all providers so cross-provider reuse works.
 	allRows, err := s.repo.ListAllModels(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("加载全量 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load all provider_models failed: %w", err)
 	}
 	aigcCode, err := assignAigcCode(input.ModelID, allRows)
 	if err != nil {
@@ -1153,7 +1153,7 @@ func (s *ProviderService) AddModel(tenantID string, providerID uint64, input *Ad
 		AigcCode:      aigcCode,
 	}
 	if err := s.repo.CreateModel(tenantID, row); err != nil {
-		return nil, fmt.Errorf("创建 model 失败: %w", err)
+		return nil, fmt.Errorf("create model failed: %w", err)
 	}
 	return s.GetByIDAsDTO(tenantID, providerID)
 }
@@ -1193,7 +1193,7 @@ func (s *ProviderService) UpdateModel(tenantID string, providerID uint64, select
 		row.Efforts = effortsToJSON(*input.Efforts)
 	}
 	if err := s.repo.UpdateModel(tenantID, row); err != nil {
-		return nil, fmt.Errorf("更新 model 失败: %w", err)
+		return nil, fmt.Errorf("update model failed: %w", err)
 	}
 	return s.GetByIDAsDTO(tenantID, providerID)
 }
@@ -1249,7 +1249,7 @@ func assignAigcCode(modelID string, existingRows []provider.ProviderModel) (stri
 func (s *ProviderService) assignBulkAigcCodes(tenantID string, providerID uint64, rows []provider.ProviderModel) ([]provider.ProviderModel, error) {
 	ownRows, err := s.repo.ListModels(tenantID, providerID)
 	if err != nil {
-		return nil, fmt.Errorf("加载现有 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load existing provider_models failed: %w", err)
 	}
 	ownByModel := make(map[string]string, len(ownRows))
 	for _, r := range ownRows {
@@ -1259,7 +1259,7 @@ func (s *ProviderService) assignBulkAigcCodes(tenantID string, providerID uint64
 	}
 	allRows, err := s.repo.ListAllModels(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("加载全量 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load all provider_models failed: %w", err)
 	}
 	for i := range rows {
 		if rows[i].AigcCode != "" {
