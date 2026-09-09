@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -27,6 +28,22 @@ func NewProviderHandler(service *services.ProviderService, multiragClient provid
 	return &ProviderHandler{service: service, multiragClient: multiragClient}
 }
 
+// respondProviderError 映射 Provider 领域错误（issue #95 P2：英文化后
+// 内部诊断只进服务端日志，HTTP 边界返回中性中文文案，不向用户泄漏
+// DB/加解密等底层细节）。领域 sentinel 走用户面文案（404/503），
+// 其余一律 500 中性，完整错误链由服务端日志承载。
+func respondProviderError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, provider.ErrProviderNotFound):
+		respondError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, provider.ErrMultiRAGConfigMissing):
+		respondError(c, http.StatusServiceUnavailable, "MultiRAG 未配置")
+	default:
+		log.Printf("[ProviderHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
+}
+
 // ── Public endpoints (for Electron app, JWTAuth required) ───────
 
 func (h *ProviderHandler) List(c *gin.Context) {
@@ -36,7 +53,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 	}
 	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -44,7 +61,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 	for _, p := range providers {
 		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondProviderError(c, err)
 			return
 		}
 		items = append(items, dto)
@@ -61,17 +78,13 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 
 	p, err := h.service.GetByID(tenant.GetTenantID(c), id)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
 	dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -86,7 +99,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 	}
 	providers, err := h.service.ListAll(tenant.GetTenantID(c), typeFilter)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -94,7 +107,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 	for _, p := range providers {
 		dto, err := h.service.ToDTO(tenant.GetTenantID(c), p)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondProviderError(c, err)
 			return
 		}
 		items = append(items, dto)
@@ -249,11 +262,7 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 
 	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)
@@ -294,7 +303,7 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	configs, err := h.service.ListRuntimeConfigs(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
@@ -315,11 +324,7 @@ func (h *ProviderHandler) RevealAPIKey(c *gin.Context) {
 
 	apiKey, err := h.service.RevealAPIKey(tenant.GetTenantID(c), id)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 
