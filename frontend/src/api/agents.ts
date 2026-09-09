@@ -1,5 +1,17 @@
 import apiClient from './client'
 
+export interface BehaviorProfile {
+  version: 1
+  hierarchyCompliance: number
+  ambition: number
+  whistleblowing: number
+  riskTolerance: number
+  conflictAvoidance: number
+  secrecy: number
+  selfInterest: number
+  escalationThreshold: number
+}
+
 export interface AgentConfig {
   id?: number
   name?: string
@@ -22,6 +34,7 @@ export interface AgentConfig {
   source?: string
   isDefault?: boolean
   group?: string
+  behaviorProfile?: BehaviorProfile | null
   createdAt?: string
   updatedAt?: string
 }

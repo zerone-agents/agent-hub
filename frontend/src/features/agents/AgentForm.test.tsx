@@ -128,3 +128,56 @@ describe('AgentForm disallowedTools', { timeout: 15000 }, () => {
     expect(payload.data.config.disallowedTools).toEqual(['Bash', 'WebSearch'])
   })
 })
+
+describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
+  beforeEach(() => {
+    createAgent.mockReset()
+    updateAgent.mockReset()
+  })
+
+  it('submits a complete structured default profile for a new agent', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    expect(screen.getByText('人格光谱')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /稳健执行者/ })).toHaveAttribute('aria-pressed', 'true')
+
+    await user.type(screen.getByLabelText('代理标识'), 'steady-agent')
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
+    expect(payload.config.behaviorProfile).toEqual({
+      version: 1,
+      hierarchyCompliance: 75,
+      ambition: 30,
+      whistleblowing: 55,
+      riskTolerance: 35,
+      conflictAvoidance: 60,
+      secrecy: 55,
+      selfInterest: 35,
+      escalationThreshold: 75,
+    })
+  })
+
+  it('applies a profile preset as structured values', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    await user.click(screen.getByRole('button', { name: /政治投机者/ }))
+    expect(screen.getByRole('button', { name: /政治投机者/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.type(screen.getByLabelText('代理标识'), 'climber-agent')
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
+    expect(payload.config.behaviorProfile).toMatchObject({
+      version: 1,
+      hierarchyCompliance: 30,
+      ambition: 90,
+      secrecy: 75,
+      selfInterest: 85,
+      escalationThreshold: 35,
+    })
+  })
+})

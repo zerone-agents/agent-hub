@@ -573,6 +573,22 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	if _, exists := config["maxSessionTurns"]; exists {
 		return fmt.Errorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
 	}
+	var parsedBehaviorProfile *agent.BehaviorProfile
+	behaviorProfilePresent := false
+	if raw, exists := config["behaviorProfile"]; exists {
+		behaviorProfilePresent = true
+		if raw != nil {
+			profileMap, ok := raw.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("behaviorProfile 必须是对象或 null")
+			}
+			profile, err := parseBehaviorProfile(profileMap)
+			if err != nil {
+				return err
+			}
+			parsedBehaviorProfile = profile
+		}
+	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
 	}
@@ -614,6 +630,9 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	// Handle group field
 	if v, ok := config["group"].(string); ok {
 		cfg.Group = v
+	}
+	if behaviorProfilePresent {
+		cfg.BehaviorProfile = parsedBehaviorProfile
 	}
 
 	// Handle maxSessionQueries field
@@ -663,14 +682,15 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 
 func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]interface{} {
 	m := map[string]interface{}{
-		"systemPrompt":   cfg.SystemPrompt,
-		"permissionMode": cfg.PermissionMode,
-		"maxTurns":       cfg.MaxTurns,
-		"icon":           cfg.Icon,
-		"iconName":       cfg.IconName,
-		"iconColor":      cfg.IconColor,
-		"iconBgColor":    cfg.IconBgColor,
-		"group":          cfg.Group,
+		"systemPrompt":    cfg.SystemPrompt,
+		"permissionMode":  cfg.PermissionMode,
+		"maxTurns":        cfg.MaxTurns,
+		"icon":            cfg.Icon,
+		"iconName":        cfg.IconName,
+		"iconColor":       cfg.IconColor,
+		"iconBgColor":     cfg.IconBgColor,
+		"group":           cfg.Group,
+		"behaviorProfile": cfg.BehaviorProfile,
 	}
 
 	if cfg.MaxSessionQueries != nil {

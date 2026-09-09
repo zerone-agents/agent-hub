@@ -40,6 +40,7 @@ func setupPlatformTestDB(t *testing.T) *gorm.DB {
 		mobile_enabled INTEGER NOT NULL DEFAULT 0,
 		is_default INTEGER DEFAULT 0,
 		group_name VARCHAR(64) DEFAULT '',
+		behavior_profile JSON,
 		max_session_queries INTEGER,
 		disallowed_tools TEXT,
 		runtime_port INTEGER DEFAULT 0,

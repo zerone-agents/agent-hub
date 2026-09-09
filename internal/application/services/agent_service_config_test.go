@@ -173,6 +173,59 @@ func TestDisallowedToolsConfigKeys(t *testing.T) {
 	})
 }
 
+func behaviorProfileConfigMap() map[string]interface{} {
+	return map[string]interface{}{
+		"version":             float64(1),
+		"hierarchyCompliance": float64(75),
+		"ambition":            float64(30),
+		"whistleblowing":      float64(55),
+		"riskTolerance":       float64(35),
+		"conflictAvoidance":   float64(60),
+		"secrecy":             float64(55),
+		"selfInterest":        float64(35),
+		"escalationThreshold": float64(75),
+	}
+}
+
+func TestBehaviorProfileConfigKeys(t *testing.T) {
+	t.Run("unpack and pack structured profile", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{
+			"systemPrompt":    "base identity",
+			"behaviorProfile": behaviorProfileConfigMap(),
+		}, cfg, ""))
+		require.NotNil(t, cfg.BehaviorProfile)
+		require.Equal(t, 75, cfg.BehaviorProfile.HierarchyCompliance)
+		require.Equal(t, 55, cfg.BehaviorProfile.Whistleblowing)
+
+		packed := modelToConfigMap(cfg, "")
+		require.Equal(t, cfg.BehaviorProfile, packed["behaviorProfile"])
+	})
+
+	t.Run("absent leaves legacy profile untouched", func(t *testing.T) {
+		profile := agent.DefaultBehaviorProfile()
+		cfg := &agent.AgentConfig{BehaviorProfile: &profile}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{"systemPrompt": "updated"}, cfg, ""))
+		require.Same(t, &profile, cfg.BehaviorProfile)
+	})
+
+	t.Run("explicit null clears profile", func(t *testing.T) {
+		profile := agent.DefaultBehaviorProfile()
+		cfg := &agent.AgentConfig{BehaviorProfile: &profile}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{"behaviorProfile": nil}, cfg, ""))
+		require.Nil(t, cfg.BehaviorProfile)
+	})
+
+	t.Run("profile participates in content hash", func(t *testing.T) {
+		without, err := computeContentHash(modelToConfigMap(&agent.AgentConfig{SystemPrompt: "same"}, ""))
+		require.NoError(t, err)
+		profile := agent.DefaultBehaviorProfile()
+		with, err := computeContentHash(modelToConfigMap(&agent.AgentConfig{SystemPrompt: "same", BehaviorProfile: &profile}, ""))
+		require.NoError(t, err)
+		require.NotEqual(t, without, with)
+	})
+}
+
 // setupAgentKnowledgeAuthTestDB 起 sqlite 内存库，建齐
 // GetAgentKnowledgeDatasetsForRequest 触碰的三张表：agents、agent_subagents、
 // agent_knowledge_datasets。与 setupSubagentToolsTestDB 同款裸 SQL 方案
@@ -205,6 +258,7 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			mobile_enabled INTEGER NOT NULL DEFAULT 0,
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
+			behavior_profile JSON,
 			max_session_queries INTEGER,
 			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,

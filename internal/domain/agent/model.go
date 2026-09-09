@@ -29,6 +29,7 @@ type AgentConfig struct {
 	MobileEnabled     bool              `gorm:"not null;default:false"`
 	IsDefault         bool              `gorm:"column:is_default;default:false"`
 	Group             string            `gorm:"column:group_name;type:varchar(64);default:''"`
+	BehaviorProfile   *BehaviorProfile  `gorm:"column:behavior_profile;type:json;serializer:json"`
 	MaxSessionQueries *int              `gorm:"column:max_session_queries;type:int;default:null"`
 	DisallowedTools   []string          `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
 	RuntimePort       int               `gorm:"column:runtime_port;default:0"`

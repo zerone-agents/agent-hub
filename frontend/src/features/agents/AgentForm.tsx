@@ -3,11 +3,13 @@ import { Modal, Form, Input, Select, InputNumber, Switch, AutoComplete, Button }
 import { XIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
-import type { Agent, AgentConfig } from '@/api/agents'
+import type { Agent, AgentConfig, BehaviorProfile } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
 import { getIconComponent, lightenHex } from '@/utils/icons'
+import BehaviorProfileEditor from './BehaviorProfileEditor'
+import { cloneBehaviorProfile, DEFAULT_BEHAVIOR_PROFILE } from './behaviorProfile'
 
 interface ToggleItemProps {
   title: string
@@ -104,6 +106,7 @@ interface FormValues {
   mobileEnabled: boolean
   isDefault: boolean
   group: string
+  behaviorProfile: BehaviorProfile
 }
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
@@ -151,13 +154,15 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
-          group: editingAgent.group ?? ''
+          group: editingAgent.group ?? '',
+          behaviorProfile: cloneBehaviorProfile(editingAgent.config.behaviorProfile ?? DEFAULT_BEHAVIOR_PROFILE)
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined,
+        behaviorProfile: cloneBehaviorProfile()
         })
       }
     }
@@ -196,7 +201,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       iconName: v.iconName || undefined,
       iconColor: v.iconColor || undefined,
       iconBgColor: v.iconBgColor || undefined,
-      group: v.group || ''
+      group: v.group || '',
+      behaviorProfile: v.behaviorProfile
     }
 
     if (editingAgent) {
@@ -356,6 +362,12 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </Form.Item>
         <Form.Item label="禁用工具" name="disallowedTools" tooltip="在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名">
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
+        </Form.Item>
+
+        {/* 行为人格 */}
+        <div className={styles.section} style={{ marginTop: 20 }}>行为人格</div>
+        <Form.Item name="behaviorProfile" noStyle>
+          <BehaviorProfileEditor />
         </Form.Item>
 
         {/* 系统提示词 */}

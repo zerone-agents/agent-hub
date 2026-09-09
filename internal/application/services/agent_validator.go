@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
+	"control-panel/internal/domain/agent"
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/pkg/database"
 )
@@ -112,6 +114,16 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	if raw, exists := config["behaviorProfile"]; exists && raw != nil {
+		profileMap, ok := raw.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("behaviorProfile 必须是对象或 null")
+		}
+		if _, err := parseBehaviorProfile(profileMap); err != nil {
+			return err
+		}
+	}
+
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
 		return fmt.Errorf("icon URL 长度不能超过 512 个字符")
 	}
@@ -166,6 +178,98 @@ func ValidateConfig(config map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// parseBehaviorProfile is the single schema boundary for the persisted
+// behavior profile. Requiring the complete v1 shape keeps runtime projection,
+// UI presets, and future policy-engine decisions on the same semantics.
+func parseBehaviorProfile(raw map[string]interface{}) (*agent.BehaviorProfile, error) {
+	allowed := map[string]bool{
+		"version": true, "hierarchyCompliance": true, "ambition": true,
+		"whistleblowing": true, "riskTolerance": true, "conflictAvoidance": true,
+		"secrecy": true, "selfInterest": true, "escalationThreshold": true,
+	}
+	for key := range raw {
+		if !allowed[key] {
+			return nil, fmt.Errorf("behaviorProfile 包含未知字段: %s", key)
+		}
+	}
+
+	read := func(key string, min, max int) (int, error) {
+		value, exists := raw[key]
+		if !exists {
+			return 0, fmt.Errorf("behaviorProfile.%s 不能为空", key)
+		}
+		number, ok := behaviorProfileInteger(value)
+		if !ok {
+			return 0, fmt.Errorf("behaviorProfile.%s 必须是整数", key)
+		}
+		if number < min || number > max {
+			return 0, fmt.Errorf("behaviorProfile.%s 必须在 %d-%d 之间", key, min, max)
+		}
+		return number, nil
+	}
+
+	version, err := read("version", agent.BehaviorProfileVersion, agent.BehaviorProfileVersion)
+	if err != nil {
+		return nil, err
+	}
+	profile := &agent.BehaviorProfile{Version: version}
+	fields := []struct {
+		key    string
+		target *int
+	}{
+		{"hierarchyCompliance", &profile.HierarchyCompliance},
+		{"ambition", &profile.Ambition},
+		{"whistleblowing", &profile.Whistleblowing},
+		{"riskTolerance", &profile.RiskTolerance},
+		{"conflictAvoidance", &profile.ConflictAvoidance},
+		{"secrecy", &profile.Secrecy},
+		{"selfInterest", &profile.SelfInterest},
+		{"escalationThreshold", &profile.EscalationThreshold},
+	}
+	for _, field := range fields {
+		value, err := read(field.key, 0, 100)
+		if err != nil {
+			return nil, err
+		}
+		*field.target = value
+	}
+	return profile, nil
+}
+
+func behaviorProfileInteger(value interface{}) (int, bool) {
+	var n float64
+	switch v := value.(type) {
+	case float64:
+		n = v
+	case float32:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	case int32:
+		n = float64(v)
+	case int64:
+		n = float64(v)
+	case uint:
+		n = float64(v)
+	case uint32:
+		n = float64(v)
+	case uint64:
+		n = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		n = parsed
+	default:
+		return 0, false
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < float64(math.MinInt) || n > float64(math.MaxInt) {
+		return 0, false
+	}
+	return int(n), true
 }
 
 // parseDisallowedTools is the single source of truth for the issue #111
