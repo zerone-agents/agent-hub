@@ -57,13 +57,18 @@ export default function UsersPage() {
     queryFn: usersApi.listInvites,
     enabled: !isCasdoor
   })
-  // 登录链接是一次性的（回调消费后失效），每次打开弹窗重新获取，
-  // 避免展示已被使用过的旧链接。
-  const { data: loginUrlData } = useQuery({
-    queryKey: ['admin', 'login-url'],
-    queryFn: usersApi.getLoginUrl,
-    enabled: isCasdoor && loginLinkModalOpen
+  // 登录链接是一次性的（回调消费后失效）。不用 useQuery：全局 staleTime
+  // 30s 会让 30s 内重开的弹窗复用缓存中的旧链接（已消费 → 回调 400）。
+  // 用 mutation：每次打开显式 reset 清空旧值再重新生成。
+  const loginUrlMutation = useMutation({
+    mutationFn: usersApi.getLoginUrl
   })
+
+  const openLoginLinkModal = () => {
+    loginUrlMutation.reset() // 清空旧值：请求完成前不展示已消费的链接
+    setLoginLinkModalOpen(true)
+    loginUrlMutation.mutate()
+  }
 
   const invalidateAll = async () => {
     await Promise.all([
@@ -239,7 +244,7 @@ export default function UsersPage() {
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
           isCasdoor ? (
-            <PrimaryButton onClick={() => { setLoginLinkModalOpen(true); }}>
+            <PrimaryButton onClick={openLoginLinkModal}>
               登录链接
             </PrimaryButton>
           ) : (
@@ -279,7 +284,8 @@ export default function UsersPage() {
       {isCasdoor && (
         <LoginLinkModal
           open={loginLinkModalOpen}
-          loginUrl={loginUrlData?.loginUrl}
+          loginUrl={loginUrlMutation.data?.loginUrl}
+          loading={loginUrlMutation.isPending}
           onClose={() => { setLoginLinkModalOpen(false); }}
         />
       )}

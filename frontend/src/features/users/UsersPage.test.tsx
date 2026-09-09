@@ -79,6 +79,48 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(await screen.findByDisplayValue('https://casdoor.example.com/login/oauth/authorize?client_id=acme')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
   })
+
+  it('P2 回归：重开弹窗重新生成链接，请求期间清空旧值并禁用复制', async () => {
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    const url1 = 'https://casdoor.example.com/login/oauth/authorize?client_id=first'
+    const url2 = 'https://casdoor.example.com/login/oauth/authorize?client_id=second'
+    const resolvers: ((v: { loginUrl: string }) => void)[] = []
+    vi.mocked(usersApi.getLoginUrl).mockImplementation(
+      () => new Promise<{ loginUrl: string }>((resolve) => { resolvers.push(resolve) })
+    )
+    renderUsersPage()
+
+    // 第一次打开：请求未返回前，无链接、复制禁用
+    fireEvent.click(await screen.findByRole('button', { name: '登录链接' }))
+    expect(await screen.findByText('登录链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    const copyBtn = () => screen.getByRole('button', { name: /复制/ })
+    expect(screen.getByPlaceholderText('生成中…')).toBeInTheDocument()
+    expect(copyBtn()).toBeDisabled()
+
+    // resolve 第一个链接
+    resolvers[0]({ loginUrl: url1 })
+    expect(await screen.findByDisplayValue(url1)).toBeInTheDocument()
+    expect(copyBtn()).toBeEnabled()
+
+    // 关闭弹窗（antd 双字按钮自动插空格：「关 闭」）
+    fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }))
+    await waitFor(() => {
+      expect(screen.queryByText('登录链接', { selector: '.ant-modal-title' })).not.toBeInTheDocument()
+    })
+
+    // 第二次打开：必须重新请求（禁止复用 30s 缓存），且请求期间旧链接不可见
+    fireEvent.click(screen.getByRole('button', { name: '登录链接' }))
+    await waitFor(() => {
+      expect(usersApi.getLoginUrl).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.queryByDisplayValue(url1)).not.toBeInTheDocument()
+    expect(copyBtn()).toBeDisabled()
+
+    // resolve 第二个链接：显示新链接而非旧链接
+    resolvers[1]({ loginUrl: url2 })
+    expect(await screen.findByDisplayValue(url2)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue(url1)).not.toBeInTheDocument()
+  })
 })
 
 describe('UsersPage casdoor 待审批用户展示', () => {

@@ -6,6 +6,8 @@ import { copyOrManual } from '@/utils/clipboard'
 interface LoginLinkModalProps {
   open: boolean
   loginUrl?: string
+  /** 正在向后端请求新链接：清空旧值、禁用复制，避免分发已消费的旧链接。 */
+  loading?: boolean
   onClose: () => void
 }
 
@@ -15,7 +17,7 @@ interface LoginLinkModalProps {
  * redirect_uri），新用户打开后走 Casdoor 的登录/注册流，落在本组织的
  * Application 上——与 builtin 的一次性邀请链接不同，这里无本地记录。
  */
-export default function LoginLinkModal({ open, loginUrl, onClose }: LoginLinkModalProps) {
+export default function LoginLinkModal({ open, loginUrl, loading = false, onClose }: LoginLinkModalProps) {
   const primaryBtnCls = usePrimaryButtonStyle()
   const copyURL = async () => {
     if (!loginUrl) return
@@ -42,8 +44,8 @@ export default function LoginLinkModal({ open, loginUrl, onClose }: LoginLinkMod
         将此链接发给新用户，通过 Casdoor 完成登录（未注册的账号可在登录页注册）后回到本页即可看到该用户。
       </Typography.Paragraph>
       <Space.Compact style={{ width: '100%' }}>
-        <Input value={loginUrl ?? ''} readOnly />
-        <Button icon={<CopyIcon size={16} />} onClick={() => void copyURL()}>
+        <Input value={loginUrl ?? ''} readOnly placeholder={loading ? '生成中…' : undefined} />
+        <Button icon={<CopyIcon size={16} />} onClick={() => void copyURL()} disabled={loading || !loginUrl}>
           复制
         </Button>
       </Space.Compact>
