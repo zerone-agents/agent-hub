@@ -50,7 +50,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 - **角色由 agent-hub 本地管理**：角色真实源是本地 `user_identities` 租户成员表（Role + Status pending/active），Casdoor 仅提供用户身份。JWT 中的 Casdoor roles claim 完全忽略。`CASDOOR_ROLE_MAPPING` / `CASDOOR_DEFAULT_ROLE` 环境变量已废弃（检测到仅打 warning，不影响启动）；升级后 Casdoor 侧的 `agent-hub-*` 角色可手动删除。
 - **新用户待审批流程**：新用户首次登录成功后自动创建 pending 记录，前端渲染「等待审批」页（可访问 /auth/userinfo 与 logout，其余 API 返回 403 PENDING_APPROVAL）。admin 在用户管理页为其分配角色后自动转为 active。
 - **admin 锚定 Casdoor 组织管理员**：本地 admin 资格与 Casdoor 组织管理员（IsAdmin）双向同步——组织管理员登录/CLI 身份核对时自动成为本地 admin；被取消组织管理员则本地 admin 撤销为待审批。admin 任命/降级采用「Casdoor 先行」双写：先成功修改 Casdoor is_admin，再写本地。
-- **用户管理（admin）**：列表来自本地成员表（禁用状态实时查 Casdoor）；审批 = 给 pending 用户分配角色（自动转 active）；禁用/重置密码直通 Casdoor；创建用户引导至 Casdoor 注册页。邀请制接口仅 builtin 模式可用。
+- **用户管理（admin）**：列表来自本地成员表（禁用状态实时查 Casdoor）；审批 = 给 pending 用户分配角色（自动转 active）；禁用/重置密码直通 Casdoor；admin 在用户管理页获取本组织的一次性 OAuth 授权登录链接（`/api/v1/admin/users/login-url`，带本组织 client_id + PKCE）引导新用户走 Casdoor 登录/注册流。邀请制接口仅 builtin 模式可用。
 - **升级指引（breaking）**：升级到此模型后所有现有用户变为待审批；Casdoor 组织管理员登录后自动成为 admin，再逐个为其他用户分配角色。业务数据方面：升级时存量 agents / providers / AIGC 配置等自动回填——**无需任何配置**，回填租户从 `user_identities` 自动推断（恰好一个组织登录过即推断为该组织）；聊天记录按 `user_id → user_identities` 映射回填到各用户所属租户，映射不到的兜底回填推断租户。仅在存量数据无法自动归属（`user_identities` 为空或含多个组织）时，启动会报错指引**临时**配置 `CASDOOR_ORGANIZATION` 指定回填目标，完成本次一次性迁移后即可移除。
 - **已知限制**：
   - JWT 无吊销通道：admin 在 Casdoor 侧被降级后，其未过期的 access token 在过期前仍有效；CLI token 最迟 5 分钟内经身份缓存纠正。

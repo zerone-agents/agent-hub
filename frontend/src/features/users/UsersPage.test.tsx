@@ -6,7 +6,7 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import UsersPage from './UsersPage'
 
-// UsersPage 按 auth.mode 分叉：builtin 显示邀请区，casdoor 改为注册引导。
+// UsersPage 按 auth.mode 分叉：builtin 显示邀请区，casdoor 改为登录链接引导。
 // 这些测试只覆盖分叉渲染，不覆盖既有交互逻辑。
 vi.mock('@/api/auth', () => ({
   authApi: {
@@ -22,7 +22,7 @@ vi.mock('@/api/users', () => ({
     listInvites: vi.fn(),
     createInvite: vi.fn(),
     revokeInvite: vi.fn(),
-    getSignupUrl: vi.fn()
+    getLoginUrl: vi.fn()
   }
 }))
 
@@ -49,7 +49,7 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     vi.clearAllMocks()
     vi.mocked(usersApi.listUsers).mockResolvedValue([])
     vi.mocked(usersApi.listInvites).mockResolvedValue([])
-    vi.mocked(usersApi.getSignupUrl).mockResolvedValue({ signupUrl: 'https://casdoor.example.com/signup/org' })
+    vi.mocked(usersApi.getLoginUrl).mockResolvedValue({ loginUrl: 'https://casdoor.example.com/login/oauth/authorize?client_id=acme' })
   })
 
   it('builtin 模式：渲染「创建邀请」按钮和「邀请记录」标题', async () => {
@@ -57,26 +57,69 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     renderUsersPage()
     expect(await screen.findByRole('button', { name: '创建邀请' })).toBeInTheDocument()
     expect(await screen.findByText('邀请记录')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '注册链接' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '登录链接' })).not.toBeInTheDocument()
   })
 
-  it('casdoor 模式：渲染「注册链接」，隐藏创建邀请与邀请记录', async () => {
+  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {
     vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
-    expect(await screen.findByRole('button', { name: '注册链接' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '登录链接' })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '创建邀请' })).not.toBeInTheDocument()
       expect(screen.queryByText('邀请记录')).not.toBeInTheDocument()
     })
   })
 
-  it('casdoor 模式：点击「注册链接」弹出 Modal，展示注册链接与复制按钮', async () => {
+  it('casdoor 模式：点击「登录链接」弹出 Modal，展示登录链接与复制按钮', async () => {
     vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
-    fireEvent.click(await screen.findByRole('button', { name: '注册链接' }))
-    expect(await screen.findByText('注册链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
-    expect(screen.getByDisplayValue('https://casdoor.example.com/signup/org')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '登录链接' }))
+    expect(await screen.findByText('登录链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    // 链接在弹窗打开后才请求（一次性链接，每次打开取新值），需异步等待。
+    expect(await screen.findByDisplayValue('https://casdoor.example.com/login/oauth/authorize?client_id=acme')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
+  })
+
+  it('P2 回归：重开弹窗重新生成链接，请求期间清空旧值并禁用复制', async () => {
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    const url1 = 'https://casdoor.example.com/login/oauth/authorize?client_id=first'
+    const url2 = 'https://casdoor.example.com/login/oauth/authorize?client_id=second'
+    const resolvers: ((v: { loginUrl: string }) => void)[] = []
+    vi.mocked(usersApi.getLoginUrl).mockImplementation(
+      () => new Promise<{ loginUrl: string }>((resolve) => { resolvers.push(resolve) })
+    )
+    renderUsersPage()
+
+    // 第一次打开：请求未返回前，无链接、复制禁用
+    fireEvent.click(await screen.findByRole('button', { name: '登录链接' }))
+    expect(await screen.findByText('登录链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    const copyBtn = () => screen.getByRole('button', { name: /复制/ })
+    expect(screen.getByPlaceholderText('生成中…')).toBeInTheDocument()
+    expect(copyBtn()).toBeDisabled()
+
+    // resolve 第一个链接
+    resolvers[0]({ loginUrl: url1 })
+    expect(await screen.findByDisplayValue(url1)).toBeInTheDocument()
+    expect(copyBtn()).toBeEnabled()
+
+    // 关闭弹窗（antd 双字按钮自动插空格：「关 闭」）
+    fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }))
+    await waitFor(() => {
+      expect(screen.queryByText('登录链接', { selector: '.ant-modal-title' })).not.toBeInTheDocument()
+    })
+
+    // 第二次打开：必须重新请求（禁止复用 30s 缓存），且请求期间旧链接不可见
+    fireEvent.click(screen.getByRole('button', { name: '登录链接' }))
+    await waitFor(() => {
+      expect(usersApi.getLoginUrl).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.queryByDisplayValue(url1)).not.toBeInTheDocument()
+    expect(copyBtn()).toBeDisabled()
+
+    // resolve 第二个链接：显示新链接而非旧链接
+    resolvers[1]({ loginUrl: url2 })
+    expect(await screen.findByDisplayValue(url2)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue(url1)).not.toBeInTheDocument()
   })
 })
 
@@ -96,7 +139,7 @@ describe('UsersPage casdoor 待审批用户展示', () => {
     vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     vi.mocked(usersApi.listUsers).mockResolvedValue([pendingUser])
     vi.mocked(usersApi.listInvites).mockResolvedValue([])
-    vi.mocked(usersApi.getSignupUrl).mockResolvedValue({ signupUrl: 'https://casdoor.example.com/signup/org' })
+    vi.mocked(usersApi.getLoginUrl).mockResolvedValue({ loginUrl: 'https://casdoor.example.com/login/oauth/authorize?client_id=acme' })
   })
 
   it('pending 用户显示「待审批」标签，分配角色后调用 updateUser', async () => {

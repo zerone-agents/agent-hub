@@ -212,6 +212,23 @@ func oauthConfig(creds *TenantClientCreds, redirectURL string) *oauth2.Config {
 	}
 }
 
+// GenerateLoginURL 生成一次性的 OAuth 授权登录链接并登记 session，等价于
+// 登录页发起流程（GetLoginURL），但不依赖前端调用方先生成 state/verifier。
+// 多租户模式下管理员用它在用户管理页分发本组织的登录入口（替代静态注册页
+// 链接 /signup/<org>——授权链接由 Casdoor 按 client_id 解析到对应
+// Application，保证新用户落在本组织的登录/注册流）。
+func GenerateLoginURL(org string) (string, error) {
+	state, err := GenerateState()
+	if err != nil {
+		return "", err
+	}
+	codeVerifier, err := GenerateCodeVerifier()
+	if err != nil {
+		return "", err
+	}
+	return GetLoginURL(org, state, codeVerifier)
+}
+
 // GetLoginURL builds the Casdoor authorization URL for the given org and
 // stores the OAuth session (with Org) for the callback.
 func GetLoginURL(org, state, codeVerifier string) (string, error) {

@@ -51,7 +51,7 @@ export const usersApi = {
       .then((res) => unwrapResponse<CreatedInvite>(res)),
   revokeInvite: (id: number) =>
     apiClient.delete(`/api/v1/admin/invites/${id}`).then((res) => unwrapResponse<unknown>(res)),
-  /** Casdoor 模式：获取组织注册页链接（admin 引导新用户自助注册）。 */
-  getSignupUrl: () =>
-    apiClient.get<ApiResponse<{ signupUrl: string }>>('/api/v1/admin/users/signup-url').then((res) => unwrapResponse<{ signupUrl: string }>(res))
+  /** Casdoor 模式：获取本组织一次性 OAuth 授权登录链接（admin 分发引导新用户登录/注册）。 */
+  getLoginUrl: () =>
+    apiClient.get<ApiResponse<{ loginUrl: string }>>('/api/v1/admin/users/login-url').then((res) => unwrapResponse<{ loginUrl: string }>(res))
 }

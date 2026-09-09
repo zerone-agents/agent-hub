@@ -157,8 +157,9 @@ func main() {
 		casdoorDir = directory.NewCasdoorDirectory(func(org string) directory.UserClient {
 			return auth.ClientForOrg(org)
 		}, membershipStore)
-		// 注册链接在 handler 里按请求租户动态拼接，这里只传 casdoor 实例地址。
-		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, cfg.Casdoor.Endpoint)
+		// 登录链接按请求租户生成 OAuth 授权 URL（各 org 解析自己的
+		// tenant_oauth_clients 凭证），这里注入生成函数。
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL)
 		log.Println("Auth mode: casdoor")
 	}
 
@@ -625,7 +626,7 @@ func main() {
 		usersAdmin.DELETE("/invites/:id", adminUserHandler.RevokeInvite)
 	} else {
 		usersAdmin := v1group.Group("/admin", middleware.RequireAdmin())
-		usersAdmin.GET("/users/signup-url", casdoorUserHandler.SignupURL)
+		usersAdmin.GET("/users/login-url", casdoorUserHandler.LoginURL)
 		usersAdmin.GET("/users", casdoorUserHandler.ListUsers)
 		usersAdmin.PATCH("/users/:id", casdoorUserHandler.UpdateUser)
 		usersAdmin.POST("/users/:id/reset-password", casdoorUserHandler.ResetUserPassword)
