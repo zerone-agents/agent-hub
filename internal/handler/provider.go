@@ -31,7 +31,8 @@ func NewProviderHandler(service *services.ProviderService, multiragClient provid
 // respondProviderError 映射 Provider 领域错误（issue #95 P2：英文化后
 // 内部诊断只进服务端日志，HTTP 边界返回中性中文文案，不向用户泄漏
 // DB/加解密等底层细节）。领域 sentinel 走用户面文案（404/503），
-// 其余一律 500 中性，完整错误链由服务端日志承载。
+// 用户面校验错误（ValidationError）保留 400 原文，其余一律 500 中性，
+// 完整错误链由服务端日志承载。
 func respondProviderError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, provider.ErrProviderNotFound):
@@ -39,6 +40,11 @@ func respondProviderError(c *gin.Context, err error) {
 	case errors.Is(err, provider.ErrMultiRAGConfigMissing):
 		respondError(c, http.StatusServiceUnavailable, "MultiRAG 未配置")
 	default:
+		var ve *provider.ValidationError
+		if errors.As(err, &ve) {
+			respondError(c, http.StatusBadRequest, ve.Error())
+			return
+		}
 		log.Printf("[ProviderHandler] internal error: %v", err)
 		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
 	}
@@ -165,7 +171,7 @@ func (h *ProviderHandler) Create(c *gin.Context) {
 		LockedAPIKey:  req.LockedAPIKey,
 	})
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondCreated(c, dto)
@@ -214,11 +220,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 		LockedAPIKey:  req.LockedAPIKey,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -232,11 +234,7 @@ func (h *ProviderHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.Delete(tenant.GetTenantID(c), id); err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Provider 已删除")
@@ -382,11 +380,7 @@ func (h *ProviderHandler) AddModel(c *gin.Context) {
 		Efforts:       req.Efforts,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondCreated(c, dto)
@@ -422,11 +416,7 @@ func (h *ProviderHandler) UpdateModel(c *gin.Context) {
 		Efforts:       req.Efforts,
 	})
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, dto)
@@ -442,11 +432,7 @@ func (h *ProviderHandler) DeleteModel(c *gin.Context) {
 	}
 	selectionID := c.Param("selectionId")
 	if err := h.service.DeleteModel(tenant.GetTenantID(c), id, selectionID); err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Model 已删除")
@@ -478,15 +464,7 @@ func (h *ProviderHandler) SyncToMultiRAG(c *gin.Context) {
 
 	result, err := h.service.SyncProviderToMultiRAG(c.Request.Context(), tenant.GetTenantID(c), id, h.multiragClient, req.VerifyOnly, req.ModelIds)
 	if err != nil {
-		if err == provider.ErrProviderNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		if err == provider.ErrMultiRAGConfigMissing {
-			respondError(c, http.StatusServiceUnavailable, "MultiRAG 未配置")
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)

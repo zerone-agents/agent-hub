@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -98,4 +99,83 @@ func TestRespondProviderError_SentinelRouting(t *testing.T) {
 		require.Contains(t, body, "服务器内部错误，请稍后重试")
 		require.NotContains(t, body, "db connection refused")
 	})
+
+	t.Run("ValidationError → 400 原文用户面文案", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		respondProviderError(c, provider.NewValidationErrorf("name 不能为空"))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		body := w.Body.String()
+		require.Contains(t, body, "name 不能为空")
+		require.NotContains(t, body, "服务器内部错误")
+	})
+}
+
+// ------ issue #95 P2 复申（review #5598101374）：Create/Update 400 分支分流 ------
+
+// TestProviderHandler_Create_DBFailure500Neutral 锁定 Create 遇到基础设施故障
+// （DB 关闭）→ 500 中性中文文案，英文化内部诊断（"check provider existence
+// failed" 等）只进服务端日志，不泄漏到响应体。
+func TestProviderHandler_Create_DBFailure500Neutral(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderModel{}))
+
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := services.NewProviderService(providerSyncTestKey)
+	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/providers", h.Create)
+
+	body := `{"key": "glm-cn", "name": "GLM", "protocol": "anthropic", "authStyle": "api_key", "baseUrl": "https://open.bigmodel.cn/api/anthropic"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, respBody, "check provider existence failed")
+	require.NotContains(t, respBody, "database is closed")
+}
+
+// TestProviderHandler_Create_ValidationKey400 锁定用户面校验错误仍走 400
+// 原文中文（不被 500 中性化吞掉）。注意 name 为空会被 binding:"required"
+// 在 ShouldBindJSON 层拦截（gin 错误），故用非法 key（含空格）命中
+// service 层 validateIdentifier 校验路径。
+func TestProviderHandler_Create_ValidationKey400(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderModel{}))
+
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+
+	svc := services.NewProviderService(providerSyncTestKey)
+	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/admin/providers", h.Create)
+
+	body := `{"key": "glm cn", "name": "GLM", "protocol": "anthropic", "authStyle": "api_key", "baseUrl": "https://open.bigmodel.cn/api/anthropic"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), "Provider key 标识只能包含字母、数字、点、下划线和横线")
+	require.NotContains(t, w.Body.String(), "服务器内部错误")
 }

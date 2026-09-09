@@ -424,7 +424,7 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 		return nil, err
 	}
 	if input.Name == "" {
-		return nil, fmt.Errorf("name 不能为空")
+		return nil, provider.NewValidationErrorf("name 不能为空")
 	}
 
 	exists, err := s.repo.ExistsByKey(tenantID, input.Key)
@@ -432,7 +432,7 @@ func (s *ProviderService) Create(tenantID string, input *CreateProviderInput) (*
 		return nil, fmt.Errorf("check provider existence failed: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("Provider '%s' 已存在", input.Key)
+		return nil, provider.NewValidationErrorf("Provider '%s' 已存在", input.Key)
 	}
 
 	protocol := input.Protocol
@@ -808,10 +808,10 @@ func (s *ProviderService) ToDTO(tenantID string, p provider.Provider) (*Provider
 // API cannot store arbitrary strings.
 func validateProviderEnum(protocol, authStyle string) error {
 	if protocol != "" && !validProtocols[protocol] {
-		return fmt.Errorf("protocol 不支持: %s（可选: anthropic, openai, mineru）", protocol)
+		return provider.NewValidationErrorf("protocol 不支持: %s（可选: anthropic, openai, mineru）", protocol)
 	}
 	if authStyle != "" && !validAuthStyles[authStyle] {
-		return fmt.Errorf("authStyle 不支持: %s（可选: api_key, auth_token, no_auth）", authStyle)
+		return provider.NewValidationErrorf("authStyle 不支持: %s（可选: api_key, auth_token, no_auth）", authStyle)
 	}
 	return nil
 }
@@ -819,7 +819,7 @@ func validateProviderEnum(protocol, authStyle string) error {
 // validateProviderType rejects unknown provider type values.
 func validateProviderType(t string) error {
 	if t != "" && !validProviderTypes[t] {
-		return fmt.Errorf("type 不支持: %s（可选: llm, ocr, embedding, vlm）", t)
+		return provider.NewValidationErrorf("type 不支持: %s（可选: llm, ocr, embedding, vlm）", t)
 	}
 	return nil
 }
@@ -831,7 +831,7 @@ func validateProviderType(t string) error {
 func validateModels(models []provider.CatalogModel) error {
 	for i, m := range models {
 		if m.ModelType == "" {
-			return fmt.Errorf("defaultModels[%d] (%s): modelType 不能为空", i, m.ModelID)
+			return provider.NewValidationErrorf("defaultModels[%d] (%s): modelType 不能为空", i, m.ModelID)
 		}
 		if err := validateProviderType(m.ModelType); err != nil {
 			return fmt.Errorf("defaultModels[%d] (%s): %w", i, m.ModelID, err)
@@ -1105,10 +1105,10 @@ func (s *ProviderService) AddModel(tenantID string, providerID uint64, input *Ad
 	}
 	providerID = summary.ID
 	if input.ModelID == "" {
-		return nil, fmt.Errorf("modelId 不能为空")
+		return nil, provider.NewValidationErrorf("modelId 不能为空")
 	}
 	if input.ModelType == "" {
-		return nil, fmt.Errorf("modelType 不能为空")
+		return nil, provider.NewValidationErrorf("modelType 不能为空")
 	}
 	if err := validateProviderType(input.ModelType); err != nil {
 		return nil, err
@@ -1176,7 +1176,7 @@ func (s *ProviderService) UpdateModel(tenantID string, providerID uint64, select
 	}
 	if input.ModelType != nil {
 		if *input.ModelType == "" {
-			return nil, fmt.Errorf("modelType 不能为空")
+			return nil, provider.NewValidationErrorf("modelType 不能为空")
 		}
 		if err := validateProviderType(*input.ModelType); err != nil {
 			return nil, err
@@ -1237,7 +1237,7 @@ func assignAigcCode(modelID string, existingRows []provider.ProviderModel) (stri
 	}
 	next := max + 1
 	if next > 9999 {
-		return "", fmt.Errorf("AIGC 模型码槽位已满（最多 9999）")
+		return "", provider.NewValidationErrorf("AIGC 模型码槽位已满（最多 9999）")
 	}
 	return fmt.Sprintf("%04d", next), nil
 }
