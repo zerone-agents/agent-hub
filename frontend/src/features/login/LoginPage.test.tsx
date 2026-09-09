@@ -141,3 +141,33 @@ describe('LoginPage (casdoor multi-org)', () => {
     expect(screen.getByRole('button', { name: '登录 Agent Hub' })).toBeEnabled()
   })
 })
+
+describe('LoginPage mode 查询失败（fail-closed）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 429 / 网络错误：getAuthMode 抛错，绝不允许 fallback 到 builtin 表单
+    // （casdoor 部署没有本地登录端点，渲染 builtin 表单必失败且误导用户）。
+    vi.mocked(authApi.getAuthMode).mockRejectedValue(new Error('请求过于频繁，请稍后再试'))
+  })
+
+  // useAuthMode 自带 retry:1（指数退避 ~1s），等待错误卡渲染需放宽超时。
+  const waitErrorCard = () => screen.findByText(/无法获取登录方式/, undefined, { timeout: 5000 })
+
+  it('渲染错误卡而非 builtin 用户名/密码表单', async () => {
+    renderLogin()
+    expect(await waitErrorCard()).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('用户名')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('密码')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '登录' })).not.toBeInTheDocument()
+  })
+
+  it('展示错误提示与重试按钮，点击重试恢复 casdoor 登录页', async () => {
+    const user = userEvent.setup()
+    renderLogin()
+    expect(await waitErrorCard()).toBeInTheDocument()
+    const retry = screen.getByRole('button', { name: /重试/ })
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true, multiOrg: false })
+    await user.click(retry)
+    expect(await screen.findByRole('button', { name: '登录 Agent Hub' })).toBeInTheDocument()
+  })
+})
