@@ -142,7 +142,6 @@ func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := setupAgentMessageService(t)
 			addTypedMessageRelation(t, f, f.a, f.b, "speeding-hq", tt.relationType, tt.stance, tt.delivery, tt.contextPolicy, tt.action)
-			addTypedMessageRelation(t, f, f.b, f.a, "speeding-hq", "peer", tt.stance, "async", "summary_only", "inform")
 
 			got, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
 				TargetAgent:    f.b.Name,
@@ -167,10 +166,36 @@ func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
 			calls := f.runner.snapshot()
 			require.Len(t, calls, 1)
 			require.Contains(t, calls[0].message, "结构关系："+tt.relationType)
-			require.Contains(t, calls[0].message, "你对发送方的当前关系："+tt.stance)
+			require.Contains(t, calls[0].message, "你对发送方的当前关系：neutral（0，尚无反向关系状态）")
 			require.Contains(t, calls[0].message, "动作："+tt.action)
 		})
 	}
+}
+
+// A directed organization is allowed to relay work A -> B -> C across two
+// independent turns. The loop guard only rejects a nested dispatch while B is
+// actively handling A's delivery; it must not permanently prevent B from
+// starting a later, explicit turn of its own.
+func TestAgentMessageServiceSupportsSequentialThreeAgentChain(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addTypedMessageRelation(t, f, f.a, f.b, "case-chain", "peer", "friendly", "sync", "summary_only", "handoff")
+	addTypedMessageRelation(t, f, f.b, f.c, "case-chain", "reports_to", "neutral", "sync", "summary_only", "report")
+
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "case-chain", Action: "handoff", Message: "A 交给 B",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusCompleted, first.Status)
+
+	second, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.c.Name, Scope: "case-chain", Action: "report", Message: "B 完成后报告 C",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusCompleted, second.Status)
+
+	calls := f.runner.snapshot()
+	require.Len(t, calls, 2)
+	require.Equal(t, []string{f.b.Name, f.c.Name}, []string{calls[0].agent, calls[1].agent})
 }
 
 func TestAgentMessageServiceSyncDeliveryUsesDirectedAuthorizedRoute(t *testing.T) {
