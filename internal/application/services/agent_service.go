@@ -275,7 +275,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 		resolvedProviderID = a.ProviderID
 	}
 	if resolvedProviderID == nil {
-		return nil, fmt.Errorf("Agent 未绑定 Provider")
+		return nil, agent.NewValidationErrorf("Agent 未绑定 Provider")
 	}
 
 	p, err := s.providerSvc.repo.GetByID(tenantID, *resolvedProviderID)
@@ -359,7 +359,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, fmt.Errorf("check agent existence failed: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("Agent '%s' 已存在", input.Name)
+		return nil, agent.NewValidationErrorf("Agent '%s' 已存在", input.Name)
 	}
 
 	if err := ValidateCreateConfig(input.Config); err != nil {
@@ -502,7 +502,7 @@ func (s *AgentService) handleDefaultUpdate(tenantID string, agentID uint64, isDe
 func (s *AgentService) DeleteAgent(tenantID, name string) error {
 	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", name)
+		return agent.NewValidationErrorf("Agent '%s' 不存在", name)
 	}
 
 	return s.repo.Delete(tenantID, cfg.ID)
@@ -515,7 +515,7 @@ func (s *AgentService) DeleteAgent(tenantID, name string) error {
 func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames []string) error {
 	cfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		return agent.NewValidationErrorf("Agent '%s' 不存在", agentName)
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
@@ -545,13 +545,13 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 		if parentIsMounted, err := s.repo.ExistsSubagentBinding(cfg.ID); err != nil {
 			return err
 		} else if parentIsMounted {
-			return fmt.Errorf("Agent %q 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）", agentName)
+			return agent.NewValidationErrorf("Agent %q 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）", agentName)
 		}
 		for _, subCfg := range resolved {
 			if n, err := s.repo.CountSubagentsOf(subCfg.ID); err != nil {
 				return err
 			} else if n > 0 {
-				return fmt.Errorf("Agent %q 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）", subCfg.Name)
+				return agent.NewValidationErrorf("Agent %q 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）", subCfg.Name)
 			}
 		}
 	}

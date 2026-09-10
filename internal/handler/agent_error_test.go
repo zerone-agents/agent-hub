@@ -46,7 +46,24 @@ func newAgentErrorRouter(h *AgentHandler) *gin.Engine {
 	r.GET("/api/v1/agents", h.List)
 	r.GET("/api/v1/agents/:name", h.Get)
 	r.POST("/api/v1/admin/agents", h.Create)
+	r.PUT("/api/v1/admin/agents/:name/subagents", h.UpdateSubagents)
 	return r
+}
+
+// seedAgentRow writes a provider-independent Agent row directly so the test
+// can construct name/N-delegation conflicts without going through the create
+// pipeline (mirrors the direct AgentConfig seeding in
+// agent_chat_runtime_addressing_test.go; table name is "agents").
+func seedAgentRow(t *testing.T, db *gorm.DB, name string) agent.AgentConfig {
+	t.Helper()
+	row := agent.AgentConfig{
+		Name:         name,
+		TenantID:     chatTestTenant,
+		ContentHash:  "seed-hash",
+		SystemPrompt: "seed",
+	}
+	require.NoError(t, db.Create(&row).Error)
+	return row
 }
 
 // TestAgentHandler_Get_NotFound404 锁定 Get 端点对未知 agent 返回
@@ -146,4 +163,101 @@ func TestAgentHandler_List_InternalError500Neutral(t *testing.T) {
 	require.Contains(t, body, "服务器内部错误，请稍后重试")
 	require.NotContains(t, body, "list agents failed")
 	require.NotContains(t, body, "database is closed")
+}
+
+// TestAgentHandler_Create_NameConflict400 锁定 Create 重名校验继续走 400
+// 原文中文（CreateAgent 的 "Agent '%s' 已存在" 已包 ValidationError，不被
+// handler 500 中性桶吞掉）。seed 一个同名 Agent 行（provider 无关直插）后
+// 再次 POST 同名。
+func TestAgentHandler_Create_NameConflict400(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	seedAgentRow(t, db, "builder-a")
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"name":"builder-a","config":{"systemPrompt":"hello"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Agent 'builder-a' 已存在")
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestAgentHandler_UpdateSubagents_MainAgentNotFound400 锁定 UpdateSubagents
+// 主 Agent 不存在的裸中文错误（UpdateSubagents 的 "Agent '%s' 不存在"）已包
+// ValidationError → 400 原文，而非 500 中性文案。
+func TestAgentHandler_UpdateSubagents_MainAgentNotFound400(t *testing.T) {
+	setupAgentErrorTestDB(t)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"subagents":["stray-sub"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost-parent/subagents", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Agent 'ghost-parent' 不存在")
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestAgentHandler_UpdateSubagents_ParentMounted400 锁定一层委托规则原文：
+// 已被其他 Agent 挂载的 Agent 不能再挂载子 Agent（issue #111 委托深度=1）。
+// 前置：parent-a 挂载 worker-b（直插 agent_subagents 行），再 PUT
+// worker-b 挂载 cand-c → 命中 "Agent %q 已被其他 Agent 挂载…" 400 回归。
+func TestAgentHandler_UpdateSubagents_ParentMounted400(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentSubagent{}))
+	parent := seedAgentRow(t, db, "parent-a")
+	worker := seedAgentRow(t, db, "worker-b")
+	seedAgentRow(t, db, "cand-c")
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: worker.ID}).Error)
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"subagents":["cand-c"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/worker-b/subagents", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, `Agent \"worker-b\" 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）`)
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestAgentHandler_UpdateSubagents_SubagentMounted400 锁定一层委托规则原文
+// 的另一侧：自身已挂载子 Agent 的 Agent 不能再被挂载。前置：worker-y 已挂载
+// child-z，PUT parent-x 挂载 worker-y → 命中
+// "Agent %q 自身已挂载子 Agent…" 400 回归。
+func TestAgentHandler_UpdateSubagents_SubagentMounted400(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentSubagent{}))
+	seedAgentRow(t, db, "parent-x")
+	worker := seedAgentRow(t, db, "worker-y")
+	child := seedAgentRow(t, db, "child-z")
+	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: worker.ID, SubagentID: child.ID}).Error)
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"subagents":["worker-y"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/parent-x/subagents", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, `Agent \"worker-y\" 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）`)
+	require.NotContains(t, respBody, "服务器内部错误")
 }
