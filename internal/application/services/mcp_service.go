@@ -230,10 +230,10 @@ func (s *McpService) toClientDTO(m *mcp.McpServer) (*McpClientDTO, error) {
 // 当前仅支持 sse / http。
 func validateMcpConfig(transport, url string) error {
 	if !validTransportType(transport) {
-		return fmt.Errorf("transportType 必须是 sse / http 之一，当前: %q", transport)
+		return mcp.NewValidationErrorf("transportType 必须是 sse / http 之一，当前: %q", transport)
 	}
 	if strings.TrimSpace(url) == "" {
-		return fmt.Errorf("%s 类型必须填写 url", transport)
+		return mcp.NewValidationErrorf("%s 类型必须填写 url", transport)
 	}
 	return nil
 }
@@ -273,7 +273,7 @@ func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, er
 		return nil, fmt.Errorf("check MCP existence failed: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("MCP '%s' 已存在", input.Name)
+		return nil, mcp.NewValidationErrorf("MCP '%s' 已存在", input.Name)
 	}
 
 	headersEnc, err := s.encryptMap(input.Headers)
@@ -382,10 +382,13 @@ func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpD
 func (s *McpService) Delete(tenantID, name string) error {
 	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return fmt.Errorf("MCP '%s' 不存在", name)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w", mcp.ErrMcpNotFound)
+		}
+		return fmt.Errorf("get MCP %s failed: %w", name, err)
 	}
 	if m.IsBuiltin {
-		return fmt.Errorf("MCP '%s' 是内置服务，不可删除", name)
+		return mcp.NewValidationErrorf("MCP '%s' 是内置服务，不可删除", name)
 	}
 
 	own, foreign, err := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
@@ -620,14 +623,14 @@ func (s *McpService) GetAgentMcps(tenantID, agentName string) ([]string, error) 
 func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []string) error {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		return mcp.NewValidationErrorf("Agent '%s' 不存在", agentName)
 	}
 
 	mcpIDs := make([]uint64, 0, len(mcpNames))
 	for _, mcpName := range mcpNames {
 		m, err := s.repo.GetByName(tenantID, mcpName)
 		if err != nil {
-			return fmt.Errorf("MCP '%s' 不存在", mcpName)
+			return mcp.NewValidationErrorf("MCP '%s' 不存在", mcpName)
 		}
 		mcpIDs = append(mcpIDs, m.ID)
 	}
@@ -640,7 +643,10 @@ func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []stri
 func (s *McpService) GetClientMcpsByAgent(tenantID, agentName string) (map[string]*McpClientDTO, error) {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", agent.ErrAgentNotFound)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	items, err := s.repo.GetMcpServersByAgent(tenantID, agentCfg.ID)
 	if err != nil {

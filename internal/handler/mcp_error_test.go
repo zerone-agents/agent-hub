@@ -47,6 +47,8 @@ func newMcpErrorRouter(h *McpHandler) *gin.Engine {
 	r.GET("/api/v1/admin/mcps/:name", h.Get)
 	r.POST("/api/v1/admin/mcps", h.Create)
 	r.PUT("/api/v1/admin/mcps/:name", h.Update)
+	r.GET("/api/v1/mcps", h.GetClientMcpsByAgent)
+	r.PUT("/api/v1/admin/agents/:name/mcps", h.UpdateAgentMcps)
 	return r
 }
 
@@ -101,25 +103,25 @@ func TestMcpHandler_List_InternalError500Neutral(t *testing.T) {
 	require.Contains(t, logBuf.String(), "list MCPs failed", "内部诊断必须进服务端日志")
 }
 
-// TestMcpHandler_ValidationError400 函数级锁定 respondMcpError 对
-// *mcp.ValidationError → 400 完整链原文（不被 500 中性化吞掉）。
-// 说明：Service.Create 的校验路径（validateMcpConfig / 存在性检查）目前
-// 返回 plain error（未包 ValidationError），不存在能端到端触发 Create 400
-// 的输入——因此 ValidationError → 400 分支以 responder 函数级单测覆盖，
-// 端到端服务调用链另由 Update 内置 MCP（TestMcpHandler_Update_Builtin
-// TransportType400）实测（brief 2c 二选一保障）。
-func TestMcpHandler_ValidationError400(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+// TestMcpHandler_Create_Validation400 升回端到端（brief 2c 原 Test 3）：
+// service 层 validateMcpConfig 已包 *mcp.ValidationError（issue #95 batch 3a
+// review P2：8 处用户可行动中文错误补包），POST 非法 transportType 经真实
+// handler 调用链 → 400 完整链原文，而不是 500 中性。
+func TestMcpHandler_Create_Validation400(t *testing.T) {
+	setupMcpErrorTestDB(t)
+	h := NewMcpHandler(services.NewMcpService("test-key"))
+	r := newMcpErrorRouter(h)
 
-	respondMcpError(c, mcp.NewValidationErrorf("校验失败：参数不合法"))
+	body := `{"name":"t-e2e","title":"端到端校验","url":"http://example.com/sse","transportType":"bogus"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/mcps", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
-	body := w.Body.String()
-	require.Contains(t, body, "校验失败：参数不合法")
-	require.NotContains(t, body, "服务器内部错误")
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "transportType 必须是 sse / http 之一")
+	require.NotContains(t, respBody, "服务器内部错误", "用户可行动的校验错误不得退化为 500 中性")
 }
 
 // TestMcpHandler_Update_BuiltinTransportType400 锁定内置 MCP 修改
@@ -154,4 +156,69 @@ func TestMcpHandler_Update_BuiltinTransportType400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "内置 MCP 不可修改 transportType")
 	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestMcpHandler_GetClientMcps_AgentNotFound404 公开端点回归锁（issue #95
+// batch 3a review P2）：GetClientMcpsByAgent 对未知 agent 必须恢复 404
+// 中文（service 层按 agent.ErrAgentNotFound sentinel 包装，handler 认
+// sentinel），runtime 侧不得把「agent 不存在」误判为服务故障（500）。
+func TestMcpHandler_GetClientMcps_AgentNotFound404(t *testing.T) {
+	setupMcpErrorTestDB(t)
+	h := NewMcpHandler(services.NewMcpService("test-key"))
+	r := newMcpErrorRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mcps?agent=ghost-agent", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	body := w.Body.String()
+	require.Contains(t, body, "Agent 不存在")
+	require.NotContains(t, body, "record not found", "gorm 英文诊断不得泄漏到响应体")
+	require.NotContains(t, body, "服务器内部错误", "公开端点 not-found 不得退化为 500 中性")
+}
+
+// TestMcpHandler_UpdateAgentMcps_NotFound400 锁定绑定接口引用未知对象 →
+// 400 原文（用户可行动）：service 层 UpdateAgentMcps 的 agent/mcp not-found
+// 均包 *mcp.ValidationError，命令 handler 调用链验证非 500 中性。
+func TestMcpHandler_UpdateAgentMcps_NotFound400(t *testing.T) {
+	db := setupMcpErrorTestDB(t)
+	// 场景 B 需要真实存在的 agent：seed 最小必填行（ContentHash/SystemPrompt
+	// 无 DB 默认值）。
+	seed := &agent.AgentConfig{
+		Name:         "existing-agent",
+		TenantID:     chatTestTenant,
+		ContentHash:  "test-hash",
+		SystemPrompt: "test-prompt",
+	}
+	require.NoError(t, db.Create(seed).Error)
+
+	h := NewMcpHandler(services.NewMcpService("test-key"))
+	r := newMcpErrorRouter(h)
+
+	t.Run("agent not found", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost/mcps",
+			bytes.NewBufferString(`{"mcpNames":["ghost-mcp"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		body := w.Body.String()
+		require.Contains(t, body, "Agent 'ghost' 不存在")
+		require.NotContains(t, body, "服务器内部错误")
+	})
+
+	t.Run("mcp not found", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/existing-agent/mcps",
+			bytes.NewBufferString(`{"mcpNames":["ghost-mcp"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		body := w.Body.String()
+		require.Contains(t, body, "MCP 'ghost-mcp' 不存在")
+		require.NotContains(t, body, "服务器内部错误")
+	})
 }

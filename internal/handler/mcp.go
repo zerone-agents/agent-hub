@@ -29,6 +29,8 @@ func respondMcpError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, mcp.ErrMcpNotFound):
 		respondError(c, http.StatusNotFound, mcp.ErrMcpNotFound.Error())
+	case errors.Is(err, agent.ErrAgentNotFound):
+		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
 	default:
 		var ve *mcp.ValidationError
 		if errors.As(err, &ve) {
