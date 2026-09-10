@@ -76,7 +76,7 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 	// escape, not a theoretical concern.
 	for _, f := range zr.File {
 		if isUnsafeZipPath(f.Name) {
-			return nil, fmt.Errorf("zip 包含不安全的路径: %s (禁止 ../ 或绝对路径)", f.Name)
+			return nil, skill.NewValidationErrorf("zip 包含不安全的路径: %s (禁止 ../ 或绝对路径)", f.Name)
 		}
 	}
 
@@ -88,7 +88,7 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("zip 包中缺少 SKILL.md 文件")
+		return nil, skill.NewValidationErrorf("zip 包中缺少 SKILL.md 文件")
 	}
 
 	for _, entry := range entries {
@@ -212,7 +212,7 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 	text := strings.ReplaceAll(string(content), "\r\n", "\n")
 
 	if !strings.HasPrefix(text, "---\n") && text != "---" {
-		return fmt.Errorf("%s: 缺少 frontmatter (必须以 --- 开头)", ctx)
+		return skill.NewValidationErrorf("%s: 缺少 frontmatter (必须以 --- 开头)", ctx)
 	}
 
 	body := strings.TrimPrefix(text, "---\n")
@@ -227,14 +227,14 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 		}
 	}
 	if closeIdx < 0 {
-		return fmt.Errorf("%s: frontmatter 未闭合 (缺少结束 ---)", ctx)
+		return skill.NewValidationErrorf("%s: frontmatter 未闭合 (缺少结束 ---)", ctx)
 	}
 
 	fmBytes := []byte(strings.Join(lines[:closeIdx], "\n"))
 
 	var parsed map[string]interface{}
 	if err := yaml.Unmarshal(fmBytes, &parsed); err != nil {
-		return fmt.Errorf("%s: frontmatter 不是合法的 YAML: %w", ctx, err)
+		return skill.NewValidationErrorf("%s: frontmatter 不是合法的 YAML: %s", ctx, err.Error())
 	}
 
 	// yaml.v3 unmarshals unquoted scalars into their native Go types
@@ -243,11 +243,11 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 	for _, key := range []string{"name", "description"} {
 		v, ok := parsed[key]
 		if !ok || v == nil {
-			return fmt.Errorf("%s: frontmatter 缺少 %s 字段", ctx, key)
+			return skill.NewValidationErrorf("%s: frontmatter 缺少 %s 字段", ctx, key)
 		}
 		s := strings.TrimSpace(fmt.Sprint(v))
 		if s == "" {
-			return fmt.Errorf("%s: frontmatter %s 不能为空", ctx, key)
+			return skill.NewValidationErrorf("%s: frontmatter %s 不能为空", ctx, key)
 		}
 	}
 	return nil
