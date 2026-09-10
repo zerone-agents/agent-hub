@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
-import { Popconfirm, Tag, Tooltip } from 'antd'
+import { Popconfirm, Tag, Tooltip, Checkbox } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
 import EntityCard from '@/components/EntityCard'
@@ -48,6 +48,27 @@ const useStyles = createStyles(({ css }) => ({
   `,
   actBtnDanger: css`
     &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+  `,
+  selectableWrap: css`
+    position: relative;
+    border-radius: ${t.radius}px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    &:hover { border-color: color-mix(in srgb, var(--primary) 34%, transparent); }
+  `,
+  selectableSelected: css`
+    border-color: var(--primary);
+  `,
+  cardCheckbox: css`
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 1;
+  `,
+  statsDisabled: css`
+    pointer-events: none;
+    opacity: 0.55;
   `
 }))
 
@@ -65,11 +86,16 @@ interface AgentCardProps {
   onEditModel: (agent: Agent) => void
   onDeploy: (agent: Agent) => void
   onEditKnowledge: (agent: Agent) => void
+  /** 批量选择模式（#141）：显示复选框、隐藏单卡操作、stats 链接禁用、整卡点击切换 */
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (name: string) => void
 }
 
 export default function AgentCard({
   agent, modelDisplayName, canWrite, onEdit, onDelete,
-  onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge
+  onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge,
+  selectionMode = false, selected = false, onToggleSelect,
 }: AgentCardProps) {
   const { styles } = useStyles()
 
@@ -107,7 +133,7 @@ export default function AgentCard({
   const hasPending = agent.pendingArtifactUpdates != null &&
     (agent.pendingArtifactUpdates.tools.length > 0 || agent.pendingArtifactUpdates.skills.length > 0)
 
-  return (
+  const card = (
     <EntityCard
       icon={icon}
       title={agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}
@@ -126,7 +152,7 @@ export default function AgentCard({
       }
       description={agent.config.description?.zh ?? agent.config.description?.en ?? '暂无描述'}
       bodyExtra={
-        <div className={styles.stats}>
+        <div className={selectionMode ? `${styles.stats} ${styles.statsDisabled}` : styles.stats}>
           <span className={styles.statLink} onClick={() => { onEditSubagents(agent); }}>
             <DiamondsFourIcon size={12} />
             {agent.subagents?.length ?? 0} 子代理
@@ -155,7 +181,7 @@ export default function AgentCard({
         </div>
       }
       footerLeft={formatTime(agent.createdAt)}
-      footerRight={
+      footerRight={selectionMode ? undefined : (
         <>
           <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
             <RocketIcon size={14} />
@@ -180,7 +206,32 @@ export default function AgentCard({
             </>
           )}
         </>
-      }
+      )}
     />
+  )
+
+  if (!selectionMode) return card
+
+  return (
+    <div
+      className={`${styles.selectableWrap}${selected ? ` ${styles.selectableSelected}` : ''}`}
+      aria-label={`选择 ${agent.name}`}
+      tabIndex={0}
+      onClick={() => { onToggleSelect?.(agent.name); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggleSelect?.(agent.name)
+        }
+      }}
+    >
+      <span
+        className={styles.cardCheckbox}
+        onClick={(e) => { e.stopPropagation(); onToggleSelect?.(agent.name); }}
+      >
+        <Checkbox checked={selected} />
+      </span>
+      {card}
+    </div>
   )
 }
