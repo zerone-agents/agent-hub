@@ -248,8 +248,8 @@ describe('AgentListPage bulk operations (#141)', () => {
     // general 未部署（not_found → 可执行）；coder 运行中（running → 跳过）
     vi.mocked(agentApi.getDeployment).mockImplementation(async (name: string) => ({
       data: { success: true, data: name === 'general' ? { status: 'not_found' } : { status: 'running' } },
-    }))
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
+    } as never))
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
     renderPage()
 
     await user.click(screen.getByRole('button', { name: /批量操作/ }))

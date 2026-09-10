@@ -35,7 +35,7 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('useBulkAgentTask — 执行与汇总', () => {
   it('全部成功：逐项 succeeded、phase done、onFinished 收到成功名单、invalidate agents', async () => {
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
     const onFinished = vi.fn()
@@ -55,7 +55,7 @@ describe('useBulkAgentTask — 执行与汇总', () => {
 
   it('单项失败不中断其他项，失败原因来自 parseApiError', async () => {
     vi.mocked(agentApi.deploy)
-      .mockResolvedValueOnce({ data: { success: true } })
+      .mockResolvedValueOnce({ data: { success: true } } as never)
       .mockRejectedValueOnce({ isAxiosError: true, response: { status: 500, data: { error: '后端爆炸' } } })
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
@@ -97,7 +97,7 @@ describe('useBulkAgentTask — 执行与汇总', () => {
       active++; peak = Math.max(peak, active)
       setTimeout(() => { active--; resolve() }, 10)
     })
-    vi.mocked(agentApi.deploy).mockImplementation(async () => { await gate(); return { data: { success: true } } })
+    vi.mocked(agentApi.deploy).mockImplementation(async () => { await gate(); return { data: { success: true } } as never })
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
 
@@ -110,9 +110,9 @@ describe('useBulkAgentTask — 执行与汇总', () => {
   })
 
   it('操作映射：redeploy → deploy(name, true)；stop → stopDeployment；delete → delete', async () => {
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
-    vi.mocked(agentApi.stopDeployment).mockResolvedValue({ data: { success: true } })
-    vi.mocked(agentApi.delete).mockResolvedValue({ data: { success: true } })
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
+    vi.mocked(agentApi.stopDeployment).mockResolvedValue({ data: { success: true } } as never)
+    vi.mocked(agentApi.delete).mockResolvedValue({ data: { success: true } } as never)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
 
@@ -134,7 +134,7 @@ describe('useBulkAgentTask — 执行与汇总', () => {
 
 describe('useBulkAgentTask — 单批次状态机（执行 × 展示正交）', () => {
   it('收起态完成：collapse → done → reopen → close 才回 idle', async () => {
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
 
@@ -155,7 +155,7 @@ describe('useBulkAgentTask — 单批次状态机（执行 × 展示正交）', 
   })
 
   it('展开态完成：close 直接清除（已查看）', async () => {
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
 
@@ -168,7 +168,7 @@ describe('useBulkAgentTask — 单批次状态机（执行 × 展示正交）', 
   })
 
   it('done 后新批次整体替换旧状态', async () => {
-    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } })
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useBulkAgentTask(), { wrapper: makeWrapper(qc) })
 
