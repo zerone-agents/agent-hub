@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { PlusIcon, SquaresFourIcon, PlugIcon } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
-import type { Agent } from '@/api/agents'
+import type { Agent, DeploymentStatus } from '@/api/agents'
 import {
   useAgents, useDeleteAgent, useUpdateAgent,
   useUpdateSubagents, useUpdateAgentTools, useUpdateAgentSkills,
@@ -16,6 +16,7 @@ import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
+import { unwrapResponse } from '@/api/client'
 import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
 import AgentCard from './AgentCard'
@@ -23,6 +24,13 @@ import AgentForm from './AgentForm'
 import { buildToolOptions } from './toolOptions'
 import DeployModal from './DeployModal'
 import AgentKnowledgeModal from './AgentKnowledgeModal'
+import BulkActionBar from './bulk/BulkActionBar'
+import BulkConfirmModal from './bulk/BulkConfirmModal'
+import BulkTaskModal from './bulk/BulkTaskModal'
+import BulkTaskBubble from './bulk/BulkTaskBubble'
+import { useBulkAgentTask } from './bulk/useBulkAgentTask'
+import { classifyAllAgents } from './bulk/classifyBulkOperation'
+import type { BulkOperation, ClassifiedItem, PrecheckResult } from './bulk/classifyBulkOperation'
 import CardGrid from '@/components/CardGrid'
 
 const useStyles = createStyles(({ css }) => ({
@@ -117,6 +125,97 @@ export default function AgentListPage() {
   // Knowledge modal state
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [knowledgeAgent, setKnowledgeAgent] = useState<Agent | null>(null)
+
+  // ===== 批量操作（#141 第一阶段 · 快速操作）=====
+  const bulkTask = useBulkAgentTask()
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [rawSelectedNames, setRawSelectedNames] = useState<Set<string>>(new Set())
+  const [confirmState, setConfirmState] = useState<{ operation: BulkOperation; items: ClassifiedItem[] } | null>(null)
+  const [precheckingOp, setPrecheckingOp] = useState<BulkOperation | null>(null)
+
+  const toggleSelect = (name: string) => {
+    setRawSelectedNames((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+  const addNames = (names: string[]) => {
+    setRawSelectedNames((prev) => new Set([...prev, ...names]))
+  }
+
+  // 列表刷新后剔除已消失的选中项（spec §4.1 选择保留策略）——渲染期派生而非
+  // effect，避免 effect 内 setState 的级联渲染（react-hooks/set-state-in-effect）
+  const validNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents])
+  const selectedNames = useMemo(
+    () => rawSelectedNames.size === 0
+      ? rawSelectedNames
+      : new Set([...rawSelectedNames].filter((n) => validNames.has(n))),
+    [rawSelectedNames, validNames],
+  )
+
+  const selectedAgents = useMemo(
+    () => agents.filter((a) => selectedNames.has(a.name)),
+    [agents, selectedNames],
+  )
+
+  const pendingUpdateCount = useMemo(
+    () => agents.filter((a) =>
+      (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
+      (a.pendingArtifactUpdates?.skills.length ?? 0) > 0,
+    ).length,
+    [agents],
+  )
+
+  // 点批量操作：并发 5 路预检选中项 → 分类 → 确认弹窗（spec §4.2）
+  const handleBulkOperation = async (op: BulkOperation) => {
+    if (bulkTask.phase === 'running' || selectedAgents.length === 0) return
+    setPrecheckingOp(op)
+    try {
+      const prechecks = new Map<string, PrecheckResult>()
+      const LIMIT = 5
+      for (let i = 0; i < selectedAgents.length; i += LIMIT) {
+        const chunk = selectedAgents.slice(i, i + LIMIT)
+        await Promise.all(chunk.map(async (a) => {
+          try {
+            const status = unwrapResponse<DeploymentStatus>(await agentApi.getDeployment(a.name))
+            prechecks.set(a.name, { kind: 'success', status })
+          } catch (err) {
+            prechecks.set(a.name, { kind: 'error', error: err })
+          }
+        }))
+      }
+      setConfirmState({ operation: op, items: classifyAllAgents(op, selectedAgents, prechecks) })
+    } finally {
+      setPrecheckingOp(null)
+    }
+  }
+
+  // 确认：启动批次；onFinished 清理成功项选中（spec §6 轻量重试路径）
+  const handleBulkConfirm = () => {
+    if (!confirmState) return
+    const { operation, items } = confirmState
+    bulkTask.start({
+      operation,
+      items,
+      onFinished: (succeeded) => {
+        setRawSelectedNames((prev) => new Set([...prev].filter((n) => !succeeded.includes(n))))
+      },
+    })
+    setConfirmState(null)
+  }
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false)
+    setRawSelectedNames(new Set())
+  }
+
+  const settledCount = bulkTask.summary.succeeded + bulkTask.summary.failed
+    + bulkTask.summary.skipped + bulkTask.summary.blocked
+  const bubbleDot: 'green' | 'red' | null =
+    bulkTask.phase !== 'done' ? null
+      : (bulkTask.summary.failed > 0 || bulkTask.summary.blocked > 0 ? 'red' : 'green')
 
   // 搜索
   const [keywords, setKeywords] = useState('')
@@ -490,13 +589,38 @@ export default function AgentListPage() {
         )}
       </div>
 
-      <div className={styles.toolbar}>
+      {selectionMode && canWrite ? (
+        <BulkActionBar
+          selectedCount={selectedNames.size}
+          pendingUpdateCount={pendingUpdateCount}
+          onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
+          onSelectPendingUpdates={() => { addNames(agents.filter((a) =>
+            (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
+            (a.pendingArtifactUpdates?.skills.length ?? 0) > 0,
+          ).map((a) => a.name)); }}
+          onClear={() => { setRawSelectedNames(new Set()); }}
+          onOperation={(op) => { void handleBulkOperation(op); }}
+          onExit={exitSelectionMode}
+          operationsDisabled={bulkTask.phase === 'running'}
+          prechecking={precheckingOp}
+        />
+      ) : (
+        <div className={styles.toolbar}>
           <NameSearch
             placeholder="搜索代理名称"
             onSearch={setKeywords}
             realtime
           />
-      </div>
+          {canWrite && (
+            <Button
+              icon={<CheckSquareIcon size={14} />}
+              onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+            >
+              批量操作
+            </Button>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
@@ -514,6 +638,15 @@ export default function AgentListPage() {
                 <span>{group}</span>
                 <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>
+              {selectionMode && canWrite && (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => { addNames((groupedAgents[group] ?? []).map((a) => a.name)); }}
+                >
+                  全选本组
+                </Button>
+              )}
             </div>
             <CardGrid>
               {(groupedAgents[group] ?? []).map((agent) => (
@@ -531,6 +664,9 @@ export default function AgentListPage() {
                   onEditModel={handleEditModel}
                   onDeploy={showDeploy}
                   onEditKnowledge={handleEditKnowledge}
+                  selectionMode={selectionMode && canWrite}
+                  selected={selectedNames.has(agent.name)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
             </CardGrid>
@@ -891,6 +1027,32 @@ export default function AgentListPage() {
           </>
         )}
       </Modal>
+
+      <BulkConfirmModal
+        open={confirmState !== null}
+        operation={confirmState?.operation ?? 'deploy'}
+        items={confirmState?.items ?? []}
+        onCancel={() => { setConfirmState(null); }}
+        onConfirm={handleBulkConfirm}
+      />
+
+      <BulkTaskModal
+        open={bulkTask.phase !== 'idle' && bulkTask.presentation === 'modal-open'}
+        phase={bulkTask.phase}
+        operation={bulkTask.operation}
+        items={bulkTask.items}
+        summary={bulkTask.summary}
+        onCollapse={bulkTask.collapse}
+        onClose={bulkTask.close}
+      />
+
+      <BulkTaskBubble
+        visible={bulkTask.phase !== 'idle' && bulkTask.presentation === 'collapsed'}
+        phase={bulkTask.phase}
+        progressText={`${settledCount}/${bulkTask.summary.total}`}
+        dot={bubbleDot}
+        onClick={bulkTask.reopen}
+      />
     </div>
   )
 }

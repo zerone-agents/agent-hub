@@ -97,7 +97,7 @@ export function useBulkAgentTask() {
 
     const worker = async (): Promise<void> => {
       while (cursor < queue.length) {
-        const name = queue[cursor]!
+        const name = queue[cursor] // while 条件保证索引有效
         cursor++ // JS 单线程，检查与自增之间无 await，无竞态
         updateItem(name, { status: 'running' })
         try {

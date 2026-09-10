@@ -98,7 +98,7 @@ export default function BulkTaskModal({
       open={open}
       onCancel={running ? onCollapse : onClose}
       closable
-      maskClosable={false}
+      mask={{ closable: false }}
       keyboard={false}
       width={560}
       footer={
