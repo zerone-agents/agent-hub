@@ -69,17 +69,23 @@ func setupPendingArtifactTestDB(t *testing.T) (*gorm.DB, *agent.AgentConfig, *ag
 
 // setupPendingArtifactRouter wires the production AgentHandler against the
 // real services + seeded DB, with the tenant seeded exactly like the JWT
-// middleware does (chat_handler_test 同款)。deployer client 指向不可达地址，
-// GetStatus 因此走 not_found 分支（HTTP 200）——无需真实 deployer 即可验证
-// GetDeployment 的 pendingArtifactUpdates 注入。
+// middleware does (chat_handler_test 同款)。deployer mock 返回 404，GetStatus
+// 走 not_found 分支（HTTP 200）——无需真实 deployer 即可验证 GetDeployment 的
+// pendingArtifactUpdates 注入。
 func setupPendingArtifactRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	db, _, _ := setupPendingArtifactTestDB(t)
 
+	// deployer 返回 404 → GetStatus（fail-closed 修正后）仍映射 not_found（HTTP 200）。
+	deployerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"success":false,"error":"agent not found"}`))
+	}))
+	t.Cleanup(deployerSrv.Close)
 	h := NewAgentHandler(
 		services.NewAgentService("", ""),
 		services.NewAgentDeployerService(services.AgentDeployerConfig{
-			Client:   deployer.NewClient("http://127.0.0.1:1", "unused"),
+			Client:   deployer.NewClient(deployerSrv.URL, "unused"),
 			AuthMode: services.ModeBuiltin,
 		}),
 	)

@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { antdTheme } from '@/lib/antd-theme'
 import AgentListPage from './AgentListPage'
 import type { Agent } from '@/api/agents'
@@ -22,12 +23,16 @@ const mockAgents: Agent[] = [
     id: 2, name: 'coder',
     config: { title: { zh: '编程助手' }, description: { zh: '代码生成与审查' }, iconName: 'Code', iconColor: '#22C55E', iconBgColor: '#E8FCE8', maxTurns: 30, permissionMode: 'auto' },
     subagents: ['general'], tools: [], skills: ['py'],
-    desktopEnabled: false, isDefault: false, createdAt: '2026-06-15T10:00:00Z'
+    desktopEnabled: false, isDefault: false, createdAt: '2026-06-15T10:00:00Z',
+    pendingArtifactUpdates: { tools: ['py-tool'], skills: [] }
   }
 ]
 
+// 测试可替换的列表数据（新数组引用模拟真实 react-query 刷新——原地 splice 骗过 useMemo 依赖比较）
+let mutableAgents: Agent[] | null = null
+
 vi.mock('@/queries/useAgents', () => ({
-  useAgents: () => ({ data: mockAgents, isLoading: false }),
+  useAgents: () => ({ data: mutableAgents ?? mockAgents, isLoading: false }),
   useDeleteAgent: () => ({ mutate: vi.fn() }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -86,8 +91,31 @@ vi.mock('@/queries/useKnowledge', () => ({
 }))
 
 vi.mock('@/api/agents', () => ({
-  agentApi: { getTools: vi.fn(), getSkills: vi.fn() }
+  agentApi: {
+    getTools: vi.fn(),
+    getSkills: vi.fn(),
+    getDeployment: vi.fn(),
+    deploy: vi.fn(),
+    stopDeployment: vi.fn(),
+    delete: vi.fn(),
+  },
 }))
+
+import { agentApi } from '@/api/agents'
+
+// 页面集成 useBulkAgentTask（内部 useQueryClient）后所有渲染都需要 QueryClientProvider
+function renderPage() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <ConfigProvider theme={antdTheme}>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <AgentListPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ConfigProvider>
+  )
+}
 
 describe('AgentListPage', () => {
   beforeEach(() => {
@@ -95,13 +123,7 @@ describe('AgentListPage', () => {
   })
 
   it('renders agent cards with names and stats', () => {
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <MemoryRouter>
-          <AgentListPage />
-        </MemoryRouter>
-      </ConfigProvider>
-    )
+    renderPage()
 
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
     expect(screen.getByText('新建代理')).toBeInTheDocument()
@@ -118,13 +140,7 @@ describe('AgentListPage', () => {
 
   it('shows model modal with test and confirm buttons', async () => {
     const user = userEvent.setup()
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <MemoryRouter>
-          <AgentListPage />
-        </MemoryRouter>
-      </ConfigProvider>
-    )
+    renderPage()
 
     // Click model tag on first agent card
     await user.click(screen.getByText('GLM-5-Turbo'))
@@ -143,26 +159,14 @@ describe('AgentListPage', () => {
   })
 
   it('renders deploy button for each agent', async () => {
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <MemoryRouter>
-          <AgentListPage />
-        </MemoryRouter>
-      </ConfigProvider>
-    )
+    renderPage()
     const deployButtons = await screen.findAllByTitle('部署')
     expect(deployButtons.length).toBe(mockAgents.length)
   })
 
   it('member: hides write actions but still sees agent data and deploy button', () => {
     setAuthRole('member')
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <MemoryRouter>
-          <AgentListPage />
-        </MemoryRouter>
-      </ConfigProvider>
-    )
+    renderPage()
 
     // 数据仍可见（只读）
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
@@ -178,13 +182,7 @@ describe('AgentListPage', () => {
 
   it('modelId dropdown excludes non-LLM models', async () => {
     const user = userEvent.setup()
-    render(
-      <ConfigProvider theme={antdTheme}>
-        <MemoryRouter>
-          <AgentListPage />
-        </MemoryRouter>
-      </ConfigProvider>
-    )
+    renderPage()
 
     // Open the model config modal by clicking the model display name on the
     // first agent card (provider already pre-selected from agent.config).
@@ -206,5 +204,173 @@ describe('AgentListPage', () => {
 
     // Embedding model must NOT appear in the dropdown options.
     expect(screen.queryAllByText('Embedding-3 (embedding-3)')).toHaveLength(0)
+  })
+})
+
+describe('AgentListPage bulk operations (#141)', () => {
+  beforeEach(() => {
+    vi.mocked(agentApi.getDeployment).mockReset()
+    vi.mocked(agentApi.deploy).mockReset()
+  })
+
+  afterEach(() => { mutableAgents = null })
+
+  it('admin sees 批量操作 entry; member does not', () => {
+    setAuthRole('admin')
+    const { unmount } = renderPage()
+    expect(screen.getByRole('button', { name: /批量操作/ })).toBeInTheDocument()
+    unmount()
+
+    setAuthRole('member')
+    renderPage()
+    expect(screen.queryByRole('button', { name: /批量操作/ })).not.toBeInTheDocument()
+  })
+
+  it('enter selection mode → click cards → bulk bar shows count; exit restores', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    expect(screen.getByTestId('bulk-action-bar')).toBeInTheDocument()
+    // review P2a：选择模式下搜索框保留（跨搜索选择保留的前提）
+    expect(screen.getByPlaceholderText('搜索代理名称')).toBeInTheDocument()
+
+    // 选择卡片的 wrap 层带 aria-label「选择 <name>」
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByLabelText('选择 coder'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    // antd 两汉字按钮自动插空格（「退 出」）
+    await user.click(screen.getByRole('button', { name: /^退\s*出$/ }))
+    expect(screen.queryByTestId('bulk-action-bar')).not.toBeInTheDocument()
+    // 单卡操作恢复（每个 agent 卡片一个部署按钮）
+    expect(screen.queryAllByTitle('部署')).toHaveLength(mockAgents.length)
+  })
+
+  it('deploy flow: precheck → confirm modal with groups → confirm executes deploy API', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    // general 未部署（not_found → 可执行）；coder 运行中（running → 跳过）
+    vi.mocked(agentApi.getDeployment).mockImplementation(async (name: string) => ({
+      data: { success: true, data: name === 'general' ? { status: 'not_found' } : { status: 'running' } },
+    } as never))
+    vi.mocked(agentApi.deploy).mockResolvedValue({ data: { success: true } } as never)
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByLabelText('选择 coder'))
+    await user.click(screen.getByRole('button', { name: '部署' }))
+
+    await waitFor(() => { expect(agentApi.getDeployment).toHaveBeenCalledTimes(2) })
+    expect(await screen.findByText('可执行 · 1')).toBeInTheDocument()
+    expect(screen.getByText('跳过 · 1')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '部署 1 个' }))
+    await waitFor(() => { expect(agentApi.deploy).toHaveBeenCalledWith('general') })
+    // 进度 Modal 打开（执行中）
+    expect(await screen.findByText('批量部署进度')).toBeInTheDocument()
+  })
+
+  it('全选待更新 selects only agents with pendingArtifactUpdates', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    // coder 带 pendingArtifactUpdates（mockAgents），general 无
+    await user.click(screen.getByRole('button', { name: /^全\s*选待更新$/ }))
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+  })
+
+  it('group header shows 全选本组 in selection mode', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    const link = screen.getAllByText('全选本组')[0]!
+    await user.click(link)
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 默认分组 2 个 agent
+  })
+
+  it('selection persists across search filtering (review P2a)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+
+    // 搜索 coder：general 卡片隐藏，但选择保留
+    await user.type(screen.getByPlaceholderText('搜索代理名称'), 'coder')
+    expect(screen.queryByLabelText('选择 general')).not.toBeInTheDocument()
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('选择 coder'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    // 清空搜索：general 回来，两个仍选中
+    await user.clear(screen.getByPlaceholderText('搜索代理名称'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+  })
+
+  it('removed agent is dropped from selection and not resurrected on reappearance (review P2b)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // 工厂函数：rerender 需要新元素引用——相同引用会被 React bailout，组件不重执行
+    const makePage = () => (
+      <ConfigProvider theme={antdTheme}>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <AgentListPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ConfigProvider>
+    )
+    const { rerender } = render(makePage())
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByLabelText('选择 coder'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    // coder 从列表消失（新数组引用 = 真实列表刷新）：选中集真正剔除
+    const general = mockAgents.find((a) => a.name === 'general')!
+    const coder = mockAgents.find((a) => a.name === 'coder')!
+    mutableAgents = [general]
+    rerender(makePage())
+    expect(await screen.findByText('已选 1 个')).toBeInTheDocument()
+
+    // coder 重现（新数组引用）：不被静默复活选中
+    mutableAgents = [general, coder]
+    rerender(makePage())
+    expect(await screen.findByLabelText('选择 coder')).toBeInTheDocument()
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+  })
+
+  it('stale precheck result is discarded after exiting selection mode (review re-check P2)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    // 手动控制预检 promise（deferred）：保持 pending 直到测试放行
+    let releasePrecheck: (() => void) | undefined
+    vi.mocked(agentApi.getDeployment).mockImplementation(async () => {
+      await new Promise<void>((r) => { releasePrecheck = r })
+      return { data: { success: true, data: { status: 'not_found' } } } as never
+    })
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByRole('button', { name: '部署' })) // 预检 pending
+
+    // 预检 pending 期间退出选择模式
+    await user.click(screen.getByRole('button', { name: /^退\s*出$/ }))
+    expect(screen.queryByTestId('bulk-action-bar')).not.toBeInTheDocument()
+
+    // 预检完成：旧批次结果被代次守卫丢弃，确认弹窗不出现
+    await act(async () => { releasePrecheck?.() })
+    expect(agentApi.getDeployment).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('批量部署')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '部署 1 个' })).not.toBeInTheDocument()
   })
 })

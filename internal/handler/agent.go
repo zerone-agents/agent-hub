@@ -219,15 +219,20 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 	// syncs the real container state from the deployer, so its result is
 	// authoritative. "not_found" and "archived" mean no container is running
 	// (archived = container removed but data retained by the deployer).
-	if deployment, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name); err == nil {
-		s := deployment.Status
-		if s != "" && s != "not_found" && s != "archived" {
-			c.JSON(http.StatusConflict, gin.H{
-				"success": false,
-				"error":   fmt.Sprintf("该 Agent 仍有活跃部署（状态: %s），请先在部署面板中删除部署后再删除 Agent", s),
-			})
-			return
-		}
+	// Fail-closed（bulk-ops spec §3.1）：GetStatus 失败（deployer 故障或 agent
+	// 不在 DB）时状态不可确认，阻止删除——否则 deployer 故障会绕过 409 检查
+	// 误删仍有容器的配置。DB not-found 也走此分支（UI 过期边缘场景，刷新自愈）。
+	deployment, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "无法确认部署状态，已阻止删除")
+		return
+	}
+	if s := deployment.Status; s != "" && s != "not_found" && s != "archived" {
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("该 Agent 仍有活跃部署（状态: %s），请先在部署面板中删除部署后再删除 Agent", s),
+		})
+		return
 	}
 
 	if err := h.service.DeleteAgent(tenant.GetTenantID(c), name); err != nil {

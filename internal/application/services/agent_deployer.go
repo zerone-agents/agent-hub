@@ -706,8 +706,15 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	ctx := context.Background()
 	statusResp, err := s.client.GetAgent(ctx, key)
 	if err != nil {
-		// If deployer says not found, return not_found status
-		return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		// Fail-closed（bulk-ops spec §3.1）：仅 deployer 明确 404（容器不存在）
+		// 才映射为 not_found；其余错误（5xx/网络/超时）如实传播。此前任何错误
+		// 都伪装成 not_found，Delete handler 的活跃部署 409 检查会被绕过，
+		// deployer 故障时会误删仍有容器在跑的 Agent 配置（孤儿容器）。
+		var httpErr *deployer.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		}
+		return nil, fmt.Errorf("get agent status: %w", err)
 	}
 
 	// If status is running, also query health
