@@ -160,66 +160,27 @@ describe('AgentForm disallowedTools', { timeout: 15000 }, () => {
   })
 })
 
-describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
+describe('AgentForm personality library selection', { timeout: 15000 }, () => {
   beforeEach(() => {
     createAgent.mockReset()
     updateAgent.mockReset()
   })
 
-  it('submits a complete structured default profile for a new agent', async () => {
-    const user = userEvent.setup()
+  it('keeps personality editing out of the agent form', () => {
     renderForm(null)
 
-    expect(screen.getByText('结构化投影（兼容）')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '投影预设' })).toBeInTheDocument()
-    expect(screen.getByText('稳健执行者')).toBeInTheDocument()
-    expect(screen.queryByLabelText('高级人格参数')).not.toBeInTheDocument()
-
-    await user.type(screen.getByLabelText('代理标识'), 'steady-agent')
-    await user.click(screen.getByRole('button', { name: '创建代理' }))
-
-    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
-    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
-    expect(payload.config.behaviorProfile).toEqual({
-      version: 1,
-      hierarchyCompliance: 75,
-      ambition: 30,
-      whistleblowing: 55,
-      riskTolerance: 35,
-      conflictAvoidance: 60,
-      secrecy: 55,
-      selfInterest: 35,
-      escalationThreshold: 75,
-    })
+    expect(screen.getByRole('combobox', { name: '人格模板' })).toBeInTheDocument()
+    expect(screen.queryByText('人格原稿')).not.toBeInTheDocument()
+    expect(screen.queryByText('提示词原稿')).not.toBeInTheDocument()
+    expect(screen.queryByText('结构化投影（兼容）')).not.toBeInTheDocument()
+    expect(screen.getByText('职责与任务')).toBeInTheDocument()
   })
 
-  it('applies a profile preset as structured values', async () => {
+  it('submits only the personality reference and leaves snapshotting to the server', async () => {
     const user = userEvent.setup()
     renderForm(null)
 
-    const templateSelect = screen.getByRole('combobox', { name: '投影预设' })
-    await user.click(templateSelect)
-    await user.click(await screen.findByText('政治投机者'))
-    await user.type(screen.getByLabelText('代理标识'), 'climber-agent')
-    await user.click(screen.getByRole('button', { name: '创建代理' }))
-
-    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
-    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
-    expect(payload.config.behaviorProfile).toMatchObject({
-      version: 1,
-      hierarchyCompliance: 30,
-      ambition: 90,
-      secrecy: 75,
-      selfInterest: 85,
-      escalationThreshold: 35,
-    })
-  })
-
-  it('snapshots a selected prompt-first personality into the agent config', async () => {
-    const user = userEvent.setup()
-    renderForm(null)
-
-    const personalitySelect = screen.getByRole('combobox', { name: '从人格库选用' })
+    const personalitySelect = screen.getByRole('combobox', { name: '人格模板' })
     await user.click(personalitySelect)
     await user.click(await screen.findByText('尽职揭弊者 · v3'))
     await user.type(screen.getByLabelText('代理标识'), 'prompt-agent')
@@ -228,8 +189,9 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
     await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
     const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
     expect(payload.config.personalityTemplateName).toBe('duty-whistleblower')
-    expect(payload.config.personalityTemplateVersion).toBe(3)
-    expect(payload.config.personalityPrompt).toContain('常规渠道失效')
-    expect(payload.config.behaviorProfile?.whistleblowing).toBe(95)
+    expect(payload.config).not.toHaveProperty('personalityTemplateVersion')
+    expect(payload.config).not.toHaveProperty('personalityPrompt')
+    expect(payload.config).not.toHaveProperty('behaviorProfile')
+    expect(screen.getByText('重事实与公共责任')).toBeInTheDocument()
   })
 })

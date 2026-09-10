@@ -3,14 +3,12 @@ import { Modal, Form, Input, Select, InputNumber, Switch, AutoComplete, Button }
 import { XIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
-import type { Agent, AgentConfig, BehaviorProfile } from '@/api/agents'
+import type { Agent, AgentConfig } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
 import { usePersonalities } from '@/queries/usePersonalities'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
 import { getIconComponent, lightenHex } from '@/utils/icons'
-import BehaviorProfileEditor from './BehaviorProfileEditor'
-import { cloneBehaviorProfile, DEFAULT_BEHAVIOR_PROFILE } from './behaviorProfile'
 
 interface ToggleItemProps {
   title: string
@@ -81,27 +79,14 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; justify-content: flex-end; gap: 10px;
     padding: 14px 24px; border-top: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
   `,
-  personalityShell: css`
-    overflow: hidden; border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
-    border-radius: 9px; background: color-mix(in srgb, var(--background) 97%, var(--primary) 3%);
+  personalityNote: css`
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+    align-items: start; margin-top: -14px; color: var(--text-muted); font-size: 11px; line-height: 1.5;
   `,
-  personalityHead: css`
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
-    align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border);
+  personalityVersion: css`
+    color: var(--primary); white-space: nowrap;
+    font: 650 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   `,
-  personalityLabel: css`display: block; margin-bottom: 4px; color: var(--text); font-size: 13px; font-weight: 650;`,
-  personalityHint: css`display: block; color: var(--text-muted); font-size: 11px; line-height: 1.5;`,
-  personalityVersion: css`color: var(--primary); font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;`,
-  personalityBody: css`padding: 14px 16px 4px;`,
-  personalityPrompt: css`
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-    line-height: 1.65 !important;
-  `,
-  personalityFoot: css`
-    margin: -6px 0 14px; padding-left: 10px;
-    border-left: 2px solid color-mix(in srgb, var(--primary) 38%, transparent);
-    color: var(--text-muted); font-size: 10px; line-height: 1.5;
-  `
 }))
 
 interface AgentFormProps {
@@ -128,10 +113,7 @@ interface FormValues {
   mobileEnabled: boolean
   isDefault: boolean
   group: string
-  behaviorProfile: BehaviorProfile
   personalityTemplateName: string
-  personalityTemplateVersion: number
-  personalityPrompt: string
 }
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
@@ -160,10 +142,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const iconColor = Form.useWatch('iconColor', form)
   const iconBgColor = Form.useWatch('iconBgColor', form)
   const personalityTemplateName = Form.useWatch('personalityTemplateName', form)
-  const personalityTemplateVersion = Form.useWatch('personalityTemplateVersion', form)
-  const personalityPrompt = Form.useWatch('personalityPrompt', form)
   const selectedPersonality = personalities.find((item) => item.name === personalityTemplateName)
-  const personalityModified = Boolean(selectedPersonality && personalityPrompt.trim() !== selectedPersonality.prompt.trim())
 
   useEffect(() => {
     if (open) {
@@ -186,17 +165,14 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           mobileEnabled: editingAgent.mobileEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
           group: editingAgent.group ?? '',
-          behaviorProfile: cloneBehaviorProfile(editingAgent.config.behaviorProfile ?? DEFAULT_BEHAVIOR_PROFILE),
-          personalityTemplateName: editingAgent.config.personalityTemplateName ?? '',
-          personalityTemplateVersion: editingAgent.config.personalityTemplateVersion ?? 0,
-          personalityPrompt: editingAgent.config.personalityPrompt ?? ''
+          personalityTemplateName: editingAgent.config.personalityTemplateName ?? ''
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
         iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined,
-        behaviorProfile: cloneBehaviorProfile(), personalityTemplateName: '', personalityTemplateVersion: 0, personalityPrompt: ''
+        personalityTemplateName: ''
         })
       }
     }
@@ -236,10 +212,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       iconColor: v.iconColor || undefined,
       iconBgColor: v.iconBgColor || undefined,
       group: v.group || '',
-      behaviorProfile: v.behaviorProfile,
-      personalityTemplateName: v.personalityTemplateName || '',
-      personalityTemplateVersion: v.personalityTemplateVersion || 0,
-      personalityPrompt: v.personalityPrompt || ''
+      personalityTemplateName: v.personalityTemplateName || ''
     }
 
     if (editingAgent) {
@@ -401,64 +374,28 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
         </Form.Item>
 
-        {/* Prompt-first 人格 */}
+        {/* 人格只从独立人格库引用，原稿与投影不在 Agent 页面重复维护。 */}
         <div className={styles.section} style={{ marginTop: 20 }}>人格</div>
-        <div className={styles.personalityShell}>
-          <div className={styles.personalityHead}>
-            <div>
-              <span className={styles.personalityLabel}>人格原稿</span>
-              <span className={styles.personalityHint}>选用模板后仍可修改；保存时会固化当前原稿，不受模板未来版本影响。</span>
-            </div>
-            <span className={styles.personalityVersion}>{personalityTemplateVersion ? `SNAPSHOT v${personalityTemplateVersion}` : 'CUSTOM'}</span>
-          </div>
-          <div className={styles.personalityBody}>
-            <Form.Item label="从人格库选用" name="personalityTemplateName">
-              <Select
-                showSearch={{ optionFilterProp: 'label' }} allowClear placeholder="选择人格，或直接撰写自定义原稿"
-                options={personalities.filter((item) => item.enabled || item.name === personalityTemplateName).map((item) => ({
-                  value: item.name, label: `${item.title} · v${item.currentVersion}`
-                }))}
-                onChange={(name?: string) => {
-                  if (!name) {
-                    form.setFieldsValue({ personalityTemplateName: '', personalityTemplateVersion: 0 })
-                    return
-                  }
-                  const template = personalities.find((item) => item.name === name)
-                  if (!template) return
-                  form.setFieldsValue({
-                    personalityTemplateName: template.name,
-                    personalityTemplateVersion: template.currentVersion,
-                    personalityPrompt: template.prompt,
-                    ...(template.behaviorProfile
-                      ? { behaviorProfile: cloneBehaviorProfile(template.behaviorProfile) }
-                      : {})
-                  })
-                }}
-              />
-            </Form.Item>
-            <Form.Item name="personalityTemplateVersion" hidden><InputNumber /></Form.Item>
-            <Form.Item label="提示词原稿" name="personalityPrompt" rules={[{ max: 40000 }]}>
-              <Input.TextArea
-                className={styles.personalityPrompt} rows={9} maxLength={40000} showCount
-                placeholder="写清楚价值排序、决策习惯、沟通方式、越级条件和人格盲点。"
-              />
-            </Form.Item>
-            <div className={styles.personalityFoot}>
-              {personalityModified ? '当前原稿已在模板基础上修改；本 Agent 将保存这份独立快照。' : '人格影响判断与表达，不会授予工具、数据、通信或越级权限。'}
-            </div>
-          </div>
+        <Form.Item label="人格模板" name="personalityTemplateName">
+          <Select
+            showSearch={{ optionFilterProp: 'label' }}
+            allowClear
+            placeholder="不设置人格"
+            options={personalities.filter((item) => item.enabled || item.name === personalityTemplateName).map((item) => ({
+              value: item.name,
+              label: `${item.title} · v${item.currentVersion}`,
+            }))}
+          />
+        </Form.Item>
+        <div className={styles.personalityNote}>
+          <span>{selectedPersonality?.description.trim() ? selectedPersonality.description : '人格内容统一在人格库中创建和维护；Agent 页面只负责选择。'}</span>
+          {selectedPersonality ? <span className={styles.personalityVersion}>保存 v{selectedPersonality.currentVersion}</span> : null}
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <Form.Item name="behaviorProfile" noStyle>
-            <BehaviorProfileEditor />
-          </Form.Item>
-        </div>
-
-        {/* 系统提示词 */}
-        <div className={styles.section} style={{ marginTop: 20 }}>系统提示词</div>
-        <Form.Item name="systemPrompt">
-          <Input.TextArea placeholder="定义代理的行为和指令..." rows={6} maxLength={20000} showCount />
+        {/* Agent 自身的身份与工作边界，不承载人格。 */}
+        <div className={styles.section} style={{ marginTop: 20 }}>职责与任务</div>
+        <Form.Item name="systemPrompt" extra="只写这个 Agent 负责什么；表达方式和决策倾向由所选人格决定。">
+          <Input.TextArea placeholder="定义身份、职责范围、工作目标和边界..." rows={6} maxLength={20000} showCount />
         </Form.Item>
 
         {/* Toggles */}
