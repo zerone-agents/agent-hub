@@ -266,6 +266,7 @@ func main() {
 	sceneHandler := handler.NewSceneHandler(sceneService)
 	personalityService := services.NewPersonalityService()
 	personalityHandler := handler.NewPersonalityHandler(personalityService)
+	relationTypeHandler := handler.NewRelationTypeHandler(services.NewRelationTypeService())
 	agentRelationService := services.NewAgentRelationService()
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
 
@@ -578,6 +579,14 @@ func main() {
 		adminRelationsGroup.POST("/:id/events", agentRelationHandler.RecordEvent)
 		adminRelationsGroup.PUT("/:id", agentRelationHandler.Update)
 		adminRelationsGroup.DELETE("/:id", agentRelationHandler.Delete)
+	}
+	adminRelationTypesGroup := adminWrite.Group("/relation-types")
+	adminRelationTypesReadGroup := adminRead.Group("/relation-types")
+	{
+		adminRelationTypesReadGroup.GET("", relationTypeHandler.List)
+		adminRelationTypesGroup.POST("", relationTypeHandler.Create)
+		adminRelationTypesGroup.PUT("/:name", relationTypeHandler.Update)
+		adminRelationTypesGroup.DELETE("/:name", relationTypeHandler.Delete)
 	}
 
 	// ---------- Knowledge MCP 运行时 ----------

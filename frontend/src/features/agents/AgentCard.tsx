@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
+import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon, ShareNetworkIcon } from '@phosphor-icons/react'
 import { Popconfirm, Tag, Tooltip } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
@@ -65,11 +65,12 @@ interface AgentCardProps {
   onEditModel: (agent: Agent) => void
   onDeploy: (agent: Agent) => void
   onEditKnowledge: (agent: Agent) => void
+  onViewRelations?: (agent: Agent) => void
 }
 
 export default function AgentCard({
   agent, modelDisplayName, canWrite, onEdit, onDelete,
-  onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge
+  onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge, onViewRelations
 }: AgentCardProps) {
   const { styles } = useStyles()
 
@@ -157,6 +158,9 @@ export default function AgentCard({
       footerLeft={formatTime(agent.createdAt)}
       footerRight={
         <>
+          <button type="button" className={styles.actBtn} title="关系拓扑" onClick={() => { onViewRelations?.(agent); }}>
+            <ShareNetworkIcon size={14} />
+          </button>
           <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
             <RocketIcon size={14} />
           </button>

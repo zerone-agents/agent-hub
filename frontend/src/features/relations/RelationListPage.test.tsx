@@ -47,6 +47,13 @@ vi.mock('@/queries/useAgentRelations', () => ({
   }),
 }))
 
+vi.mock('@/queries/useRelationTypes', () => ({
+  useRelationTypes: () => ({ data: [], isLoading: false }),
+  useCreateRelationType: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateRelationType: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteRelationType: () => ({ mutate: vi.fn() }),
+}))
+
 vi.mock('@/queries/useAgents', () => ({
   useAgents: () => ({
     data: [

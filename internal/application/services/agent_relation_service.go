@@ -20,58 +20,64 @@ var relationScopePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}
 type AgentRelationService struct {
 	repo      *repository.AgentRelationRepository
 	agentRepo *repository.AgentRepository
+	typeRepo  *repository.RelationTypeRepository
 }
 
 func NewAgentRelationService() *AgentRelationService {
 	return &AgentRelationService{
 		repo:      repository.NewAgentRelationRepository(),
 		agentRepo: repository.NewAgentRepository(),
+		typeRepo:  repository.NewRelationTypeRepository(),
 	}
 }
 
 type CreateAgentRelationInput struct {
-	SourceAgentID  uint64
-	TargetAgentID  uint64
-	Scope          string
-	RelationType   string
-	Stance         string
-	AllowedActions []string
-	ContextPolicy  string
-	DeliveryPolicy string
-	Constraint     string
-	Enabled        bool
-	Bidirectional  bool
+	SourceAgentID            uint64
+	TargetAgentID            uint64
+	Scope                    string
+	RelationType             string
+	RelationTypeTemplateName string
+	Stance                   string
+	AllowedActions           []string
+	ContextPolicy            string
+	DeliveryPolicy           string
+	Constraint               string
+	Enabled                  bool
+	Bidirectional            bool
 }
 
 type UpdateAgentRelationInput struct {
-	Scope          *string
-	RelationType   *string
-	Stance         *string
-	AllowedActions *[]string
-	ContextPolicy  *string
-	DeliveryPolicy *string
-	Constraint     *string
-	Enabled        *bool
+	Scope                    *string
+	RelationType             *string
+	RelationTypeTemplateName *string
+	Stance                   *string
+	AllowedActions           *[]string
+	ContextPolicy            *string
+	DeliveryPolicy           *string
+	Constraint               *string
+	Enabled                  *bool
 }
 
 type AgentRelationDTO struct {
-	ID                uint64   `json:"id"`
-	Scope             string   `json:"scope"`
-	SourceAgentID     uint64   `json:"sourceAgentId"`
-	SourceAgentName   string   `json:"sourceAgentName"`
-	TargetAgentID     uint64   `json:"targetAgentId"`
-	TargetAgentName   string   `json:"targetAgentName"`
-	RelationType      string   `json:"relationType"`
-	Stance            string   `json:"stance"`
-	RelationshipScore int      `json:"relationshipScore"`
-	LastChangedAt     *string  `json:"lastChangedAt,omitempty"`
-	AllowedActions    []string `json:"allowedActions"`
-	ContextPolicy     string   `json:"contextPolicy"`
-	DeliveryPolicy    string   `json:"deliveryPolicy"`
-	Constraint        string   `json:"constraint"`
-	Enabled           bool     `json:"enabled"`
-	CreatedAt         string   `json:"createdAt"`
-	UpdatedAt         string   `json:"updatedAt"`
+	ID                          uint64   `json:"id"`
+	Scope                       string   `json:"scope"`
+	SourceAgentID               uint64   `json:"sourceAgentId"`
+	SourceAgentName             string   `json:"sourceAgentName"`
+	TargetAgentID               uint64   `json:"targetAgentId"`
+	TargetAgentName             string   `json:"targetAgentName"`
+	RelationType                string   `json:"relationType"`
+	RelationTypeTemplateName    string   `json:"relationTypeTemplateName"`
+	RelationTypeTemplateVersion int      `json:"relationTypeTemplateVersion"`
+	Stance                      string   `json:"stance"`
+	RelationshipScore           int      `json:"relationshipScore"`
+	LastChangedAt               *string  `json:"lastChangedAt,omitempty"`
+	AllowedActions              []string `json:"allowedActions"`
+	ContextPolicy               string   `json:"contextPolicy"`
+	DeliveryPolicy              string   `json:"deliveryPolicy"`
+	Constraint                  string   `json:"constraint"`
+	Enabled                     bool     `json:"enabled"`
+	CreatedAt                   string   `json:"createdAt"`
+	UpdatedAt                   string   `json:"updatedAt"`
 }
 
 type RecordAgentRelationEventInput struct {
@@ -128,6 +134,17 @@ func (s *AgentRelationService) List(tenantID string) ([]*AgentRelationDTO, error
 
 func (s *AgentRelationService) Create(tenantID string, input *CreateAgentRelationInput) ([]*AgentRelationDTO, error) {
 	normalizeCreateRelation(input)
+	templateVersion := 0
+	if input.RelationTypeTemplateName != "" {
+		template, err := s.typeRepo.Get(tenantID, input.RelationTypeTemplateName)
+		if err != nil || !template.Enabled {
+			return nil, fmt.Errorf("关系类型模板不可用")
+		}
+		if template.BaseType != input.RelationType {
+			return nil, fmt.Errorf("关系类型模板与基础协议不匹配")
+		}
+		templateVersion = template.CurrentVersion
+	}
 	if err := validateRelation(input.SourceAgentID, input.TargetAgentID, input.Scope, input.RelationType, input.Stance, input.AllowedActions, input.ContextPolicy, input.DeliveryPolicy, input.Constraint); err != nil {
 		return nil, err
 	}
@@ -158,18 +175,20 @@ func (s *AgentRelationService) Create(tenantID string, input *CreateAgentRelatio
 	now := time.Now().UTC()
 	for _, edge := range edges {
 		relations = append(relations, &agentrelation.AgentRelation{
-			Scope:             input.Scope,
-			SourceAgentID:     edge[0],
-			TargetAgentID:     edge[1],
-			RelationType:      input.RelationType,
-			Stance:            input.Stance,
-			RelationshipScore: agentrelation.InitialScoreForStance(input.Stance),
-			LastChangedAt:     &now,
-			AllowedActions:    append([]string(nil), input.AllowedActions...),
-			ContextPolicy:     input.ContextPolicy,
-			DeliveryPolicy:    input.DeliveryPolicy,
-			Constraint:        input.Constraint,
-			Enabled:           input.Enabled,
+			Scope:                       input.Scope,
+			SourceAgentID:               edge[0],
+			TargetAgentID:               edge[1],
+			RelationType:                input.RelationType,
+			RelationTypeTemplateName:    input.RelationTypeTemplateName,
+			RelationTypeTemplateVersion: templateVersion,
+			Stance:                      input.Stance,
+			RelationshipScore:           agentrelation.InitialScoreForStance(input.Stance),
+			LastChangedAt:               &now,
+			AllowedActions:              append([]string(nil), input.AllowedActions...),
+			ContextPolicy:               input.ContextPolicy,
+			DeliveryPolicy:              input.DeliveryPolicy,
+			Constraint:                  input.Constraint,
+			Enabled:                     input.Enabled,
 		})
 	}
 	if err := s.repo.CreateMany(tenantID, relations); err != nil {
@@ -200,6 +219,19 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 	}
 	if input.RelationType != nil {
 		relation.RelationType = strings.TrimSpace(*input.RelationType)
+	}
+	if input.RelationTypeTemplateName != nil {
+		name := strings.TrimSpace(*input.RelationTypeTemplateName)
+		if name == "" {
+			relation.RelationTypeTemplateName = ""
+			relation.RelationTypeTemplateVersion = 0
+		} else {
+			template, getErr := s.typeRepo.Get(tenantID, name)
+			if getErr != nil || !template.Enabled {
+				return nil, fmt.Errorf("关系类型模板不可用")
+			}
+			relation.RelationTypeTemplateName, relation.RelationTypeTemplateVersion, relation.RelationType = name, template.CurrentVersion, template.BaseType
+		}
 	}
 	if input.Stance != nil {
 		requestedStance = strings.TrimSpace(*input.Stance)
@@ -442,6 +474,7 @@ func normalizeCreateRelation(input *CreateAgentRelationInput) {
 		input.Scope = agentrelation.DefaultScope
 	}
 	input.RelationType = strings.TrimSpace(input.RelationType)
+	input.RelationTypeTemplateName = strings.TrimSpace(input.RelationTypeTemplateName)
 	input.Stance = strings.TrimSpace(input.Stance)
 	if input.Stance == "" {
 		input.Stance = "neutral"
@@ -510,22 +543,24 @@ func validateRelation(sourceAgentID, targetAgentID uint64, scope, relationType, 
 
 func relationToDTO(relation *agentrelation.AgentRelation) *AgentRelationDTO {
 	dto := &AgentRelationDTO{
-		ID:                relation.ID,
-		Scope:             relation.Scope,
-		SourceAgentID:     relation.SourceAgentID,
-		SourceAgentName:   relation.SourceAgent.Name,
-		TargetAgentID:     relation.TargetAgentID,
-		TargetAgentName:   relation.TargetAgent.Name,
-		RelationType:      relation.RelationType,
-		Stance:            relation.Stance,
-		RelationshipScore: relation.RelationshipScore,
-		AllowedActions:    append([]string(nil), relation.AllowedActions...),
-		ContextPolicy:     relation.ContextPolicy,
-		DeliveryPolicy:    relation.DeliveryPolicy,
-		Constraint:        relation.Constraint,
-		Enabled:           relation.Enabled,
-		CreatedAt:         relation.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:         relation.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		ID:                          relation.ID,
+		Scope:                       relation.Scope,
+		SourceAgentID:               relation.SourceAgentID,
+		SourceAgentName:             relation.SourceAgent.Name,
+		TargetAgentID:               relation.TargetAgentID,
+		TargetAgentName:             relation.TargetAgent.Name,
+		RelationType:                relation.RelationType,
+		RelationTypeTemplateName:    relation.RelationTypeTemplateName,
+		RelationTypeTemplateVersion: relation.RelationTypeTemplateVersion,
+		Stance:                      relation.Stance,
+		RelationshipScore:           relation.RelationshipScore,
+		AllowedActions:              append([]string(nil), relation.AllowedActions...),
+		ContextPolicy:               relation.ContextPolicy,
+		DeliveryPolicy:              relation.DeliveryPolicy,
+		Constraint:                  relation.Constraint,
+		Enabled:                     relation.Enabled,
+		CreatedAt:                   relation.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:                   relation.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
 	if relation.LastChangedAt != nil {
 		value := relation.LastChangedAt.UTC().Format(time.RFC3339)

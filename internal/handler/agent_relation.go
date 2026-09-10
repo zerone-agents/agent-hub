@@ -44,17 +44,18 @@ func (h *AgentRelationHandler) ListEvents(c *gin.Context) {
 }
 
 type createAgentRelationReq struct {
-	SourceAgentID  uint64   `json:"sourceAgentId" binding:"required"`
-	TargetAgentID  uint64   `json:"targetAgentId" binding:"required"`
-	Scope          string   `json:"scope"`
-	RelationType   string   `json:"relationType" binding:"required"`
-	Stance         string   `json:"stance"`
-	AllowedActions []string `json:"allowedActions" binding:"required"`
-	ContextPolicy  string   `json:"contextPolicy"`
-	DeliveryPolicy string   `json:"deliveryPolicy"`
-	Constraint     string   `json:"constraint"`
-	Enabled        *bool    `json:"enabled"`
-	Bidirectional  bool     `json:"bidirectional"`
+	SourceAgentID            uint64   `json:"sourceAgentId" binding:"required"`
+	TargetAgentID            uint64   `json:"targetAgentId" binding:"required"`
+	Scope                    string   `json:"scope"`
+	RelationType             string   `json:"relationType" binding:"required"`
+	RelationTypeTemplateName string   `json:"relationTypeTemplateName"`
+	Stance                   string   `json:"stance"`
+	AllowedActions           []string `json:"allowedActions" binding:"required"`
+	ContextPolicy            string   `json:"contextPolicy"`
+	DeliveryPolicy           string   `json:"deliveryPolicy"`
+	Constraint               string   `json:"constraint"`
+	Enabled                  *bool    `json:"enabled"`
+	Bidirectional            bool     `json:"bidirectional"`
 }
 
 func (h *AgentRelationHandler) Create(c *gin.Context) {
@@ -68,17 +69,18 @@ func (h *AgentRelationHandler) Create(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 	relations, err := h.service.Create(tenant.GetTenantID(c), &services.CreateAgentRelationInput{
-		SourceAgentID:  req.SourceAgentID,
-		TargetAgentID:  req.TargetAgentID,
-		Scope:          req.Scope,
-		RelationType:   req.RelationType,
-		Stance:         req.Stance,
-		AllowedActions: req.AllowedActions,
-		ContextPolicy:  req.ContextPolicy,
-		DeliveryPolicy: req.DeliveryPolicy,
-		Constraint:     req.Constraint,
-		Enabled:        enabled,
-		Bidirectional:  req.Bidirectional,
+		SourceAgentID:            req.SourceAgentID,
+		TargetAgentID:            req.TargetAgentID,
+		Scope:                    req.Scope,
+		RelationType:             req.RelationType,
+		RelationTypeTemplateName: req.RelationTypeTemplateName,
+		Stance:                   req.Stance,
+		AllowedActions:           req.AllowedActions,
+		ContextPolicy:            req.ContextPolicy,
+		DeliveryPolicy:           req.DeliveryPolicy,
+		Constraint:               req.Constraint,
+		Enabled:                  enabled,
+		Bidirectional:            req.Bidirectional,
 	})
 	if err != nil {
 		writeAgentRelationError(c, err)
@@ -88,14 +90,15 @@ func (h *AgentRelationHandler) Create(c *gin.Context) {
 }
 
 type updateAgentRelationReq struct {
-	Scope          *string   `json:"scope"`
-	RelationType   *string   `json:"relationType"`
-	Stance         *string   `json:"stance"`
-	AllowedActions *[]string `json:"allowedActions"`
-	ContextPolicy  *string   `json:"contextPolicy"`
-	DeliveryPolicy *string   `json:"deliveryPolicy"`
-	Constraint     *string   `json:"constraint"`
-	Enabled        *bool     `json:"enabled"`
+	Scope                    *string   `json:"scope"`
+	RelationType             *string   `json:"relationType"`
+	RelationTypeTemplateName *string   `json:"relationTypeTemplateName"`
+	Stance                   *string   `json:"stance"`
+	AllowedActions           *[]string `json:"allowedActions"`
+	ContextPolicy            *string   `json:"contextPolicy"`
+	DeliveryPolicy           *string   `json:"deliveryPolicy"`
+	Constraint               *string   `json:"constraint"`
+	Enabled                  *bool     `json:"enabled"`
 }
 
 type recordAgentRelationEventReq struct {
@@ -141,14 +144,15 @@ func (h *AgentRelationHandler) Update(c *gin.Context) {
 		return
 	}
 	relation, err := h.service.Update(tenant.GetTenantID(c), id, &services.UpdateAgentRelationInput{
-		Scope:          req.Scope,
-		RelationType:   req.RelationType,
-		Stance:         req.Stance,
-		AllowedActions: req.AllowedActions,
-		ContextPolicy:  req.ContextPolicy,
-		DeliveryPolicy: req.DeliveryPolicy,
-		Constraint:     req.Constraint,
-		Enabled:        req.Enabled,
+		Scope:                    req.Scope,
+		RelationType:             req.RelationType,
+		RelationTypeTemplateName: req.RelationTypeTemplateName,
+		Stance:                   req.Stance,
+		AllowedActions:           req.AllowedActions,
+		ContextPolicy:            req.ContextPolicy,
+		DeliveryPolicy:           req.DeliveryPolicy,
+		Constraint:               req.Constraint,
+		Enabled:                  req.Enabled,
 	})
 	if err != nil {
 		writeAgentRelationError(c, err)

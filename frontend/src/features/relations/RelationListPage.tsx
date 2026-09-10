@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Alert, Button, Empty, Popconfirm, Spin, Tag, Tooltip } from 'antd'
+import { Alert, Button, Empty, Popconfirm, Spin, Tabs, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   ArrowRightIcon,
@@ -10,7 +10,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import type { AgentRelation, RelationAction } from '@/api/agent-relations'
 import type { Agent } from '@/api/agents'
 import BorderedTable from '@/components/BorderedTable'
@@ -23,6 +23,9 @@ import { useAgentRelations, useDeleteAgentRelation } from '@/queries/useAgentRel
 import { tokens as t } from '@/styles/tokens'
 import RelationForm from './RelationForm'
 import RelationDynamicsDrawer from './RelationDynamicsDrawer'
+import RelationTopology from './RelationTopology'
+import RelationTypeLibrary from './RelationTypeLibrary'
+import { useRelationTypes } from '@/queries/useRelationTypes'
 import { ACTIONS, CONTEXT_POLICIES, DELIVERY_POLICIES, RELATION_TYPES, STANCES, optionLabel } from './relationOptions'
 
 const useStyles = createStyles(({ css }) => ({
@@ -224,13 +227,18 @@ export default function RelationListPage() {
   const { styles } = useStyles()
   const { data: relations = [], isLoading, isError, refetch } = useAgentRelations()
   const { data: agents = [], isLoading: agentsLoading } = useAgents()
+  const { data: relationTypes = [] } = useRelationTypes()
   const deleteRelation = useDeleteAgentRelation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const canWrite = useCanWrite()
   const [keywords, setKeywords] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingRelation, setEditingRelation] = useState<AgentRelation | null>(null)
   const [dynamicsRelation, setDynamicsRelation] = useState<AgentRelation | null>(null)
+  const initialAgent = Number(searchParams.get('agent')) || undefined
+  const [focusAgentId, setFocusAgentId] = useState<number | undefined>(initialAgent)
+  const [activeView, setActiveView] = useState(initialAgent ? 'network' : 'list')
 
   const filteredRelations = useMemo(() => {
     const query = keywords.trim().toLowerCase()
@@ -470,6 +478,12 @@ export default function RelationListPage() {
         </div>
       </div>
 
+      <Tabs activeKey={activeView} onChange={setActiveView} items={[{key:'network',label:'关系网络'},{key:'types',label:'关系类型'},{key:'list',label:'关系清单'}]} />
+
+      {activeView === 'types' ? <RelationTypeLibrary /> : activeView === 'network' ? (
+        <RelationTopology agents={agents} relations={filteredRelations} types={relationTypes} focusId={focusAgentId} onFocus={setFocusAgentId} onEdge={setDynamicsRelation} />
+      ) : <>
+
       <div className={styles.toolbar}>
         <NameSearch placeholder="搜索 Agent、关系、动作或范围" realtime onSearch={setKeywords} />
         <Tag icon={<ArrowsLeftRightIcon size={13} />}>共 {filteredRelations.length} 条有向边</Tag>
@@ -529,11 +543,13 @@ export default function RelationListPage() {
           }}
         />
       )}
+      </>}
 
       <RelationForm
         open={formOpen}
         editingRelation={editingRelation}
         agents={agents}
+        presetSourceAgentId={focusAgentId}
         onClose={() => {
           setFormOpen(false)
         }}

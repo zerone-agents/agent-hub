@@ -24,6 +24,7 @@ import { buildToolOptions } from './toolOptions'
 import DeployModal from './DeployModal'
 import AgentKnowledgeModal from './AgentKnowledgeModal'
 import CardGrid from '@/components/CardGrid'
+import { useNavigate } from 'react-router'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -70,6 +71,7 @@ const useStyles = createStyles(({ css }) => ({
 
 export default function AgentListPage() {
   const { styles } = useStyles()
+  const navigate = useNavigate()
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
   const canWrite = useCanWrite()
@@ -531,6 +533,7 @@ export default function AgentListPage() {
                   onEditModel={handleEditModel}
                   onDeploy={showDeploy}
                   onEditKnowledge={handleEditKnowledge}
+                  onViewRelations={(item) => { void navigate(`/relations?agent=${item.id}`) }}
                 />
               ))}
             </CardGrid>

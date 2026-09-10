@@ -92,13 +92,15 @@ var RelationEventVisibilities = map[string]struct{}{
 // AgentRelation is one directed edge in an organization graph. A bidirectional
 // relationship is intentionally represented by two independently editable rows.
 type AgentRelation struct {
-	ID            uint64 `gorm:"primaryKey;autoIncrement" json:"id"`
-	TenantID      string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_agent_relations_edge,priority:1;index" json:"-"`
-	Scope         string `gorm:"type:varchar(64);not null;default:'global';uniqueIndex:uk_agent_relations_edge,priority:2" json:"scope"`
-	SourceAgentID uint64 `gorm:"column:source_agent_id;not null;uniqueIndex:uk_agent_relations_edge,priority:3;index" json:"sourceAgentId"`
-	TargetAgentID uint64 `gorm:"column:target_agent_id;not null;uniqueIndex:uk_agent_relations_edge,priority:4;index" json:"targetAgentId"`
-	RelationType  string `gorm:"column:relation_type;type:varchar(32);not null;index" json:"relationType"`
-	Stance        string `gorm:"type:varchar(32);not null;default:'neutral'" json:"stance"`
+	ID                          uint64 `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID                    string `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_agent_relations_edge,priority:1;index" json:"-"`
+	Scope                       string `gorm:"type:varchar(64);not null;default:'global';uniqueIndex:uk_agent_relations_edge,priority:2" json:"scope"`
+	SourceAgentID               uint64 `gorm:"column:source_agent_id;not null;uniqueIndex:uk_agent_relations_edge,priority:3;index" json:"sourceAgentId"`
+	TargetAgentID               uint64 `gorm:"column:target_agent_id;not null;uniqueIndex:uk_agent_relations_edge,priority:4;index" json:"targetAgentId"`
+	RelationType                string `gorm:"column:relation_type;type:varchar(32);not null;index" json:"relationType"`
+	RelationTypeTemplateName    string `gorm:"column:relation_type_template_name;type:varchar(64);not null;default:'';index" json:"relationTypeTemplateName"`
+	RelationTypeTemplateVersion int    `gorm:"column:relation_type_template_version;not null;default:0" json:"relationTypeTemplateVersion"`
+	Stance                      string `gorm:"type:varchar(32);not null;default:'neutral'" json:"stance"`
 	// RelationshipScore is the source of truth for the current, directional
 	// social attitude. Stance is its cached human-readable projection.
 	RelationshipScore int               `gorm:"column:relationship_score;not null;default:0" json:"relationshipScore"`
@@ -113,6 +115,44 @@ type AgentRelation struct {
 	CreatedAt         time.Time         `gorm:"column:created_at" json:"createdAt"`
 	UpdatedAt         time.Time         `gorm:"column:updated_at;index" json:"updatedAt"`
 }
+
+// RelationTypeTemplate is the editable product-language layer over the stable
+// runtime relation protocol. BaseType remains constrained to RelationTypes.
+type RelationTypeTemplate struct {
+	ID                    uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID              string    `gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_relation_types_tenant_name,priority:1;index" json:"-"`
+	Name                  string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_relation_types_tenant_name,priority:2" json:"name"`
+	Title                 string    `gorm:"type:varchar(128);not null" json:"title"`
+	Description           string    `gorm:"type:text" json:"description"`
+	BaseType              string    `gorm:"column:base_type;type:varchar(32);not null;index" json:"baseType"`
+	DirectionPolicy       string    `gorm:"column:direction_policy;type:varchar(32);not null;default:'one_way'" json:"directionPolicy"`
+	DefaultStance         string    `gorm:"column:default_stance;type:varchar(32);not null;default:'neutral'" json:"defaultStance"`
+	DefaultAllowedActions []string  `gorm:"column:default_allowed_actions;type:json;serializer:json" json:"defaultAllowedActions"`
+	DefaultContextPolicy  string    `gorm:"column:default_context_policy;type:varchar(32);not null;default:'summary_only'" json:"defaultContextPolicy"`
+	DefaultDeliveryPolicy string    `gorm:"column:default_delivery_policy;type:varchar(16);not null;default:'async'" json:"defaultDeliveryPolicy"`
+	DefaultConstraint     string    `gorm:"column:default_constraint;type:text" json:"defaultConstraint"`
+	LineColor             string    `gorm:"column:line_color;type:varchar(16);not null;default:'#64748b'" json:"lineColor"`
+	LineStyle             string    `gorm:"column:line_style;type:varchar(16);not null;default:'solid'" json:"lineStyle"`
+	CurrentVersion        int       `gorm:"column:current_version;not null;default:1" json:"currentVersion"`
+	Enabled               bool      `gorm:"not null;default:true;index" json:"enabled"`
+	IsBuiltin             bool      `gorm:"column:is_builtin;not null;default:false" json:"isBuiltin"`
+	CreatedAt             time.Time `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt             time.Time `gorm:"column:updated_at" json:"updatedAt"`
+}
+
+func (RelationTypeTemplate) TableName() string { return "relation_type_templates" }
+
+type RelationTypeVersion struct {
+	ID         uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	TemplateID uint64         `gorm:"column:template_id;not null;uniqueIndex:uk_relation_type_version,priority:1;index" json:"templateId"`
+	TenantID   string         `gorm:"type:varchar(64);not null;default:'';index" json:"-"`
+	Version    int            `gorm:"not null;uniqueIndex:uk_relation_type_version,priority:2" json:"version"`
+	Snapshot   map[string]any `gorm:"type:json;serializer:json" json:"snapshot"`
+	ChangeNote string         `gorm:"column:change_note;type:varchar(255)" json:"changeNote"`
+	CreatedAt  time.Time      `gorm:"column:created_at" json:"createdAt"`
+}
+
+func (RelationTypeVersion) TableName() string { return "relation_type_versions" }
 
 func (AgentRelation) TableName() string { return "agent_relations" }
 

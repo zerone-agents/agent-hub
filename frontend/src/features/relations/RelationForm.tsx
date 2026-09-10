@@ -19,10 +19,10 @@ import {
   CONTEXT_POLICIES,
   DEFAULT_ACTIONS,
   DELIVERY_POLICIES,
-  RELATION_TYPES,
   STANCES,
 } from './relationOptions'
 import { useCreateAgentRelation, useUpdateAgentRelation } from '@/queries/useAgentRelations'
+import { useRelationTypes } from '@/queries/useRelationTypes'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -141,6 +141,7 @@ interface RelationFormProps {
   editingRelation: AgentRelation | null
   agents: Agent[]
   onClose: () => void
+  presetSourceAgentId?: number
 }
 
 interface FormValues {
@@ -149,6 +150,7 @@ interface FormValues {
   direction: 'one_way' | 'two_way'
   scope: string
   relationType: RelationType
+  relationTypeTemplateName?: string
   stance: RelationStance
   allowedActions: RelationAction[]
   contextPolicy: ContextPolicy
@@ -161,7 +163,7 @@ function agentTitle(agent: Agent): string {
   return agent.config.title?.zh ?? agent.config.title?.en ?? agent.name
 }
 
-export default function RelationForm({ open, editingRelation, agents, onClose }: RelationFormProps) {
+export default function RelationForm({ open, editingRelation, agents, onClose, presetSourceAgentId }: RelationFormProps) {
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const sourceAgentId = Form.useWatch('sourceAgentId', form)
@@ -170,6 +172,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
   const createRelation = useCreateAgentRelation()
   const updateRelation = useUpdateAgentRelation()
   const submitting = createRelation.isPending || updateRelation.isPending
+  const { data: relationTypes = [] } = useRelationTypes()
 
   useEffect(() => {
     if (!open) return
@@ -180,6 +183,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
         direction: 'one_way',
         scope: editingRelation.scope,
         relationType: editingRelation.relationType,
+        relationTypeTemplateName: editingRelation.relationTypeTemplateName,
         stance: editingRelation.stance,
         allowedActions: editingRelation.allowedActions,
         contextPolicy: editingRelation.contextPolicy,
@@ -190,12 +194,14 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
       return
     }
     form.resetFields()
+    const defaultTemplate = relationTypes.find((item) => item.enabled && item.baseType === 'peer')
     form.setFieldsValue({
-      sourceAgentId: null,
+      sourceAgentId: presetSourceAgentId ?? null,
       targetAgentId: null,
       direction: 'one_way',
       scope: 'global',
       relationType: 'peer',
+      relationTypeTemplateName: defaultTemplate?.name,
       stance: 'neutral',
       allowedActions: DEFAULT_ACTIONS.peer,
       contextPolicy: 'summary_only',
@@ -203,7 +209,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
       constraint: '',
       enabled: true,
     })
-  }, [editingRelation, form, open])
+  }, [editingRelation, form, open, presetSourceAgentId, relationTypes])
 
   const options = agents.map((agent) => ({
     label: `${agentTitle(agent)} · ${agent.name}`,
@@ -218,6 +224,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
       const payload: AgentRelationUpdatePayload = {
         scope: values.scope.trim(),
         relationType: values.relationType,
+        relationTypeTemplateName: values.relationTypeTemplateName,
         allowedActions: values.allowedActions,
         contextPolicy: values.contextPolicy,
         deliveryPolicy: values.deliveryPolicy,
@@ -238,6 +245,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
         targetAgentId: values.targetAgentId,
         scope: values.scope.trim(),
         relationType: values.relationType,
+        relationTypeTemplateName: values.relationTypeTemplateName,
         stance: values.stance,
         allowedActions: values.allowedActions,
         contextPolicy: values.contextPolicy,
@@ -342,20 +350,19 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
           >
             <Input placeholder="global" />
           </Form.Item>
-          <Form.Item label="结构关系" name="relationType" rules={[{ required: true }]}>
+          <Form.Item label="关系类型" name="relationTypeTemplateName" tooltip="在关系类型库统一维护默认动作、立场和通信策略">
             <Select
-              options={RELATION_TYPES.map((item) => ({
-                value: item.value,
-                label: item.label,
+              allowClear
+              placeholder="选择关系类型模板"
+              options={relationTypes.filter(item=>item.enabled || item.name===editingRelation?.relationTypeTemplateName).map((item) => ({
+                value: item.name,
+                label: `${item.title} · v${item.currentVersion}`,
                 title: item.description,
               }))}
-              onChange={(value: RelationType) => {
-                if (!editingRelation) {
-                  form.setFieldValue('allowedActions', DEFAULT_ACTIONS[value])
-                  if (value !== 'peer' && value !== 'opponent' && value !== 'external') {
-                    form.setFieldValue('direction', 'one_way')
-                  }
-                }
+              onChange={(name?: string) => {
+                const template=relationTypes.find(item=>item.name===name)
+                if (!template) return
+                form.setFieldsValue({relationType:template.baseType,stance:template.defaultStance,allowedActions:template.defaultAllowedActions,contextPolicy:template.defaultContextPolicy,deliveryPolicy:template.defaultDeliveryPolicy,constraint:template.defaultConstraint,direction:template.directionPolicy==='one_way'?'one_way':direction})
               }}
               optionRender={(option) => (
                 <div>
@@ -365,6 +372,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose }:
               )}
             />
           </Form.Item>
+          <Form.Item name="relationType" hidden rules={[{ required: true }]}><Input /></Form.Item>
           {!editingRelation && !supportsBidirectional && (
             <div className={styles.asymmetryHint}>
               非对称关系需要分别配置两个方向，避免把“下属”和“负责人”等语义错误镜像。

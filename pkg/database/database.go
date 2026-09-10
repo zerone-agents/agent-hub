@@ -125,6 +125,8 @@ func AutoMigrate(backfillTenant string) error {
 		&personality.Template{},
 		&personality.Version{},
 		&agentrelation.AgentRelation{},
+		&agentrelation.RelationTypeTemplate{},
+		&agentrelation.RelationTypeVersion{},
 		&agentrelation.AgentRelationEvent{},
 		&agentrelation.AgentMessage{},
 		&agent.AgentSubagent{},

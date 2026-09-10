@@ -55,6 +55,8 @@ export interface AgentRelation {
   targetAgentId: number
   targetAgentName: string
   relationType: RelationType
+  relationTypeTemplateName?: string
+  relationTypeTemplateVersion?: number
   stance: RelationStance
   relationshipScore: number
   lastChangedAt?: string
@@ -112,6 +114,7 @@ export interface AgentRelationCreatePayload {
   targetAgentId: number
   scope: string
   relationType: RelationType
+  relationTypeTemplateName?: string
   stance: RelationStance
   allowedActions: RelationAction[]
   contextPolicy: ContextPolicy
