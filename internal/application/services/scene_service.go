@@ -68,7 +68,7 @@ func (s *SceneService) List(tenantID string, agentID uint64) ([]*SceneDTO, error
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("获取场景列表失败: %w", err)
+		return nil, fmt.Errorf("list scenes failed: %w", err)
 	}
 
 	result := make([]*SceneDTO, 0, len(scenes))
@@ -106,7 +106,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查场景存在性失败: %w", err)
+		return nil, fmt.Errorf("check scene existence failed: %w", err)
 	}
 	if exists {
 		return nil, scene.ErrSceneExists
@@ -114,7 +114,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 
 	agentExists, err := s.agentRepo.Exists(tenantID, input.AgentID)
 	if err != nil {
-		return nil, fmt.Errorf("检查 Agent 存在性失败: %w", err)
+		return nil, fmt.Errorf("check agent existence failed: %w", err)
 	}
 	if !agentExists {
 		return nil, scene.ErrAgentNotFound
@@ -131,7 +131,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 	}
 
 	if err := s.repo.Create(tenantID, sc); err != nil {
-		return nil, fmt.Errorf("创建场景失败: %w", err)
+		return nil, fmt.Errorf("create scene failed: %w", err)
 	}
 
 	return s.sceneToDTO(tenantID, sc), nil
@@ -149,7 +149,7 @@ func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInpu
 	}
 
 	if err := s.repo.Update(tenantID, sc); err != nil {
-		return nil, fmt.Errorf("更新场景失败: %w", err)
+		return nil, fmt.Errorf("update scene failed: %w", err)
 	}
 
 	return s.sceneToDTO(tenantID, sc), nil
@@ -160,7 +160,7 @@ func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.S
 	if input.AgentID != nil {
 		agentExists, err := s.agentRepo.Exists(tenantID, *input.AgentID)
 		if err != nil {
-			return fmt.Errorf("检查 Agent 存在性失败: %w", err)
+			return fmt.Errorf("check agent existence failed: %w", err)
 		}
 		if !agentExists {
 			return scene.ErrAgentNotFound
@@ -202,7 +202,7 @@ func (s *SceneService) DeleteScene(tenantID, name string) error {
 	}
 
 	if err := s.repo.Delete(tenantID, sc.ID); err != nil {
-		return fmt.Errorf("删除场景失败: %w", err)
+		return fmt.Errorf("delete scene failed: %w", err)
 	}
 
 	return nil
