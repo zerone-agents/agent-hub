@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"control-panel/internal/domain/skill"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,13 +19,16 @@ func BuildOSSKey(skillType string, name string) string {
 
 func ValidateSkillType(skillType string) error {
 	if skillType != "expert" && skillType != "community" {
-		return fmt.Errorf("技能类型必须是 expert 或 community")
+		return skill.NewValidationErrorf("技能类型必须是 expert 或 community")
 	}
 	return nil
 }
 
 func ValidateSkillName(name string) error {
-	return validateIdentifier("技能", name)
+	if err := validateIdentifier("技能", name); err != nil {
+		return skill.NewValidationErrorf("%s", err.Error())
+	}
+	return nil
 }
 
 // ValidateSkillZip is the server-side half of the "double insurance" pattern:
@@ -58,12 +62,12 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 	// is required — buffer the stream first.
 	buf, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("读取 zip 内容失败: %w", err)
+		return nil, fmt.Errorf("read zip content failed: %w", err)
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
 	if err != nil {
-		return nil, fmt.Errorf("不是有效的 zip 文件: %w", err)
+		return nil, skill.NewValidationErrorf("不是有效的 zip 文件: %s", err.Error())
 	}
 
 	// Reject any entry that could escape the extraction directory or point
@@ -140,12 +144,12 @@ func FindAllSkillMd(zr *zip.Reader) ([]SkillMdEntry, error) {
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("打开 %s 失败: %w", name, err)
+			return nil, fmt.Errorf("open %s failed: %w", name, err)
 		}
 		content, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			return nil, fmt.Errorf("读取 %s 内容失败: %w", name, err)
+			return nil, fmt.Errorf("read %s content failed: %w", name, err)
 		}
 		found = append(found, SkillMdEntry{Path: name, Content: string(content)})
 	}
