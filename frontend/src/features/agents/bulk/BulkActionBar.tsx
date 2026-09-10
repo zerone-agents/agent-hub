@@ -1,6 +1,7 @@
 import { Button } from 'antd'
 import { RocketIcon, ArrowClockwiseIcon, StopIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation } from './classifyBulkOperation'
 import { tokens as t } from '@/styles/tokens'
 
@@ -43,11 +44,11 @@ const useStyles = createStyles(({ css }) => ({
   `,
 }))
 
-const OPERATIONS: { op: BulkOperation; label: string; icon: React.ReactNode; danger?: boolean }[] = [
-  { op: 'deploy', label: '部署', icon: <RocketIcon size={14} /> },
-  { op: 'redeploy', label: '重新部署', icon: <ArrowClockwiseIcon size={14} /> },
-  { op: 'stop', label: '停止', icon: <StopIcon size={14} /> },
-  { op: 'delete', label: '删除', icon: <TrashIcon size={14} />, danger: true },
+const OPERATIONS: { op: BulkOperation; icon: React.ReactNode; danger?: boolean }[] = [
+  { op: 'deploy', icon: <RocketIcon size={14} /> },
+  { op: 'redeploy', icon: <ArrowClockwiseIcon size={14} /> },
+  { op: 'stop', icon: <StopIcon size={14} /> },
+  { op: 'delete', icon: <TrashIcon size={14} />, danger: true },
 ]
 
 export interface BulkActionBarProps {
@@ -84,7 +85,7 @@ export default function BulkActionBar({
         <Button type="link" size="small" disabled={noSelection} onClick={onClear}>清空</Button>
       </div>
       <div className={styles.right}>
-        {OPERATIONS.map(({ op, label, icon, danger }) => (
+        {OPERATIONS.map(({ op, icon, danger }) => (
           <Button
             key={op}
             size="small"
@@ -95,7 +96,7 @@ export default function BulkActionBar({
             loading={prechecking === op}
             onClick={() => { onOperation(op); }}
           >
-            {label}
+            {BULK_OPERATION_LABEL[op]}
           </Button>
         ))}
         <Button size="small" onClick={onExit}>退出</Button>
