@@ -334,8 +334,9 @@ func main() {
 	// ==================== 路由管理 ====================
 
 	// /health
-	r.GET("/health", handler.HealthCheck)
-	r.GET("/health/:service", handler.ServiceHealthCheck)
+	casdoorRequiredForHealth := cfg.Auth.IsCasdoor()
+	r.GET("/health", handler.HealthCheckForAuthMode(casdoorRequiredForHealth))
+	r.GET("/health/:service", handler.ServiceHealthCheckForAuthMode(casdoorRequiredForHealth))
 
 	// /api/v1/ops — 运维端点（组织 OAuth 客户端管理），不走 JWT 链，
 	// 由 X-Ops-Key 常量时间鉴权。OPS_API_KEY 为空 = 功能未启用，端点不挂载（等效 404）。
