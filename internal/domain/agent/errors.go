@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// ValidationError 标记用户面校验错误（请求参数/领域规则不合法）：
+// HTTP 边界（respondAgentError）返回 400 + 原文中文文案；与之相对，
+// 内部诊断（DB/加解密等基础设施包装）走 500 中性文案，完整错误链只在
+// 服务端日志（issue #95 P2：handler 边界分流）。
+type ValidationError struct {
+	msg string
+}
+
+func (e *ValidationError) Error() string { return e.msg }
+
+func NewValidationErrorf(format string, args ...any) error {
+	return &ValidationError{msg: fmt.Sprintf(format, args...)}
+}
+
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按
 // fmt.Errorf("%w: %s", ErrAgentNotFound, name) 包装，handler 用 errors.Is 映射
 // 404（对齐 ErrToolNotFound；DB 故障走英文诊断包装 → 500 桶，绝不伪装 not-found）。

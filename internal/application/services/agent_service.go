@@ -112,7 +112,7 @@ type AgentDTO struct {
 func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, platform)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
+		return nil, fmt.Errorf("list agents failed: %w", err)
 	}
 
 	var maxUpdatedAt time.Time
@@ -140,7 +140,7 @@ func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, err
 func (s *AgentService) GetDesktopAgents(tenantID string) (*AgentsDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, agent.PlatformDesktop)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
+		return nil, fmt.Errorf("list agents failed: %w", err)
 	}
 
 	return s.buildAgentsDTO(tenantID, configs)
@@ -150,7 +150,7 @@ func (s *AgentService) GetDesktopAgents(tenantID string) (*AgentsDTO, error) {
 func (s *AgentService) GetAllAgentsAdmin(tenantID string) (*AgentsDTO, error) {
 	configs, err := s.repo.ListAll(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent 列表失败: %w", err)
+		return nil, fmt.Errorf("list agents failed: %w", err)
 	}
 
 	return s.buildAgentsDTO(tenantID, configs)
@@ -160,27 +160,27 @@ func (s *AgentService) GetAllAgentsAdmin(tenantID string) (*AgentsDTO, error) {
 func (s *AgentService) buildAgentsDTO(tenantID string, configs []*agent.AgentConfig) (*AgentsDTO, error) {
 	subagentsMap, err := s.repo.GetAllSubagents(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取子 Agent 关系失败: %w", err)
+		return nil, fmt.Errorf("list subagent relations failed: %w", err)
 	}
 
 	toolsMap, err := s.toolRepo.GetAllAgentTools(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent Tool 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent tool relations failed: %w", err)
 	}
 
 	skillsMap, err := s.skillRepo.GetAllAgentSkills(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent Skill 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent skill relations failed: %w", err)
 	}
 
 	mcpsMap, err := s.mcpRepo.GetAllAgentMcpNames(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent MCP 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent mcp relations failed: %w", err)
 	}
 
 	datasetsMap, err := s.repo.GetAllAgentKnowledgeDatasetIDs(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent 知识库绑定失败: %w", err)
+		return nil, fmt.Errorf("list agent knowledge bindings failed: %w", err)
 	}
 
 	agents := make([]AgentDTO, 0, len(configs))
@@ -220,7 +220,7 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 
 	subs, err := s.repo.GetSubagents(cfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取子 Agent 关系失败: %w", err)
+		return nil, fmt.Errorf("list subagent relations failed: %w", err)
 	}
 	if subs == nil {
 		subs = []string{}
@@ -228,7 +228,7 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 
 	toolIDs, err := s.toolRepo.GetToolsByAgent(cfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent Tool 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent tool relations failed: %w", err)
 	}
 	if toolIDs == nil {
 		toolIDs = []string{}
@@ -236,7 +236,7 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 
 	skillIDs, err := s.skillRepo.GetAgentSkills(cfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent Skill 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent skill relations failed: %w", err)
 	}
 	if skillIDs == nil {
 		skillIDs = []string{}
@@ -244,7 +244,7 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 
 	mcpNames, err := s.mcpRepo.GetMcpNamesByAgent(cfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent MCP 关系失败: %w", err)
+		return nil, fmt.Errorf("list agent mcp relations failed: %w", err)
 	}
 	if mcpNames == nil {
 		mcpNames = []string{}
@@ -252,7 +252,7 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 
 	datasetIDs, err := s.repo.GetKnowledgeDatasetIDsByAgent(cfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Agent 知识库绑定失败: %w", err)
+		return nil, fmt.Errorf("list agent knowledge bindings failed: %w", err)
 	}
 	if datasetIDs == nil {
 		datasetIDs = []string{}
@@ -285,7 +285,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 
 	storedKey, err := provider.Decrypt(p.LockedAPIKey, s.encryptionKey)
 	if err != nil {
-		return nil, fmt.Errorf("解密 Provider API Key 失败: %w", err)
+		return nil, fmt.Errorf("decrypt provider API key failed: %w", err)
 	}
 
 	overrides := map[string]string{}
@@ -320,7 +320,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 	// dropped in Task 7.
 	modelRows, err := s.providerSvc.repo.ListModels(tenantID, *resolvedProviderID)
 	if err != nil {
-		return nil, fmt.Errorf("加载 provider_models 失败: %w", err)
+		return nil, fmt.Errorf("load provider_models failed: %w", err)
 	}
 	models := toCatalogModels(modelRows)
 
@@ -356,7 +356,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查 Agent 存在性失败: %w", err)
+		return nil, fmt.Errorf("check agent existence failed: %w", err)
 	}
 	if exists {
 		return nil, fmt.Errorf("Agent '%s' 已存在", input.Name)
@@ -373,7 +373,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 
 	if cfg.IsDefault {
 		if err := s.repo.ClearAllDefault(tenantID); err != nil {
-			return nil, fmt.Errorf("清除默认 Agent 失败: %w", err)
+			return nil, fmt.Errorf("clear default agent failed: %w", err)
 		}
 	}
 
@@ -381,16 +381,16 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 
 	contentHash, err := computeContentHash(modelToConfigMap(cfg, s.encryptionKey))
 	if err != nil {
-		return nil, fmt.Errorf("计算内容哈希失败: %w", err)
+		return nil, fmt.Errorf("compute content hash failed: %w", err)
 	}
 	cfg.ContentHash = contentHash
 
 	if err := s.repo.Create(tenantID, cfg); err != nil {
-		return nil, fmt.Errorf("创建 Agent 失败: %w", err)
+		return nil, fmt.Errorf("create agent failed: %w", err)
 	}
 
 	if err := s.toolRepo.BindDefaultToolsToAgent(tenantID, cfg.ID); err != nil {
-		return nil, fmt.Errorf("绑定默认 Tool 失败: %w", err)
+		return nil, fmt.Errorf("bind default tool failed: %w", err)
 	}
 
 	return s.GetAgent(tenantID, input.Name)
@@ -447,12 +447,12 @@ func (s *AgentService) UpdateAgent(tenantID, name string, input *UpdateAgentInpu
 
 	contentHash, err := computeContentHash(modelToConfigMap(cfg, s.encryptionKey))
 	if err != nil {
-		return nil, fmt.Errorf("计算内容哈希失败: %w", err)
+		return nil, fmt.Errorf("compute content hash failed: %w", err)
 	}
 	cfg.ContentHash = contentHash
 
 	if err := s.repo.Update(tenantID, cfg); err != nil {
-		return nil, fmt.Errorf("更新 Agent 失败: %w", err)
+		return nil, fmt.Errorf("update agent failed: %w", err)
 	}
 
 	return s.GetAgent(tenantID, name)
@@ -493,7 +493,7 @@ func (s *AgentService) handleDefaultUpdate(tenantID string, agentID uint64, isDe
 		return nil
 	}
 	if err := s.repo.ClearDefaultExcept(tenantID, agentID); err != nil {
-		return fmt.Errorf("清除默认 Agent 失败: %w", err)
+		return fmt.Errorf("clear default agent failed: %w", err)
 	}
 	return nil
 }
@@ -523,7 +523,7 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	for _, subName := range subagentNames {
 		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
-			return fmt.Errorf("子 Agent '%s' 不存在", subName)
+			return agent.NewValidationErrorf("子 Agent '%s' 不存在", subName)
 		}
 		subagentIDs = append(subagentIDs, subCfg.ID)
 		resolved = append(resolved, subCfg)
@@ -531,7 +531,7 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 
 	for _, subName := range subagentNames {
 		if subName == agentName {
-			return fmt.Errorf("子 Agent 不能与主 Agent 相同")
+			return agent.NewValidationErrorf("子 Agent 不能与主 Agent 相同")
 		}
 	}
 
@@ -571,7 +571,7 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	// （issue #111）。在任何字段解包前拒绝，保证调用方不会拿到部分解包的
 	// 半成品 cfg。
 	if _, exists := config["maxSessionTurns"]; exists {
-		return fmt.Errorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
+		return agent.NewValidationErrorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
 	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
@@ -747,7 +747,7 @@ func encryptFieldOverrides(overrides map[string]string, providerID uint64, encry
 		// No encryption configured, store as plaintext JSON
 		jsonBytes, err := json.Marshal(overrides)
 		if err != nil {
-			return "", fmt.Errorf("序列化 fieldOverrides 失败: %w", err)
+			return "", fmt.Errorf("serialize fieldOverrides failed: %w", err)
 		}
 		return string(jsonBytes), nil
 	}
@@ -785,7 +785,7 @@ func encryptFieldOverrides(overrides map[string]string, providerID uint64, encry
 		if secretKeys[k] && v != "" {
 			encVal, err := provider.Encrypt(v, encryptionKey)
 			if err != nil {
-				return "", fmt.Errorf("加密字段 %s 失败: %w", k, err)
+				return "", fmt.Errorf("encrypt field %s failed: %w", k, err)
 			}
 			encrypted[k] = encVal
 		} else {
@@ -795,7 +795,7 @@ func encryptFieldOverrides(overrides map[string]string, providerID uint64, encry
 
 	jsonBytes, err := json.Marshal(encrypted)
 	if err != nil {
-		return "", fmt.Errorf("序列化加密后的 fieldOverrides 失败: %w", err)
+		return "", fmt.Errorf("serialize encrypted fieldOverrides failed: %w", err)
 	}
 	return string(jsonBytes), nil
 }
@@ -808,7 +808,7 @@ func decryptFieldOverrides(storedJSON string, providerID uint64, encryptionKey s
 
 	var overrides map[string]string
 	if err := json.Unmarshal([]byte(storedJSON), &overrides); err != nil {
-		return nil, fmt.Errorf("解析 fieldOverrides 失败: %w", err)
+		return nil, fmt.Errorf("parse fieldOverrides failed: %w", err)
 	}
 
 	if encryptionKey == "" {
@@ -930,7 +930,7 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 		// 的最严格行为——token agent 自身绑定。
 		datasets, err := s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 		if err != nil {
-			return nil, "", fmt.Errorf("查询 Agent '%s' 知识库绑定失败: %w", tokenAgentName, err)
+			return nil, "", fmt.Errorf("query knowledge bindings for agent '%s' failed: %w", tokenAgentName, err)
 		}
 		return datasets, agentCfg.Name, nil
 	}
@@ -943,7 +943,7 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 	}
 	subagentNames, err := s.repo.GetSubagents(agentCfg.ID)
 	if err != nil {
-		return nil, "", fmt.Errorf("查询 Agent '%s' 子代理列表失败: %w", tokenAgentName, err)
+		return nil, "", fmt.Errorf("query subagents for agent '%s' failed: %w", tokenAgentName, err)
 	}
 	allowedAgents := make(map[string]struct{}, len(subagentNames)+1)
 	allowedAgents[agentCfg.Name] = struct{}{}
@@ -969,7 +969,7 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 	}
 	datasets, err := s.repo.GetKnowledgeDatasetIDsByAgent(reqCfg.ID)
 	if err != nil {
-		return nil, "", fmt.Errorf("查询 Agent '%s' 知识库绑定失败: %w", agentName, err)
+		return nil, "", fmt.Errorf("query knowledge bindings for agent '%s' failed: %w", agentName, err)
 	}
 	return datasets, agentName, nil
 }
@@ -991,12 +991,12 @@ func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, 
 	}
 
 	if err := s.repo.ReplaceAgentKnowledgeDatasets(agentCfg.ID, cleaned); err != nil {
-		return fmt.Errorf("替换 Agent knowledge dataset 失败: %w", err)
+		return fmt.Errorf("replace agent knowledge datasets failed: %w", err)
 	}
 
 	knowledgeMcp, err := s.mcpRepo.GetByName(tenantID, "knowledge")
 	if err != nil {
-		return fmt.Errorf("内置 MCP 'knowledge' 不存在: %w", err)
+		return fmt.Errorf("builtin MCP 'knowledge' not found: %w", err)
 	}
 
 	if len(cleaned) > 0 {
@@ -1025,15 +1025,15 @@ func syncSubagentToolBindings(
 		// 启动回填（无租户上下文）与业务路径统一走此读法。
 		t, err := toolRepo.GetByName("", name)
 		if err != nil {
-			return fmt.Errorf("内置 %s tool 不存在: %w", name, err)
+			return fmt.Errorf("builtin %s tool not found: %w", name, err)
 		}
 		if hasSubagents {
 			if err := agentRepo.EnsureAgentToolBinding(agentID, t.ID); err != nil {
-				return fmt.Errorf("挂载 %s tool 失败: %w", name, err)
+				return fmt.Errorf("mount %s tool failed: %w", name, err)
 			}
 		} else {
 			if err := agentRepo.RemoveAgentToolBinding(agentID, t.ID); err != nil {
-				return fmt.Errorf("卸载 %s tool 失败: %w", name, err)
+				return fmt.Errorf("unmount %s tool failed: %w", name, err)
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"control-panel/internal/domain/agent"
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/pkg/database"
 )
@@ -25,13 +26,13 @@ var validAgentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`
 
 func ValidateAgentName(name string) error {
 	if name == "" {
-		return fmt.Errorf("Agent 标识不能为空")
+		return agent.NewValidationErrorf("Agent 标识不能为空")
 	}
 	if len(name) > 64 {
-		return fmt.Errorf("Agent 标识长度不能超过 64 个字符")
+		return agent.NewValidationErrorf("Agent 标识长度不能超过 64 个字符")
 	}
 	if !validAgentNamePattern.MatchString(name) {
-		return fmt.Errorf("Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾")
+		return agent.NewValidationErrorf("Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾")
 	}
 	return nil
 }
@@ -70,22 +71,22 @@ func NormalizeAgentName(name string) string {
 
 func ValidateCreateConfig(config map[string]interface{}) error {
 	if config == nil {
-		return fmt.Errorf("config 不能为空")
+		return agent.NewValidationErrorf("config 不能为空")
 	}
 	if v, ok := config["systemPrompt"].(string); !ok || v == "" {
-		return fmt.Errorf("systemPrompt 不能为空")
+		return agent.NewValidationErrorf("systemPrompt 不能为空")
 	}
 	return ValidateConfig(config)
 }
 
 func ValidateConfig(config map[string]interface{}) error {
 	if config == nil {
-		return fmt.Errorf("config 不能为空")
+		return agent.NewValidationErrorf("config 不能为空")
 	}
 
 	if pm, ok := config["permissionMode"].(string); ok && pm != "" {
 		if !validPermissionModes[pm] {
-			return fmt.Errorf("无效的 permissionMode: %s，可选值: auto, plan, bypassPermissions", pm)
+			return agent.NewValidationErrorf("无效的 permissionMode: %s，可选值: auto, plan, bypassPermissions", pm)
 		}
 	}
 
@@ -96,10 +97,10 @@ func ValidateConfig(config map[string]interface{}) error {
 	const maxTurnsUpperBound = 500
 	if v, ok := config["maxTurns"].(float64); ok {
 		if v < 0 {
-			return fmt.Errorf("maxTurns 不能为负数")
+			return agent.NewValidationErrorf("maxTurns 不能为负数")
 		}
 		if v > maxTurnsUpperBound {
-			return fmt.Errorf("maxTurns 不能超过 %d", maxTurnsUpperBound)
+			return agent.NewValidationErrorf("maxTurns 不能超过 %d", maxTurnsUpperBound)
 		}
 	}
 
@@ -113,19 +114,19 @@ func ValidateConfig(config map[string]interface{}) error {
 	}
 
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
-		return fmt.Errorf("icon URL 长度不能超过 512 个字符")
+		return agent.NewValidationErrorf("icon URL 长度不能超过 512 个字符")
 	}
 
 	if v, ok := config["iconName"].(string); ok && len(v) > 64 {
-		return fmt.Errorf("iconName 长度不能超过 64 个字符")
+		return agent.NewValidationErrorf("iconName 长度不能超过 64 个字符")
 	}
 
 	if v, ok := config["iconColor"].(string); ok && len(v) > 32 {
-		return fmt.Errorf("iconColor 长度不能超过 32 个字符")
+		return agent.NewValidationErrorf("iconColor 长度不能超过 32 个字符")
 	}
 
 	if v, ok := config["iconBgColor"].(string); ok && len(v) > 64 {
-		return fmt.Errorf("iconBgColor 长度不能超过 64 个字符")
+		return agent.NewValidationErrorf("iconBgColor 长度不能超过 64 个字符")
 	}
 
 	// 模型绑定校验
@@ -158,7 +159,7 @@ func ValidateConfig(config map[string]interface{}) error {
 
 	if len(fieldOverrides) > 0 {
 		if providerID == nil {
-			return fmt.Errorf("fieldOverrides 需要 providerId 同时存在")
+			return agent.NewValidationErrorf("fieldOverrides 需要 providerId 同时存在")
 		}
 		if err := validateFieldOverridesKeys(*providerID, fieldOverrides); err != nil {
 			return err
@@ -188,24 +189,24 @@ func parseDisallowedTools(raw []interface{}) ([]string, error) {
 		maxDisallowedToolChars = 128
 	)
 	if len(raw) > maxDisallowedTools {
-		return nil, fmt.Errorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
+		return nil, agent.NewValidationErrorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
 	}
 	seen := make(map[string]bool, len(raw))
 	items := make([]string, 0, len(raw))
 	for i, item := range raw {
 		s, ok := item.(string)
 		if !ok {
-			return nil, fmt.Errorf("disallowedTools[%d] 必须是字符串", i)
+			return nil, agent.NewValidationErrorf("disallowedTools[%d] 必须是字符串", i)
 		}
 		trimmed := strings.TrimSpace(s)
 		if trimmed == "" {
-			return nil, fmt.Errorf("disallowedTools[%d] trim 后不能为空", i)
+			return nil, agent.NewValidationErrorf("disallowedTools[%d] trim 后不能为空", i)
 		}
 		if len(trimmed) > maxDisallowedToolChars {
-			return nil, fmt.Errorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
+			return nil, agent.NewValidationErrorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
 		}
 		if seen[trimmed] {
-			return nil, fmt.Errorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
+			return nil, agent.NewValidationErrorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
 		}
 		seen[trimmed] = true
 		items = append(items, trimmed)
@@ -234,10 +235,10 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 	var exists int64
 	if err := database.DB.Table("provider_summaries").
 		Where("id = ?", providerID).Count(&exists).Error; err != nil {
-		return fmt.Errorf("读取 provider 失败: %w", err)
+		return fmt.Errorf("read provider failed: %w", err)
 	}
 	if exists == 0 {
-		return fmt.Errorf("providerId %d 不存在", providerID)
+		return agent.NewValidationErrorf("providerId %d 不存在", providerID)
 	}
 
 	if modelID == "" && modelSelectionID == "" {
@@ -256,15 +257,15 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 	err := query.Select("model_type").Row().Scan(&modelType)
 	if err == sql.ErrNoRows {
 		if modelSelectionID != "" {
-			return fmt.Errorf("providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
+			return agent.NewValidationErrorf("providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
 		}
-		return fmt.Errorf("providerId %d 下不存在模型 %s", providerID, modelID)
+		return agent.NewValidationErrorf("providerId %d 下不存在模型 %s", providerID, modelID)
 	}
 	if err != nil {
-		return fmt.Errorf("读取 provider_models 失败: %w", err)
+		return fmt.Errorf("read provider_models failed: %w", err)
 	}
 	if modelType != string(providerdomain.TypeLLM) && modelType != string(providerdomain.TypeVLM) {
-		return fmt.Errorf("模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
+		return agent.NewValidationErrorf("模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
 	}
 	return nil
 }
@@ -281,17 +282,17 @@ func validateFieldOverridesKeys(providerID uint64, overrides map[string]interfac
 		Select("fields").
 		Row().Scan(&fieldsJSON)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("providerId %d 不存在，无法验证 fieldOverrides", providerID)
+		return agent.NewValidationErrorf("providerId %d 不存在，无法验证 fieldOverrides", providerID)
 	}
 	if err != nil {
-		return fmt.Errorf("读取 Provider fields 失败: %w", err)
+		return fmt.Errorf("read provider fields failed: %w", err)
 	}
 
 	var fields []struct {
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-		return fmt.Errorf("解析 Provider fields 失败: %w", err)
+		return fmt.Errorf("parse provider fields failed: %w", err)
 	}
 
 	allowedKeys := make(map[string]bool)
@@ -301,7 +302,7 @@ func validateFieldOverridesKeys(providerID uint64, overrides map[string]interfac
 
 	for k := range overrides {
 		if !allowedKeys[k] {
-			return fmt.Errorf("fieldOverrides 包含非法 key: %s", k)
+			return agent.NewValidationErrorf("fieldOverrides 包含非法 key: %s", k)
 		}
 	}
 
