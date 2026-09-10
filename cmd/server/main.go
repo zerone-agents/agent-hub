@@ -264,6 +264,8 @@ func main() {
 
 	sceneService := services.NewSceneService()
 	sceneHandler := handler.NewSceneHandler(sceneService)
+	personalityService := services.NewPersonalityService()
+	personalityHandler := handler.NewPersonalityHandler(personalityService)
 	agentRelationService := services.NewAgentRelationService()
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
 
@@ -551,6 +553,17 @@ func main() {
 		adminScenesGroup.POST("", sceneHandler.Create)
 		adminScenesGroup.PUT("/:name", sceneHandler.Update)
 		adminScenesGroup.DELETE("/:name", sceneHandler.Delete)
+	}
+
+	// ---------- Prompt-first 人格库 ----------
+	adminPersonalitiesGroup := adminWrite.Group("/personalities")
+	adminPersonalitiesReadGroup := adminRead.Group("/personalities")
+	{
+		adminPersonalitiesReadGroup.GET("", personalityHandler.List)
+		adminPersonalitiesReadGroup.GET("/:name", personalityHandler.Get)
+		adminPersonalitiesGroup.POST("", personalityHandler.Create)
+		adminPersonalitiesGroup.PUT("/:name", personalityHandler.Update)
+		adminPersonalitiesGroup.DELETE("/:name", personalityHandler.Delete)
 	}
 
 	// ---------- Agent 组织关系 ----------

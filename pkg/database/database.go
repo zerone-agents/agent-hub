@@ -15,6 +15,7 @@ import (
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/mcp"
+	"control-panel/internal/domain/personality"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
@@ -121,6 +122,8 @@ func AutoMigrate(backfillTenant string) error {
 
 	err := DB.AutoMigrate(
 		&agent.AgentConfig{},
+		&personality.Template{},
+		&personality.Version{},
 		&agentrelation.AgentRelation{},
 		&agentrelation.AgentRelationEvent{},
 		&agentrelation.AgentMessage{},

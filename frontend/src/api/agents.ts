@@ -35,6 +35,9 @@ export interface AgentConfig {
   isDefault?: boolean
   group?: string
   behaviorProfile?: BehaviorProfile | null
+  personalityTemplateName?: string
+  personalityTemplateVersion?: number
+  personalityPrompt?: string
   createdAt?: string
   updatedAt?: string
 }

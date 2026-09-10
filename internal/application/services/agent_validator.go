@@ -124,6 +124,20 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	if v, ok := config["personalityTemplateName"].(string); ok && v != "" {
+		if err := validateIdentifier("人格模板", v); err != nil {
+			return err
+		}
+	}
+	if v, ok := config["personalityTemplateVersion"].(float64); ok {
+		if math.Trunc(v) != v || v < 0 {
+			return fmt.Errorf("personalityTemplateVersion 必须是非负整数")
+		}
+	}
+	if v, ok := config["personalityPrompt"].(string); ok && len(v) > personalityPromptMaxLength {
+		return fmt.Errorf("人格提示词长度不能超过 %d 个字符", personalityPromptMaxLength)
+	}
+
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
 		return fmt.Errorf("icon URL 长度不能超过 512 个字符")
 	}

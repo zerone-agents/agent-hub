@@ -242,9 +242,9 @@ export default function BehaviorProfileEditor({
     <div className={styles.shell}>
       <div className={styles.intro}>
         <div className={styles.introCopy}>
-          <span className={styles.introTitle}>人格光谱</span>
+          <span className={styles.introTitle}>结构化投影（兼容）</span>
           <span className={styles.introDesc}>
-            这组结构化倾向会在部署时转成稳定的系统上下文；它影响判断，但不会赋予越级、通信或数据权限。
+            用于旧版行为逻辑、筛选和观察。人格原稿才是主要来源；这些数值不会赋予越级、通信或数据权限。
           </span>
         </div>
         <span className={styles.version}>Schema v{profile.version}</span>
@@ -253,7 +253,7 @@ export default function BehaviorProfileEditor({
       <div className={styles.template}>
         <div className={styles.templateLabelRow}>
           <label className={styles.templateLabel} htmlFor="behavior-profile-template">
-            人格模板
+            投影预设
           </label>
           <span className={styles.templateStatus}>
             {selectedPreset ? '已套用模板' : '已调整为自定义参数'}
@@ -261,7 +261,7 @@ export default function BehaviorProfileEditor({
         </div>
         <Select
           id="behavior-profile-template"
-          aria-label="人格模板"
+          aria-label="投影预设"
           className={styles.templateSelect}
           value={selectedTemplateId}
           options={templateOptions}

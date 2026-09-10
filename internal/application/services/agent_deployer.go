@@ -927,7 +927,7 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 	def := &deployer.AgentDefinition{
 		Name:         name,
 		Description:  firstNonEmpty(cfg.Description["zh"], cfg.Description["en"], cfg.Name),
-		SystemPrompt: composeBehaviorProfileSystemPrompt(cfg.SystemPrompt, cfg.BehaviorProfile),
+		SystemPrompt: composePersonalitySystemPrompt(cfg.SystemPrompt, cfg.PersonalityPrompt, cfg.BehaviorProfile),
 		MaxTurns:     intPtr(cfg.MaxTurns),
 	}
 	if opts.isRoot {

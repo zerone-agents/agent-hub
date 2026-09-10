@@ -631,6 +631,15 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	if v, ok := config["group"].(string); ok {
 		cfg.Group = v
 	}
+	if v, ok := config["personalityTemplateName"].(string); ok {
+		cfg.PersonalityTemplateName = v
+	}
+	if v, ok := config["personalityTemplateVersion"].(float64); ok {
+		cfg.PersonalityTemplateVersion = int(v)
+	}
+	if v, ok := config["personalityPrompt"].(string); ok {
+		cfg.PersonalityPrompt = v
+	}
 	if behaviorProfilePresent {
 		cfg.BehaviorProfile = parsedBehaviorProfile
 	}
@@ -682,15 +691,18 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 
 func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]interface{} {
 	m := map[string]interface{}{
-		"systemPrompt":    cfg.SystemPrompt,
-		"permissionMode":  cfg.PermissionMode,
-		"maxTurns":        cfg.MaxTurns,
-		"icon":            cfg.Icon,
-		"iconName":        cfg.IconName,
-		"iconColor":       cfg.IconColor,
-		"iconBgColor":     cfg.IconBgColor,
-		"group":           cfg.Group,
-		"behaviorProfile": cfg.BehaviorProfile,
+		"systemPrompt":               cfg.SystemPrompt,
+		"permissionMode":             cfg.PermissionMode,
+		"maxTurns":                   cfg.MaxTurns,
+		"icon":                       cfg.Icon,
+		"iconName":                   cfg.IconName,
+		"iconColor":                  cfg.IconColor,
+		"iconBgColor":                cfg.IconBgColor,
+		"group":                      cfg.Group,
+		"behaviorProfile":            cfg.BehaviorProfile,
+		"personalityTemplateName":    cfg.PersonalityTemplateName,
+		"personalityTemplateVersion": cfg.PersonalityTemplateVersion,
+		"personalityPrompt":          cfg.PersonalityPrompt,
 	}
 
 	if cfg.MaxSessionQueries != nil {

@@ -5,6 +5,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, AgentConfig, BehaviorProfile } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
+import { usePersonalities } from '@/queries/usePersonalities'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
 import { getIconComponent, lightenHex } from '@/utils/icons'
@@ -79,6 +80,27 @@ const useStyles = createStyles(({ css }) => ({
   foot: css`
     display: flex; justify-content: flex-end; gap: 10px;
     padding: 14px 24px; border-top: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
+  `,
+  personalityShell: css`
+    overflow: hidden; border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+    border-radius: 9px; background: color-mix(in srgb, var(--background) 97%, var(--primary) 3%);
+  `,
+  personalityHead: css`
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
+    align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border);
+  `,
+  personalityLabel: css`display: block; margin-bottom: 4px; color: var(--text); font-size: 13px; font-weight: 650;`,
+  personalityHint: css`display: block; color: var(--text-muted); font-size: 11px; line-height: 1.5;`,
+  personalityVersion: css`color: var(--primary); font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;`,
+  personalityBody: css`padding: 14px 16px 4px;`,
+  personalityPrompt: css`
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    line-height: 1.65 !important;
+  `,
+  personalityFoot: css`
+    margin: -6px 0 14px; padding-left: 10px;
+    border-left: 2px solid color-mix(in srgb, var(--primary) 38%, transparent);
+    color: var(--text-muted); font-size: 10px; line-height: 1.5;
   `
 }))
 
@@ -107,6 +129,9 @@ interface FormValues {
   isDefault: boolean
   group: string
   behaviorProfile: BehaviorProfile
+  personalityTemplateName: string
+  personalityTemplateVersion: number
+  personalityPrompt: string
 }
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
@@ -116,6 +141,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const updateAgent = useUpdateAgent()
   const submitting = createAgent.isPending || updateAgent.isPending
   const { data: allAgents = [] } = useAgents()
+  const { data: personalities = [] } = usePersonalities()
 
   // 提取去重后的 group 值
   const groupOptions = React.useMemo(() => {
@@ -133,6 +159,11 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const iconName = Form.useWatch('iconName', form)
   const iconColor = Form.useWatch('iconColor', form)
   const iconBgColor = Form.useWatch('iconBgColor', form)
+  const personalityTemplateName = Form.useWatch('personalityTemplateName', form)
+  const personalityTemplateVersion = Form.useWatch('personalityTemplateVersion', form)
+  const personalityPrompt = Form.useWatch('personalityPrompt', form)
+  const selectedPersonality = personalities.find((item) => item.name === personalityTemplateName)
+  const personalityModified = Boolean(selectedPersonality && personalityPrompt.trim() !== selectedPersonality.prompt.trim())
 
   useEffect(() => {
     if (open) {
@@ -155,14 +186,17 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           mobileEnabled: editingAgent.mobileEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
           group: editingAgent.group ?? '',
-          behaviorProfile: cloneBehaviorProfile(editingAgent.config.behaviorProfile ?? DEFAULT_BEHAVIOR_PROFILE)
+          behaviorProfile: cloneBehaviorProfile(editingAgent.config.behaviorProfile ?? DEFAULT_BEHAVIOR_PROFILE),
+          personalityTemplateName: editingAgent.config.personalityTemplateName ?? '',
+          personalityTemplateVersion: editingAgent.config.personalityTemplateVersion ?? 0,
+          personalityPrompt: editingAgent.config.personalityPrompt ?? ''
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
         iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined,
-        behaviorProfile: cloneBehaviorProfile()
+        behaviorProfile: cloneBehaviorProfile(), personalityTemplateName: '', personalityTemplateVersion: 0, personalityPrompt: ''
         })
       }
     }
@@ -202,7 +236,10 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       iconColor: v.iconColor || undefined,
       iconBgColor: v.iconBgColor || undefined,
       group: v.group || '',
-      behaviorProfile: v.behaviorProfile
+      behaviorProfile: v.behaviorProfile,
+      personalityTemplateName: v.personalityTemplateName || '',
+      personalityTemplateVersion: v.personalityTemplateVersion || 0,
+      personalityPrompt: v.personalityPrompt || ''
     }
 
     if (editingAgent) {
@@ -364,11 +401,59 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
         </Form.Item>
 
-        {/* 行为人格 */}
-        <div className={styles.section} style={{ marginTop: 20 }}>行为人格</div>
-        <Form.Item name="behaviorProfile" noStyle>
-          <BehaviorProfileEditor />
-        </Form.Item>
+        {/* Prompt-first 人格 */}
+        <div className={styles.section} style={{ marginTop: 20 }}>人格</div>
+        <div className={styles.personalityShell}>
+          <div className={styles.personalityHead}>
+            <div>
+              <span className={styles.personalityLabel}>人格原稿</span>
+              <span className={styles.personalityHint}>选用模板后仍可修改；保存时会固化当前原稿，不受模板未来版本影响。</span>
+            </div>
+            <span className={styles.personalityVersion}>{personalityTemplateVersion ? `SNAPSHOT v${personalityTemplateVersion}` : 'CUSTOM'}</span>
+          </div>
+          <div className={styles.personalityBody}>
+            <Form.Item label="从人格库选用" name="personalityTemplateName">
+              <Select
+                showSearch={{ optionFilterProp: 'label' }} allowClear placeholder="选择人格，或直接撰写自定义原稿"
+                options={personalities.filter((item) => item.enabled || item.name === personalityTemplateName).map((item) => ({
+                  value: item.name, label: `${item.title} · v${item.currentVersion}`
+                }))}
+                onChange={(name?: string) => {
+                  if (!name) {
+                    form.setFieldsValue({ personalityTemplateName: '', personalityTemplateVersion: 0 })
+                    return
+                  }
+                  const template = personalities.find((item) => item.name === name)
+                  if (!template) return
+                  form.setFieldsValue({
+                    personalityTemplateName: template.name,
+                    personalityTemplateVersion: template.currentVersion,
+                    personalityPrompt: template.prompt,
+                    ...(template.behaviorProfile
+                      ? { behaviorProfile: cloneBehaviorProfile(template.behaviorProfile) }
+                      : {})
+                  })
+                }}
+              />
+            </Form.Item>
+            <Form.Item name="personalityTemplateVersion" hidden><InputNumber /></Form.Item>
+            <Form.Item label="提示词原稿" name="personalityPrompt" rules={[{ max: 40000 }]}>
+              <Input.TextArea
+                className={styles.personalityPrompt} rows={9} maxLength={40000} showCount
+                placeholder="写清楚价值排序、决策习惯、沟通方式、越级条件和人格盲点。"
+              />
+            </Form.Item>
+            <div className={styles.personalityFoot}>
+              {personalityModified ? '当前原稿已在模板基础上修改；本 Agent 将保存这份独立快照。' : '人格影响判断与表达，不会授予工具、数据、通信或越级权限。'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <Form.Item name="behaviorProfile" noStyle>
+            <BehaviorProfileEditor />
+          </Form.Item>
+        </div>
 
         {/* 系统提示词 */}
         <div className={styles.section} style={{ marginTop: 20 }}>系统提示词</div>

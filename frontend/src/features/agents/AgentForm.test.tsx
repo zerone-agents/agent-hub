@@ -17,6 +17,37 @@ vi.mock('@/queries/useAgents', () => ({
   useAgents: () => ({ data: [] as Agent[] }),
 }))
 
+vi.mock('@/queries/usePersonalities', () => ({
+  usePersonalities: () => ({
+    data: [
+      {
+        id: 1,
+        name: 'duty-whistleblower',
+        title: '尽职揭弊者',
+        description: '重事实与公共责任',
+        prompt: '证据充分且常规渠道失效时，你会越级报告。',
+        currentVersion: 3,
+        enabled: true,
+        isBuiltin: true,
+        usageCount: 0,
+        createdAt: '',
+        updatedAt: '',
+        behaviorProfile: {
+          version: 1,
+          hierarchyCompliance: 65,
+          ambition: 35,
+          whistleblowing: 95,
+          riskTolerance: 65,
+          conflictAvoidance: 20,
+          secrecy: 35,
+          selfInterest: 20,
+          escalationThreshold: 25,
+        },
+      },
+    ],
+  }),
+}))
+
 function renderForm(editingAgent: Agent | null) {
   return render(
     <ConfigProvider theme={antdTheme}>
@@ -139,8 +170,8 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
     const user = userEvent.setup()
     renderForm(null)
 
-    expect(screen.getByText('人格光谱')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '人格模板' })).toBeInTheDocument()
+    expect(screen.getByText('结构化投影（兼容）')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '投影预设' })).toBeInTheDocument()
     expect(screen.getByText('稳健执行者')).toBeInTheDocument()
     expect(screen.queryByLabelText('高级人格参数')).not.toBeInTheDocument()
 
@@ -166,7 +197,7 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
     const user = userEvent.setup()
     renderForm(null)
 
-    const templateSelect = screen.getByRole('combobox', { name: '人格模板' })
+    const templateSelect = screen.getByRole('combobox', { name: '投影预设' })
     await user.click(templateSelect)
     await user.click(await screen.findByText('政治投机者'))
     await user.type(screen.getByLabelText('代理标识'), 'climber-agent')
@@ -182,5 +213,23 @@ describe('AgentForm behaviorProfile', { timeout: 15000 }, () => {
       selfInterest: 85,
       escalationThreshold: 35,
     })
+  })
+
+  it('snapshots a selected prompt-first personality into the agent config', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    const personalitySelect = screen.getByRole('combobox', { name: '从人格库选用' })
+    await user.click(personalitySelect)
+    await user.click(await screen.findByText('尽职揭弊者 · v3'))
+    await user.type(screen.getByLabelText('代理标识'), 'prompt-agent')
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
+    expect(payload.config.personalityTemplateName).toBe('duty-whistleblower')
+    expect(payload.config.personalityTemplateVersion).toBe(3)
+    expect(payload.config.personalityPrompt).toContain('常规渠道失效')
+    expect(payload.config.behaviorProfile?.whistleblowing).toBe(95)
   })
 })

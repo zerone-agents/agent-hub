@@ -26,3 +26,22 @@ func TestComposeBehaviorProfileSystemPrompt(t *testing.T) {
 		require.Contains(t, got, "不授予任何工具、数据或组织权限")
 	})
 }
+
+func TestComposePersonalitySystemPrompt(t *testing.T) {
+	t.Run("prompt is primary and boundary is explicit", func(t *testing.T) {
+		got := composePersonalitySystemPrompt("你是财务总管。", "你谨慎，但在证据充分时会越级。", nil)
+		require.Contains(t, got, "你是财务总管。")
+		require.Contains(t, got, "[人格原稿]")
+		require.Contains(t, got, "你谨慎，但在证据充分时会越级。")
+		require.Contains(t, got, "不授予工具、数据、通信、组织层级或越级权限")
+		require.Contains(t, got, "与原稿冲突，以人格原稿为准")
+	})
+
+	t.Run("structured projection remains compatible", func(t *testing.T) {
+		profile := agent.DefaultBehaviorProfile()
+		got := composePersonalitySystemPrompt("角色", "人格", &profile)
+		require.Contains(t, got, "[人格原稿]")
+		require.Contains(t, got, "[结构化行为人格｜v1]")
+		require.Less(t, strings.Index(got, "[人格原稿]"), strings.Index(got, "[结构化行为人格｜v1]"))
+	})
+}

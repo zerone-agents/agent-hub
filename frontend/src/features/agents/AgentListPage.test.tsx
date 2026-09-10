@@ -39,6 +39,10 @@ vi.mock('@/queries/useAgents', () => ({
   useUpdateAgentKnowledgeDatasets: () => ({ mutateAsync: vi.fn(), isPending: false })
 }))
 
+vi.mock('@/queries/usePersonalities', () => ({
+  usePersonalities: () => ({ data: [], isLoading: false })
+}))
+
 vi.mock('@/queries/useTools', () => ({
   useTools: () => ({ data: [{ id: 1, name: 'search', title: '搜索', isDefault: true }] })
 }))
