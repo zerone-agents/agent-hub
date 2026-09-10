@@ -695,7 +695,10 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	// Load agent from DB
 	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("agent not found: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("load agent %s failed: %w", name, err)
 	}
 
 	// Deployer calls use the tenant-scoped deploy key.

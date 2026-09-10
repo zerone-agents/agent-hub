@@ -49,7 +49,9 @@ func respondAgentError(c *gin.Context, err error) {
 	case errors.Is(err, agent.ErrAgentNotFound):
 		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
 	case errors.Is(err, provider.ErrProviderNotFound):
-		respondError(c, http.StatusNotFound, provider.ErrProviderNotFound.Error())
+		// provider 域 sentinel 是英文文案（"provider not found"），
+		// HTTP 边界按用户面中文提示返回（外审 #5614465831 P3）。
+		respondError(c, http.StatusNotFound, "Provider 不存在")
 	default:
 		var ve *agent.ValidationError
 		if errors.As(err, &ve) {

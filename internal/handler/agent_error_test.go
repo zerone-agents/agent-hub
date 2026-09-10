@@ -10,6 +10,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/mcp"
+	"control-panel/internal/domain/provider"
 	"control-panel/pkg/database"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,8 @@ func newAgentErrorRouter(h *AgentHandler) *gin.Engine {
 	r.POST("/api/v1/admin/agents", h.Create)
 	r.PUT("/api/v1/admin/agents/:name/subagents", h.UpdateSubagents)
 	r.PUT("/api/v1/admin/agents/:name/knowledge", h.UpdateAgentKnowledge)
+	r.GET("/api/v1/admin/agents/:name/deploy", h.GetDeployment)
+	r.POST("/api/v1/admin/agents/:name/probe", h.ProbeAgent)
 	return r
 }
 
@@ -317,5 +320,55 @@ func TestAgentHandler_UpdateAgentKnowledge_AgentNotFound404(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "Agent 不存在")
 	require.NotContains(t, respBody, "record not found", "gorm 英文诊断不得泄漏")
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestAgentHandler_GetDeployment_AgentNotFound404 锁定外审 #5614465831 P2：
+// GetDeployment 不存在的 Agent 必须是 404「Agent 不存在」（service 层
+// GetStatus 的 not-found 已补 sentinel 包装），不得因 404 桶只认 sentinel
+// 而回归为 500 中性。
+func TestAgentHandler_GetDeployment_AgentNotFound404(t *testing.T) {
+	setupAgentErrorTestDB(t)
+
+	// deployer client 可置空：GetStatus 在 GetByName not-found 时提前返回，
+	// 不会触达 client。
+	deployerSvc := services.NewAgentDeployerService(services.AgentDeployerConfig{})
+	h := NewAgentHandler(services.NewAgentService("", ""), deployerSvc)
+	r := newAgentErrorRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/ghost-agent/deploy", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Agent 不存在")
+	require.NotContains(t, respBody, "server internal error", "不得回归 500 中性桶")
+	require.NotContains(t, respBody, "record not found", "gorm 英文诊断不得泄漏")
+}
+
+// TestAgentHandler_ProbeAgent_ProviderNotFound404 锁定外审 #5614465831 P3：
+// Probe 的 Provider 不存在必须返回中文用户面「Provider 不存在」，
+// 不得直接透出 provider 域英文 sentinel "provider not found"。
+func TestAgentHandler_ProbeAgent_ProviderNotFound404(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	// provider_summaries 表必须存在：id 不存在才返回 gorm.ErrRecordNotFound
+	// （表缺失会报 "no such table" 而非 not-found，走 500 桶）。
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}))
+	seedAgentRow(t, db, "probe-me")
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"providerId":999999}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents/probe-me/probe", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Provider 不存在")
+	require.NotContains(t, respBody, "provider not found", "英文 sentinel 不得直达用户")
 	require.NotContains(t, respBody, "服务器内部错误")
 }
