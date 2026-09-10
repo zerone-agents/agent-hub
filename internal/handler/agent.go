@@ -9,11 +9,11 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/deployer"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type AgentHandler struct {
@@ -33,16 +33,23 @@ func NewAgentHandler(service *services.AgentService, deployerService *services.A
 // （ValidationError）→ 400 完整链原文（外层 wrap 携带上下文必须保留）；
 // 基础设施故障（DB/加解密）→ 500 中性文案，完整错误链只在服务端日志。
 //
-// 404 分支同时认 gorm.ErrRecordNotFound：AgentService 的 not-found 统一按
-// fmt.Errorf("Agent 不存在: %w", err) 包装 repo 原始 gorm 错误（errors.go
-// 注释声称按 ErrAgentNotFound 包装，实证 agent_service 并未 wrap sentinel），
-// 两种底链都映射 404；响应取 sentinel 固定中文文案而非 err.Error()，避免
-// "record not found" 等英文诊断泄漏到响应体。DB 故障（非 ErrRecordNotFound）
-// 仍落入 500 中性桶，绝不伪装 not-found。
+// 404 分支只认 Agent/Provider 专属 sentinel（外审 #5612003511 P2）：
+// gorm.ErrRecordNotFound 是泛化错误，可能来自 builtin MCP 等非 Agent 实体
+// ——双认会把它们误判为「Agent 不存在」且吞掉诊断日志。service 层已在
+// not-found 时按 errors.Is(gorm.ErrRecordNotFound) 区分并包装专属 sentinel
+// （agent.ErrAgentNotFound / provider.ErrProviderNotFound），其余错误走
+// 英文诊断；因此 handler 仅需认 sentinel 即可，DB 故障仍落入 500 中性桶，
+// 绝不伪装 not-found。
 func respondAgentError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, agent.ErrAgentNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+	// 仅 Agent/Provider 专属 sentinel 映射 404（外审 #5612003511 P2：
+	// gorm.ErrRecordNotFound 是泛化错误，可能来自 builtin MCP 等非
+	// Agent 实体——双认会把它们误判为「Agent 不存在」且吞掉诊断日志；
+	// service 层已在 not-found 时包装专属 sentinel）。
+	case errors.Is(err, agent.ErrAgentNotFound):
 		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
+	case errors.Is(err, provider.ErrProviderNotFound):
+		respondError(c, http.StatusNotFound, provider.ErrProviderNotFound.Error())
 	default:
 		var ve *agent.ValidationError
 		if errors.As(err, &ve) {

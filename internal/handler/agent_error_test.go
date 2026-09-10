@@ -9,6 +9,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/mcp"
 	"control-panel/pkg/database"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,7 @@ func newAgentErrorRouter(h *AgentHandler) *gin.Engine {
 	r.GET("/api/v1/agents/:name", h.Get)
 	r.POST("/api/v1/admin/agents", h.Create)
 	r.PUT("/api/v1/admin/agents/:name/subagents", h.UpdateSubagents)
+	r.PUT("/api/v1/admin/agents/:name/knowledge", h.UpdateAgentKnowledge)
 	return r
 }
 
@@ -259,5 +261,61 @@ func TestAgentHandler_UpdateSubagents_SubagentMounted400(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 	respBody := w.Body.String()
 	require.Contains(t, respBody, `Agent \"worker-y\" 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）`)
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestAgentHandler_UpdateAgentKnowledge_MissingBuiltinMcp500Neutral 锁定
+// 外审 #5612003511 P2 复现场景：Agent 存在、内置 knowledge MCP 缺失时，
+// gorm.ErrRecordNotFound 底链来自 builtin MCP 查找而非 Agent 本身——
+// 修前 handler 双认 gorm 会误判 404「Agent 不存在」且吞掉诊断日志；修后
+// 404 只认 Agent/Provider 专属 sentinel，builtin MCP 缺失落 500 中性 +
+// 服务端日志（英文诊断 "builtin MCP 'knowledge' not found" 只在日志）。
+func TestAgentHandler_UpdateAgentKnowledge_MissingBuiltinMcp500Neutral(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.AgentKnowledgeDataset{}, &mcp.McpServer{}))
+	seedAgentRow(t, db, "builder-a") // Agent 存在；内置 knowledge MCP 未配置
+
+	// 捕获服务端日志，锁定「完整错误链只在日志」。
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"dataset_ids":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/builder-a/knowledge", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, respBody, "Agent 不存在", "builtin MCP 缺失不得误判为 Agent 不存在")
+	require.NotContains(t, respBody, "builtin MCP")
+	require.NotContains(t, respBody, "record not found")
+	require.Contains(t, logBuf.String(), "builtin MCP 'knowledge' not found", "MCP 缺失诊断必须进服务端日志")
+}
+
+// TestAgentHandler_UpdateAgentKnowledge_AgentNotFound404 锁定知识库端点对
+// 未知 agent 仍走 404 + Agent 专属 sentinel 文案（service 层 gorm not-found
+// 已按 ErrAgentNotFound 包装，handler 认 sentinel 即可——不应落 500）。
+func TestAgentHandler_UpdateAgentKnowledge_AgentNotFound404(t *testing.T) {
+	setupAgentErrorTestDB(t)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	r := newAgentErrorRouter(h)
+
+	body := `{"dataset_ids":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost-agent/knowledge", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Agent 不存在")
+	require.NotContains(t, respBody, "record not found", "gorm 英文诊断不得泄漏")
 	require.NotContains(t, respBody, "服务器内部错误")
 }

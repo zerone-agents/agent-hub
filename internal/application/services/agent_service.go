@@ -3,6 +3,7 @@ package services
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -13,6 +14,8 @@ import (
 	"control-panel/internal/domain/provider"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/database"
+
+	"gorm.io/gorm"
 )
 
 // AgentService provides business logic for managing agent configurations.
@@ -215,7 +218,10 @@ func (s *AgentService) buildAgentsDTO(tenantID string, configs []*agent.AgentCon
 func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("Agent 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", name, err)
 	}
 
 	subs, err := s.repo.GetSubagents(cfg.ID)
@@ -265,7 +271,10 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, apiKey, baseURL string) (*ProbeResult, error) {
 	a, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("Agent 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", name, err)
 	}
 
 	// Prefer explicit providerID from the request (supports testing before
@@ -280,7 +289,10 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 
 	p, err := s.providerSvc.repo.GetByID(tenantID, *resolvedProviderID)
 	if err != nil {
-		return nil, fmt.Errorf("Provider 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", provider.ErrProviderNotFound)
+		}
+		return nil, fmt.Errorf("get provider %d failed: %w", *resolvedProviderID, err)
 	}
 
 	storedKey, err := provider.Decrypt(p.LockedAPIKey, s.encryptionKey)
@@ -438,7 +450,10 @@ func (s *AgentService) applyCreateDefaults(cfg *agent.AgentConfig) {
 func (s *AgentService) UpdateAgent(tenantID, name string, input *UpdateAgentInput) (*AgentDTO, error) {
 	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("Agent 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", name, err)
 	}
 
 	if err := s.applyUpdateConfig(tenantID, cfg, input); err != nil {
@@ -902,7 +917,10 @@ func canonicalJSON(v interface{}) ([]byte, error) {
 func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]string, error) {
 	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, agentName)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	return s.repo.GetKnowledgeDatasetIDsByAgent(agentCfg.ID)
 }
@@ -923,7 +941,10 @@ func (s *AgentService) GetAgentKnowledgeDatasets(tenantID, agentName string) ([]
 func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
 	agentCfg, err := s.repo.GetByName(tenantID, tokenAgentName)
 	if err != nil {
-		return nil, "", fmt.Errorf("Agent '%s' 不存在: %w", tokenAgentName, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", fmt.Errorf("%w: %s", agent.ErrAgentNotFound, tokenAgentName)
+		}
+		return nil, "", fmt.Errorf("get agent %s failed: %w", tokenAgentName, err)
 	}
 	if capabilityHeader == "" {
 		// 存量兼容：未携带 capability 的已部署 agents.yaml 回到 #111 前
@@ -979,7 +1000,10 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, datasetIDs []string) error {
 	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在: %w", agentName, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: %s", agent.ErrAgentNotFound, agentName)
+		}
+		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
 	cleaned := make([]string, 0, len(datasetIDs))
