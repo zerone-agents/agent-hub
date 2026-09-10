@@ -67,8 +67,9 @@ export default function BulkConfirmModal({ open, operation, items, onCancel, onC
       okText={`${OP_LABEL[operation]} ${executableCount} 个`}
       okButtonProps={{
         disabled: executableCount === 0,
-        // 删除操作用 antd danger 主按钮；其余操作注入统一主按钮样式（AGENTS.md）
-        ...(danger ? { danger: true } : { className: primaryStyles.root }),
+        // 统一注入共享主按钮样式（AGENTS.md）；删除操作叠加 danger（review S2：两者都保留）
+        className: primaryStyles.root,
+        ...(danger ? { danger: true } : {}),
       }}
       onOk={onConfirm}
       width={480}

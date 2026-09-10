@@ -76,6 +76,11 @@ const useStyles = createStyles(({ css }) => ({
   `,
 }))
 
+/** 是否存在待更新工件（工具/技能任一非空）——「待更新」计数与「全选待更新」共用判定（review S3） */
+const hasPendingArtifactUpdates = (a: Agent): boolean =>
+  (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
+  (a.pendingArtifactUpdates?.skills.length ?? 0) > 0
+
 export default function AgentListPage() {
   const { styles } = useStyles()
   const { data: agents = [], isLoading } = useAgents()
@@ -145,15 +150,17 @@ export default function AgentListPage() {
     setRawSelectedNames((prev) => new Set([...prev, ...names]))
   }
 
-  // 列表刷新后剔除已消失的选中项（spec §4.1 选择保留策略）——渲染期派生而非
-  // effect，避免 effect 内 setState 的级联渲染（react-hooks/set-state-in-effect）
+  // 列表刷新后剔除已消失的选中项（spec §4.1 选择保留策略）——render-time state
+  // adjustment（React 官方模式，替代 effect 内 setState）：真正从 raw 集删除，
+  // 防止同名 Agent 重现时被静默复活选中（review P2b）
   const validNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents])
-  const selectedNames = useMemo(
-    () => rawSelectedNames.size === 0
-      ? rawSelectedNames
-      : new Set([...rawSelectedNames].filter((n) => validNames.has(n))),
-    [rawSelectedNames, validNames],
-  )
+  if (rawSelectedNames.size > 0) {
+    const kept = [...rawSelectedNames].filter((n) => validNames.has(n))
+    if (kept.length !== rawSelectedNames.size) {
+      setRawSelectedNames(new Set(kept))
+    }
+  }
+  const selectedNames = rawSelectedNames
 
   const selectedAgents = useMemo(
     () => agents.filter((a) => selectedNames.has(a.name)),
@@ -161,16 +168,14 @@ export default function AgentListPage() {
   )
 
   const pendingUpdateCount = useMemo(
-    () => agents.filter((a) =>
-      (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
-      (a.pendingArtifactUpdates?.skills.length ?? 0) > 0,
-    ).length,
+    () => agents.filter(hasPendingArtifactUpdates).length,
     [agents],
   )
 
-  // 点批量操作：并发 5 路预检选中项 → 分类 → 确认弹窗（spec §4.2）
+  // 点批量操作：并发 5 路预检选中项 → 分类 → 确认弹窗（spec §4.2）。
+  // 预检互斥守卫（review P1）：进行中不接受第二个预检，防止竞争覆盖 confirmState。
   const handleBulkOperation = async (op: BulkOperation) => {
-    if (bulkTask.phase === 'running' || selectedAgents.length === 0) return
+    if (bulkTask.phase === 'running' || precheckingOp !== null || selectedAgents.length === 0) return
     setPrecheckingOp(op)
     try {
       const prechecks = new Map<string, PrecheckResult>()
@@ -589,38 +594,35 @@ export default function AgentListPage() {
         )}
       </div>
 
-      {selectionMode && canWrite ? (
-        <BulkActionBar
-          selectedCount={selectedNames.size}
-          pendingUpdateCount={pendingUpdateCount}
-          onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
-          onSelectPendingUpdates={() => { addNames(agents.filter((a) =>
-            (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
-            (a.pendingArtifactUpdates?.skills.length ?? 0) > 0,
-          ).map((a) => a.name)); }}
-          onClear={() => { setRawSelectedNames(new Set()); }}
-          onOperation={(op) => { void handleBulkOperation(op); }}
-          onExit={exitSelectionMode}
-          operationsDisabled={bulkTask.phase === 'running'}
-          prechecking={precheckingOp}
+      <div className={styles.toolbar}>
+        <NameSearch
+          placeholder="搜索代理名称"
+          onSearch={setKeywords}
+          realtime
         />
-      ) : (
-        <div className={styles.toolbar}>
-          <NameSearch
-            placeholder="搜索代理名称"
-            onSearch={setKeywords}
-            realtime
+        {selectionMode && canWrite ? (
+          <BulkActionBar
+            selectedCount={selectedNames.size}
+            pendingUpdateCount={pendingUpdateCount}
+            onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
+            onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
+            onClear={() => { setRawSelectedNames(new Set()); }}
+            onOperation={(op) => { void handleBulkOperation(op); }}
+            onExit={exitSelectionMode}
+            operationsDisabled={bulkTask.phase === 'running'}
+            prechecking={precheckingOp}
           />
-          {canWrite && (
+        ) : (
+          canWrite && (
             <Button
               icon={<CheckSquareIcon size={14} />}
               onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
             >
               批量操作
             </Button>
-          )}
-        </div>
-      )}
+          )
+        )}
+      </div>
 
       {isLoading ? (
         <div className={styles.loadingWrap}><Spin size="medium" /></div>

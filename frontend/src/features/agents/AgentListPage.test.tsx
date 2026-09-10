@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
@@ -28,8 +28,11 @@ const mockAgents: Agent[] = [
   }
 ]
 
+// 测试可替换的列表数据（新数组引用模拟真实 react-query 刷新——原地 splice 骗过 useMemo 依赖比较）
+let mutableAgents: Agent[] | null = null
+
 vi.mock('@/queries/useAgents', () => ({
-  useAgents: () => ({ data: mockAgents, isLoading: false }),
+  useAgents: () => ({ data: mutableAgents ?? mockAgents, isLoading: false }),
   useDeleteAgent: () => ({ mutate: vi.fn() }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -210,6 +213,8 @@ describe('AgentListPage bulk operations (#141)', () => {
     vi.mocked(agentApi.deploy).mockReset()
   })
 
+  afterEach(() => { mutableAgents = null })
+
   it('admin sees 批量操作 entry; member does not', () => {
     setAuthRole('admin')
     const { unmount } = renderPage()
@@ -228,7 +233,8 @@ describe('AgentListPage bulk operations (#141)', () => {
 
     await user.click(screen.getByRole('button', { name: /批量操作/ }))
     expect(screen.getByTestId('bulk-action-bar')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('搜索代理名称')).not.toBeInTheDocument() // 批量栏替换工具栏
+    // review P2a：选择模式下搜索框保留（跨搜索选择保留的前提）
+    expect(screen.getByPlaceholderText('搜索代理名称')).toBeInTheDocument()
 
     // 选择卡片的 wrap 层带 aria-label「选择 <name>」
     await user.click(screen.getByLabelText('选择 general'))
@@ -285,5 +291,60 @@ describe('AgentListPage bulk operations (#141)', () => {
     const link = screen.getAllByText('全选本组')[0]!
     await user.click(link)
     expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 默认分组 2 个 agent
+  })
+
+  it('selection persists across search filtering (review P2a)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+
+    // 搜索 coder：general 卡片隐藏，但选择保留
+    await user.type(screen.getByPlaceholderText('搜索代理名称'), 'coder')
+    expect(screen.queryByLabelText('选择 general')).not.toBeInTheDocument()
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('选择 coder'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    // 清空搜索：general 回来，两个仍选中
+    await user.clear(screen.getByPlaceholderText('搜索代理名称'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+  })
+
+  it('removed agent is dropped from selection and not resurrected on reappearance (review P2b)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // 工厂函数：rerender 需要新元素引用——相同引用会被 React bailout，组件不重执行
+    const makePage = () => (
+      <ConfigProvider theme={antdTheme}>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <AgentListPage />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ConfigProvider>
+    )
+    const { rerender } = render(makePage())
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByLabelText('选择 coder'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    // coder 从列表消失（新数组引用 = 真实列表刷新）：选中集真正剔除
+    const general = mockAgents.find((a) => a.name === 'general')!
+    const coder = mockAgents.find((a) => a.name === 'coder')!
+    mutableAgents = [general]
+    rerender(makePage())
+    expect(await screen.findByText('已选 1 个')).toBeInTheDocument()
+
+    // coder 重现（新数组引用）：不被静默复活选中
+    mutableAgents = [general, coder]
+    rerender(makePage())
+    expect(await screen.findByLabelText('选择 coder')).toBeInTheDocument()
+    expect(screen.getByText('已选 1 个')).toBeInTheDocument()
   })
 })

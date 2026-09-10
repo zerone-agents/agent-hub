@@ -1,5 +1,6 @@
 import { Button, Modal, Progress, Tag } from 'antd'
 import { createStyles } from 'antd-style'
+import PrimaryButton from '@/components/PrimaryButton'
 import type { BulkOperation } from './classifyBulkOperation'
 import type { BulkItemStatus, BulkTaskItem, BulkTaskSummary, TaskPhase } from './useBulkAgentTask'
 import { tokens as t } from '@/styles/tokens'
@@ -102,12 +103,11 @@ export default function BulkTaskModal({
       keyboard={false}
       width={560}
       footer={
-        <Button
-          type={running ? 'default' : 'primary'}
-          onClick={running ? onCollapse : onClose}
-        >
-          {running ? '收起' : '关闭'}
-        </Button>
+        running ? (
+          <Button onClick={onCollapse}>收起</Button>
+        ) : (
+          <PrimaryButton onClick={onClose}>关闭</PrimaryButton>
+        )
       }
     >
       <div className={styles.head}>

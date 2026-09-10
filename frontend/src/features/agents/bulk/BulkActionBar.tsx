@@ -90,7 +90,8 @@ export default function BulkActionBar({
             size="small"
             danger={danger}
             icon={icon}
-            disabled={noSelection || operationsDisabled}
+            // 任一预检进行中禁用全部操作，防止多个预检竞争覆盖确认内容（review P1）
+            disabled={noSelection || operationsDisabled || prechecking !== null}
             loading={prechecking === op}
             onClick={() => { onOperation(op); }}
           >

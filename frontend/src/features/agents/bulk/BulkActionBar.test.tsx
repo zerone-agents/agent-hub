@@ -63,4 +63,11 @@ describe('BulkActionBar', () => {
     await user.click(screen.getByRole('button', { name: '停止' }))
     expect(p.onOperation).toHaveBeenCalledWith('stop')
   })
+
+  it('all operations disabled while any precheck is running (review P1)', () => {
+    renderBar({ prechecking: 'deploy' })
+    for (const label of ['重新部署', '停止', '删除']) {
+      expect(screen.getByRole('button', { name: label })).toBeDisabled()
+    }
+  })
 })
