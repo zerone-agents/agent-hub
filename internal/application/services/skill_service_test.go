@@ -193,8 +193,8 @@ func TestGetSkillMd_DownloadFailure(t *testing.T) {
 	if err == skill.ErrSkillNotFound || err == skill.ErrSkillFileNotFound {
 		t.Errorf("expected wrapped download error, got sentinel: %v", err)
 	}
-	if !strings.Contains(err.Error(), "下载技能文件失败") {
-		t.Errorf("error = %q, want to contain '下载技能文件失败'", err.Error())
+	if !strings.Contains(err.Error(), "download skill file failed") {
+		t.Errorf("error = %q, want to contain 'download skill file failed'", err.Error())
 	}
 }
 
@@ -326,7 +326,7 @@ func TestDeleteSkill_DBFailureKeepsObjectAndRow(t *testing.T) {
 	svc := &SkillService{repo: repository.NewSkillRepositoryWithDB(db), uploader: uploader, cdnHost: "https://cdn.example.com"}
 	err := svc.DeleteSkill("acme", "s1")
 	require.ErrorIs(t, err, forced)
-	require.Contains(t, err.Error(), "删除技能失败")
+	require.Contains(t, err.Error(), "delete skill failed")
 	_, exists := uploader.data[ossKey]
 	require.True(t, exists, "DB 删除失败时 OSS 对象必须原封不动")
 }
