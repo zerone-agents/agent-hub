@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"control-panel/internal/application/services"
@@ -22,13 +23,34 @@ func NewSkillHandler(service *services.SkillService) *SkillHandler {
 	return &SkillHandler{service: service}
 }
 
+// respondSkillError 映射 Skill 领域错误（issue #95 P2 同款边界分流）：
+// 领域 sentinel（ErrSkillNotFound / ErrSkillFileNotFound）→ 404 中文；
+// 文件类用户面错误（ErrInvalidSkillFile / ErrFileTooLarge）→ 400 原文；
+// ValidationError → 400 完整链；基础设施故障 → 500 中性 + 服务端日志。
+func respondSkillError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, skill.ErrSkillNotFound), errors.Is(err, skill.ErrSkillFileNotFound):
+		respondError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, skill.ErrInvalidSkillFile), errors.Is(err, skill.ErrFileTooLarge):
+		respondError(c, http.StatusBadRequest, err.Error())
+	default:
+		var ve *skill.ValidationError
+		if errors.As(err, &ve) {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[SkillHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
+}
+
 // ListPublic returns all skills for unauthenticated users.
 func (h *SkillHandler) ListPublic(c *gin.Context) {
 	skillType := c.Query("type")
 
 	skills, err := h.service.ListAll(tenant.GetTenantID(c), skillType)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -41,7 +63,7 @@ func (h *SkillHandler) GetPublic(c *gin.Context) {
 
 	sk, err := h.service.GetSkill(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -54,15 +76,7 @@ func (h *SkillHandler) Download(c *gin.Context) {
 
 	dto, err := h.service.Download(tenant.GetTenantID(c), name)
 	if err != nil {
-		if err == skill.ErrSkillNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		if err == skill.ErrSkillFileNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -80,15 +94,7 @@ func (h *SkillHandler) GetSkillMd(c *gin.Context) {
 
 	entries, err := h.service.GetSkillMd(tenant.GetTenantID(c), name)
 	if err != nil {
-		if err == skill.ErrSkillNotFound || err == skill.ErrSkillFileNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		if err == skill.ErrInvalidSkillFile {
-			respondError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -101,7 +107,7 @@ func (h *SkillHandler) ListAdmin(c *gin.Context) {
 
 	skills, err := h.service.ListAll(tenant.GetTenantID(c), skillType)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -140,7 +146,7 @@ func (h *SkillHandler) Create(c *gin.Context) {
 		FileSize:      header.Size,
 	})
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -187,11 +193,7 @@ func (h *SkillHandler) Update(c *gin.Context) {
 
 	sk, err := h.service.UpdateSkill(tenant.GetTenantID(c), name, input)
 	if err != nil {
-		if err == skill.ErrSkillNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -208,11 +210,7 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})
 			return
 		}
-		if err == skill.ErrSkillNotFound {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 
@@ -233,7 +231,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 		return
 	}
 	if err := h.service.UpdateAgentSkills(tenant.GetTenantID(c), agentName, req.SkillNames); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Agent Skill 关系已更新")
@@ -244,7 +242,7 @@ func (h *SkillHandler) GetAgentSkills(c *gin.Context) {
 	agentName := c.Param("name")
 	skillNames, err := h.service.GetAgentSkills(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondSkillError(c, err)
 		return
 	}
 	respondSuccess(c, skillNames)
