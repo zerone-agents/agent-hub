@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/deployer"
 
@@ -26,13 +28,45 @@ func NewAgentHandler(service *services.AgentService, deployerService *services.A
 	}
 }
 
+// respondAgentError 映射 Agent 领域错误（issue #95 P2 同款边界分流）：
+// 领域 sentinel（ErrAgentNotFound）→ 404 用户面文案；用户面校验错误
+// （ValidationError）→ 400 完整链原文（外层 wrap 携带上下文必须保留）；
+// 基础设施故障（DB/加解密）→ 500 中性文案，完整错误链只在服务端日志。
+//
+// 404 分支只认 Agent/Provider 专属 sentinel（外审 #5612003511 P2）：
+// gorm.ErrRecordNotFound 是泛化错误，可能来自 builtin MCP 等非 Agent 实体
+// ——双认会把它们误判为「Agent 不存在」且吞掉诊断日志。service 层已在
+// not-found 时按 errors.Is(gorm.ErrRecordNotFound) 区分并包装专属 sentinel
+// （agent.ErrAgentNotFound / provider.ErrProviderNotFound），其余错误走
+// 英文诊断；因此 handler 仅需认 sentinel 即可，DB 故障仍落入 500 中性桶，
+// 绝不伪装 not-found。
+func respondAgentError(c *gin.Context, err error) {
+	switch {
+	// 仅 Agent/Provider 专属 sentinel 映射 404（外审 #5612003511 P2：
+	// gorm.ErrRecordNotFound 是泛化错误，可能来自 builtin MCP 等非
+	// Agent 实体——双认会把它们误判为「Agent 不存在」且吞掉诊断日志；
+	// service 层已在 not-found 时包装专属 sentinel）。
+	case errors.Is(err, agent.ErrAgentNotFound):
+		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
+	case errors.Is(err, provider.ErrProviderNotFound):
+		// provider 域 sentinel 是英文文案（"provider not found"），
+		// HTTP 边界按用户面中文提示返回（外审 #5614465831 P3）。
+		respondError(c, http.StatusNotFound, "Provider 不存在")
+	default:
+		var ve *agent.ValidationError
+		if errors.As(err, &ve) {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[AgentHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
+}
+
 func (h *AgentHandler) Manifest(c *gin.Context) {
 	resp, err := h.service.GetManifest(tenant.GetTenantID(c), c.Query("platform"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -45,10 +79,7 @@ func (h *AgentHandler) Manifest(c *gin.Context) {
 func (h *AgentHandler) List(c *gin.Context) {
 	resp, err := h.service.GetDesktopAgents(tenant.GetTenantID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -61,10 +92,7 @@ func (h *AgentHandler) List(c *gin.Context) {
 func (h *AgentHandler) ListAdmin(c *gin.Context) {
 	resp, err := h.service.GetAllAgentsAdmin(tenant.GetTenantID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -90,10 +118,9 @@ func (h *AgentHandler) Get(c *gin.Context) {
 
 	resp, err := h.service.GetAgent(tenant.GetTenantID(c), name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		// 行为修正（原「所有错误一律 404」）：not-found 走 404，
+		// 其余错误由 respondAgentError 分流（VAL 400 / 基础设施 500）。
+		respondAgentError(c, err)
 		return
 	}
 
@@ -137,10 +164,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		IsDefault:      req.IsDefault,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -178,10 +202,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		Source:         req.Source,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -210,10 +231,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteAgent(tenant.GetTenantID(c), name); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -243,10 +261,7 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 
 	result, err := h.service.ProbeAgent(tenant.GetTenantID(c), name, req.ProviderID, req.APIKey, req.BaseURL)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -328,7 +343,7 @@ func (h *AgentHandler) GetDeployment(c *gin.Context) {
 
 	resp, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondAgentError(c, err)
 		return
 	}
 
@@ -402,10 +417,7 @@ func (h *AgentHandler) UpdateSubagents(c *gin.Context) {
 	}
 
 	if err := h.service.UpdateSubagents(tenant.GetTenantID(c), name, req.Subagents); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
@@ -423,10 +435,7 @@ func (h *AgentHandler) GetAgentKnowledge(c *gin.Context) {
 	name := c.Param("name")
 	datasetIDs, err := h.service.GetAgentKnowledgeDatasets(tenant.GetTenantID(c), name)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -450,10 +459,7 @@ func (h *AgentHandler) UpdateAgentKnowledge(c *gin.Context) {
 	}
 
 	if err := h.service.UpdateAgentKnowledgeDatasets(tenant.GetTenantID(c), name, req.DatasetIDs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondAgentError(c, err)
 		return
 	}
 
