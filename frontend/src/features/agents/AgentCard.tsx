@@ -4,6 +4,7 @@ import { Popconfirm, Tag, Tooltip, Checkbox } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
 import EntityCard from '@/components/EntityCard'
+import { hasPendingArtifactUpdates } from './pendingArtifactUpdates'
 import { getIconComponent } from '@/utils/icons'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
@@ -130,8 +131,7 @@ export default function AgentCard({
     color: 'var(--primary)'
   }
 
-  const hasPending = agent.pendingArtifactUpdates != null &&
-    (agent.pendingArtifactUpdates.tools.length > 0 || agent.pendingArtifactUpdates.skills.length > 0)
+  const hasPending = hasPendingArtifactUpdates(agent)
 
   const card = (
     <EntityCard

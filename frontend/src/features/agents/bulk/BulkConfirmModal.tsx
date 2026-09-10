@@ -1,15 +1,9 @@
 import { Modal, Tag } from 'antd'
 import { createStyles } from 'antd-style'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
+import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation, ClassifiedItem, Classification } from './classifyBulkOperation'
 import { tokens as t } from '@/styles/tokens'
-
-const OP_LABEL: Record<BulkOperation, string> = {
-  deploy: '部署',
-  redeploy: '重新部署',
-  stop: '停止',
-  delete: '删除',
-}
 
 const useStyles = createStyles(({ css }) => ({
   group: css`
@@ -60,11 +54,11 @@ export default function BulkConfirmModal({ open, operation, items, onCancel, onC
 
   return (
     <Modal
-      title={`批量${OP_LABEL[operation]}`}
+      title={`批量${BULK_OPERATION_LABEL[operation]}`}
       open={open}
       onCancel={onCancel}
       cancelText="取消"
-      okText={`${OP_LABEL[operation]} ${executableCount} 个`}
+      okText={`${BULK_OPERATION_LABEL[operation]} ${executableCount} 个`}
       okButtonProps={{
         disabled: executableCount === 0,
         // 统一注入共享主按钮样式（AGENTS.md）；删除操作叠加 danger（review S2：两者都保留）

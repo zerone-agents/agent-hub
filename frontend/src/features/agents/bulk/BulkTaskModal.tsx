@@ -1,16 +1,10 @@
 import { Button, Modal, Progress, Tag } from 'antd'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
+import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation } from './classifyBulkOperation'
 import type { BulkItemStatus, BulkTaskItem, BulkTaskSummary, TaskPhase } from './useBulkAgentTask'
 import { tokens as t } from '@/styles/tokens'
-
-const OP_LABEL: Record<BulkOperation, string> = {
-  deploy: '部署',
-  redeploy: '重新部署',
-  stop: '停止',
-  delete: '删除',
-}
 
 const STATUS_META: Record<BulkItemStatus, { label: string; color: string }> = {
   pending: { label: '等待', color: 'default' },
@@ -95,7 +89,7 @@ export default function BulkTaskModal({
 
   return (
     <Modal
-      title={`批量${operation ? OP_LABEL[operation] : ''}进度`}
+      title={`批量${operation ? BULK_OPERATION_LABEL[operation] : ''}进度`}
       open={open}
       onCancel={running ? onCollapse : onClose}
       closable

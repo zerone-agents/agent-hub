@@ -3,6 +3,14 @@ import type { Agent, DeploymentStatus } from '@/api/agents'
 /** 批量操作类型（issue #141 第一阶段 + 用户新增的停止）。 */
 export type BulkOperation = 'deploy' | 'redeploy' | 'stop' | 'delete'
 
+/** 操作中文标签（确认弹窗、进度 Modal 等共用，review 提示去重）。 */
+export const BULK_OPERATION_LABEL: Record<BulkOperation, string> = {
+  deploy: '部署',
+  redeploy: '重新部署',
+  stop: '停止',
+  delete: '删除',
+}
+
 /**
  * 预检结果判别联合（spec §5）：
  * - success：GET /deploy 请求成功，status 是真实部署状态（可为 'unknown' 或未识别值）

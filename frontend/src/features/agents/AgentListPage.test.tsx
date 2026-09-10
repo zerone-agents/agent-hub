@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
@@ -346,5 +346,31 @@ describe('AgentListPage bulk operations (#141)', () => {
     rerender(makePage())
     expect(await screen.findByLabelText('选择 coder')).toBeInTheDocument()
     expect(screen.getByText('已选 1 个')).toBeInTheDocument()
+  })
+
+  it('stale precheck result is discarded after exiting selection mode (review re-check P2)', async () => {
+    setAuthRole('admin')
+    const user = userEvent.setup()
+    // 手动控制预检 promise（deferred）：保持 pending 直到测试放行
+    let releasePrecheck: (() => void) | undefined
+    vi.mocked(agentApi.getDeployment).mockImplementation(async () => {
+      await new Promise<void>((r) => { releasePrecheck = r })
+      return { data: { success: true, data: { status: 'not_found' } } } as never
+    })
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: /批量操作/ }))
+    await user.click(screen.getByLabelText('选择 general'))
+    await user.click(screen.getByRole('button', { name: '部署' })) // 预检 pending
+
+    // 预检 pending 期间退出选择模式
+    await user.click(screen.getByRole('button', { name: /^退\s*出$/ }))
+    expect(screen.queryByTestId('bulk-action-bar')).not.toBeInTheDocument()
+
+    // 预检完成：旧批次结果被代次守卫丢弃，确认弹窗不出现
+    await act(async () => { releasePrecheck?.() })
+    expect(agentApi.getDeployment).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('批量部署')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '部署 1 个' })).not.toBeInTheDocument()
   })
 })

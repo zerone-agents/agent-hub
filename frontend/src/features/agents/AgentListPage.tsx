@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon } from '@phosphor-icons/react'
@@ -32,6 +32,7 @@ import { useBulkAgentTask } from './bulk/useBulkAgentTask'
 import { classifyAllAgents } from './bulk/classifyBulkOperation'
 import type { BulkOperation, ClassifiedItem, PrecheckResult } from './bulk/classifyBulkOperation'
 import CardGrid from '@/components/CardGrid'
+import { hasPendingArtifactUpdates } from './pendingArtifactUpdates'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -75,11 +76,6 @@ const useStyles = createStyles(({ css }) => ({
     gap: 12px; margin-bottom: 16px;
   `,
 }))
-
-/** 是否存在待更新工件（工具/技能任一非空）——「待更新」计数与「全选待更新」共用判定（review S3） */
-const hasPendingArtifactUpdates = (a: Agent): boolean =>
-  (a.pendingArtifactUpdates?.tools.length ?? 0) > 0 ||
-  (a.pendingArtifactUpdates?.skills.length ?? 0) > 0
 
 export default function AgentListPage() {
   const { styles } = useStyles()
@@ -137,6 +133,9 @@ export default function AgentListPage() {
   const [rawSelectedNames, setRawSelectedNames] = useState<Set<string>>(new Set())
   const [confirmState, setConfirmState] = useState<{ operation: BulkOperation; items: ClassifiedItem[] } | null>(null)
   const [precheckingOp, setPrecheckingOp] = useState<BulkOperation | null>(null)
+  // 预检代次（review 复审 P2）：退出选择模式时 bump，进行中的预检完成后
+  // 发现代次不符即丢弃结果——退出后不再弹旧批次的确认弹窗
+  const precheckGenerationRef = useRef(0)
 
   const toggleSelect = (name: string) => {
     setRawSelectedNames((prev) => {
@@ -176,6 +175,7 @@ export default function AgentListPage() {
   // 预检互斥守卫（review P1）：进行中不接受第二个预检，防止竞争覆盖 confirmState。
   const handleBulkOperation = async (op: BulkOperation) => {
     if (bulkTask.phase === 'running' || precheckingOp !== null || selectedAgents.length === 0) return
+    const generation = precheckGenerationRef.current
     setPrecheckingOp(op)
     try {
       const prechecks = new Map<string, PrecheckResult>()
@@ -191,6 +191,8 @@ export default function AgentListPage() {
           }
         }))
       }
+      // 预检期间用户已退出选择模式 → 丢弃旧批次结果，不弹确认（review 复审 P2）
+      if (precheckGenerationRef.current !== generation) return
       setConfirmState({ operation: op, items: classifyAllAgents(op, selectedAgents, prechecks) })
     } finally {
       setPrecheckingOp(null)
@@ -212,6 +214,7 @@ export default function AgentListPage() {
   }
 
   const exitSelectionMode = () => {
+    precheckGenerationRef.current++ // 使进行中的预检结果失效（review 复审 P2）
     setSelectionMode(false)
     setRawSelectedNames(new Set())
   }
