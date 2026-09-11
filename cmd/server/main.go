@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -176,6 +177,12 @@ func main() {
 
 	r := gin.Default()
 	r.MaxMultipartMemory = 50 << 20
+
+	// 审计 RemoteIP 信任边界（spec §5.2）：非法 CIDR 即终止启动——错误配置后的
+	// 信任状态不可保证；fatal 属内部错误，按 CONTRIBUTING 带 stack。
+	if err := middleware.ApplyTrustedProxies(r, cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("invalid server.trusted_proxies config: %v\n%s", err, debug.Stack())
+	}
 
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
@@ -403,7 +410,7 @@ func main() {
 			authGroup.GET("/mode", rlMode, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", rl, handler.Login)
-			authGroup.GET("/callback", handler.Callback(casdoorProvider))
+			authGroup.GET("/callback", rl, handler.Callback(casdoorProvider))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
 			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
 			authGroup.POST("/refresh", rl, handler.RefreshToken)

@@ -144,9 +144,10 @@ type OSSConfig struct {
 }
 
 type ServerConfig struct {
-	Host        string   `mapstructure:"host"`
-	Port        int      `mapstructure:"port"`
-	CorsOrigins []string `mapstructure:"cors_origins"`
+	Host           string   `mapstructure:"host"`
+	Port           int      `mapstructure:"port"`
+	CorsOrigins    []string `mapstructure:"cors_origins"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type DatabaseConfig struct {
@@ -171,7 +172,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	bindEnvVars := []string{
-		"server.host", "server.port", "server.cors_origins",
+		"server.host", "server.port", "server.cors_origins", "server.trusted_proxies",
 		"database.url", "database.max_idle", "database.max_open", "database.max_lifetime",
 		"casdoor.endpoint", "casdoor.client_id", "casdoor.client_secret", "casdoor.certificate",
 		"casdoor.organization", "casdoor.callback_url",
@@ -212,6 +213,10 @@ func LoadConfig() (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+
+	// trusted_proxies：env 存在则覆盖（spec §5.2）——viper 对 env string→[]string
+	// 自动转换按空格切分不可靠，故显式逗号分隔 + 清洗（TrimSpace、丢弃空项）。
+	applyTrustedProxiesEnv(&cfg)
 
 	// 角色已改为 agent-hub 本地管理，这两个环境变量不再生效；
 	// 检测到仅打 warning 不 fail，给线上留清理窗口。
@@ -266,4 +271,24 @@ func deriveDeployerURLHost(deployerURL string) string {
 		return ""
 	}
 	return u.Hostname()
+}
+
+// parseProxyCIDRList 将逗号分隔的 CIDR 列表清洗为 []string：
+// TrimSpace 每项并丢弃空项；空串/纯空白输入返回空列表（不信任任何代理，非错误）。
+func parseProxyCIDRList(raw string) []string {
+	out := []string{}
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// applyTrustedProxiesEnv 在 Unmarshal 之后显式覆盖 SERVER_TRUSTED_PROXIES：
+// 环境变量存在（即使为空）即覆盖，不存在的 key 不动 config 文件值。
+func applyTrustedProxiesEnv(cfg *Config) {
+	if raw, ok := os.LookupEnv("SERVER_TRUSTED_PROXIES"); ok {
+		cfg.Server.TrustedProxies = parseProxyCIDRList(raw)
+	}
 }
