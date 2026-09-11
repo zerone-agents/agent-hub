@@ -98,13 +98,13 @@ func (s *ToolService) SeedBuiltins() error {
 		t.Source = agent.ToolSourceBuiltin
 		exists, err := s.repo.ExistsByName(sysTenant, t.Name)
 		if err != nil {
-			return fmt.Errorf("检查内置 %s tool 失败: %w", t.Name, err)
+			return fmt.Errorf("check builtin %s tool failed: %w", t.Name, err)
 		}
 		if exists {
 			continue
 		}
 		if err := s.repo.Create(sysTenant, &t); err != nil {
-			return fmt.Errorf("创建内置 %s tool 失败: %w", t.Name, err)
+			return fmt.Errorf("create builtin %s tool failed: %w", t.Name, err)
 		}
 	}
 	return nil
@@ -167,7 +167,7 @@ type UpdateToolInput struct {
 func (s *ToolService) ListAll(tenantID string) ([]*ToolDTO, error) {
 	tools, err := s.repo.ListAll(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 Tool 列表失败: %w", err)
+		return nil, fmt.Errorf("list tools failed: %w", err)
 	}
 	dtos := make([]*ToolDTO, 0, len(tools))
 	for _, t := range tools {
@@ -404,14 +404,14 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 
 	defaultToolNames, err := s.repo.GetDefaultToolNames(tenantID)
 	if err != nil {
-		return fmt.Errorf("获取默认 Tool 失败: %w", err)
+		return fmt.Errorf("get default tool failed: %w", err)
 	}
 	toolNames = mergeStringSlices(toolNames, defaultToolNames)
 
 	// 已有关联名单：存量 missing 工具保持挂载合法，仅拒绝「新增」（issue #88）。
 	currentNames, err := s.repo.GetToolsByAgent(agentCfg.ID)
 	if err != nil {
-		return fmt.Errorf("获取 Agent 现有 Tool 失败: %w", err)
+		return fmt.Errorf("get agent tools failed: %w", err)
 	}
 	current := make(map[string]bool, len(currentNames))
 	for _, n := range currentNames {
@@ -443,7 +443,7 @@ func (s *ToolService) SeedIfEmpty() error {
 	const sysTenant = ""
 	tools, err := s.repo.ListAll(sysTenant)
 	if err != nil {
-		return fmt.Errorf("获取 Tool 列表失败: %w", err)
+		return fmt.Errorf("list tools failed: %w", err)
 	}
 	if len(tools) > 0 {
 		return nil
@@ -463,7 +463,7 @@ func (s *ToolService) SeedIfEmpty() error {
 			Source:        agent.ToolSourceBuiltin,
 		}
 		if err := s.repo.Create(sysTenant, t); err != nil {
-			return fmt.Errorf("创建预设 Tool '%s' 失败: %w", t.Name, err)
+			return fmt.Errorf("create preset tool '%s' failed: %w", t.Name, err)
 		}
 	}
 
@@ -530,12 +530,12 @@ func mergeStringSlices(base, extra []string) []string {
 func (s *ToolService) BackfillSubagentToolBindings() error {
 	agents, err := s.agentRepo.ListAllUnscoped()
 	if err != nil {
-		return fmt.Errorf("列出 Agent 失败: %w", err)
+		return fmt.Errorf("list agents failed: %w", err)
 	}
 	for _, a := range agents {
 		subs, err := s.agentRepo.GetSubagents(a.ID)
 		if err != nil {
-			return fmt.Errorf("获取 Agent %s 的 subagent 失败: %w", a.Name, err)
+			return fmt.Errorf("get subagents for agent %s failed: %w", a.Name, err)
 		}
 		if len(subs) == 0 {
 			continue
