@@ -41,7 +41,7 @@ func TestProviderHandler_SyncToMultiRAG_CClassNoModels400(t *testing.T) {
 	}).Error)
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -72,7 +72,7 @@ func TestProviderHandler_Create_BatchModelValidationKeepsIndex(t *testing.T) {
 	t.Cleanup(func() { database.DB = previousDB })
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

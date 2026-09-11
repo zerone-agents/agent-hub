@@ -78,7 +78,7 @@ func setupRuntimeConfigRouter(t *testing.T) (*gin.Engine, *bytes.Buffer, string)
 	})
 
 	gin.SetMode(gin.TestMode)
-	h := NewProviderHandler(services.NewProviderService(runtimeConfigTestEncryptionKey), nil)
+	h := NewProviderHandler(services.NewProviderService(runtimeConfigTestEncryptionKey), nil, newHandlerTestAuditRecorder(t))
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if c.GetHeader("X-Test-User") == "" {

@@ -4,17 +4,19 @@ import (
 	"net/http"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AigcConfigHandler struct {
-	svc *services.AigcConfigService
+	svc   *services.AigcConfigService
+	audit *services.AuditRecorder
 }
 
-func NewAigcConfigHandler(svc *services.AigcConfigService) *AigcConfigHandler {
-	return &AigcConfigHandler{svc: svc}
+func NewAigcConfigHandler(svc *services.AigcConfigService, ar *services.AuditRecorder) *AigcConfigHandler {
+	return &AigcConfigHandler{svc: svc, audit: ar}
 }
 
 func (h *AigcConfigHandler) Get(c *gin.Context) {
@@ -39,11 +41,13 @@ func (h *AigcConfigHandler) Save(c *gin.Context) {
 		return
 	}
 	tenantID := tenant.GetTenantID(c)
-	dto, _, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
+	dto, rcpt, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	// 幂等保存（ChangedFields=[]）仍记录事件：操作意图本身可审计（Task 9 语义）。
+	h.audit.AigcSaved(c, rcpt.ChangedFields)
 	respondSuccess(c, dto)
 }
 
@@ -53,6 +57,7 @@ func (h *AigcConfigHandler) RotateKey(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.audit.Simple(c, audit.ActionAigcRotateKey, audit.TargetAigcConfig, tenant.GetTenantID(c), "")
 	respondSuccess(c, dto)
 }
 
@@ -61,5 +66,6 @@ func (h *AigcConfigHandler) Delete(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit.Simple(c, audit.ActionAigcDelete, audit.TargetAigcConfig, tenant.GetTenantID(c), "")
 	respondMessage(c, http.StatusOK, "aigc config deleted")
 }

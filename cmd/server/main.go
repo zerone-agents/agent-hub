@@ -233,7 +233,7 @@ func main() {
 	knowledgeService := services.NewKnowledgeService(knowledgeEngine, providerService)
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
-	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
+	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
 		Client:            deployerClient,
 		PublicHost:        cfg.Deployer.PublicHost,
@@ -251,7 +251,7 @@ func main() {
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
-	agentHandler := handler.NewAgentHandler(agentService, deployerService)
+	agentHandler := handler.NewAgentHandler(agentService, deployerService, auditRecorder)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
 	runtimeClient := runtime.NewClient()
@@ -302,7 +302,7 @@ func main() {
 		multiragSync = c
 		multiragMyLLMs = c
 	}
-	providerHandler := handler.NewProviderHandler(providerService, multiragSync)
+	providerHandler := handler.NewProviderHandler(providerService, multiragSync, auditRecorder)
 
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeService, multiragMyLLMs)
 
@@ -310,7 +310,7 @@ func main() {
 	// Backed by GORM directly (no repository layer needed) — service tests use
 	// sqlite for isolation.
 	cliTokenSvc := services.NewCLITokenService(database.GetDB())
-	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc)
+	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc, auditRecorder)
 
 	// 首次启动时插入种子数据
 	if err := providerService.SeedIfEmpty(); err != nil {
