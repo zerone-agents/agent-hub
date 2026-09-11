@@ -424,6 +424,13 @@ func main() {
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
 
+	// ---------- Audit 领域 ----------
+	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。
+	auditRepo := repository.NewAuditRepository(database.GetDB())
+	auditQuerier := services.NewAuditQuerier(auditRepo)
+	auditHandler := handler.NewAuditHandler(auditQuerier)
+	v1group.Group("/admin", middleware.RequireAdmin()).GET("/audit-logs", auditHandler.List)
+
 	// ---------- Agent 领域 ----------
 	// 公开接口
 	agentsGroup := v1group.Group("/agents")
