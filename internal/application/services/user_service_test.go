@@ -167,8 +167,9 @@ func TestSetStatusReceipt(t *testing.T) {
 	require.True(t, rcpt.LocalApplied)
 }
 
-func TestUpdateColumnZeroRowsReturnsNotFound(t *testing.T) {
-	// RowsAffected 判定：零行命中（并发删除窗口）→ 未生效 + 错误（spec §3.2）
+func TestUpdateColumnMissingRowReturnsZeroRows(t *testing.T) {
+	// updateColumn 只报告 RowsAffected：零行命中（如行不存在）不是错误。
+	// 「0 行 → 哪种错误/幂等」的消歧职责在调用方 resolveZeroRows（见下组用例）。
 	_, db := newUserSvc(t)
 	rows, err := updateColumn(db, 999, "role", "admin")
 	require.NoError(t, err)
@@ -185,4 +186,81 @@ func TestUpdateRoleErrorReturnsNilReceipt(t *testing.T) {
 	rcpt, err = svc.UpdateRole(1, 1, "admin") // 自我变更
 	require.ErrorIs(t, err, ErrSelfOperation)
 	require.Nil(t, rcpt)
+}
+
+// rows==0 复查消歧（用户裁决 2026-09-11 方案②，spec §3.2）。生产库 MySQL 默认
+// rowcount=实际改变行数，同值幂等更新 RowsAffected=0；SQLite 端到端复现不了
+// （按写入行计数恒为 1），故三种结局直接对 resolveZeroRows 做确定性单测。
+
+func TestUpdateRoleZeroRowsIdempotentSuccess(t *testing.T) {
+	// 结局 1：行仍在且 role 已等于目标值 → 幂等成功，重复提交不得报错。
+	_, db := newUserSvc(t)
+	u := seedUser(t, db, 1, "alice", "member", "active")
+	rcpt, err := resolveZeroRows(u, nil, "role", "member")
+	require.NoError(t, err)
+	require.NotNil(t, rcpt)
+	require.Equal(t, authdom.Role("member"), rcpt.RoleBefore)
+	require.Equal(t, rcpt.RoleBefore, rcpt.RoleAfter)
+	require.Equal(t, authdom.UserStatus("active"), rcpt.StatusBefore)
+	require.Equal(t, rcpt.StatusBefore, rcpt.StatusAfter)
+	require.Equal(t, rcpt.StatusBefore, rcpt.EffectiveStatusBefore)
+	require.Equal(t, rcpt.StatusBefore, rcpt.EffectiveStatusAfter)
+	require.True(t, rcpt.RemoteApplied)
+	require.True(t, rcpt.LocalApplied)
+	// role 列之外的 Status 四字段按当前值（上面的断言）；status 列同构验证。
+	rcpt, err = resolveZeroRows(u, nil, "status", "active")
+	require.NoError(t, err)
+	require.NotNil(t, rcpt)
+	require.Equal(t, rcpt.RoleBefore, rcpt.RoleAfter)
+	require.Equal(t, rcpt.StatusBefore, rcpt.StatusAfter)
+	require.True(t, rcpt.RemoteApplied)
+	require.True(t, rcpt.LocalApplied)
+}
+
+func TestSetStatusZeroRowsIdempotentSuccess(t *testing.T) {
+	// 结局 1（status 列）：对已是 disabled 的用户重复提交 disabled → 幂等成功。
+	_, db := newUserSvc(t)
+	u := seedUser(t, db, 1, "alice", "member", "disabled")
+	rcpt, err := resolveZeroRows(u, nil, "status", "disabled")
+	require.NoError(t, err)
+	require.NotNil(t, rcpt)
+	require.Equal(t, authdom.UserStatus("disabled"), rcpt.StatusBefore)
+	require.Equal(t, rcpt.StatusBefore, rcpt.StatusAfter)
+	require.Equal(t, rcpt.StatusBefore, rcpt.EffectiveStatusBefore)
+	require.Equal(t, rcpt.StatusBefore, rcpt.EffectiveStatusAfter)
+	require.Equal(t, authdom.Role("member"), rcpt.RoleBefore)
+	require.Equal(t, rcpt.RoleBefore, rcpt.RoleAfter)
+	require.True(t, rcpt.RemoteApplied)
+	require.True(t, rcpt.LocalApplied)
+}
+
+func TestUpdateRoleZeroRowsRowDeleted(t *testing.T) {
+	// 结局 2：行已不存在（真正的并发删除窗口）→ (nil, gorm.ErrRecordNotFound)。
+	svc, db := newUserSvc(t)
+	seedUser(t, db, 1, "alice", "member", "active")
+	require.NoError(t, db.Delete(&authdom.User{}, 1).Error)
+	cur, getErr := svc.GetByID(1)
+	require.Error(t, getErr) // 行没了，复查必须失败
+	rcpt, err := resolveZeroRows(cur, getErr, "role", "admin")
+	require.Nil(t, rcpt)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	// status 列同构
+	rcpt, err = resolveZeroRows(cur, getErr, "status", "disabled")
+	require.Nil(t, rcpt)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}
+
+func TestUpdateRoleZeroRowsConcurrentWriterWon(t *testing.T) {
+	// 结局 3：行仍在但值不等于目标（并发写入者胜出，我方写入实为 no-op）
+	// → (nil, 「用户已被并发修改，请重试」)。
+	_, db := newUserSvc(t)
+	u := seedUser(t, db, 1, "bob", "admin", "active") // 并发写入者已把 role 改为 admin
+	rcpt, err := resolveZeroRows(u, nil, "role", "member")
+	require.Nil(t, rcpt)
+	require.ErrorIs(t, err, ErrConcurrentModification)
+	require.Equal(t, "用户已被并发修改，请重试", err.Error())
+	// status 列同构
+	rcpt, err = resolveZeroRows(u, nil, "status", "disabled")
+	require.Nil(t, rcpt)
+	require.ErrorIs(t, err, ErrConcurrentModification)
 }
