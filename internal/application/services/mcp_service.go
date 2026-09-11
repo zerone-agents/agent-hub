@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"control-panel/internal/domain/provider"
 	mcpprobe "control-panel/internal/infrastructure/mcp"
 	repository "control-panel/internal/infrastructure/persistence"
+	"gorm.io/gorm"
 )
 
 type McpService struct {
@@ -124,7 +126,7 @@ func (s *McpService) encryptMap(m map[string]string) (string, error) {
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {
-		return "", fmt.Errorf("序列化失败: %w", err)
+		return "", fmt.Errorf("serialize failed: %w", err)
 	}
 	return provider.Encrypt(string(raw), s.encryptionKey)
 }
@@ -143,7 +145,7 @@ func (s *McpService) decryptMap(stored string) (map[string]string, error) {
 		return out, nil
 	}
 	if err := json.Unmarshal([]byte(plain), &out); err != nil {
-		return nil, fmt.Errorf("反序列化失败: %w", err)
+		return nil, fmt.Errorf("deserialize failed: %w", err)
 	}
 	return out, nil
 }
@@ -183,7 +185,7 @@ func (s *McpService) toDTO(m *mcp.McpServer) *McpDTO {
 func (s *McpService) toDetailDTO(m *mcp.McpServer) (*McpDetailDTO, error) {
 	headersMap, err := s.decryptMap(m.Headers)
 	if err != nil {
-		return nil, fmt.Errorf("解密 headers 失败: %w", err)
+		return nil, fmt.Errorf("decrypt headers failed: %w", err)
 	}
 	// Mask sensitive values; the frontend compares against these masked forms
 	// to decide whether the user actually changed a value before saving.
@@ -201,7 +203,7 @@ func (s *McpService) toDetailDTO(m *mcp.McpServer) (*McpDetailDTO, error) {
 func (s *McpService) toClientDTO(m *mcp.McpServer) (*McpClientDTO, error) {
 	headersMap, err := s.decryptMap(m.Headers)
 	if err != nil {
-		return nil, fmt.Errorf("解密 headers 失败: %w", err)
+		return nil, fmt.Errorf("decrypt headers failed: %w", err)
 	}
 
 	dto := &McpClientDTO{
@@ -212,7 +214,7 @@ func (s *McpService) toClientDTO(m *mcp.McpServer) (*McpClientDTO, error) {
 	}
 	if m.ToolsJSON != "" {
 		if err := json.Unmarshal([]byte(m.ToolsJSON), &dto.Tools); err != nil {
-			return nil, fmt.Errorf("解析 MCP %q tools 失败: %w", m.Name, err)
+			return nil, fmt.Errorf("parse MCP %q tools failed: %w", m.Name, err)
 		}
 	}
 	if m.RetryMaxRetries != nil || m.RetryTimeoutMs != nil {
@@ -228,10 +230,10 @@ func (s *McpService) toClientDTO(m *mcp.McpServer) (*McpClientDTO, error) {
 // 当前仅支持 sse / http。
 func validateMcpConfig(transport, url string) error {
 	if !validTransportType(transport) {
-		return fmt.Errorf("transportType 必须是 sse / http 之一，当前: %q", transport)
+		return mcp.NewValidationErrorf("transportType 必须是 sse / http 之一，当前: %q", transport)
 	}
 	if strings.TrimSpace(url) == "" {
-		return fmt.Errorf("%s 类型必须填写 url", transport)
+		return mcp.NewValidationErrorf("%s 类型必须填写 url", transport)
 	}
 	return nil
 }
@@ -241,7 +243,7 @@ func validateMcpConfig(transport, url string) error {
 func (s *McpService) ListAll(tenantID string) ([]*McpDTO, error) {
 	items, err := s.repo.ListAll(tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 MCP 列表失败: %w", err)
+		return nil, fmt.Errorf("list MCPs failed: %w", err)
 	}
 	dtos := make([]*McpDTO, 0, len(items))
 	for _, m := range items {
@@ -253,7 +255,10 @@ func (s *McpService) ListAll(tenantID string) ([]*McpDTO, error) {
 func (s *McpService) GetByName(tenantID, name string) (*McpDetailDTO, error) {
 	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("MCP 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", mcp.ErrMcpNotFound)
+		}
+		return nil, fmt.Errorf("get MCP %s failed: %w", name, err)
 	}
 	return s.toDetailDTO(m)
 }
@@ -265,15 +270,15 @@ func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, er
 
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查 MCP 存在性失败: %w", err)
+		return nil, fmt.Errorf("check MCP existence failed: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("MCP '%s' 已存在", input.Name)
+		return nil, mcp.NewValidationErrorf("MCP '%s' 已存在", input.Name)
 	}
 
 	headersEnc, err := s.encryptMap(input.Headers)
 	if err != nil {
-		return nil, fmt.Errorf("加密 headers 失败: %w", err)
+		return nil, fmt.Errorf("encrypt headers failed: %w", err)
 	}
 
 	var toolsJSON string
@@ -282,7 +287,7 @@ func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, er
 	if input.Tools != nil {
 		raw, err := json.Marshal(input.Tools)
 		if err != nil {
-			return nil, fmt.Errorf("序列化 tools 失败: %w", err)
+			return nil, fmt.Errorf("serialize tools failed: %w", err)
 		}
 		toolsJSON = string(raw)
 		probeStatus = "success"
@@ -306,7 +311,7 @@ func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, er
 	}
 
 	if err := s.repo.Create(tenantID, m); err != nil {
-		return nil, fmt.Errorf("创建 MCP 失败: %w", err)
+		return nil, fmt.Errorf("create MCP failed: %w", err)
 	}
 	return s.toDTO(m), nil
 }
@@ -314,12 +319,15 @@ func (s *McpService) Create(tenantID string, input *CreateMcpInput) (*McpDTO, er
 func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpDTO, error) {
 	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("MCP 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", mcp.ErrMcpNotFound)
+		}
+		return nil, fmt.Errorf("get MCP %s failed: %w", name, err)
 	}
 
 	if m.IsBuiltin {
 		if input.TransportType != nil && *input.TransportType != m.TransportType {
-			return nil, fmt.Errorf("内置 MCP 不可修改 transportType")
+			return nil, mcp.NewValidationErrorf("内置 MCP 不可修改 transportType")
 		}
 	}
 
@@ -350,7 +358,7 @@ func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpD
 		}
 		enc, err := s.encryptMap(merged)
 		if err != nil {
-			return nil, fmt.Errorf("加密 headers 失败: %w", err)
+			return nil, fmt.Errorf("encrypt headers failed: %w", err)
 		}
 		m.Headers = enc
 	}
@@ -366,7 +374,7 @@ func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpD
 	}
 
 	if err := s.repo.Update(tenantID, m); err != nil {
-		return nil, fmt.Errorf("更新 MCP 失败: %w", err)
+		return nil, fmt.Errorf("update MCP failed: %w", err)
 	}
 	return s.toDTO(m), nil
 }
@@ -374,15 +382,18 @@ func (s *McpService) Update(tenantID, name string, input *UpdateMcpInput) (*McpD
 func (s *McpService) Delete(tenantID, name string) error {
 	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return fmt.Errorf("MCP '%s' 不存在", name)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w", mcp.ErrMcpNotFound)
+		}
+		return fmt.Errorf("get MCP %s failed: %w", name, err)
 	}
 	if m.IsBuiltin {
-		return fmt.Errorf("MCP '%s' 是内置服务，不可删除", name)
+		return mcp.NewValidationErrorf("MCP '%s' 是内置服务，不可删除", name)
 	}
 
 	own, foreign, err := s.repo.GetMcpBindingsScoped(tenantID, m.ID)
 	if err != nil {
-		return fmt.Errorf("查询 MCP 绑定失败: %w", err)
+		return fmt.Errorf("query MCP bindings failed: %w", err)
 	}
 	if len(own) > 0 || foreign {
 		return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
@@ -397,7 +408,7 @@ func (s *McpService) Delete(tenantID, name string) error {
 				return &agent.McpInUseError{McpName: m.Name, Agents: own, Foreign: foreign}
 			}
 		}
-		return fmt.Errorf("删除 MCP 失败: %w", err)
+		return fmt.Errorf("delete MCP failed: %w", err)
 	}
 	return nil
 }
@@ -553,18 +564,21 @@ func (s *McpService) ProbeByConfig(ctx context.Context, input *McpProbeInput) (*
 func (s *McpService) ProbeByName(ctx context.Context, tenantID, name string) (*mcpprobe.ProbeResult, error) {
 	m, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("MCP 不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", mcp.ErrMcpNotFound)
+		}
+		return nil, fmt.Errorf("get MCP %s failed: %w", name, err)
 	}
 	if m.IsBuiltin {
 		var tools []mcpprobe.McpTool
 		if err := json.Unmarshal([]byte(m.ToolsJSON), &tools); err != nil {
-			return nil, fmt.Errorf("解析内置 MCP tools 失败: %w", err)
+			return nil, fmt.Errorf("parse builtin MCP tools failed: %w", err)
 		}
 		return &mcpprobe.ProbeResult{Status: "success", Tools: tools}, nil
 	}
 	headersMap, err := s.decryptMap(m.Headers)
 	if err != nil {
-		return nil, fmt.Errorf("解密 headers 失败: %w", err)
+		return nil, fmt.Errorf("decrypt headers failed: %w", err)
 	}
 	result, err := s.probeClient.Probe(ctx, mcpprobe.ProbeConfig{
 		TransportType: m.TransportType,
@@ -588,7 +602,7 @@ func (s *McpService) saveProbeResult(tenantID string, m *mcp.McpServer, result *
 	if len(result.Tools) > 0 {
 		raw, err := json.Marshal(result.Tools)
 		if err != nil {
-			return fmt.Errorf("序列化 tools 失败: %w", err)
+			return fmt.Errorf("serialize tools failed: %w", err)
 		}
 		toolsJSON = string(raw)
 	}
@@ -609,14 +623,20 @@ func (s *McpService) GetAgentMcps(tenantID, agentName string) ([]string, error) 
 func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []string) error {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mcp.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		}
+		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
 	mcpIDs := make([]uint64, 0, len(mcpNames))
 	for _, mcpName := range mcpNames {
 		m, err := s.repo.GetByName(tenantID, mcpName)
 		if err != nil {
-			return fmt.Errorf("MCP '%s' 不存在", mcpName)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return mcp.NewValidationErrorf("MCP '%s' 不存在", mcpName)
+			}
+			return fmt.Errorf("get MCP %s failed: %w", mcpName, err)
 		}
 		mcpIDs = append(mcpIDs, m.ID)
 	}
@@ -629,11 +649,14 @@ func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []stri
 func (s *McpService) GetClientMcpsByAgent(tenantID, agentName string) (map[string]*McpClientDTO, error) {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", agent.ErrAgentNotFound)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	items, err := s.repo.GetMcpServersByAgent(tenantID, agentCfg.ID)
 	if err != nil {
-		return nil, fmt.Errorf("查询 Agent MCP 失败: %w", err)
+		return nil, fmt.Errorf("query agent MCPs failed: %w", err)
 	}
 	out := make(map[string]*McpClientDTO, len(items))
 	for _, m := range items {

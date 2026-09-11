@@ -2,10 +2,12 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -19,12 +21,33 @@ func NewMcpHandler(svc *services.McpService) *McpHandler {
 	return &McpHandler{service: svc}
 }
 
+// respondMcpError 映射 MCP 领域错误（issue #95 P2 同款边界分流）：
+// 领域 sentinel（ErrMcpNotFound）→ 404 中文；用户面校验错误
+// （ValidationError）→ 400 完整链原文；基础设施故障 → 500 中性，
+// 完整错误链只在服务端日志。
+func respondMcpError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, mcp.ErrMcpNotFound):
+		respondError(c, http.StatusNotFound, mcp.ErrMcpNotFound.Error())
+	case errors.Is(err, agent.ErrAgentNotFound):
+		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
+	default:
+		var ve *mcp.ValidationError
+		if errors.As(err, &ve) {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[McpHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
+}
+
 // ==================== 管理：CRUD ====================
 
 func (h *McpHandler) List(c *gin.Context) {
 	items, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, items)
@@ -34,7 +57,9 @@ func (h *McpHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 	item, err := h.service.GetByName(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		// 行为修正（原「所有错误一律 404」）：not-found 走 404 中文，
+		// DB 等基础设施故障由 respondMcpError 落 500 中性（issue #95 P2）。
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, item)
@@ -48,7 +73,7 @@ func (h *McpHandler) Create(c *gin.Context) {
 	}
 	item, err := h.service.Create(tenant.GetTenantID(c), &input)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondCreated(c, item)
@@ -63,7 +88,7 @@ func (h *McpHandler) Update(c *gin.Context) {
 	}
 	item, err := h.service.Update(tenant.GetTenantID(c), name, &input)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, item)
@@ -77,7 +102,7 @@ func (h *McpHandler) Delete(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})
 			return
 		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "MCP 已删除")
@@ -93,7 +118,7 @@ func (h *McpHandler) GetAgentMcps(c *gin.Context) {
 	agentName := c.Param("name")
 	names, err := h.service.GetAgentMcps(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, names)
@@ -107,7 +132,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 		return
 	}
 	if err := h.service.UpdateAgentMcps(tenant.GetTenantID(c), agentName, req.McpNames); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondMessage(c, http.StatusOK, "Agent MCP 关系已更新")
@@ -121,7 +146,7 @@ func (h *McpHandler) ProbeByConfig(c *gin.Context) {
 	}
 	result, err := h.service.ProbeByConfig(c.Request.Context(), &input)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, result)
@@ -131,7 +156,7 @@ func (h *McpHandler) ProbeByName(c *gin.Context) {
 	name := c.Param("name")
 	result, err := h.service.ProbeByName(c.Request.Context(), tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, result)
@@ -149,7 +174,7 @@ func (h *McpHandler) GetClientMcpsByAgent(c *gin.Context) {
 	}
 	items, err := h.service.GetClientMcpsByAgent(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		respondMcpError(c, err)
 		return
 	}
 	respondSuccess(c, items)

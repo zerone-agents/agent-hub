@@ -1,10 +1,27 @@
 package mcp
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"control-panel/internal/domain/agent"
 )
+
+var ErrMcpNotFound = errors.New("MCP 不存在")
+
+// ValidationError 标记用户面校验错误（请求参数/领域规则不合法）：
+// HTTP 边界（respondMcpError）返回 400 + 原文中文文案；与之相对，
+// 内部诊断（DB/加解密等基础设施包装）走 500 中性文案（issue #95 P2）。
+type ValidationError struct {
+	msg string
+}
+
+func (e *ValidationError) Error() string { return e.msg }
+
+func NewValidationErrorf(format string, args ...any) error {
+	return &ValidationError{msg: fmt.Sprintf(format, args...)}
+}
 
 // Transport 类型常量（仅开放 sse / http，stdio 不再支持）
 const (

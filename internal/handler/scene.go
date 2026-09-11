@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -17,6 +19,27 @@ type SceneHandler struct {
 
 func NewSceneHandler(service *services.SceneService) *SceneHandler {
 	return &SceneHandler{service: service}
+}
+
+// respondSceneError 映射 Scene 领域错误（issue #95 P2 同款边界分流）：
+// ErrSceneNotFound → 404；ErrSceneExists / ErrAgentNotFound（关联校验
+// 冲突，用户可行动）→ 400 原文；ValidationError → 400 完整链；
+// 基础设施故障 → 500 中性 + 服务端日志。
+func respondSceneError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, scene.ErrSceneNotFound):
+		respondError(c, http.StatusNotFound, scene.ErrSceneNotFound.Error())
+	case errors.Is(err, scene.ErrSceneExists), errors.Is(err, scene.ErrAgentNotFound):
+		respondError(c, http.StatusBadRequest, err.Error())
+	default:
+		var ve *scene.ValidationError
+		if errors.As(err, &ve) {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("[SceneHandler] internal error: %v", err)
+		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+	}
 }
 
 func (h *SceneHandler) List(c *gin.Context) {
@@ -36,10 +59,7 @@ func (h *SceneHandler) List(c *gin.Context) {
 
 	scenes, err := h.service.List(tenant.GetTenantID(c), agentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondSceneError(c, err)
 		return
 	}
 
@@ -54,10 +74,9 @@ func (h *SceneHandler) Get(c *gin.Context) {
 
 	sc, err := h.service.GetScene(tenant.GetTenantID(c), name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		// 行为修正（原「所有错误一律 404」）：not-found 走 404 中文，
+		// 其余错误由 respondSceneError 分流（issue #95 P2）。
+		respondSceneError(c, err)
 		return
 	}
 
@@ -70,10 +89,7 @@ func (h *SceneHandler) Get(c *gin.Context) {
 func (h *SceneHandler) ListAdmin(c *gin.Context) {
 	scenes, err := h.service.ListAll(tenant.GetTenantID(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondSceneError(c, err)
 		return
 	}
 
@@ -111,10 +127,7 @@ func (h *SceneHandler) Create(c *gin.Context) {
 		PromptEn: req.PromptEn,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondSceneError(c, err)
 		return
 	}
 
@@ -154,24 +167,9 @@ func (h *SceneHandler) Update(c *gin.Context) {
 		Enabled:  req.Enabled,
 	})
 	if err != nil {
-		if err == scene.ErrSceneNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
-		if err == scene.ErrAgentNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		// ErrSceneNotFound → 404；ErrAgentNotFound / ErrSceneExists /
+		// ValidationError → 400 原文；基础设施故障 → 500 中性。
+		respondSceneError(c, err)
 		return
 	}
 
@@ -185,17 +183,7 @@ func (h *SceneHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.service.DeleteScene(tenant.GetTenantID(c), name); err != nil {
-		if err == scene.ErrSceneNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
+		respondSceneError(c, err)
 		return
 	}
 
