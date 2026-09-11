@@ -623,14 +623,20 @@ func (s *McpService) GetAgentMcps(tenantID, agentName string) ([]string, error) 
 func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []string) error {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return mcp.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mcp.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		}
+		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
 	mcpIDs := make([]uint64, 0, len(mcpNames))
 	for _, mcpName := range mcpNames {
 		m, err := s.repo.GetByName(tenantID, mcpName)
 		if err != nil {
-			return mcp.NewValidationErrorf("MCP '%s' 不存在", mcpName)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return mcp.NewValidationErrorf("MCP '%s' 不存在", mcpName)
+			}
+			return fmt.Errorf("get MCP %s failed: %w", mcpName, err)
 		}
 		mcpIDs = append(mcpIDs, m.ID)
 	}

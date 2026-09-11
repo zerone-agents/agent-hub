@@ -222,3 +222,36 @@ func TestMcpHandler_UpdateAgentMcps_NotFound400(t *testing.T) {
 		require.NotContains(t, body, "服务器内部错误")
 	})
 }
+
+// TestMcpHandler_UpdateAgentMcps_DBFailure500Neutral 锁定外审 #5635191918
+// 发现 1：UpdateAgentMcps 的基础设施故障（DB 关闭）不得被误包为 400 用户
+// 文案（"Agent/MCP 不存在"）——gorm 分叉后非 not-found 错误走英文诊断 →
+// 500 中性 + 服务端日志，且 400 not-found 路径仍保留（上一测试锁定）。
+func TestMcpHandler_UpdateAgentMcps_DBFailure500Neutral(t *testing.T) {
+	db := setupMcpErrorTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	// 捕获服务端日志，锁定「完整错误链只在日志」。
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := NewMcpHandler(services.NewMcpService("test-key"))
+	r := newMcpErrorRouter(h)
+
+	body := `{"mcpNames":["ghost-mcp"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost/mcps", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, respBody, "Agent 'ghost' 不存在", "DB 故障不得伪装为 400 用户文案")
+	require.NotContains(t, respBody, "database is closed")
+	require.Contains(t, logBuf.String(), "get agent ghost failed", "基础设施诊断必须进服务端日志")
+}
