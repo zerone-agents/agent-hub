@@ -6,6 +6,7 @@ import (
 	authdom "control-panel/internal/domain/auth"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -83,19 +84,19 @@ func TestCreateValidation(t *testing.T) {
 func TestLastAdminProtection(t *testing.T) {
 	svc, _ := newUserSvc(t)
 	admin, _ := svc.CreateInitialAdmin("Passw0rd!")
-	if err := svc.UpdateRole(admin.ID, admin.ID, authdom.RoleMember); err == nil {
+	if _, err := svc.UpdateRole(admin.ID, admin.ID, authdom.RoleMember); err == nil {
 		t.Fatal("self role change must fail")
 	}
-	if err := svc.SetStatus(admin.ID, admin.ID, authdom.StatusDisabled); err == nil {
+	if _, err := svc.SetStatus(admin.ID, admin.ID, authdom.StatusDisabled); err == nil {
 		t.Fatal("self disable must fail")
 	}
 	second, _ := svc.Create("admin2", "abcd1234", "", authdom.RoleAdmin)
 	// Two admins exist: demoting admin by another actor is allowed.
-	if err := svc.UpdateRole(admin.ID, second.ID, authdom.RoleMember); err != nil {
+	if _, err := svc.UpdateRole(admin.ID, second.ID, authdom.RoleMember); err != nil {
 		t.Fatalf("demote with two admins should pass: %v", err)
 	}
 	// Now admin is the only remaining admin and must not be demoted.
-	if err := svc.UpdateRole(second.ID, admin.ID, authdom.RoleMaintainer); err != ErrLastAdmin {
+	if _, err := svc.UpdateRole(second.ID, admin.ID, authdom.RoleMaintainer); err != ErrLastAdmin {
 		t.Fatalf("want ErrLastAdmin, got %v", err)
 	}
 }
@@ -125,4 +126,63 @@ func TestChangeAndResetPassword(t *testing.T) {
 	if _, err := svc.Authenticate("carol", plain); err != nil {
 		t.Fatalf("auth with reset pwd: %v", err)
 	}
+}
+
+// seedUser inserts a user with an explicit id for receipt assertions.
+func seedUser(t *testing.T, db *gorm.DB, id uint64, username, role, status string) *authdom.User {
+	t.Helper()
+	u := &authdom.User{ID: id, Username: username, PasswordHash: "x", Role: role, Status: status}
+	if err := db.Create(u).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return u
+}
+
+func TestUpdateRoleReceiptBeforeAfter(t *testing.T) {
+	svc, db := newUserSvc(t)
+	seedUser(t, db, 1, "alice", "member", "active")
+	rcpt, err := svc.UpdateRole(1, 2, "maintainer")
+	require.NoError(t, err)
+	require.NotNil(t, rcpt)
+	require.Equal(t, authdom.Role("member"), rcpt.RoleBefore)
+	require.Equal(t, authdom.Role("maintainer"), rcpt.RoleAfter)
+	require.Equal(t, authdom.UserStatus("active"), rcpt.StatusBefore)
+	require.Equal(t, rcpt.StatusBefore, rcpt.StatusAfter)          // role 变更不动 status
+	require.Equal(t, rcpt.StatusBefore, rcpt.EffectiveStatusAfter) // builtin: Effective==Status
+	require.True(t, rcpt.RemoteApplied)
+	require.True(t, rcpt.LocalApplied)
+}
+
+func TestSetStatusReceipt(t *testing.T) {
+	svc, db := newUserSvc(t)
+	seedUser(t, db, 1, "alice", "member", "active")
+	rcpt, err := svc.SetStatus(1, 2, "disabled")
+	require.NoError(t, err)
+	require.NotNil(t, rcpt)
+	require.Equal(t, authdom.UserStatus("active"), rcpt.EffectiveStatusBefore)
+	require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusAfter)
+	require.Equal(t, authdom.UserStatus("active"), rcpt.StatusBefore)
+	require.Equal(t, authdom.UserStatus("disabled"), rcpt.StatusAfter)
+	require.True(t, rcpt.RemoteApplied)
+	require.True(t, rcpt.LocalApplied)
+}
+
+func TestUpdateColumnZeroRowsReturnsNotFound(t *testing.T) {
+	// RowsAffected 判定：零行命中（并发删除窗口）→ 未生效 + 错误（spec §3.2）
+	_, db := newUserSvc(t)
+	rows, err := updateColumn(db, 999, "role", "admin")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, rows)
+}
+
+func TestUpdateRoleErrorReturnsNilReceipt(t *testing.T) {
+	// spec §3.2 规则 4：未生效不记录——任何错误路径 receipt 必须为 nil。
+	svc, db := newUserSvc(t)
+	seedUser(t, db, 1, "alice", "member", "active")
+	rcpt, err := svc.UpdateRole(999, 2, "admin") // 用户不存在
+	require.Error(t, err)
+	require.Nil(t, rcpt)
+	rcpt, err = svc.UpdateRole(1, 1, "admin") // 自我变更
+	require.ErrorIs(t, err, ErrSelfOperation)
+	require.Nil(t, rcpt)
 }

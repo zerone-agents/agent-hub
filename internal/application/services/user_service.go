@@ -191,43 +191,86 @@ func (s *UserService) Delete(id uint64) error {
 }
 
 // UpdateRole changes a user's role. Guards: no self-change, keep last admin.
-func (s *UserService) UpdateRole(id, actorID uint64, role string) error {
+// 返回权威 MutationReceipt（spec §3.2）：builtin 下 Effective==Status、
+// RemoteApplied 恒 true；任何错误路径 receipt 为 nil（未生效不记录）。
+func (s *UserService) UpdateRole(id, actorID uint64, role string) (*authdom.MutationReceipt, error) {
 	if !authdom.IsValidRole(role) {
-		return errors.New("非法角色")
+		return nil, errors.New("非法角色")
 	}
 	if id == actorID {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
 	u, err := s.GetByID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if u.Role == authdom.RoleAdmin && u.Status == authdom.StatusActive && role != authdom.RoleAdmin {
 		if err := s.ensureNotLastAdmin(id); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return s.db.Model(&authdom.User{}).Where("id = ?", id).Update("role", role).Error
+	rows, err := updateColumn(s.db, id, "role", role)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		// GetByID 与 Update 之间行被并发删除：nil error + 0 行（spec §3.2）
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore:            authdom.Role(u.Role),
+		RoleAfter:             authdom.Role(role),
+		StatusBefore:          authdom.UserStatus(u.Status),
+		StatusAfter:           authdom.UserStatus(u.Status),
+		EffectiveStatusBefore: authdom.UserStatus(u.Status),
+		EffectiveStatusAfter:  authdom.UserStatus(u.Status),
+		RemoteApplied:         true,
+		LocalApplied:          true,
+	}, nil
 }
 
 // SetStatus enables/disables a user. Guards: no self-disable, keep last admin.
-func (s *UserService) SetStatus(id, actorID uint64, status string) error {
+// 返回权威 MutationReceipt（spec §3.2）：builtin 下 Effective==Status、
+// RemoteApplied 恒 true；任何错误路径 receipt 为 nil（未生效不记录）。
+func (s *UserService) SetStatus(id, actorID uint64, status string) (*authdom.MutationReceipt, error) {
 	if status != authdom.StatusActive && status != authdom.StatusDisabled {
-		return errors.New("非法状态")
+		return nil, errors.New("非法状态")
 	}
 	if id == actorID && status == authdom.StatusDisabled {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
 	u, err := s.GetByID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if u.Role == authdom.RoleAdmin && u.Status == authdom.StatusActive && status == authdom.StatusDisabled {
 		if err := s.ensureNotLastAdmin(id); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return s.db.Model(&authdom.User{}).Where("id = ?", id).Update("status", status).Error
+	rows, err := updateColumn(s.db, id, "status", status)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore:            authdom.Role(u.Role),
+		RoleAfter:             authdom.Role(u.Role),
+		StatusBefore:          authdom.UserStatus(u.Status),
+		StatusAfter:           authdom.UserStatus(status),
+		EffectiveStatusBefore: authdom.UserStatus(u.Status),
+		EffectiveStatusAfter:  authdom.UserStatus(status),
+		RemoteApplied:         true,
+		LocalApplied:          true,
+	}, nil
+}
+
+// updateColumn：单列 UPDATE，返回 RowsAffected（零行≠错误）。
+func updateColumn(db *gorm.DB, id uint64, col, val string) (int64, error) {
+	res := db.Model(&authdom.User{}).Where("id = ?", id).Update(col, val)
+	return res.RowsAffected, res.Error
 }
 
 // ResetPassword sets a random password and returns the plaintext once.

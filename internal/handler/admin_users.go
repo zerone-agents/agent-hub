@@ -85,13 +85,13 @@ func (h *AdminUserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	if req.Role != "" {
-		if err := h.users.UpdateRole(id, actorID, req.Role); err != nil {
+		if _, err := h.users.UpdateRole(id, actorID, req.Role); err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if req.Status != "" {
-		if err := h.users.SetStatus(id, actorID, req.Status); err != nil {
+		if _, err := h.users.SetStatus(id, actorID, req.Status); err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
 		}
