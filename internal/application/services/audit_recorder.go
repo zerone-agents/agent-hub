@@ -97,8 +97,8 @@ func (r *AuditRecorder) Record(c *gin.Context, e audit.Entry) {
 	truncateEntry(&e) // stdout 与 DB 展示一致的截断值
 
 	log.Printf("[AUDIT] %s | user_id=%s user_name=%s target=%s remote_ip=%s result=%s time=%s",
-		e.Action, e.Actor.UserID, escapeForStdout(e.Actor.UserName), escapeForStdout(e.TargetName),
-		e.Actor.RemoteIP, e.Status, time.Now().UTC().Format(time.RFC3339))
+		e.Action, escapeForStdout(e.Actor.UserID), escapeForStdout(e.Actor.UserName), escapeForStdout(e.TargetName),
+		escapeForStdout(e.Actor.RemoteIP), e.Status, time.Now().UTC().Format(time.RFC3339))
 
 	r.persist(e)
 }
@@ -167,7 +167,7 @@ func (r *AuditRecorder) AigcSaved(c *gin.Context, changed []aigc.AigcConfigField
 func (r *AuditRecorder) RevealKeyLegacy(c *gin.Context, providerID uint64) {
 	a := r.actorFrom(c)
 	log.Printf("[AUDIT] provider API key revealed | user_id=%s user_name=%s provider_id=%d remote_ip=%s method=%s path=%s result=success time=%s",
-		a.UserID, escapeForStdout(a.UserName), providerID, a.RemoteIP, c.Request.Method, c.Request.URL.Path,
+		escapeForStdout(a.UserID), escapeForStdout(a.UserName), providerID, escapeForStdout(a.RemoteIP), c.Request.Method, c.Request.URL.Path,
 		time.Now().UTC().Format(time.RFC3339))
 	r.persist(audit.SimpleEvent(a, audit.ActionRevealKey, audit.TargetProvider, strconv.FormatUint(providerID, 10), ""))
 }
@@ -175,7 +175,7 @@ func (r *AuditRecorder) RevealKeyLegacy(c *gin.Context, providerID uint64) {
 func (r *AuditRecorder) RuntimeConfigLegacy(c *gin.Context, providers int) {
 	a := r.actorFrom(c)
 	log.Printf("[AUDIT] provider runtime-config served | user_id=%s user_name=%s providers=%d remote_ip=%s time=%s",
-		a.UserID, escapeForStdout(a.UserName), providers, a.RemoteIP, time.Now().UTC().Format(time.RFC3339))
+		escapeForStdout(a.UserID), escapeForStdout(a.UserName), providers, escapeForStdout(a.RemoteIP), time.Now().UTC().Format(time.RFC3339))
 	r.persist(audit.RuntimeConfigEvent(a, providers))
 }
 

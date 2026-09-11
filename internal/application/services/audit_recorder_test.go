@@ -111,6 +111,19 @@ func TestRecorderStdoutInjectionGuard(t *testing.T) {
 	require.Contains(t, out, `\n`) // 转义可见
 }
 
+func TestRecorderUserIDStdoutInjection(t *testing.T) {
+	rec, _, buf := newRecorderEnv(t)
+	c := auditCtx(t)
+	// 登录失败流程：userID 是请求体携带的尝试标识（pre-auth，spec §5.6 残余注入面），
+	// 经 Login 的显式 Actor.UserID 覆盖 context，必须同样被 stdout 转义。
+	rec.Login(c, "evil\n[AUDIT] forged | result=success", "user\nname", "t1", audit.StatusFailure, audit.ReasonInvalidCredentials)
+	out := buf.String()
+	// 换行被转义后不得伪造新的 AUDIT 行；整条 stdout 保持单行（仅行尾换行）
+	require.Equal(t, 0, strings.Count(out, "\n[AUDIT]"), "user_id 换行不得伪造新的 AUDIT 行:\n%s", out)
+	require.Equal(t, 1, strings.Count(out, "\n"), "stdout 必须保持单行:\n%s", out)
+	require.Contains(t, out, `\n`) // 转义可见
+}
+
 func TestRecorderTruncationWithinColumnWidth(t *testing.T) {
 	rec, db, _ := newRecorderEnv(t)
 	c := auditCtx(t)
