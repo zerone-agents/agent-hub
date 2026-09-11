@@ -39,7 +39,7 @@ func TestFullAuthFlow(t *testing.T) {
 	invites := services.NewInviteService(db)
 	cliSvc := services.NewCLITokenService(db)
 	authH := NewBuiltinAuthHandler(p, users, invites, services.NewAuditRecorder(repository.NewAuditRepository(db)))
-	adminH := NewAdminUserHandler(users, invites, p)
+	adminH := NewAdminUserHandler(users, invites, p, services.NewAuditRecorder(repository.NewAuditRepository(db)))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

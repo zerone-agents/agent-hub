@@ -11,7 +11,9 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
+	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -20,26 +22,29 @@ import (
 
 // newAdminTestEnv wires an admin router with a stubbed actor (user_id=1,
 // matching the first-created admin). Tests cover List/Update/Reset/Create
-// invite/List invite/Revoke invite.
-func newAdminTestEnv(t *testing.T) (*gin.Engine, *services.UserService) {
+// invite/List invite/Revoke invite. audit.Log 与真实 recorder 一并装配
+// （Task 11）：时间列需 T4 同款 sqlite 包装器，返回 db 供审计断言。
+func newAdminTestEnv(t *testing.T) (*gin.Engine, *services.UserService, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(auditTestSqlite{sqlite.Open(":memory:").(*sqlite.Dialector)}, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}); err != nil {
+	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}, &audit.Log{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	users := services.NewUserService(db)
 	invites := services.NewInviteService(db)
 	p := builtin.New(db, builtinTestSecret)
-	h := NewAdminUserHandler(users, invites, p)
+	ar := services.NewAuditRecorder(repository.NewAuditRepository(db))
+	h := NewAdminUserHandler(users, invites, p, ar)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// The first user created (admin via CreateInitialAdmin) gets id=1.
 	withActor := func(c *gin.Context) {
 		c.Set("user_id", "1")
+		c.Set("tenant_id", "default") // 生产由 JWT 中间件回填（builtin 恒 default）
 		c.Next()
 	}
 	g := r.Group("/api/v1/admin", withActor)
@@ -49,11 +54,11 @@ func newAdminTestEnv(t *testing.T) (*gin.Engine, *services.UserService) {
 	g.POST("/invites", h.CreateInvite)
 	g.GET("/invites", h.ListInvites)
 	g.DELETE("/invites/:id", h.RevokeInvite)
-	return r, users
+	return r, users, db
 }
 
 func TestAdminUserOps(t *testing.T) {
-	r, users := newAdminTestEnv(t)
+	r, users, _ := newAdminTestEnv(t)
 	admin, _ := users.CreateInitialAdmin("Passw0rd!")
 	member, _ := users.Create("member1", "abcd1234", "", authdom.RoleMember)
 
@@ -129,7 +134,7 @@ func TestAdminUserOps(t *testing.T) {
 }
 
 func TestAdminInviteOps(t *testing.T) {
-	r, _ := newAdminTestEnv(t)
+	r, _, _ := newAdminTestEnv(t)
 
 	// create invite
 	body, _ := json.Marshal(map[string]any{"role": "member", "note": "测试", "expiresInDays": 3})
@@ -181,7 +186,7 @@ func TestAdminInviteOps(t *testing.T) {
 }
 
 func TestAdminRejectsBadID(t *testing.T) {
-	r, _ := newAdminTestEnv(t)
+	r, _, _ := newAdminTestEnv(t)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/users/abc", bytes.NewReader([]byte(`{"role":"member"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

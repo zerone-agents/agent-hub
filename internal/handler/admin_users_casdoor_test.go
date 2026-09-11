@@ -9,10 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"control-panel/internal/application/services"
 	"control-panel/internal/directory"
+	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
+	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 // fakeUserDirectory implements UserDirectory with scripted results and
@@ -25,6 +30,11 @@ type fakeUserDirectory struct {
 	setDisabledErr error
 	resetPassword  string
 	resetErr       error
+
+	// receipt 脚本（Task 11 审计断言）：显式设置时按脚本返回——配对应 err
+	// 字段可模拟 partial（RemoteApplied 且本地失败）等两阶段写结果。
+	updateRoleRcpt  *authdom.MutationReceipt
+	setDisabledRcpt *authdom.MutationReceipt
 
 	gotTenant, gotUser, gotActor string
 	gotRole                      string
@@ -41,12 +51,19 @@ func (f *fakeUserDirectory) ListUsers(tenantID string) ([]directory.ManagedUser,
 func (f *fakeUserDirectory) UpdateRole(tenantID, userID, role, actorID string) (*authdom.MutationReceipt, error) {
 	f.updateRoleCalls++
 	f.gotTenant, f.gotUser, f.gotRole, f.gotActor = tenantID, userID, role, actorID
-	return nil, f.updateRoleErr
+	if f.updateRoleRcpt != nil || f.updateRoleErr != nil {
+		return f.updateRoleRcpt, f.updateRoleErr
+	}
+	// 默认成功 receipt：与真实 directory 契约一致（T8：成功必非 nil）
+	return &authdom.MutationReceipt{}, nil
 }
 
 func (f *fakeUserDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) (*authdom.MutationReceipt, error) {
 	f.gotTenant, f.gotUser, f.gotDisabled, f.gotActor = tenantID, userID, disabled, actorID
-	return nil, f.setDisabledErr
+	if f.setDisabledRcpt != nil || f.setDisabledErr != nil {
+		return f.setDisabledRcpt, f.setDisabledErr
+	}
+	return &authdom.MutationReceipt{}, nil
 }
 
 func (f *fakeUserDirectory) ResetPassword(tenantID, userID, actorID string) (string, error) {
@@ -75,21 +92,30 @@ func fakeLoginURLBuilder(t *testing.T) (LoginURLBuilder, *[]string) {
 // setupCasdoorUserRouter wires the casdoor admin user routes with a fake
 // directory. The middleware injects the same context the auth middleware
 // would set (tenant_id / user_id / roles); RequireAdmin is intentionally not
-// mounted here — it is applied at route registration in main.go.
-func setupCasdoorUserRouter(dir UserDirectory, loginURLFn LoginURLBuilder) *gin.Engine {
+// mounted here — it is applied at route registration in main.go. 审计侧
+// （Task 11）装配真实 recorder over 测试 db，返回 db 供审计断言。
+func setupCasdoorUserRouter(dir UserDirectory, loginURLFn LoginURLBuilder) (*gin.Engine, *gorm.DB) {
 	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(auditTestSqlite{sqlite.Open(":memory:").(*sqlite.Dialector)}, &gorm.Config{})
+	if err != nil {
+		panic("open audit sqlite: " + err.Error()) // 测试装配失败无恢复语义
+	}
+	if err := db.AutoMigrate(&audit.Log{}); err != nil {
+		panic("migrate audit_logs: " + err.Error())
+	}
+	ar := services.NewAuditRecorder(repository.NewAuditRepository(db))
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set("tenant_id", "tenant-a")
 		c.Set("user_id", "actor")
 		c.Set("roles", []string{"admin"})
 	})
-	h := NewCasdoorUserHandler(dir, loginURLFn)
+	h := NewCasdoorUserHandler(dir, loginURLFn, ar)
 	r.GET("/admin/users/login-url", h.LoginURL)
 	r.GET("/admin/users", h.ListUsers)
 	r.PATCH("/admin/users/:id", h.UpdateUser)
 	r.POST("/admin/users/:id/reset-password", h.ResetUserPassword)
-	return r
+	return r, db
 }
 
 func casdoorDo(r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
@@ -108,7 +134,7 @@ func TestCasdoorListUsersOK(t *testing.T) {
 	dir := &fakeUserDirectory{
 		users: []directory.ManagedUser{{ID: "u1", Username: "alice", Role: "member", Status: "active"}},
 	}
-	r := setupCasdoorUserRouter(dir, trivialLoginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, trivialLoginURLFn)
 
 	w := casdoorDo(r, "GET", "/admin/users", nil)
 	if w.Code != http.StatusOK {
@@ -131,7 +157,7 @@ func TestCasdoorListUsersOK(t *testing.T) {
 
 func TestCasdoorListUsersSDKFailure502(t *testing.T) {
 	dir := &fakeUserDirectory{listErr: errors.New("sdk unreachable")}
-	r := setupCasdoorUserRouter(dir, trivialLoginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, trivialLoginURLFn)
 
 	w := casdoorDo(r, "GET", "/admin/users", nil)
 	if w.Code != http.StatusBadGateway {
@@ -141,7 +167,7 @@ func TestCasdoorListUsersSDKFailure502(t *testing.T) {
 
 func TestCasdoorUpdateUserRoleAndStatus(t *testing.T) {
 	dir := &fakeUserDirectory{}
-	r := setupCasdoorUserRouter(dir, trivialLoginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, trivialLoginURLFn)
 
 	// role update: directory receives tenant, user id, role, actor.
 	w := casdoorDo(r, "PATCH", "/admin/users/u1", map[string]string{"role": "maintainer"})
@@ -184,7 +210,7 @@ func TestCasdoorUpdateUserRoleAndStatus(t *testing.T) {
 
 func TestCasdoorUpdateUserInvalidStatus(t *testing.T) {
 	dir := &fakeUserDirectory{}
-	r := setupCasdoorUserRouter(dir, trivialLoginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, trivialLoginURLFn)
 
 	// Invalid status alone -> 400.
 	w := casdoorDo(r, "PATCH", "/admin/users/u1", map[string]string{"status": "banned"})
@@ -205,7 +231,7 @@ func TestCasdoorUpdateUserInvalidStatus(t *testing.T) {
 
 func TestCasdoorResetPassword(t *testing.T) {
 	dir := &fakeUserDirectory{resetPassword: "pw"}
-	r := setupCasdoorUserRouter(dir, trivialLoginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, trivialLoginURLFn)
 
 	w := casdoorDo(r, "POST", "/admin/users/u1/reset-password", nil)
 	if w.Code != http.StatusOK {
@@ -229,7 +255,7 @@ func TestCasdoorResetPassword(t *testing.T) {
 func TestCasdoorLoginURL(t *testing.T) {
 	dir := &fakeUserDirectory{}
 	loginURLFn, gotOrgs := fakeLoginURLBuilder(t)
-	r := setupCasdoorUserRouter(dir, loginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, loginURLFn)
 
 	w := casdoorDo(r, "GET", "/admin/users/login-url", nil)
 	if w.Code != http.StatusOK {
@@ -252,7 +278,7 @@ func TestCasdoorLoginURLBuilderFailure(t *testing.T) {
 	loginURLFn := func(org string) (string, error) {
 		return "", errors.New("组织未注册")
 	}
-	r := setupCasdoorUserRouter(dir, loginURLFn)
+	r, _ := setupCasdoorUserRouter(dir, loginURLFn)
 
 	w := casdoorDo(r, "GET", "/admin/users/login-url", nil)
 	if w.Code != http.StatusBadGateway {

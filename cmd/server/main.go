@@ -148,7 +148,7 @@ func main() {
 		builtinProvider := builtin.New(database.GetDB(), cfg.Auth.JWTSecret)
 		authProvider = builtinProvider
 		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc, auditRecorder)
-		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider)
+		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider, auditRecorder)
 		log.Println("Auth mode: builtin")
 	} else {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
@@ -165,7 +165,7 @@ func main() {
 		}, membershipStore)
 		// 登录链接按请求租户生成 OAuth 授权 URL（各 org 解析自己的
 		// tenant_oauth_clients 凭证），这里注入生成函数。
-		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL)
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL, auditRecorder)
 		log.Println("Auth mode: casdoor")
 	}
 
