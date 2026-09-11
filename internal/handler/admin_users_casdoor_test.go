@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"control-panel/internal/directory"
+	authdom "control-panel/internal/domain/auth"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,15 +38,15 @@ func (f *fakeUserDirectory) ListUsers(tenantID string) ([]directory.ManagedUser,
 	return f.users, f.listErr
 }
 
-func (f *fakeUserDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
+func (f *fakeUserDirectory) UpdateRole(tenantID, userID, role, actorID string) (*authdom.MutationReceipt, error) {
 	f.updateRoleCalls++
 	f.gotTenant, f.gotUser, f.gotRole, f.gotActor = tenantID, userID, role, actorID
-	return f.updateRoleErr
+	return nil, f.updateRoleErr
 }
 
-func (f *fakeUserDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) error {
+func (f *fakeUserDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) (*authdom.MutationReceipt, error) {
 	f.gotTenant, f.gotUser, f.gotDisabled, f.gotActor = tenantID, userID, disabled, actorID
-	return f.setDisabledErr
+	return nil, f.setDisabledErr
 }
 
 func (f *fakeUserDirectory) ResetPassword(tenantID, userID, actorID string) (string, error) {

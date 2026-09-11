@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"control-panel/internal/directory"
+	authdom "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +14,8 @@ import (
 // UserDirectory is the user-management surface for casdoor mode.
 type UserDirectory interface {
 	ListUsers(tenantID string) ([]directory.ManagedUser, error)
-	UpdateRole(tenantID, userID, role, actorID string) error
-	SetDisabled(tenantID, userID string, disabled bool, actorID string) error
+	UpdateRole(tenantID, userID, role, actorID string) (*authdom.MutationReceipt, error)
+	SetDisabled(tenantID, userID string, disabled bool, actorID string) (*authdom.MutationReceipt, error)
 	ResetPassword(tenantID, userID, actorID string) (string, error)
 }
 
@@ -69,13 +70,13 @@ func (h *CasdoorUserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	if req.Role != "" {
-		if err := h.dir.UpdateRole(tenant.GetTenantID(c), id, req.Role, actorID); err != nil {
+		if _, err := h.dir.UpdateRole(tenant.GetTenantID(c), id, req.Role, actorID); err != nil {
 			respondDirectoryError(c, err)
 			return
 		}
 	}
 	if req.Status != "" {
-		if err := h.dir.SetDisabled(tenant.GetTenantID(c), id, req.Status == "disabled", actorID); err != nil {
+		if _, err := h.dir.SetDisabled(tenant.GetTenantID(c), id, req.Status == "disabled", actorID); err != nil {
 			respondDirectoryError(c, err)
 			return
 		}
