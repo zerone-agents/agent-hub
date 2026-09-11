@@ -10,7 +10,9 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
+	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/internal/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +30,7 @@ func TestFullAuthFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}, &authdom.CLIToken{}); err != nil {
+	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}, &authdom.CLIToken{}, &audit.Log{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -36,7 +38,7 @@ func TestFullAuthFlow(t *testing.T) {
 	users := services.NewUserService(db)
 	invites := services.NewInviteService(db)
 	cliSvc := services.NewCLITokenService(db)
-	authH := NewBuiltinAuthHandler(p, users, invites)
+	authH := NewBuiltinAuthHandler(p, users, invites, services.NewAuditRecorder(repository.NewAuditRepository(db)))
 	adminH := NewAdminUserHandler(users, invites, p)
 
 	gin.SetMode(gin.TestMode)

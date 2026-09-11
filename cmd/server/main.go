@@ -137,12 +137,17 @@ func main() {
 	var builtinAuthHandler *handler.BuiltinAuthHandler
 	var adminUserHandler *handler.AdminUserHandler
 
+	// 审计写入侧（Task 10）：auth 端点埋点在两种模式下都消费 recorder，须先于
+	// 认证装配创建；查询侧（auditQuerier）在下方 Audit 领域区复用同一 repo。
+	auditRepo := repository.NewAuditRepository(database.GetDB())
+	auditRecorder := services.NewAuditRecorder(auditRepo)
+
 	if cfg.Auth.IsBuiltin() {
 		userSvc := services.NewUserService(database.GetDB())
 		inviteSvc := services.NewInviteService(database.GetDB())
 		builtinProvider := builtin.New(database.GetDB(), cfg.Auth.JWTSecret)
 		authProvider = builtinProvider
-		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc)
+		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc, auditRecorder)
 		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider)
 		log.Println("Auth mode: builtin")
 	} else {
@@ -410,9 +415,11 @@ func main() {
 			authGroup.GET("/mode", rlMode, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", rl, handler.Login)
-			authGroup.GET("/callback", rl, handler.Callback(casdoorProvider))
+			authGroup.GET("/callback", rl, handler.Callback(casdoorProvider, auditRecorder))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
-			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
+			authGroup.POST("/logout", middleware.JWTAuth(authProvider), func(c *gin.Context) {
+				handler.Logout(c, auditRecorder)
+			})
 			authGroup.POST("/refresh", rl, handler.RefreshToken)
 		}
 	}
@@ -433,7 +440,7 @@ func main() {
 
 	// ---------- Audit 领域 ----------
 	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。
-	auditRepo := repository.NewAuditRepository(database.GetDB())
+	// （auditRepo/auditRecorder 已在认证装配区创建——auth 埋点写入侧先于路由装配。）
 	auditQuerier := services.NewAuditQuerier(auditRepo)
 	auditHandler := handler.NewAuditHandler(auditQuerier)
 	v1group.Group("/admin", middleware.RequireAdmin()).GET("/audit-logs", auditHandler.List)
