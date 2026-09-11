@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/skill"
 	"control-panel/pkg/database"
 
@@ -21,14 +22,16 @@ import (
 // ---------- issue #95 P2：skill handler 边界分流回归 ----------
 
 // setupSkillErrorTestDB builds an in-memory sqlite DB with the minimal
-// skills table and injects it into the database.DB global (same pattern as
-// agent_error_test.go). Repos capture the global at construction, so the
+// skills/agents tables and injects it into the database.DB global (same
+// pattern as agent_error_test.go). Agents is migrated alongside skills so the
+// agent-skill binding endpoints hit a real "record not found" (not
+// "no such table"). Repos capture the global at construction, so the
 // service must be built AFTER injection.
 func setupSkillErrorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&skill.Skill{}))
+	require.NoError(t, db.AutoMigrate(&skill.Skill{}, &agent.AgentConfig{}))
 
 	previous := database.DB
 	database.DB = db
@@ -48,6 +51,8 @@ func newSkillErrorRouter(t *testing.T, h *SkillHandler) *gin.Engine {
 	r.GET("/api/v1/skills/:name", h.GetPublic)
 	r.GET("/api/v1/skills/:name/download", h.Download)
 	r.POST("/api/v1/admin/skills", h.Create)
+	r.GET("/api/v1/admin/agents/:name/skills", h.GetAgentSkills)
+	r.PUT("/api/v1/admin/agents/:name/skills", h.UpdateAgentSkills)
 	return r
 }
 
@@ -180,6 +185,111 @@ func TestSkillHandler_Create_NameConflict400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "技能 'dup-skill' 已存在")
 	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestSkillHandler_GetAgentSkills_AgentNotFound404 锁定管理端点 GET admin
+// agents/:name/skills 对未知 agent 返回 404「Agent 不存在」——service 层
+// GetAgentSkills 已按 gorm 分叉为 agent.ErrAgentNotFound sentinel（此前裸
+// 中文 fmt.Errorf 落 500 中性），respondSkillError 404 桶新增 agent 分支后
+// 正确路由；gorm 英文诊断不得泄漏。
+func TestSkillHandler_GetAgentSkills_AgentNotFound404(t *testing.T) {
+	setupSkillErrorTestDB(t)
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/ghost/skills", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	body := w.Body.String()
+	require.Contains(t, body, "Agent 不存在")
+	require.NotContains(t, body, "record not found", "gorm 英文诊断不得泄漏到响应体")
+	require.NotContains(t, body, "服务器内部错误", "not-found 不得退化为 500 中性")
+}
+
+// TestSkillHandler_UpdateAgentSkills_AgentNotFound400 锁定绑定接口引用
+// 未知 agent → 400 原文（用户可行动）：service 层 UpdateAgentSkills 的
+// agent 不存在按 skill.ValidationError 包装（此前裸中文 fmt.Errorf 落 500
+// 中性），handler 经 ValidationError 分支落 400 完整链。
+func TestSkillHandler_UpdateAgentSkills_AgentNotFound400(t *testing.T) {
+	setupSkillErrorTestDB(t)
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	body := `{"skillNames":["ghost-skill"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost/skills", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Agent 'ghost' 不存在")
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestSkillHandler_UpdateAgentSkills_SkillNotFound400 锁定绑定接口引用
+// 未知技能 → 400 原文（场景 B 需要真实存在的 agent 越过第一步校验，命中
+// Service 层技能存在性校验——skill.ValidationError，非 500 中性）。
+func TestSkillHandler_UpdateAgentSkills_SkillNotFound400(t *testing.T) {
+	db := setupSkillErrorTestDB(t)
+	seed := &agent.AgentConfig{
+		Name:         "existing-agent",
+		TenantID:     "tenant-a",
+		ContentHash:  "test-hash",
+		SystemPrompt: "test-prompt",
+	}
+	require.NoError(t, db.Create(seed).Error)
+
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	body := `{"skillNames":["ghost-skill"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/existing-agent/skills", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "Skill 'ghost-skill' 不存在")
+	require.NotContains(t, respBody, "服务器内部错误")
+}
+
+// TestSkillHandler_Get_DBFailure500Neutral 锁定 Get 端点遇到基础设施故障
+// （DB 关闭）→ 500 中性中文文案 + 服务端日志（替代修前的 404 伪装）：
+// service 层 GetSkill 已按 gorm 分叉，非 not-found 错误走英文诊断
+// "get skill %s failed"，handler 落 500 中性。用合法名直接越过路径参数
+// 检查（GetPublic 无 binding 拦截），命中 service 层 DB 故障。
+func TestSkillHandler_Get_DBFailure500Neutral(t *testing.T) {
+	db := setupSkillErrorTestDB(t)
+
+	// 关闭底层连接：GetByName 随即返回错误，触发 gorm 分叉的非 not-found 分支。
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	// 捕获服务端日志，锁定「完整错误链只在日志」。
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skills/some-skill", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	body := w.Body.String()
+	require.Contains(t, body, "服务器内部错误，请稍后重试")
+	require.NotContains(t, body, "技能不存在", "DB 故障不得伪装为 404 not-found")
+	require.NotContains(t, body, "get skill", "英文诊断不得泄漏到响应体")
+	require.NotContains(t, body, "database is closed", "DB 细节不得泄漏到响应体")
+	require.Contains(t, logBuf.String(), "get skill some-skill failed", "内部诊断必须进服务端日志")
 }
 
 // TestSkillHandler_Download_FileNotFound404 锁定 Download 端点对技能存在

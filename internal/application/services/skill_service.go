@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"control-panel/internal/domain/skill"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/oss"
+
+	"gorm.io/gorm"
 )
 
 // SkillService provides business logic for managing skills and their file uploads.
@@ -101,7 +104,10 @@ func (s *SkillService) ListAll(tenantID, skillType string) ([]*SkillDTO, error) 
 func (s *SkillService) GetSkill(tenantID, name string) (*SkillDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	return s.toDTO(sk), nil
@@ -329,7 +335,10 @@ func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
 func (s *SkillService) GetSkillMd(tenantID, name string) ([]SkillMdEntry, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	if sk.URL == "" {
@@ -423,7 +432,10 @@ func (s *SkillService) GetAgentSkills(tenantID, agentName string) ([]string, err
 	agentRepo := repository.NewAgentRepository()
 	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", agent.ErrAgentNotFound)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	return s.repo.GetAgentSkills(agentCfg.ID)
 }
@@ -435,14 +447,14 @@ func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames 
 	toolRepo := repository.NewToolRepository()
 	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		return skill.NewValidationErrorf("Agent '%s' 不存在", agentName)
 	}
 
 	skillIDs := make([]uint64, 0, len(skillNames))
 	for _, name := range skillNames {
 		sk, err := s.repo.GetByName(tenantID, name)
 		if err != nil {
-			return fmt.Errorf("Skill '%s' 不存在", name)
+			return skill.NewValidationErrorf("Skill '%s' 不存在", name)
 		}
 		skillIDs = append(skillIDs, sk.ID)
 	}
