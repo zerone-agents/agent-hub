@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Avatar, Breadcrumb, Dropdown } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router'
-import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, LockIcon } from '@phosphor-icons/react'
+import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, LockIcon, ScrollIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useAuthStore } from '@/stores/auth'
 import { useCanWrite } from '@/hooks/useCanWrite'
@@ -215,6 +215,14 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           icon: <UsersIcon size={14} />,
           label: '用户管理',
           onClick: async () => { await navigate('/settings/users'); }
+        }]
+      : []),
+    ...(user?.role === 'admin'
+      ? [{
+          key: 'audit-logs',
+          icon: <ScrollIcon size={14} />,
+          label: '审计日志',
+          onClick: async () => { await navigate('/settings/audit-logs'); }
         }]
       : []),
     {

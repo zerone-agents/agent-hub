@@ -36,7 +36,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
 const SETTINGS_LABELS: Record<string, string> = {
   'cli-tokens': 'CLI Tokens',
   aigc: 'AIGC 标识配置',
-  users: '用户管理'
+  users: '用户管理',
+  'audit-logs': '审计日志'
 }
 
 export interface BreadcrumbItem {
