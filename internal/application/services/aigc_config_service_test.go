@@ -43,10 +43,17 @@ func newAigcSvcWithModels(t *testing.T, models providerModelCodeSource) *AigcCon
 	return NewAigcConfigService(db, aigcTestEncKey, models)
 }
 
+// newAigcSvcOnDB 在既有 db（如真 MySQL DSN）上构造 service，供 env 门控
+// 的并发测试使用；注入与 sqlite fixture 相同的 encryptionKey。
+func newAigcSvcOnDB(t *testing.T, db *gorm.DB) *AigcConfigService {
+	t.Helper()
+	return NewAigcConfigService(db, aigcTestEncKey, fakeModelSource{})
+}
+
 func TestAigcSave_CreateGeneratesKeyAndProducer(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 
-	dto, err := svc.Save("acme", testUSCC, "南京测试科技有限公司")
+	dto, _, err := svc.Save("acme", testUSCC, "南京测试科技有限公司")
 	require.NoError(t, err)
 	require.True(t, dto.Configured)
 	require.True(t, dto.SigningKeyConfigured)
@@ -62,22 +69,23 @@ func TestAigcSave_CreateGeneratesKeyAndProducer(t *testing.T) {
 
 func TestAigcSave_RejectsInvalidUSCC(t *testing.T) {
 	svc, _ := setupAigcSvc(t)
-	_, err := svc.Save("acme", "91320118MAK93FC72DIX", "公司") // 19 位
+	_, r, err := svc.Save("acme", "91320118MAK93FC72DIX", "公司") // 19 位
 	require.Error(t, err)
-	_, err = svc.Save("acme", "91320118MAK93FC72S", "公司") // 含非法字符 S
+	require.Nil(t, r)                                        // 任何失败 → receipt=nil（spec §3.3；1205 路径由 MySQL 门控测试覆盖）
+	_, _, err = svc.Save("acme", "91320118MAK93FC72S", "公司") // 含非法字符 S
 	require.Error(t, err)
-	_, err = svc.Save("acme", testUSCC, "  ")
+	_, _, err = svc.Save("acme", testUSCC, "  ")
 	require.Error(t, err)
 }
 
 func TestAigcSave_UpdateKeepsSigningKey(t *testing.T) {
 	svc, db := setupAigcSvc(t)
-	_, err := svc.Save("acme", testUSCC, "公司A")
+	_, _, err := svc.Save("acme", testUSCC, "公司A")
 	require.NoError(t, err)
 	var before aigc.Config
 	require.NoError(t, db.First(&before, 1).Error)
 
-	_, err = svc.Save("acme", testUSCC, "公司B")
+	_, _, err = svc.Save("acme", testUSCC, "公司B")
 	require.NoError(t, err)
 	var after aigc.Config
 	require.NoError(t, db.First(&after, 1).Error)
@@ -87,7 +95,7 @@ func TestAigcSave_UpdateKeepsSigningKey(t *testing.T) {
 
 func TestAigcRotateKey_ReplacesKey(t *testing.T) {
 	svc, db := setupAigcSvc(t)
-	_, err := svc.Save("acme", testUSCC, "公司A")
+	_, _, err := svc.Save("acme", testUSCC, "公司A")
 	require.NoError(t, err)
 	var before aigc.Config
 	require.NoError(t, db.First(&before, 1).Error)
@@ -114,7 +122,7 @@ func TestAigcDeployerConfig_NotConfiguredReturnsNil(t *testing.T) {
 
 func TestAigcDeployerConfig_DecryptsKey(t *testing.T) {
 	svc, db := setupAigcSvc(t)
-	_, err := svc.Save("acme", testUSCC, "公司A")
+	_, _, err := svc.Save("acme", testUSCC, "公司A")
 	require.NoError(t, err)
 
 	cfg, err := svc.DeployerConfig("acme")
@@ -139,7 +147,7 @@ func TestDeployerConfig_BuildsModelCodesFromProviderModels(t *testing.T) {
 		{ModelID: "gpt-4o", AigcCode: "0005"},
 		{ModelID: "empty", AigcCode: ""}, // 跳过空码
 	}})
-	_, err := svc.Save("acme", testUSCC, "公司")
+	_, _, err := svc.Save("acme", testUSCC, "公司")
 	require.NoError(t, err)
 
 	cfg, err := svc.DeployerConfig("acme")
@@ -149,7 +157,7 @@ func TestDeployerConfig_BuildsModelCodesFromProviderModels(t *testing.T) {
 
 func TestDeployerConfig_ModelCodesEmptyWhenNoModels(t *testing.T) {
 	svc := newAigcSvcWithModels(t, fakeModelSource{})
-	_, err := svc.Save("acme", testUSCC, "公司")
+	_, _, err := svc.Save("acme", testUSCC, "公司")
 	require.NoError(t, err)
 
 	cfg, err := svc.DeployerConfig("acme")
@@ -167,7 +175,7 @@ func TestDeployerConfig_NotConfiguredShortCircuitsModelQuery(t *testing.T) {
 
 func TestDeployerConfig_ModelQueryErrorPropagates(t *testing.T) {
 	svc := newAigcSvcWithModels(t, fakeModelSource{err: errors.New("db down")})
-	_, err := svc.Save("acme", testUSCC, "公司")
+	_, _, err := svc.Save("acme", testUSCC, "公司")
 	require.NoError(t, err)
 
 	_, err = svc.DeployerConfig("acme")
@@ -184,7 +192,7 @@ func TestAigcGet_NotConfigured(t *testing.T) {
 
 func TestAigcDelete_RemovesConfig(t *testing.T) {
 	svc, _ := setupAigcSvc(t)
-	_, err := svc.Save("acme", testUSCC, "公司A")
+	_, _, err := svc.Save("acme", testUSCC, "公司A")
 	require.NoError(t, err)
 	require.NoError(t, svc.Delete("acme"))
 	cfg, err := svc.DeployerConfig("acme")
@@ -220,7 +228,7 @@ func TestAigcSave_TenantRowShadowsShared(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
-	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	_, _, err := svc.Save("acme", testUSCC, "租户A公司")
 	require.NoError(t, err)
 
 	dto, err := svc.Get("acme")
@@ -238,7 +246,7 @@ func TestAigcGet_OtherTenantWithoutOwnRowNotConfigured(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
-	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	_, _, err := svc.Save("acme", testUSCC, "租户A公司")
 	require.NoError(t, err)
 
 	dto, err := svc.Get("other")
@@ -250,7 +258,7 @@ func TestAigcDeployerConfig_TenantRowPreferred(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
-	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	_, _, err := svc.Save("acme", testUSCC, "租户A公司")
 	require.NoError(t, err)
 
 	cfg, err := svc.DeployerConfig("acme")
@@ -267,7 +275,7 @@ func TestAigcDeployerConfig_TenantRowPreferred(t *testing.T) {
 func TestAigcDelete_OnlyOwnRow(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
-	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	_, _, err := svc.Save("acme", testUSCC, "租户A公司")
 	require.NoError(t, err)
 
 	require.NoError(t, svc.Delete("acme"))
@@ -295,7 +303,7 @@ func TestAigcRotateKey_NoOwnRowRejected(t *testing.T) {
 func TestAigcRotateKey_OwnRowRotatedSharedUntouched(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
-	_, err := svc.Save("acme", testUSCC, "租户A公司")
+	_, _, err := svc.Save("acme", testUSCC, "租户A公司")
 	require.NoError(t, err)
 	var before aigc.Config
 	require.NoError(t, db.Where("tenant_id = ?", "acme").First(&before).Error)
@@ -317,7 +325,7 @@ func TestAigcSave_EmptyTenantIDRejected(t *testing.T) {
 	svc, db := setupAigcSvc(t)
 	seedSharedRow(t, db)
 
-	_, err := svc.Save("", testUSCC, "越权公司")
+	_, _, err := svc.Save("", testUSCC, "越权公司")
 	require.True(t, errors.Is(err, persistence.ErrTenantIDRequired), "空租户 Save 必须返回 ErrTenantIDRequired, got %v", err)
 
 	var shared aigc.Config
@@ -354,7 +362,7 @@ func TestAigcDelete_EmptyTenantIDRejected(t *testing.T) {
 
 func TestAigcRotateKey_RotatesResolvedRow(t *testing.T) {
 	svc, db := setupAigcSvc(t)
-	_, err := svc.Save("acme", testUSCC, "公司A") // 本租户行
+	_, _, err := svc.Save("acme", testUSCC, "公司A") // 本租户行
 	require.NoError(t, err)
 	var before aigc.Config
 	require.NoError(t, db.Where("tenant_id = ?", "acme").First(&before).Error)
@@ -364,4 +372,32 @@ func TestAigcRotateKey_RotatesResolvedRow(t *testing.T) {
 	var after aigc.Config
 	require.NoError(t, db.Where("tenant_id = ?", "acme").First(&after).Error)
 	require.NotEqual(t, before.SigningKeyEncrypted, after.SigningKeyEncrypted)
+}
+
+// --- receipt 三态语义（Task 9，spec §3.3）---
+
+func TestAigcSaveReceiptSemantics(t *testing.T) {
+	svc, _ := setupAigcSvc(t) // sqlite + encryptionKey，同既有 fixture
+
+	// create：全集 + Created=true
+	_, r, err := svc.Save("acme", testUSCC, "公司A")
+	require.NoError(t, err)
+	require.True(t, r.Created)
+	require.Equal(t, []aigc.AigcConfigField{aigc.AigcFieldUSCC, aigc.AigcFieldCompanyName}, r.ChangedFields)
+
+	// 幂等保存：空变更集（事件语义仍记录由 handler 层保证，receipt 表达 []）
+	_, r, err = svc.Save("acme", testUSCC, "公司A")
+	require.NoError(t, err)
+	require.False(t, r.Created)
+	require.Empty(t, r.ChangedFields)
+
+	// 单字段修改
+	_, r, err = svc.Save("acme", testUSCC, "公司B")
+	require.NoError(t, err)
+	require.Equal(t, []aigc.AigcConfigField{aigc.AigcFieldCompanyName}, r.ChangedFields)
+
+	// 多字段修改
+	_, r, err = svc.Save("acme", "91320118MAK93FC72K", "公司C")
+	require.NoError(t, err)
+	require.Len(t, r.ChangedFields, 2)
 }

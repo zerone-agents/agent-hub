@@ -39,7 +39,7 @@ func (h *AigcConfigHandler) Save(c *gin.Context) {
 		return
 	}
 	tenantID := tenant.GetTenantID(c)
-	dto, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
+	dto, _, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
