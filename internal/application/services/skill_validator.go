@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"control-panel/internal/domain/skill"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,13 +19,16 @@ func BuildOSSKey(skillType string, name string) string {
 
 func ValidateSkillType(skillType string) error {
 	if skillType != "expert" && skillType != "community" {
-		return fmt.Errorf("技能类型必须是 expert 或 community")
+		return skill.NewValidationErrorf("技能类型必须是 expert 或 community")
 	}
 	return nil
 }
 
 func ValidateSkillName(name string) error {
-	return validateIdentifier("技能", name)
+	if err := validateIdentifier("技能", name); err != nil {
+		return skill.NewValidationErrorf("%s", err.Error())
+	}
+	return nil
 }
 
 // ValidateSkillZip is the server-side half of the "double insurance" pattern:
@@ -58,12 +62,12 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 	// is required — buffer the stream first.
 	buf, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("读取 zip 内容失败: %w", err)
+		return nil, fmt.Errorf("read zip content failed: %w", err)
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
 	if err != nil {
-		return nil, fmt.Errorf("不是有效的 zip 文件: %w", err)
+		return nil, skill.NewValidationErrorf("不是有效的 zip 文件: %s", err.Error())
 	}
 
 	// Reject any entry that could escape the extraction directory or point
@@ -72,7 +76,7 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 	// escape, not a theoretical concern.
 	for _, f := range zr.File {
 		if isUnsafeZipPath(f.Name) {
-			return nil, fmt.Errorf("zip 包含不安全的路径: %s (禁止 ../ 或绝对路径)", f.Name)
+			return nil, skill.NewValidationErrorf("zip 包含不安全的路径: %s (禁止 ../ 或绝对路径)", f.Name)
 		}
 	}
 
@@ -84,7 +88,7 @@ func ValidateSkillZip(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("zip 包中缺少 SKILL.md 文件")
+		return nil, skill.NewValidationErrorf("zip 包中缺少 SKILL.md 文件")
 	}
 
 	for _, entry := range entries {
@@ -140,12 +144,12 @@ func FindAllSkillMd(zr *zip.Reader) ([]SkillMdEntry, error) {
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("打开 %s 失败: %w", name, err)
+			return nil, fmt.Errorf("open %s failed: %w", name, err)
 		}
 		content, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			return nil, fmt.Errorf("读取 %s 内容失败: %w", name, err)
+			return nil, fmt.Errorf("read %s content failed: %w", name, err)
 		}
 		found = append(found, SkillMdEntry{Path: name, Content: string(content)})
 	}
@@ -208,7 +212,7 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 	text := strings.ReplaceAll(string(content), "\r\n", "\n")
 
 	if !strings.HasPrefix(text, "---\n") && text != "---" {
-		return fmt.Errorf("%s: 缺少 frontmatter (必须以 --- 开头)", ctx)
+		return skill.NewValidationErrorf("%s: 缺少 frontmatter (必须以 --- 开头)", ctx)
 	}
 
 	body := strings.TrimPrefix(text, "---\n")
@@ -223,14 +227,14 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 		}
 	}
 	if closeIdx < 0 {
-		return fmt.Errorf("%s: frontmatter 未闭合 (缺少结束 ---)", ctx)
+		return skill.NewValidationErrorf("%s: frontmatter 未闭合 (缺少结束 ---)", ctx)
 	}
 
 	fmBytes := []byte(strings.Join(lines[:closeIdx], "\n"))
 
 	var parsed map[string]interface{}
 	if err := yaml.Unmarshal(fmBytes, &parsed); err != nil {
-		return fmt.Errorf("%s: frontmatter 不是合法的 YAML: %w", ctx, err)
+		return skill.NewValidationErrorf("%s: frontmatter 不是合法的 YAML: %s", ctx, err.Error())
 	}
 
 	// yaml.v3 unmarshals unquoted scalars into their native Go types
@@ -239,11 +243,11 @@ func validateSkillFrontmatter(content []byte, ctx string) error {
 	for _, key := range []string{"name", "description"} {
 		v, ok := parsed[key]
 		if !ok || v == nil {
-			return fmt.Errorf("%s: frontmatter 缺少 %s 字段", ctx, key)
+			return skill.NewValidationErrorf("%s: frontmatter 缺少 %s 字段", ctx, key)
 		}
 		s := strings.TrimSpace(fmt.Sprint(v))
 		if s == "" {
-			return fmt.Errorf("%s: frontmatter %s 不能为空", ctx, key)
+			return skill.NewValidationErrorf("%s: frontmatter %s 不能为空", ctx, key)
 		}
 	}
 	return nil
