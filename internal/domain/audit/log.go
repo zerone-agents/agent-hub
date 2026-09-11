@@ -84,3 +84,6 @@ type Log struct {
 	UserAgent  string     `gorm:"size:256" json:"userAgent"`
 	CreatedAt  time.Time  `gorm:"type:datetime(6);index:idx_audit_tenant_created,priority:2" json:"createdAt"`
 }
+
+// TableName 显式映射 audit_logs（spec §4；GORM 默认会把 Log 映射成 logs）。
+func (Log) TableName() string { return "audit_logs" }
