@@ -8,7 +8,7 @@
 
 Speeding 的玩家动力、核心循环、生存压力、路线与内容机制见
 `speeding-game-design-framework.md`。该文档中的 G0–G4 是本计划 Phase 5–6 的产品设计前置。
-分版本的 P0/P1/P2 优先级、双产品发布节奏和退出门槛见 `version-roadmap.md`。
+分版本的 P0/P1/P2 优先级、Agent Hub 主导的发布节奏和退出门槛见 `version-roadmap.md`。
 
 ## 1. 拆分结论
 
