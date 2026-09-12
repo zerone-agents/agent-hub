@@ -31,6 +31,8 @@ func respondSkillError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, skill.ErrSkillNotFound), errors.Is(err, skill.ErrSkillFileNotFound):
 		respondError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, agent.ErrAgentNotFound):
+		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
 	case errors.Is(err, skill.ErrInvalidSkillFile), errors.Is(err, skill.ErrFileTooLarge):
 		respondError(c, http.StatusBadRequest, err.Error())
 	default:

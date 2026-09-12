@@ -615,7 +615,10 @@ func (s *McpService) saveProbeResult(tenantID string, m *mcp.McpServer, result *
 func (s *McpService) GetAgentMcps(tenantID, agentName string) ([]string, error) {
 	agentCfg, err := s.agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", agent.ErrAgentNotFound)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	return s.repo.GetMcpNamesByAgent(agentCfg.ID)
 }

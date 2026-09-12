@@ -1,10 +1,13 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
 	"control-panel/internal/domain/scene"
 	repository "control-panel/internal/infrastructure/persistence"
+
+	"gorm.io/gorm"
 )
 
 // SceneService provides business logic for managing scenes.
@@ -87,7 +90,10 @@ func (s *SceneService) ListAll(tenantID string) ([]*SceneDTO, error) {
 func (s *SceneService) GetScene(tenantID, name string) (*SceneDTO, error) {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, scene.ErrSceneNotFound
+		}
+		return nil, fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 	return s.sceneToDTO(tenantID, sc), nil
 }
@@ -141,7 +147,10 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInput) (*SceneDTO, error) {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, scene.ErrSceneNotFound
+		}
+		return nil, fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 
 	if err := s.validateAndUpdateSceneFields(tenantID, sc, input); err != nil {
@@ -198,7 +207,10 @@ func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.S
 func (s *SceneService) DeleteScene(tenantID, name string) error {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return scene.ErrSceneNotFound
+		}
+		return fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 
 	if err := s.repo.Delete(tenantID, sc.ID); err != nil {

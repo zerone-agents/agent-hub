@@ -48,6 +48,7 @@ func newMcpErrorRouter(h *McpHandler) *gin.Engine {
 	r.POST("/api/v1/admin/mcps", h.Create)
 	r.PUT("/api/v1/admin/mcps/:name", h.Update)
 	r.GET("/api/v1/mcps", h.GetClientMcpsByAgent)
+	r.GET("/api/v1/admin/agents/:name/mcps", h.GetAgentMcps)
 	r.PUT("/api/v1/admin/agents/:name/mcps", h.UpdateAgentMcps)
 	return r
 }
@@ -176,6 +177,27 @@ func TestMcpHandler_GetClientMcps_AgentNotFound404(t *testing.T) {
 	require.Contains(t, body, "Agent 不存在")
 	require.NotContains(t, body, "record not found", "gorm 英文诊断不得泄漏到响应体")
 	require.NotContains(t, body, "服务器内部错误", "公开端点 not-found 不得退化为 500 中性")
+}
+
+// TestMcpHandler_GetAgentMcps_AgentNotFound404 管理端点回归锁（Task 1 review
+// 明确要求）：GET admin agents/:name/mcps 对未知 agent 必须返回 404
+// 「Agent 不存在」——service 层 GetAgentMcps 已按 gorm 分叉为
+// agent.ErrAgentNotFound sentinel（此前裸中文 fmt.Errorf 落 500 中性），
+// handler 认 sentinel；gorm 英文诊断不得泄漏。
+func TestMcpHandler_GetAgentMcps_AgentNotFound404(t *testing.T) {
+	setupMcpErrorTestDB(t)
+	h := NewMcpHandler(services.NewMcpService("test-key"))
+	r := newMcpErrorRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/ghost/mcps", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	body := w.Body.String()
+	require.Contains(t, body, "Agent 不存在")
+	require.NotContains(t, body, "record not found", "gorm 英文诊断不得泄漏到响应体")
+	require.NotContains(t, body, "服务器内部错误", "not-found 不得退化为 500 中性")
 }
 
 // TestMcpHandler_UpdateAgentMcps_NotFound400 锁定绑定接口引用未知对象 →
