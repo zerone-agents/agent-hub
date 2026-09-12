@@ -120,6 +120,17 @@ lead → analyst → reviewer → analyst → reviewer → analyst → lead
 - Hub 在完全不安装 `com.speeding.*` 包时能够构建、测试和启动。
 - CI 至少包含：扩展清单正/反例、平台中性文案扫描、无 Speeding 包启动测试。
 
+研发门禁可在仓库根目录直接执行：
+
+```bash
+./scripts/check-platform-neutrality.sh
+./scripts/verify-core-without-speeding.sh
+```
+
+第二条命令默认验证无 Speeding 扩展的 Hub Core 构建；设置
+`H0_DATABASE_URL` 后还会启动真实 Hub 进程并请求 `/health`。Speeding 的
+可选种子数据已隔离在 `examples/extensions/speeding/`，不会被 Hub 自动加载。
+
 ## 后续阶段门禁映射
 
 | 阶段 | 两案例共同新增的可执行断言 |

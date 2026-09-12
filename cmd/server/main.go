@@ -266,6 +266,7 @@ func main() {
 	sceneHandler := handler.NewSceneHandler(sceneService)
 	personalityService := services.NewPersonalityService()
 	personalityHandler := handler.NewPersonalityHandler(personalityService)
+	extensionVerificationHandler := handler.NewExtensionVerificationHandler()
 	relationTypeHandler := handler.NewRelationTypeHandler(services.NewRelationTypeService())
 	agentRelationService := services.NewAgentRelationService()
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
@@ -431,6 +432,12 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
+
+	// ---------- Extension protocol H0 verification ----------
+	// Metadata/examples are safe for all approved members. Inline validation is
+	// manager-only and never resolves file references from pasted manifests.
+	adminRead.GET("/extensions/h0", extensionVerificationHandler.Overview)
+	adminWrite.POST("/extensions/validate", extensionVerificationHandler.Validate)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

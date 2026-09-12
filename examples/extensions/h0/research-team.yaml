@@ -1,0 +1,37 @@
+apiVersion: agenthub.extension/v1alpha1
+kind: CapabilityPackage
+metadata:
+  name: research-team
+  namespace: io.zerone.examples.research
+  version: 0.1.0
+  displayName: 通用研究协作
+  description: 研究负责人、分析员与审核员的协作能力包
+  publisher: zerone
+compatibility:
+  hub: ">=0.9.0 <2.0.0"
+  runtimeProtocol: ">=1.0.0 <2.0.0"
+dependencies: []
+permissions:
+  state:
+    read: ["io.zerone.examples.research/*"]
+    write: ["io.zerone.examples.research/*"]
+  events:
+    consume: ["agenthub.task.*"]
+    emit: ["io.zerone.examples.research.review.completed.v1"]
+  tools:
+    expose: ["research.submit_evidence"]
+  network:
+    outbound: []
+contributes:
+  stateSchemas:
+    - {id: research-run, version: 1.0.0, file: schemas/research-run.schema.json}
+  events:
+    - {id: research-events, file: events/research-events.yaml}
+  tools:
+    - {id: submit-evidence, file: tools/submit-evidence.yaml}
+  relationTypes:
+    - {id: peer-review, file: relations/peer-review.yaml}
+  promptFragments:
+    - {id: evidence-policy, file: prompts/evidence-policy.yaml}
+  uiViews:
+    - {id: research-board, file: ui/research-board.yaml}

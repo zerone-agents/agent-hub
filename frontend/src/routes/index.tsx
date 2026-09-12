@@ -56,6 +56,11 @@ export const router = createBrowserRouter(
             import('@/features/relations/RelationListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'extensions',
+          lazy: () =>
+            import('@/features/extensions/ExtensionAcceptancePage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'tools',
           lazy: () => import('@/features/tools/ToolListPage').then((m) => ({ Component: m.default }))
         },

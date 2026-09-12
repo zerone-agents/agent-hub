@@ -20,9 +20,39 @@ import (
 var schemaDocument []byte
 
 type Report struct {
-	Manifest string
-	Valid    bool
-	Errors   []string
+	Manifest      string
+	Valid         bool
+	Package       *PackageSummary
+	Contributions []ContributionSummary
+	Errors        []string
+}
+
+type PackageSummary struct {
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	Version     string `json:"version"`
+	DisplayName string `json:"displayName"`
+}
+
+type ContributionSummary struct {
+	Key   string `json:"key"`
+	Count int    `json:"count"`
+}
+
+// ValidateManifest validates one in-memory YAML manifest against the embedded
+// extension protocol schema. It intentionally does not resolve contributed
+// files: callers accepting pasted content must never gain filesystem access
+// through manifest references.
+func ValidateManifest(raw []byte) Report {
+	report := Report{Manifest: "inline"}
+	document, validationErrors := validateDocument(raw)
+	if len(validationErrors) > 0 {
+		report.Errors = validationErrors
+		return report
+	}
+	report.Valid = true
+	report.Package, report.Contributions = summarizeDocument(document)
+	return report
 }
 
 func ValidatePackage(packageDir string) Report {
@@ -44,38 +74,9 @@ func ValidatePackage(packageDir string) Report {
 		return report
 	}
 
-	var document any
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	if err := decoder.Decode(&document); err != nil {
-		report.Errors = []string{fmt.Sprintf("parse YAML: %v", err)}
-		return report
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err == nil {
-		report.Errors = []string{"parse YAML: extension.yaml must contain exactly one document"}
-		return report
-	} else if !errors.Is(err, io.EOF) {
-		report.Errors = []string{fmt.Sprintf("parse YAML: trailing content: %v", err)}
-		return report
-	}
-
-	compiler := jsonschema.NewCompiler()
-	var schemaJSON any
-	if err := json.Unmarshal(schemaDocument, &schemaJSON); err != nil {
-		report.Errors = []string{fmt.Sprintf("decode embedded schema: %v", err)}
-		return report
-	}
-	if err := compiler.AddResource("agenthub-extension-v1alpha1.schema.json", schemaJSON); err != nil {
-		report.Errors = []string{fmt.Sprintf("load embedded schema: %v", err)}
-		return report
-	}
-	schema, err := compiler.Compile("agenthub-extension-v1alpha1.schema.json")
-	if err != nil {
-		report.Errors = []string{fmt.Sprintf("compile embedded schema: %v", err)}
-		return report
-	}
-	if err := schema.Validate(document); err != nil {
-		report.Errors = flattenValidationError(err)
+	document, validationErrors := validateDocument(raw)
+	if len(validationErrors) > 0 {
+		report.Errors = validationErrors
 		return report
 	}
 
@@ -116,6 +117,37 @@ func ValidatePackage(packageDir string) Report {
 	return report
 }
 
+func validateDocument(raw []byte) (any, []string) {
+	var document any
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&document); err != nil {
+		return nil, []string{fmt.Sprintf("parse YAML: %v", err)}
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		return nil, []string{"parse YAML: extension.yaml must contain exactly one document"}
+	} else if !errors.Is(err, io.EOF) {
+		return nil, []string{fmt.Sprintf("parse YAML: trailing content: %v", err)}
+	}
+
+	compiler := jsonschema.NewCompiler()
+	var schemaJSON any
+	if err := json.Unmarshal(schemaDocument, &schemaJSON); err != nil {
+		return nil, []string{fmt.Sprintf("decode embedded schema: %v", err)}
+	}
+	if err := compiler.AddResource("agenthub-extension-v1alpha1.schema.json", schemaJSON); err != nil {
+		return nil, []string{fmt.Sprintf("load embedded schema: %v", err)}
+	}
+	schema, err := compiler.Compile("agenthub-extension-v1alpha1.schema.json")
+	if err != nil {
+		return nil, []string{fmt.Sprintf("compile embedded schema: %v", err)}
+	}
+	if err := schema.Validate(document); err != nil {
+		return nil, flattenValidationError(err)
+	}
+	return document, nil
+}
+
 func flattenValidationError(err error) []string {
 	var validationErr *jsonschema.ValidationError
 	if !errors.As(err, &validationErr) {
@@ -136,6 +168,28 @@ func flattenValidationError(err error) []string {
 	walk(validationErr)
 	sort.Strings(output)
 	return output
+}
+
+func summarizeDocument(document any) (*PackageSummary, []ContributionSummary) {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return nil, nil
+	}
+	var parsed struct {
+		Metadata    PackageSummary               `json:"metadata"`
+		Contributes map[string][]json.RawMessage `json:"contributes"`
+	}
+	if err := json.Unmarshal(encoded, &parsed); err != nil {
+		return nil, nil
+	}
+	keys := []string{"stateSchemas", "events", "tools", "relationTypes", "promptFragments", "uiViews", "templates", "handlers"}
+	contributions := make([]ContributionSummary, 0, len(keys))
+	for _, key := range keys {
+		if count := len(parsed.Contributes[key]); count > 0 {
+			contributions = append(contributions, ContributionSummary{Key: key, Count: count})
+		}
+	}
+	return &parsed.Metadata, contributions
 }
 
 type manifestFiles struct {

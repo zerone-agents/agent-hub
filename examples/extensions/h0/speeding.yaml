@@ -1,0 +1,37 @@
+apiVersion: agenthub.extension/v1alpha1
+kind: CapabilityPackage
+metadata:
+  name: speeding-world
+  namespace: io.zerone.speeding.world
+  version: 0.1.0
+  displayName: Speeding 世界模拟
+  description: 财富、权力与社会系统互动游戏能力包
+  publisher: zerone
+compatibility:
+  hub: ">=0.9.0 <2.0.0"
+  runtimeProtocol: ">=1.0.0 <2.0.0"
+dependencies: []
+permissions:
+  state:
+    read: ["io.zerone.speeding.world/*"]
+    write: ["io.zerone.speeding.world/*"]
+  events:
+    consume: ["agenthub.task.*"]
+    emit: ["io.zerone.speeding.world.turn.completed.v1"]
+  tools:
+    expose: ["speeding.issue_order"]
+  network:
+    outbound: []
+contributes:
+  stateSchemas:
+    - {id: world-state, version: 1.0.0, file: schemas/world-state.schema.json}
+  events:
+    - {id: world-events, file: events/world-events.yaml}
+  tools:
+    - {id: issue-order, file: tools/issue-order.yaml}
+  relationTypes:
+    - {id: political-alliance, file: relations/political-alliance.yaml}
+  promptFragments:
+    - {id: world-context, file: prompts/world-context.yaml}
+  uiViews:
+    - {id: world-dashboard, file: ui/world-dashboard.yaml}

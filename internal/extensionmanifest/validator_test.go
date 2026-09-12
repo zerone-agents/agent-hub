@@ -94,3 +94,29 @@ contributes:
 		t.Fatalf("unexpected report: %+v", report)
 	}
 }
+
+func TestValidateManifestDoesNotReadReferencedFiles(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("testdata", "valid", "extension.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := ValidateManifest(raw)
+	if !report.Valid || len(report.Errors) != 0 {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+	if report.Package == nil || report.Package.Namespace != "io.zerone.organization.emotion" {
+		t.Fatalf("package summary = %+v", report.Package)
+	}
+	if len(report.Contributions) != 2 {
+		t.Fatalf("contributions = %+v", report.Contributions)
+	}
+}
+
+func TestValidateManifestRejectsMultipleDocuments(t *testing.T) {
+	t.Parallel()
+	report := ValidateManifest([]byte("apiVersion: agenthub.extension/v1alpha1\n---\nkind: CapabilityPackage\n"))
+	if report.Valid || !strings.Contains(strings.Join(report.Errors, "\n"), "exactly one document") {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+}

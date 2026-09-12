@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Idempotently installs the SPEEDING conversation-test cast into Agent Hub.
+ * Idempotently installs the SPEEDING vertical-example cast into Agent Hub.
  *
  * Required environment:
  *   HUB_TOKEN  Bearer token for an admin/maintainer
  *
  * Optional environment:
- *   HUB_URL    defaults to http://14.103.78.132
+ *   HUB_URL    defaults to http://127.0.0.1:8081
  *   DEPLOY     comma-separated agent ids, or "core" for the three core agents
  *
  * The script deliberately never accepts or stores a Bailian API key. It uses
@@ -15,7 +15,7 @@
  * that provider cannot pass its connection probe.
  */
 
-const hubURL = (process.env.HUB_URL || 'http://14.103.78.132').replace(/\/$/, '')
+const hubURL = (process.env.HUB_URL || 'http://127.0.0.1:8081').replace(/\/$/, '')
 const token = process.env.HUB_TOKEN || ''
 
 if (!token) {

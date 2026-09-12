@@ -69,6 +69,11 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Verify platform boundary without Speeding
+        env:
+          H0_DATABASE_URL: root:test@tcp(127.0.0.1:3306)/hub?charset=utf8mb4&parseTime=true
+        run: ./scripts/verify-core-without-speeding.sh
+
       - name: Run tests
         run: go test -v ./...
 
@@ -169,4 +174,3 @@ jobs:
           if [ $TEST_EXIT -ne 0 ] || [ $TSC_EXIT -ne 0 ]; then
             exit 1
           fi
-
