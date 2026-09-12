@@ -85,7 +85,10 @@ function renderPage(path = '/runs/run-market') {
   return render(
     <ConfigProvider theme={antdTheme}>
       <MemoryRouter initialEntries={[path]}>
-        <Routes><Route path="/runs/:runId?" element={<RunCenterPage />} /></Routes>
+        <Routes>
+          <Route path="/runs/:runId?" element={<RunCenterPage />} />
+          <Route path="/agents/:name/chat" element={<div>Agent Run Chat</div>} />
+        </Routes>
       </MemoryRouter>
     </ConfigProvider>,
   )
@@ -109,6 +112,12 @@ describe('RunCenterPage', () => {
     expect(screen.getByText('已生效')).toBeInTheDocument()
     expect(screen.getByText(/因果链起点/)).toBeInTheDocument()
     expect(screen.getByText(/H2 已将事件、工具结果/)).toBeInTheDocument()
+  })
+
+  it('opens participant chat inside the selected run', () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /进入本次对话/ }))
+    expect(screen.getByText('Agent Run Chat')).toBeInTheDocument()
   })
 
   it('explains an Agent judgment context in product language', () => {
