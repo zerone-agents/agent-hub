@@ -33,6 +33,17 @@ const personality: Personality = {
       createdAt: '2026-09-10T10:00:00Z',
     },
   ],
+  behaviorProfile: {
+    version: 1,
+    hierarchyCompliance: 65,
+    ambition: 35,
+    whistleblowing: 95,
+    riskTolerance: 65,
+    conflictAvoidance: 20,
+    secrecy: 35,
+    selfInterest: 20,
+    escalationThreshold: 25,
+  },
 }
 
 vi.mock('@/queries/usePersonalities', () => ({
@@ -68,6 +79,7 @@ describe('PersonalityLibraryPage', () => {
     expect(screen.getByText('3 个 Agent 使用')).toBeInTheDocument()
     expect(screen.getByText('补充越级条件')).toBeInTheDocument()
     expect(screen.getByText('新建人格')).toBeInTheDocument()
+    expect(screen.queryByText(/层级服从|权力野心|调整参数|结构化投影/)).not.toBeInTheDocument()
   })
 
   it('keeps the library readable for members but hides authoring actions', async () => {

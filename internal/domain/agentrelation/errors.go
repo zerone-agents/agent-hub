@@ -30,4 +30,5 @@ var (
 	ErrInvalidVisibility    = errors.New("关系事件可见范围无效")
 	ErrEventReasonRequired  = errors.New("请说明导致关系变化的具体事实")
 	ErrEventReasonTooLong   = errors.New("关系事件说明不能超过 2000 个字符")
+	ErrDynamicsReadOnly     = errors.New("旧动态关系已转为只读兼容，请使用能力包和运行状态")
 )

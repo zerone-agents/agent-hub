@@ -46,22 +46,34 @@ func TestExtensionVerificationOverview(t *testing.T) {
 	if data["protocolVersion"] != "v1alpha1" || data["platformVersion"] != "0.9.0-h0" || data["status"] != "可验收" {
 		t.Fatalf("protocol metadata = %+v", data)
 	}
-	examples, ok := data["examples"].([]any)
-	if !ok || len(examples) != 2 {
-		t.Fatalf("examples = %#v", data["examples"])
-	}
-	for _, raw := range examples {
-		example := raw.(map[string]any)
-		if example["id"] == "" || example["manifest"] == "" {
-			t.Fatalf("incomplete example: %+v", example)
-		}
+	if _, bundled := data["examples"]; bundled {
+		t.Fatal("production overview must not bundle consumer fixtures")
 	}
 }
 
 func TestExtensionVerificationValidate(t *testing.T) {
 	r := extensionVerificationRouter()
-	example := extensionExamples()[0]
-	body, _ := json.Marshal(map[string]string{"manifest": example.Manifest})
+	body, _ := json.Marshal(map[string]string{"manifest": `apiVersion: agenthub.extension/v1alpha1
+kind: CapabilityPackage
+metadata:
+  name: task-state
+  namespace: io.example.research
+  version: 1.0.0
+  displayName: Task State
+  description: Generic state package
+  publisher: Example
+compatibility:
+  hub: ">=0.9.0"
+  runtimeProtocol: ">=1.0.0"
+permissions:
+  state: {read: [], write: []}
+  events: {consume: [], emit: []}
+  tools: {expose: []}
+  network: {outbound: []}
+contributes:
+  stateSchemas:
+    - {id: task, version: 1.0.0, file: schemas/task.json}
+`})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/admin/extensions/validate", bytes.NewReader(body)))
 	if w.Code != http.StatusOK {
@@ -71,7 +83,7 @@ func TestExtensionVerificationValidate(t *testing.T) {
 	if data["valid"] != true || data["package"] == nil {
 		t.Fatalf("validation data = %+v", data)
 	}
-	if got := len(data["contributions"].([]any)); got != 6 {
+	if got := len(data["contributions"].([]any)); got != 1 {
 		t.Fatalf("contribution count = %d, data=%+v", got, data)
 	}
 }

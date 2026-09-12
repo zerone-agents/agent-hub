@@ -12,7 +12,7 @@ vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).cr
 const relations: AgentRelation[] = [
   {
     id: 9,
-    scope: 'speeding-hq',
+    scope: 'operations',
     sourceAgentId: 1,
     sourceAgentName: 'chief-of-staff',
     targetAgentId: 2,
@@ -79,25 +79,27 @@ describe('RelationListPage', () => {
     setAuthRole('admin')
   })
 
-  it('renders directed relation semantics and actions', () => {
+  it('renders a directed platform connection without relationship dynamics', () => {
     renderPage()
-    expect(screen.getByText('组织关系')).toBeInTheDocument()
+    expect(screen.getByText('通信连接')).toBeInTheDocument()
     expect(screen.getByText('幕僚长')).toBeInTheDocument()
     expect(screen.getByText('法务总监')).toBeInTheDocument()
     expect(screen.getByText('复核关系')).toBeInTheDocument()
-    expect(screen.getByText('戒备')).toBeInTheDocument()
-    expect(screen.getByText('-30')).toBeInTheDocument()
+    expect(screen.queryByText('戒备')).not.toBeInTheDocument()
+    expect(screen.queryByText('-30')).not.toBeInTheDocument()
+    expect(screen.queryByText('关系动态')).not.toBeInTheDocument()
+    expect(screen.getByText(/人物关系属于可选能力包/)).toBeInTheDocument()
     expect(screen.getByText('挑战')).toBeInTheDocument()
-    expect(screen.getByText('新建关系')).toBeInTheDocument()
+    expect(screen.getByText('新建连接')).toBeInTheDocument()
   })
 
   it('keeps member access read-only', () => {
     setAuthRole('member')
     renderPage()
     expect(screen.getByText('幕僚长')).toBeInTheDocument()
-    expect(screen.queryByText('新建关系')).not.toBeInTheDocument()
+    expect(screen.queryByText('新建连接')).not.toBeInTheDocument()
     expect(screen.queryByTitle('编辑')).not.toBeInTheDocument()
     expect(screen.queryByTitle('删除')).not.toBeInTheDocument()
-    expect(screen.getByTitle('关系动态')).toBeInTheDocument()
+    expect(screen.queryByTitle('关系动态')).not.toBeInTheDocument()
   })
 })

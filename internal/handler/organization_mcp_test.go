@@ -114,29 +114,20 @@ func TestOrganizationMcpListsRuntimeTools(t *testing.T) {
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.Equal(t, []string{"agent_relations", "agent_send", "agent_relation_signal", "agent_message_status", "agent_inbox"}, []string{
+	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox"}, []string{
 		response.Result.Tools[0].Name,
 		response.Result.Tools[1].Name,
 		response.Result.Tools[2].Name,
 		response.Result.Tools[3].Name,
-		response.Result.Tools[4].Name,
 	})
 }
 
-func TestOrganizationMcpSignalUsesRuntimeIdentityAndFixedEventContract(t *testing.T) {
-	service := &fakeOrganizationMessageService{signalResult: &services.AgentRelationEventResultDTO{
-		Relation: &services.AgentRelationDTO{ID: 9, RelationshipScore: -20, Stance: "neutral"},
-		Event:    &services.AgentRelationEventDTO{ID: "event-1", EventType: "promise_broken", Delta: -20},
-	}}
-	router := setupOrganizationMcpRouter(service)
+func TestOrganizationMcpDoesNotExposeLegacyRelationshipMutation(t *testing.T) {
+	router := setupOrganizationMcpRouter(&fakeOrganizationMessageService{})
 	params := json.RawMessage(`{"name":"agent_relation_signal","arguments":{"target_agent":"agent-b","event_type":"promise_broken","reason":"承诺后没有交付","idempotency_key":"task-7-promise"}}`)
 	rec := postOrganizationRPC(t, router, "tools/call", params, "agent-a-token")
 	require.Equal(t, http.StatusOK, rec.Code)
-	payload := decodeMcpTextResult(t, rec)
-	require.NotNil(t, payload["event"])
-	require.Equal(t, "agent-a", service.source.Name)
-	require.Equal(t, "promise_broken", service.signal.EventType)
-	require.Equal(t, "task-7-promise", service.signal.IdempotencyKey)
+	require.Contains(t, rec.Body.String(), "工具不存在")
 }
 
 func TestOrganizationMcpDerivesSourceFromRuntimeToken(t *testing.T) {
@@ -210,11 +201,24 @@ func TestOrganizationMcpRelationsExposeDirection(t *testing.T) {
 	relations := payload["relations"].([]interface{})
 	require.Equal(t, "outgoing", relations[0].(map[string]interface{})["direction"])
 	require.Equal(t, "incoming", relations[1].(map[string]interface{})["direction"])
-	require.Contains(t, relations[0].(map[string]interface{}), "relationship_score")
-	require.Contains(t, relations[0].(map[string]interface{}), "stance")
+	require.NotContains(t, relations[0].(map[string]interface{}), "relationship_score")
+	require.NotContains(t, relations[0].(map[string]interface{}), "stance")
 	require.NotContains(t, relations[1].(map[string]interface{}), "relationship_score")
 	require.NotContains(t, relations[1].(map[string]interface{}), "current_stance")
 	require.NotContains(t, relations[1].(map[string]interface{}), "stance")
+}
+
+func TestOrganizationMcpPureConnectionOmitsDynamicRelationship(t *testing.T) {
+	service := &fakeOrganizationMessageService{relations: []*services.AgentRelationDTO{
+		{SourceAgentID: 41, SourceAgentName: "agent-a", TargetAgentID: 42, TargetAgentName: "agent-b", Scope: "hq", RelationType: "peer", AllowedActions: []string{"review"}},
+	}}
+	router := setupOrganizationMcpRouter(service)
+	rec := postOrganizationRPC(t, router, "tools/call", json.RawMessage(`{"name":"agent_relations","arguments":{}}`), "agent-a-token")
+	payload := decodeMcpTextResult(t, rec)
+	relation := payload["relations"].([]interface{})[0].(map[string]interface{})
+	require.Equal(t, "peer", relation["relation_type"])
+	require.NotContains(t, relation, "relationship_score")
+	require.NotContains(t, relation, "stance")
 }
 
 func TestOrganizationMcpRejectsMissingRuntimeToken(t *testing.T) {

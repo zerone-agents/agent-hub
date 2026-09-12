@@ -57,7 +57,7 @@ func setupAgentRelationHTTPTest(t *testing.T) (*gin.Engine, agent.AgentConfig, a
 	return router, source, target
 }
 
-func TestAgentRelationHTTPRecordsAndListsDynamicEvents(t *testing.T) {
+func TestAgentRelationHTTPLegacyDynamicEventsAreReadOnly(t *testing.T) {
 	router, source, target := setupAgentRelationHTTPTest(t)
 	createBody := fmt.Sprintf(`{
 		"sourceAgentId": %d,
@@ -81,19 +81,8 @@ func TestAgentRelationHTTPRecordsAndListsDynamicEvents(t *testing.T) {
 		"visibility": "participants",
 		"idempotencyKey": "meeting-7-promise"
 	}`)
-	require.Equal(t, http.StatusCreated, recordedResponse.Code)
-	var recorded struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Relation services.AgentRelationDTO      `json:"relation"`
-			Event    services.AgentRelationEventDTO `json:"event"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(recordedResponse.Body.Bytes(), &recorded))
-	require.True(t, recorded.Success)
-	require.Equal(t, 20, recorded.Data.Relation.RelationshipScore)
-	require.Equal(t, "neutral", recorded.Data.Relation.Stance)
-	require.Equal(t, -20, recorded.Data.Event.Delta)
+	require.Equal(t, http.StatusBadRequest, recordedResponse.Code)
+	require.Contains(t, recordedResponse.Body.String(), "只读兼容")
 
 	listedResponse := agentRelationHTTPRequest(t, router, http.MethodGet, eventPath, "")
 	require.Equal(t, http.StatusOK, listedResponse.Code)
@@ -102,8 +91,7 @@ func TestAgentRelationHTTPRecordsAndListsDynamicEvents(t *testing.T) {
 		Data    []services.AgentRelationEventDTO `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(listedResponse.Body.Bytes(), &listed))
-	require.Len(t, listed.Data, 1)
-	require.Equal(t, "meeting-7-promise", listed.Data[0].IdempotencyKey)
+	require.Empty(t, listed.Data)
 }
 
 func agentRelationHTTPRequest(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -156,7 +144,7 @@ func TestAgentRelationHTTPCRUDAndBidirectionalContract(t *testing.T) {
 		Data    services.AgentRelationDTO `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(updateResponse.Body.Bytes(), &updated))
-	require.Equal(t, "competitive", updated.Data.Stance)
+	require.Equal(t, "neutral", updated.Data.Stance)
 	require.Equal(t, []string{"review", "challenge"}, updated.Data.AllowedActions)
 
 	deleteResponse := agentRelationHTTPRequest(t, router, http.MethodDelete,

@@ -4,7 +4,6 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ArrowRightIcon,
   ArrowsLeftRightIcon,
-  ClockCounterClockwiseIcon,
   PencilSimpleIcon,
   PlusIcon,
   TrashIcon,
@@ -22,11 +21,10 @@ import { useAgents } from '@/queries/useAgents'
 import { useAgentRelations, useDeleteAgentRelation } from '@/queries/useAgentRelations'
 import { tokens as t } from '@/styles/tokens'
 import RelationForm from './RelationForm'
-import RelationDynamicsDrawer from './RelationDynamicsDrawer'
 import RelationTopology from './RelationTopology'
 import RelationTypeLibrary from './RelationTypeLibrary'
 import { useRelationTypes } from '@/queries/useRelationTypes'
-import { ACTIONS, CONTEXT_POLICIES, DELIVERY_POLICIES, RELATION_TYPES, STANCES, optionLabel } from './relationOptions'
+import { ACTIONS, CONTEXT_POLICIES, DELIVERY_POLICIES, RELATION_TYPES, optionLabel } from './relationOptions'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -235,7 +233,6 @@ export default function RelationListPage() {
   const [keywords, setKeywords] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingRelation, setEditingRelation] = useState<AgentRelation | null>(null)
-  const [dynamicsRelation, setDynamicsRelation] = useState<AgentRelation | null>(null)
   const initialAgent = Number(searchParams.get('agent')) || undefined
   const [focusAgentId, setFocusAgentId] = useState<number | undefined>(initialAgent)
   const [activeView, setActiveView] = useState(initialAgent ? 'network' : 'list')
@@ -249,8 +246,6 @@ export default function RelationListPage() {
         relation.targetAgentName,
         relation.scope,
         optionLabel(RELATION_TYPES, relation.relationType),
-        optionLabel(STANCES, relation.stance),
-        String(relation.relationshipScore),
         ...actionLabels(relation.allowedActions),
         relation.constraint,
       ].some((value) => value.toLowerCase().includes(query)),
@@ -259,7 +254,7 @@ export default function RelationListPage() {
 
   const columns: ColumnsType<AgentRelation> = [
     {
-      title: '有向关系',
+      title: '有向连接',
       key: 'edge',
       width: 330,
       render: (_, relation) => (
@@ -283,39 +278,12 @@ export default function RelationListPage() {
       ),
     },
     {
-      title: '关系 / 动态状态',
+      title: '连接类型',
       key: 'semantics',
       width: 170,
-      render: (_, relation) => {
-        const stance = STANCES.find((item) => item.value === relation.stance)
-        return (
-          <div>
-            <div style={{ color: t.text, fontWeight: 600 }}>{optionLabel(RELATION_TYPES, relation.relationType)}</div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                marginTop: 5,
-              }}
-            >
-              <Tag color={stance?.color} style={{ marginInlineEnd: 0 }}>
-                {stance?.label ?? relation.stance}
-              </Tag>
-              <span
-                style={{
-                  color: relation.relationshipScore >= 0 ? t.success : t.danger,
-                  fontFamily: t.fontMono,
-                  fontSize: 12,
-                }}
-              >
-                {relation.relationshipScore > 0 ? '+' : ''}
-                {relation.relationshipScore}
-              </span>
-            </div>
-          </div>
-        )
-      },
+      render: (_, relation) => (
+        <div style={{ color: t.text, fontWeight: 600 }}>{optionLabel(RELATION_TYPES, relation.relationType)}</div>
+      ),
     },
     {
       title: '允许动作',
@@ -370,20 +338,10 @@ export default function RelationListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 126,
+      width: 90,
       fixed: 'right',
       render: (_, relation) => (
         <div className={styles.actions}>
-          <button
-            type="button"
-            className={styles.actionButton}
-            title="关系动态"
-            onClick={() => {
-              setDynamicsRelation(relation)
-            }}
-          >
-            <ClockCounterClockwiseIcon size={15} />
-          </button>
           {canWrite && (
             <>
               <button
@@ -398,8 +356,8 @@ export default function RelationListPage() {
                 <PencilSimpleIcon size={15} />
               </button>
               <Popconfirm
-                title="删除这条有向关系？"
-                description="反向关系不会被一并删除。"
+                title="删除这条有向连接？"
+                description="反向连接不会被一并删除。"
                 okText="删除"
                 okButtonProps={{ danger: true }}
                 cancelText="取消"
@@ -427,9 +385,9 @@ export default function RelationListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>组织关系</div>
+          <div className={styles.pageTitle}>通信连接</div>
           <div className={styles.pageSub}>
-            Agent 创建完成后，在这里定义通信边界；互动事件会继续改变每条有向关系的分值与立场。
+            定义 Agent 之间谁能联系谁、可以做什么，以及如何传递消息。人物关系属于可选能力包，安装后在运行状态页查看。
           </div>
         </div>
         {canWrite && (
@@ -445,14 +403,14 @@ export default function RelationListPage() {
                     : openCreate
                 }
               >
-                {agents.length < 2 ? '先创建 Agent' : '新建关系'}
+                {agents.length < 2 ? '先创建 Agent' : '新建连接'}
               </PrimaryButton>
             </span>
           </Tooltip>
         )}
       </div>
 
-      <div className={styles.modelStrip} aria-label="关系模型说明">
+      <div className={styles.modelStrip} aria-label="连接模型说明">
         <div className={styles.modelItem}>
           <span className={styles.modelIndex}>01</span>
           <div className={styles.modelCopy}>
@@ -471,21 +429,21 @@ export default function RelationListPage() {
         <div className={styles.modelItem}>
           <span className={styles.modelIndex}>03</span>
           <div className={styles.modelCopy}>
-            <strong>动态演化</strong>
+            <strong>运行时执行</strong>
             <br />
-            事件改分，立场随分值自动变化
+            H3 按连接检查多跳通信
           </div>
         </div>
       </div>
 
-      <Tabs activeKey={activeView} onChange={setActiveView} items={[{key:'network',label:'关系网络'},{key:'types',label:'关系类型'},{key:'list',label:'关系清单'}]} />
+      <Tabs activeKey={activeView} onChange={setActiveView} items={[{key:'network',label:'连接网络'},{key:'types',label:'连接类型'},{key:'list',label:'连接清单'}]} />
 
       {activeView === 'types' ? <RelationTypeLibrary /> : activeView === 'network' ? (
-        <RelationTopology agents={agents} relations={filteredRelations} types={relationTypes} focusId={focusAgentId} onFocus={setFocusAgentId} onEdge={setDynamicsRelation} />
+        <RelationTopology agents={agents} relations={filteredRelations} types={relationTypes} focusId={focusAgentId} onFocus={setFocusAgentId} />
       ) : <>
 
       <div className={styles.toolbar}>
-        <NameSearch placeholder="搜索 Agent、关系、动作或范围" realtime onSearch={setKeywords} />
+        <NameSearch placeholder="搜索 Agent、连接类型、动作或范围" realtime onSearch={setKeywords} />
         <Tag icon={<ArrowsLeftRightIcon size={13} />}>共 {filteredRelations.length} 条有向边</Tag>
       </div>
 
@@ -493,7 +451,7 @@ export default function RelationListPage() {
         <Alert
           type="error"
           showIcon
-          title="组织关系加载失败"
+          title="通信连接加载失败"
           action={
             <Button
               type="link"
@@ -512,10 +470,10 @@ export default function RelationListPage() {
         </div>
       ) : filteredRelations.length === 0 ? (
         <div className={styles.empty}>
-          <Empty description={keywords ? '没有匹配的关系' : '还没有组织关系'} />
+          <Empty description={keywords ? '没有匹配的连接' : '还没有通信连接'} />
           {canWrite && !keywords && agents.length >= 2 && (
             <PrimaryButton style={{ marginTop: 14 }} onClick={openCreate}>
-              创建第一条关系
+              创建第一条连接
             </PrimaryButton>
           )}
           {canWrite && !keywords && agents.length < 2 && (
@@ -552,16 +510,6 @@ export default function RelationListPage() {
         presetSourceAgentId={focusAgentId}
         onClose={() => {
           setFormOpen(false)
-        }}
-      />
-      <RelationDynamicsDrawer
-        open={dynamicsRelation !== null}
-        relation={
-          dynamicsRelation ? (relations.find((item) => item.id === dynamicsRelation.id) ?? dynamicsRelation) : null
-        }
-        canWrite={canWrite}
-        onClose={() => {
-          setDynamicsRelation(null)
         }}
       />
     </div>

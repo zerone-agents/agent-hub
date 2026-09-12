@@ -188,41 +188,12 @@ func behaviorProfileConfigMap() map[string]interface{} {
 }
 
 func TestBehaviorProfileConfigKeys(t *testing.T) {
-	t.Run("unpack and pack structured profile", func(t *testing.T) {
-		cfg := &agent.AgentConfig{}
-		require.NoError(t, unpackConfigToModel(map[string]interface{}{
-			"systemPrompt":    "base identity",
-			"behaviorProfile": behaviorProfileConfigMap(),
-		}, cfg, ""))
-		require.NotNil(t, cfg.BehaviorProfile)
-		require.Equal(t, 75, cfg.BehaviorProfile.HierarchyCompliance)
-		require.Equal(t, 55, cfg.BehaviorProfile.Whistleblowing)
-
-		packed := modelToConfigMap(cfg, "")
-		require.Equal(t, cfg.BehaviorProfile, packed["behaviorProfile"])
-	})
-
-	t.Run("absent leaves legacy profile untouched", func(t *testing.T) {
+	t.Run("legacy profile remains readable and untouched by unrelated edits", func(t *testing.T) {
 		profile := agent.DefaultBehaviorProfile()
 		cfg := &agent.AgentConfig{BehaviorProfile: &profile}
 		require.NoError(t, unpackConfigToModel(map[string]interface{}{"systemPrompt": "updated"}, cfg, ""))
 		require.Same(t, &profile, cfg.BehaviorProfile)
-	})
-
-	t.Run("explicit null clears profile", func(t *testing.T) {
-		profile := agent.DefaultBehaviorProfile()
-		cfg := &agent.AgentConfig{BehaviorProfile: &profile}
-		require.NoError(t, unpackConfigToModel(map[string]interface{}{"behaviorProfile": nil}, cfg, ""))
-		require.Nil(t, cfg.BehaviorProfile)
-	})
-
-	t.Run("profile participates in content hash", func(t *testing.T) {
-		without, err := computeContentHash(modelToConfigMap(&agent.AgentConfig{SystemPrompt: "same"}, ""))
-		require.NoError(t, err)
-		profile := agent.DefaultBehaviorProfile()
-		with, err := computeContentHash(modelToConfigMap(&agent.AgentConfig{SystemPrompt: "same", BehaviorProfile: &profile}, ""))
-		require.NoError(t, err)
-		require.NotEqual(t, without, with)
+		require.Equal(t, &profile, modelToConfigMap(cfg, "")["behaviorProfile"])
 	})
 }
 

@@ -92,14 +92,14 @@ func TestAgentRelationServiceSupportsMixedOrganizationGraph(t *testing.T) {
 	require.Equal(t, "reports_to", edges[edgeKey{legal.ID, chief.ID}].RelationType)
 	require.Equal(t, []string{"report", "escalate"}, edges[edgeKey{legal.ID, chief.ID}].AllowedActions)
 	require.Equal(t, "oversight", edges[edgeKey{chief.ID, legal.ID}].RelationType)
-	require.Equal(t, "friendly", edges[edgeKey{chief.ID, legal.ID}].Stance)
+	require.Equal(t, "neutral", edges[edgeKey{chief.ID, legal.ID}].Stance)
 	require.Equal(t, "peer", edges[edgeKey{legal.ID, finance.ID}].RelationType)
 	require.Equal(t, "peer", edges[edgeKey{finance.ID, legal.ID}].RelationType)
 	require.Equal(t, "shared_thread", edges[edgeKey{finance.ID, legal.ID}].ContextPolicy)
 	require.Equal(t, "advisor", edges[edgeKey{communications.ID, chief.ID}].RelationType)
 	require.Equal(t, "reviewer", edges[edgeKey{auditor.ID, chief.ID}].RelationType)
-	require.Equal(t, "hostile", edges[edgeKey{chief.ID, rival.ID}].Stance)
-	require.Equal(t, "hostile", edges[edgeKey{rival.ID, chief.ID}].Stance)
+	require.Equal(t, "neutral", edges[edgeKey{chief.ID, rival.ID}].Stance)
+	require.Equal(t, "neutral", edges[edgeKey{rival.ID, chief.ID}].Stance)
 }
 
 func TestAgentRelationServiceSamePairCanDifferByScope(t *testing.T) {
@@ -168,7 +168,7 @@ func TestAgentRelationServiceTenantCannotMutateAnotherTenantEdge(t *testing.T) {
 	ownerList, err := service.List("org-a")
 	require.NoError(t, err)
 	require.Len(t, ownerList, 1)
-	require.Equal(t, "friendly", ownerList[0].Stance)
+	require.Equal(t, "neutral", ownerList[0].Stance)
 }
 
 func TestAgentRelationServiceRejectsInvalidRelationshipContracts(t *testing.T) {
@@ -181,7 +181,6 @@ func TestAgentRelationServiceRejectsInvalidRelationshipContracts(t *testing.T) {
 	}{
 		{name: "invalid scope", mutate: func(input *CreateAgentRelationInput) { input.Scope = "bad scope" }, wantErr: agentrelation.ErrInvalidScope},
 		{name: "unknown type", mutate: func(input *CreateAgentRelationInput) { input.RelationType = "best_friend" }, wantErr: agentrelation.ErrInvalidType},
-		{name: "unknown stance", mutate: func(input *CreateAgentRelationInput) { input.Stance = "treacherous" }, wantErr: agentrelation.ErrInvalidStance},
 		{name: "actions required", mutate: func(input *CreateAgentRelationInput) { input.AllowedActions = nil }, wantErr: agentrelation.ErrActionsRequired},
 		{name: "unknown action", mutate: func(input *CreateAgentRelationInput) { input.AllowedActions = []string{"bribe"} }, wantErr: agentrelation.ErrInvalidAction},
 		{name: "unknown context policy", mutate: func(input *CreateAgentRelationInput) { input.ContextPolicy = "all_memory" }, wantErr: agentrelation.ErrInvalidContext},

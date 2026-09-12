@@ -306,6 +306,11 @@ Agent 作出的是行动提议。涉及财富、舆论、法律和关系变化�
 验收：不安装 Speeding 时，Hub 所有用户界面、运行提示词和数据库核心字段均无 Speeding 品牌
 或财富游戏语义。
 
+H3.1 收口补充：正式 Hub 不得 import `examples/`；能力包注册必须记录来源、
+权限请求和资源 provenance，管理员批准权限后才能启用。人格和关系模块创建的
+具体资源后续通过 `capability_resource_provenance` 的 package/resource 键接入，不再把包语义
+复制进各个领域核心表。
+
 ### Phase 1：Run、扩展注册与通用状态
 
 目标：实现后续所有动态系统共同依赖的最小平台底座。

@@ -8,6 +8,7 @@ export interface RelationTypeTemplate {
   description: string
   baseType: RelationType
   directionPolicy: 'one_way' | 'bidirectional_allowed'
+  /** @deprecated Legacy backend compatibility; not a connection setting. */
   defaultStance: RelationStance
   defaultAllowedActions: RelationAction[]
   defaultContextPolicy: ContextPolicy
@@ -21,7 +22,10 @@ export interface RelationTypeTemplate {
   usageCount: number
 }
 
-export type RelationTypePayload = Omit<RelationTypeTemplate, 'id' | 'currentVersion' | 'isBuiltin' | 'usageCount'>
+export type RelationTypePayload = Omit<RelationTypeTemplate, 'id' | 'currentVersion' | 'isBuiltin' | 'usageCount' | 'defaultStance'> & {
+  /** @deprecated Accepted only by older servers; current clients omit it. */
+  defaultStance?: RelationStance
+}
 
 export const relationTypeApi = {
   list: () => apiClient.get('/api/v1/admin/relation-types'),

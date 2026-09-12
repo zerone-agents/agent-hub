@@ -11,7 +11,6 @@ import (
 	"control-panel/internal/domain/agentrelation"
 	repository "control-panel/internal/infrastructure/persistence"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -172,7 +171,6 @@ func (s *AgentRelationService) Create(tenantID string, input *CreateAgentRelatio
 	}
 
 	relations := make([]*agentrelation.AgentRelation, 0, len(edges))
-	now := time.Now().UTC()
 	for _, edge := range edges {
 		relations = append(relations, &agentrelation.AgentRelation{
 			Scope:                       input.Scope,
@@ -181,9 +179,8 @@ func (s *AgentRelationService) Create(tenantID string, input *CreateAgentRelatio
 			RelationType:                input.RelationType,
 			RelationTypeTemplateName:    input.RelationTypeTemplateName,
 			RelationTypeTemplateVersion: templateVersion,
-			Stance:                      input.Stance,
-			RelationshipScore:           agentrelation.InitialScoreForStance(input.Stance),
-			LastChangedAt:               &now,
+			Stance:                      "neutral", // legacy column; not part of the connection contract
+			RelationshipScore:           0,         // legacy column; H6 will use capability-owned Run state
 			AllowedActions:              append([]string(nil), input.AllowedActions...),
 			ContextPolicy:               input.ContextPolicy,
 			DeliveryPolicy:              input.DeliveryPolicy,
@@ -211,9 +208,6 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 	if err != nil {
 		return nil, agentrelation.ErrNotFound
 	}
-	originalStance := relation.Stance
-	requestedStance := originalStance
-
 	if input.Scope != nil {
 		relation.Scope = strings.TrimSpace(*input.Scope)
 	}
@@ -233,10 +227,8 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 			relation.RelationTypeTemplateName, relation.RelationTypeTemplateVersion, relation.RelationType = name, template.CurrentVersion, template.BaseType
 		}
 	}
-	if input.Stance != nil {
-		requestedStance = strings.TrimSpace(*input.Stance)
-		relation.Stance = requestedStance
-	}
+	// Stance is a deprecated request field retained for wire compatibility.
+	// Connection updates deliberately ignore it; legacy dynamics are read-only.
 	if input.AllowedActions != nil {
 		relation.AllowedActions = normalizeActions(*input.AllowedActions)
 	}
@@ -267,29 +259,6 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 		}
 	}
 
-	if requestedStance != originalStance {
-		now := time.Now().UTC()
-		eventID := uuid.NewString()
-		updated, _, err := s.repo.UpdateAndResetScore(tenantID, relation, &agentrelation.AgentRelationEvent{
-			ID:             eventID,
-			RelationID:     relation.ID,
-			EventType:      "admin_stance_reset",
-			Severity:       1,
-			Reason:         fmt.Sprintf("管理员将关系立场重设为 %s", requestedStance),
-			Visibility:     "private",
-			ActorType:      "admin",
-			SourceKind:     "configuration",
-			IdempotencyKey: eventID,
-			RuleVersion:    agentrelation.RelationshipRuleV1,
-			OccurredAt:     now,
-			CreatedAt:      now,
-		}, agentrelation.InitialScoreForStance(requestedStance))
-		if err != nil {
-			return nil, fmt.Errorf("更新 Agent 关系失败: %w", err)
-		}
-		return relationToDTO(updated), nil
-	}
-
 	if err := s.repo.Update(tenantID, relation); err != nil {
 		return nil, fmt.Errorf("更新 Agent 关系失败: %w", err)
 	}
@@ -304,49 +273,7 @@ func (s *AgentRelationService) Update(tenantID string, id uint64, input *UpdateA
 // existing directed edge. Arbitrary score deltas are intentionally not part of
 // the input contract.
 func (s *AgentRelationService) RecordEvent(tenantID string, relationID uint64, input *RecordAgentRelationEventInput, actorType, actorID string) (*AgentRelationEventResultDTO, error) {
-	if input == nil {
-		return nil, agentrelation.ErrInvalidEventType
-	}
-	normalizeRelationEventInput(input)
-	if err := validateRelationEventInput(input); err != nil {
-		return nil, err
-	}
-	delta, ok := agentrelation.EventDelta(input.EventType, input.Severity)
-	if !ok {
-		return nil, agentrelation.ErrInvalidEventType
-	}
-	now := time.Now().UTC()
-	event := &agentrelation.AgentRelationEvent{
-		ID:             uuid.NewString(),
-		RelationID:     relationID,
-		EventType:      input.EventType,
-		Severity:       input.Severity,
-		Delta:          delta,
-		Reason:         input.Reason,
-		Visibility:     input.Visibility,
-		ActorType:      strings.TrimSpace(actorType),
-		ActorID:        truncateRelationEventField(actorID, 128),
-		SourceKind:     input.SourceKind,
-		SourceID:       input.SourceID,
-		IdempotencyKey: input.IdempotencyKey,
-		RuleVersion:    agentrelation.RelationshipRuleV1,
-		OccurredAt:     now,
-		CreatedAt:      now,
-	}
-	if event.ActorType == "" {
-		event.ActorType = "system"
-	}
-	if event.IdempotencyKey == "" {
-		event.IdempotencyKey = event.ID
-	}
-	relation, applied, err := s.repo.ApplyEvent(tenantID, event)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, agentrelation.ErrNotFound
-		}
-		return nil, fmt.Errorf("记录关系事件失败: %w", err)
-	}
-	return &AgentRelationEventResultDTO{Relation: relationToDTO(relation), Event: relationEventToDTO(applied)}, nil
+	return nil, agentrelation.ErrDynamicsReadOnly
 }
 
 // RecordEventForAgent only permits a runtime agent to change its own view of
@@ -475,10 +402,9 @@ func normalizeCreateRelation(input *CreateAgentRelationInput) {
 	}
 	input.RelationType = strings.TrimSpace(input.RelationType)
 	input.RelationTypeTemplateName = strings.TrimSpace(input.RelationTypeTemplateName)
-	input.Stance = strings.TrimSpace(input.Stance)
-	if input.Stance == "" {
-		input.Stance = "neutral"
-	}
+	// Deprecated compatibility input: connection creation never creates
+	// business stance. Keep the legacy non-null column at its neutral default.
+	input.Stance = "neutral"
 	input.AllowedActions = normalizeActions(input.AllowedActions)
 	input.ContextPolicy = strings.TrimSpace(input.ContextPolicy)
 	if input.ContextPolicy == "" {

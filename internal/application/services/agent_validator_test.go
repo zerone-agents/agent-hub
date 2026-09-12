@@ -271,71 +271,10 @@ func TestValidateConfig_DisallowedTools(t *testing.T) {
 }
 
 func TestValidateConfig_BehaviorProfile(t *testing.T) {
-	require.NoError(t, ValidateConfig(map[string]interface{}{
-		"behaviorProfile": behaviorProfileConfigMap(),
-	}))
-	require.NoError(t, ValidateConfig(map[string]interface{}{"behaviorProfile": nil}))
 	require.NoError(t, ValidateConfig(map[string]interface{}{}))
-
-	cases := []struct {
-		name    string
-		mutate  func(map[string]interface{}) interface{}
-		wantErr string
-	}{
-		{
-			name:    "wrong shape",
-			mutate:  func(map[string]interface{}) interface{} { return "prompt-like text" },
-			wantErr: "必须是对象",
-		},
-		{
-			name: "missing field",
-			mutate: func(profile map[string]interface{}) interface{} {
-				delete(profile, "secrecy")
-				return profile
-			},
-			wantErr: "secrecy 不能为空",
-		},
-		{
-			name: "out of range",
-			mutate: func(profile map[string]interface{}) interface{} {
-				profile["ambition"] = float64(101)
-				return profile
-			},
-			wantErr: "ambition 必须在 0-100",
-		},
-		{
-			name: "fractional score",
-			mutate: func(profile map[string]interface{}) interface{} {
-				profile["riskTolerance"] = 42.5
-				return profile
-			},
-			wantErr: "riskTolerance 必须是整数",
-		},
-		{
-			name: "unknown version",
-			mutate: func(profile map[string]interface{}) interface{} {
-				profile["version"] = float64(2)
-				return profile
-			},
-			wantErr: "version 必须在 1-1",
-		},
-		{
-			name: "unknown field",
-			mutate: func(profile map[string]interface{}) interface{} {
-				profile["likesSkipLevelReporting"] = true
-				return profile
-			},
-			wantErr: "未知字段",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateConfig(map[string]interface{}{
-				"behaviorProfile": tc.mutate(behaviorProfileConfigMap()),
-			})
-			require.Error(t, err)
-			require.Contains(t, err.Error(), tc.wantErr)
-		})
+	for _, value := range []interface{}{behaviorProfileConfigMap(), nil} {
+		err := ValidateConfig(map[string]interface{}{"behaviorProfile": value})
+		require.ErrorContains(t, err, "已停止配置")
 	}
 }
 

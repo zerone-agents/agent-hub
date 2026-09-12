@@ -184,7 +184,8 @@ func (s *PromptComposerService) relationshipFragments(tenantID, runID string, a 
 	s.db.Where("tenant_id = ? AND enabled = ? AND source_agent_id = ? AND target_agent_id IN ?", tenantID, true, a.AgentID, ids).Order("target_agent_id, relation_type").Find(&rows)
 	result := make([]promptFragment, 0, len(rows))
 	for _, row := range rows {
-		text := fmt.Sprintf("你与 %s 的关系是 %s，立场为 %s。可执行动作：%s。上下文规则：%s。", names[row.TargetAgentID], row.RelationType, row.Stance, strings.Join(row.AllowedActions, "、"), row.ContextPolicy)
+		connection := row.ConnectionContract()
+		text := fmt.Sprintf("你与 %s 存在 %s 通信连接。可执行动作：%s。上下文规则：%s。", names[row.TargetAgentID], connection.RelationType, strings.Join(connection.AllowedActions, "、"), connection.ContextPolicy)
 		result = append(result, promptFragment{Stage: "relationship_context", Label: "协作关系 · " + names[row.TargetAgentID], SourceType: "relation", SourceID: fmt.Sprint(row.ID), SourceVersion: fmt.Sprint(row.RelationTypeTemplateVersion), Text: text})
 	}
 	return result

@@ -17,7 +17,7 @@ func setupPromptComposer(t *testing.T) (*gorm.DB, *PromptComposerService, *rundo
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.CapabilityBinding{}, &rundomain.RunState{}, &rundomain.PromptSnapshot{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.CapabilityBinding{}, &rundomain.RunState{}, &rundomain.PromptSnapshot{}))
 	a := &agent.AgentConfig{TenantID: "t1", Name: "analyst", Title: map[string]string{"zh": "分析师"}, ContentHash: "agent-v1", SystemPrompt: "核验事实并提交报告。", PersonalityTemplateName: "careful", PersonalityTemplateVersion: 2, PersonalityPrompt: "证据不足时明确说明不确定性。"}
 	require.NoError(t, db.Create(a).Error)
 	r := &rundomain.Run{ID: "run-1", TenantID: "t1", Name: "研究任务", Status: rundomain.StatusDraft, Metadata: map[string]any{"goal": "判断市场需求"}}
@@ -64,6 +64,23 @@ func TestPromptComposerTenantIsolation(t *testing.T) {
 	_, svc, r, a := setupPromptComposer(t)
 	_, err := svc.Compose("other", r.ID, a.ID)
 	require.ErrorIs(t, err, rundomain.ErrNotFound)
+}
+
+func TestPromptComposerUsesOnlyConnectionContract(t *testing.T) {
+	db, svc, r, a := setupPromptComposer(t)
+	b := &agent.AgentConfig{TenantID: "t1", Name: "reviewer", ContentHash: "agent-v1", SystemPrompt: "复核结论。"}
+	require.NoError(t, db.Create(b).Error)
+	_, err := NewRunService(db).AddAgent("t1", r.ID, b.ID, "复核人")
+	require.NoError(t, err)
+	relation := &agentrelation.AgentRelation{TenantID: "t1", Scope: "global", SourceAgentID: a.ID, TargetAgentID: b.ID, RelationType: "peer", Stance: "hostile", RelationshipScore: -90, AllowedActions: []string{"consult"}, ContextPolicy: "summary_only", DeliveryPolicy: "async", Enabled: true}
+	require.NoError(t, db.Create(relation).Error)
+
+	plain, err := svc.Compose("t1", r.ID, a.ID)
+	require.NoError(t, err)
+	require.Contains(t, plain.RenderedText, "peer 通信连接")
+	require.NotContains(t, plain.RenderedText, "hostile")
+	require.NotContains(t, plain.RenderedText, "-90")
+
 }
 
 func TestPromptComposerDeliveryEnvelopeCannotBeForgedByUserInput(t *testing.T) {

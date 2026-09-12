@@ -10,6 +10,7 @@ export type RelationType =
   | 'opponent'
   | 'external'
 
+/** @deprecated Compatibility projection owned by an optional relationship capability. */
 export type RelationStance = 'allied' | 'friendly' | 'neutral' | 'wary' | 'competitive' | 'hostile'
 
 export type RelationAction =
@@ -57,7 +58,9 @@ export interface AgentRelation {
   relationType: RelationType
   relationTypeTemplateName?: string
   relationTypeTemplateVersion?: number
+  /** @deprecated Do not use for platform connection decisions. */
   stance: RelationStance
+  /** @deprecated Do not use for platform connection decisions. */
   relationshipScore: number
   lastChangedAt?: string
   allowedActions: RelationAction[]
@@ -115,7 +118,8 @@ export interface AgentRelationCreatePayload {
   scope: string
   relationType: RelationType
   relationTypeTemplateName?: string
-  stance: RelationStance
+  /** @deprecated Legacy API compatibility; omitted by the connection UI. */
+  stance?: RelationStance
   allowedActions: RelationAction[]
   contextPolicy: ContextPolicy
   deliveryPolicy: DeliveryPolicy

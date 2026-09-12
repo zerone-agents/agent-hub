@@ -114,14 +114,8 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
-	if raw, exists := config["behaviorProfile"]; exists && raw != nil {
-		profileMap, ok := raw.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("behaviorProfile 必须是对象或 null")
-		}
-		if _, err := parseBehaviorProfile(profileMap); err != nil {
-			return err
-		}
+	if _, exists := config["behaviorProfile"]; exists {
+		return fmt.Errorf("behaviorProfile 已停止配置，请在人格库中通过提示词描述行为")
 	}
 
 	if v, ok := config["personalityTemplateName"].(string); ok && v != "" {

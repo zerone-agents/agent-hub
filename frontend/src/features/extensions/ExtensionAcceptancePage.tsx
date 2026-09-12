@@ -1,10 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Alert, Button, Empty, Input, Select, Skeleton, Tag } from 'antd'
+import { useState } from 'react'
+import { Alert, Button, Empty, Input, Skeleton, Tag } from 'antd'
 import {
   CheckCircleIcon,
-  ClipboardTextIcon,
   CodeIcon,
-  FlaskIcon,
   PackageIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
@@ -239,16 +237,7 @@ export default function ExtensionAcceptancePage() {
   const { styles } = useStyles()
   const info = useH0AcceptanceInfo()
   const validation = useValidateExtension()
-  const [exampleId, setExampleId] = useState<string>()
-  const [manifest, setManifest] = useState<string>()
-
-  const effectiveExampleId = exampleId ?? info.data?.examples[0]?.id
-
-  const selectedExample = useMemo(
-    () => info.data?.examples.find((example) => example.id === effectiveExampleId),
-    [effectiveExampleId, info.data?.examples],
-  )
-  const effectiveManifest = manifest ?? selectedExample?.manifest ?? ''
+  const [manifest, setManifest] = useState('')
 
   const contributions = (info.data?.contributionCategories ?? []).map((category) => ({
     ...category,
@@ -256,13 +245,6 @@ export default function ExtensionAcceptancePage() {
       ? validation.data.contributions?.find((item) => item.key === category.key)?.count
       : undefined,
   }))
-
-  const selectExample = (id: string) => {
-    const example = info.data?.examples.find((item) => item.id === id)
-    setExampleId(id)
-    if (example) setManifest(example.manifest)
-    validation.reset()
-  }
 
   if (info.isLoading) {
     return <div className={styles.page}><Skeleton active paragraph={{ rows: 12 }} /></div>
@@ -286,8 +268,8 @@ export default function ExtensionAcceptancePage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.title}>扩展能力验收</h1>
-          <p className={styles.subtitle}>验证能力包是否遵守 Agent Hub 平台边界。垂直应用示例仅用于验证，不属于平台内置业务。</p>
+          <h1 className={styles.title}>能力包检查</h1>
+          <p className={styles.subtitle}>在安装前检查能力包的身份、权限和扩展内容。平台不内置任何垂直应用的业务规则。</p>
         </div>
         <Tag color="green" icon={<CheckCircleIcon size={14} weight="fill" />}>{info.data.status}</Tag>
       </header>
@@ -295,25 +277,15 @@ export default function ExtensionAcceptancePage() {
       <div className={styles.versionStrip} aria-label="平台协议版本">
         <span className={styles.versionItem}><PackageIcon size={17} /><span>平台 <strong><code>{info.data.platformVersion}</code></strong></span></span>
         <span className={styles.versionItem}><CodeIcon size={17} /><span>扩展协议 <strong><code>{info.data.protocolVersion}</code></strong></span></span>
-        <span className={styles.versionItem}><FlaskIcon size={17} /><span>示例 <strong>{info.data.examples.length}</strong> 个</span></span>
       </div>
 
       <div className={styles.workspace}>
         <section className={styles.editor} aria-labelledby="manifest-title">
           <div className={styles.toolbar}>
             <div className={styles.field}>
-              <label htmlFor="extension-example">验收示例</label>
-              <Select
-                id="extension-example"
-                aria-label="验收示例"
-                value={effectiveExampleId}
-                onChange={selectExample}
-                options={info.data.examples.map((example) => ({ label: `${example.name} · ${example.kind}`, value: example.id }))}
-                style={{ width: '100%' }}
-              />
-              <div className={styles.helper}>{selectedExample?.description}</div>
+              <label htmlFor="extension-manifest">能力包 Manifest</label>
+              <div className={styles.helper}>粘贴 extension.yaml，平台只做协议校验，不会读取其中的本地文件路径。</div>
             </div>
-            <Button size="small" icon={<ClipboardTextIcon size={15} />} onClick={() => { void navigator.clipboard.writeText(effectiveManifest) }}>复制 YAML</Button>
           </div>
 
           <div className={styles.editorBody}>
@@ -321,18 +293,18 @@ export default function ExtensionAcceptancePage() {
               id="extension-manifest"
               name="extension-manifest"
               aria-label="extension.yaml"
-              value={effectiveManifest}
+              value={manifest}
               onChange={(event) => { setManifest(event.target.value); validation.reset() }}
               spellCheck={false}
             />
           </div>
           <div className={styles.editorFooter}>
-            <span>{effectiveManifest.length.toLocaleString('zh-CN')} 字符</span>
+            <span>{manifest.length.toLocaleString('zh-CN')} 字符</span>
             <PrimaryButton
               icon={<CheckCircleIcon size={16} weight="bold" />}
               loading={validation.isPending}
-              disabled={!effectiveManifest.trim()}
-              onClick={() => { validation.mutate(effectiveManifest) }}
+              disabled={!manifest.trim()}
+              onClick={() => { validation.mutate(manifest) }}
             >
               校验扩展包
             </PrimaryButton>

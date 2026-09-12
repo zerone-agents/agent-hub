@@ -12,7 +12,6 @@ import { createStyles } from 'antd-style'
 import NameSearch from '@/components/NameSearch'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useCanWrite } from '@/hooks/useCanWrite'
-import type { BehaviorProfile } from '@/api/agents'
 import type { Personality } from '@/api/personalities'
 import {
   useDeletePersonality,
@@ -155,20 +154,6 @@ const useStyles = createStyles(({ css }) => ({
     gap: 5px;
     color: var(--text-muted);
     font-size: 10px;
-  `,
-  signal: css`
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 25px;
-    padding-top: 2px;
-  `,
-  signalBar: css`
-    width: 4px;
-    min-height: 4px;
-    max-height: 23px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--primary) 72%, var(--foreground));
   `,
   inspector: css`
     min-width: 0;
@@ -365,29 +350,6 @@ const useStyles = createStyles(({ css }) => ({
   `,
 }))
 
-function PersonalitySignal({ profile }: { profile?: BehaviorProfile | null }) {
-  const { styles } = useStyles()
-  const values = profile
-    ? [
-        profile.hierarchyCompliance,
-        profile.ambition,
-        profile.whistleblowing,
-        profile.riskTolerance,
-      ]
-    : [38, 65, 48, 78]
-  return (
-    <span className={styles.signal} aria-hidden="true">
-      {values.map((value, index) => (
-        <i
-          key={index}
-          className={styles.signalBar}
-          style={{ height: `${Math.max(4, value / 4)}px` }}
-        />
-      ))}
-    </span>
-  )
-}
-
 export default function PersonalityLibraryPage() {
   const { styles, cx } = useStyles()
   const canWrite = useCanWrite()
@@ -472,7 +434,7 @@ export default function PersonalityLibraryPage() {
                     setSelectedName(item.name)
                   }}
                 >
-                  <PersonalitySignal profile={item.behaviorProfile} />
+                  <FingerprintIcon size={18} aria-hidden="true" />
                   <span>
                     <span className={styles.rowTitle}>{item.title}</span>
                     <span className={styles.rowName}>{item.name}</span>

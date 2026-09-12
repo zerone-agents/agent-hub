@@ -251,13 +251,6 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			guardReason = "sync_wait_cycle"
 		}
 	}
-	// The target must act from its own directional view of the sender. The
-	// authorizing A -> B edge is not evidence of how B feels about A.
-	recipientView, err := s.relationRepo.FindEnabledEdge(tenantID, relation.Scope, target.ID, source.ID)
-	if err != nil {
-		return nil, fmt.Errorf("读取接收方关系状态失败: %w", err)
-	}
-
 	message := &agentrelation.AgentMessage{
 		ID:         messageID,
 		RelationID: relation.ID,
@@ -294,7 +287,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		return agentMessageToDTO(message), agentrelation.ErrChainGuarded
 	}
 
-	envelope := buildAgentMessageEnvelope(source, target, relation, recipientView, message)
+	envelope := buildAgentMessageEnvelope(source, target, relation, message)
 	if relation.DeliveryPolicy == "async" {
 		dto := agentMessageToDTO(message)
 		go func() {
@@ -527,10 +520,11 @@ func estimateMessageTokens(value string) int64 {
 	return nonASCII + (ascii+3)/4
 }
 
-func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation, recipientView *agentrelation.AgentRelation, message *agentrelation.AgentMessage) string {
+func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agentrelation.AgentRelation, message *agentrelation.AgentMessage) string {
 	var b strings.Builder
+	connection := relation.ConnectionContract()
 	fmt.Fprintf(&b, "[Agent Hub 组织消息]\n消息ID：%s\n你是接收方 %s；发送方是 %s。\n", message.ID, target.Name, source.Name)
-	fmt.Fprintf(&b, "关系范围：%s\n结构关系：%s\n动作：%s\n上下文策略：%s\n", relation.Scope, relation.RelationType, message.Action, relation.ContextPolicy)
+	fmt.Fprintf(&b, "连接范围：%s\n连接类型：%s\n动作：%s\n上下文策略：%s\n", connection.Scope, connection.RelationType, message.Action, connection.ContextPolicy)
 	deadline := "none"
 	if message.DeadlineAt != nil {
 		deadline = message.DeadlineAt.UTC().Format(time.RFC3339)
@@ -539,11 +533,6 @@ func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation, reci
 		message.ConversationID, message.RootMessageID, message.ParentMessageID, message.Hop, message.MaxHops,
 		message.EventCount, message.EventBudget, message.TokensUsed, message.TokenBudget, deadline)
 	fmt.Fprintf(&b, "已访问 Agent IDs：%v\n", message.VisitedAgentIDs)
-	if recipientView == nil {
-		b.WriteString("你对发送方的当前关系：neutral（0，尚无反向关系状态）\n")
-	} else {
-		fmt.Fprintf(&b, "你对发送方的当前关系：%s（%d）\n", recipientView.Stance, recipientView.RelationshipScore)
-	}
 	if strings.TrimSpace(relation.Constraint) != "" {
 		fmt.Fprintf(&b, "这条关系的强制约束：%s\n", relation.Constraint)
 	}

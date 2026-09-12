@@ -67,13 +67,13 @@ fixture、Agent、关系、输入和预期结果。
 
 ### Agent Hub P0
 
-- [ ] 将 `[SPEEDING 组织消息]` 改为中性平台消息信封；
-- [ ] 搜索并清理 Hub 运行时代码里的其他游戏品牌和世界语义；
-- [ ] 将 `behavior_profile` 标记为 deprecated compatibility projection；
-- [ ] 将固定关系事件/分值标记为内置 `relationship-dynamics` 规则来源；
-- [ ] 为 `extension.yaml` 建立 JSON Schema、校验器和有效/无效 fixtures；
-- [ ] 建立四份 ADR：Run、状态所有权、事件语义、Hub/应用仓库边界；
-- [ ] 明确模板、能力包、MCP 和垂直应用的不同权限。
+- [x] 将 `[SPEEDING 组织消息]` 改为中性平台消息信封；
+- [x] 搜索并清理 Hub 运行时代码里的其他游戏品牌和世界语义；
+- [x] 将 `behavior_profile` 标记为 deprecated compatibility projection；
+- [x] 将固定关系事件/分值标记为内置 `relationship-dynamics` 规则来源；
+- [x] 为 `extension.yaml` 建立 JSON Schema、校验器和有效/无效 fixtures；
+- [x] 建立四份 ADR：Run、状态所有权、事件语义、Hub/应用仓库边界；
+- [x] 明确模板、能力包、MCP 和垂直应用的不同权限。
 
 ### Speeding 验收案例
 
@@ -205,6 +205,27 @@ fixture、Agent、关系、输入和预期结果。
 - 不依赖 Speeding 人格或世界字段。
 
 完成 H3 后，Agent Hub 已具备第一版可对外验证的“多 Agent 协作运行平台”能力。
+
+## 8.1 H3.1：平台边界收口
+
+目标：在群组和频道继续扩大组织模型前，使通信连接、可选人物关系与垂直应用真正分层。
+
+### Agent Hub P0
+
+- [x] 通信连接运行时不再读取立场、关系分及其变化规则；旧列仅保留只读迁移兼容；
+- [x] 动态人物关系的正式入口从 Core 下线，后续只允许由可选能力包以 Run 状态提供；
+- [x] `behavior_profile` 停止新写入和默认提示词注入，只保留存量读取/迁移；
+- [x] Hub 正式 handler/runtime 不再编译或内嵌消费方示例；
+- [x] 平台中立性 gate 扫描所有发布源码，并检查已知领域语义字段；
+- [x] 能力包注册保存来源、请求权限、批准人/时间和资源 provenance；
+- [x] 未批准权限的能力包不得启用。
+
+### 验收
+
+- Hub 二进制不 import `examples/`，能力包检查页从用户粘贴的 Manifest 开始；
+- 注册后页面/API 可区分“待审核”与“已批准”，并查询每项资源来自哪个包版本；
+- `./scripts/check-platform-neutrality.sh` 不通过排除正式页面来掩盖耦合；
+- 消费方示例仅位于 `examples/`、测试 fixture 或外部安装制品。
 
 ## 9. H4：群组、频道和会议
 

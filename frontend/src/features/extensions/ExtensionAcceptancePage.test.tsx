@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import ExtensionAcceptancePage from './ExtensionAcceptancePage'
@@ -10,10 +10,6 @@ const info = {
   platformVersion: '0.9.0-h0',
   protocolVersion: 'v1alpha1',
   status: '可验收',
-  examples: [
-    { id: 'speeding', name: 'Speeding', kind: '垂直应用', description: '财富处置游戏示例', manifest: 'metadata:\n  namespace: speeding' },
-    { id: 'research', name: '通用研究团队', kind: '平台示例', description: '非游戏多 Agent 示例', manifest: 'metadata:\n  namespace: research' },
-  ],
   contributionCategories: [
     { key: 'state', label: '状态 Schema', description: '声明扩展状态' },
     { key: 'events', label: '事件', description: '声明领域事件' },
@@ -38,13 +34,13 @@ describe('ExtensionAcceptancePage', () => {
     validationState = {}
   })
 
-  it('shows protocol boundary, examples and contribution categories', async () => {
+  it('shows the product-neutral protocol boundary and contribution categories', () => {
     renderPage()
-    expect(screen.getByRole('heading', { name: '扩展能力验收' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '能力包检查' })).toBeInTheDocument()
     expect(screen.getByText('v1alpha1')).toBeInTheDocument()
-    expect(screen.getByText(/垂直应用示例仅用于验证/)).toBeInTheDocument()
+    expect(screen.getByText(/不内置任何垂直应用/)).toBeInTheDocument()
     expect(screen.getByText('状态 Schema')).toBeInTheDocument()
-    expect(await screen.findByDisplayValue(/namespace: speeding/)).toBeInTheDocument()
+    expect(screen.getByLabelText('extension.yaml')).toHaveValue('')
   })
 
   it('submits the edited manifest for backend validation', async () => {
@@ -74,12 +70,4 @@ describe('ExtensionAcceptancePage', () => {
     expect(screen.getByTestId('validation-errors')).toHaveTextContent('必填字段缺失')
   })
 
-  it('switches to the generic non-game example', async () => {
-    renderPage()
-    fireEvent.mouseDown(screen.getByLabelText('验收示例'))
-    fireEvent.click(await screen.findByText('通用研究团队 · 平台示例'))
-    await waitFor(() => {
-      expect((screen.getByLabelText('extension.yaml') as HTMLTextAreaElement).value).toContain('namespace: research')
-    })
-  })
 })

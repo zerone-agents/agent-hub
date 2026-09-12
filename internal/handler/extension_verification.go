@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	h0examples "control-panel/examples/extensions/h0"
 	"control-panel/internal/extensionmanifest"
 
 	"github.com/gin-gonic/gin"
@@ -20,22 +19,14 @@ func NewExtensionVerificationHandler() *ExtensionVerificationHandler {
 	return &ExtensionVerificationHandler{}
 }
 
-type extensionExample struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	Description string `json:"description"`
-	Manifest    string `json:"manifest"`
-}
-
 type contributionDescription struct {
 	Key         string `json:"key"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
 }
 
-// Overview returns stable protocol metadata and bundled manifests for the
-// product-verification screen. Examples are data only and are never installed.
+// Overview returns stable, product-neutral protocol metadata. Consumer
+// fixtures deliberately live outside the server binary.
 func (h *ExtensionVerificationHandler) Overview(c *gin.Context) {
 	respondSuccess(c, gin.H{
 		"platformVersion": "0.9.0-h0",
@@ -51,7 +42,6 @@ func (h *ExtensionVerificationHandler) Overview(c *gin.Context) {
 			{Key: "templates", Label: "模板", Description: "声明可复用的初始配置模板。"},
 			{Key: "handlers", Label: "处理器", Description: "声明响应事件的运行时处理器。"},
 		},
-		"examples": extensionExamples(),
 	})
 }
 
@@ -100,16 +90,4 @@ func extensionValidationErrors(messages []string) []extensionValidationError {
 		output = append(output, item)
 	}
 	return output
-}
-
-func extensionExamples() []extensionExample {
-	source := h0examples.Examples()
-	examples := make([]extensionExample, 0, len(source))
-	for _, item := range source {
-		examples = append(examples, extensionExample{
-			ID: item.ID, Name: item.Name, Kind: item.Kind,
-			Description: item.Description, Manifest: item.Manifest,
-		})
-	}
-	return examples
 }

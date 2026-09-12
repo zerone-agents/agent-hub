@@ -30,15 +30,13 @@ func TestAgentPersonalitySelectionUsesLibraryAsSourceOfTruth(t *testing.T) {
 			"personalityTemplateName":    "duty-whistleblower",
 			"personalityTemplateVersion": float64(999),
 			"personalityPrompt":          "客户端伪造的人格",
-			"behaviorProfile":            behaviorProfileConfigMap(),
 		},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "duty-whistleblower", cfg.PersonalityTemplateName)
 	require.Equal(t, 1, cfg.PersonalityTemplateVersion)
 	require.Equal(t, selectedPrompt, cfg.PersonalityPrompt)
-	require.NotNil(t, cfg.BehaviorProfile)
-	require.Equal(t, 95, cfg.BehaviorProfile.Whistleblowing)
+	require.Nil(t, cfg.BehaviorProfile)
 }
 
 func TestAgentPersonalitySelectionCannotBeEditedInline(t *testing.T) {
@@ -58,7 +56,6 @@ func TestAgentPersonalitySelectionCannotBeEditedInline(t *testing.T) {
 		"systemPrompt":               "更新职责",
 		"personalityTemplateVersion": float64(999),
 		"personalityPrompt":          "试图在 Agent 页面改人格",
-		"behaviorProfile":            nil,
 	}
 	require.NoError(t, service.applyUpdateConfig("org-a", cfg, &UpdateAgentInput{Config: &update}))
 	require.Equal(t, "更新职责", cfg.SystemPrompt)

@@ -110,8 +110,10 @@ func validateRelationType(in *RelationTypeInput) error {
 	if in.DirectionPolicy != "one_way" && in.DirectionPolicy != "bidirectional_allowed" {
 		return fmt.Errorf("方向策略无效")
 	}
-	if _, ok := agentrelation.Stances[in.DefaultStance]; !ok {
-		return fmt.Errorf("默认立场无效")
+	if in.DefaultStance != "" {
+		if _, ok := agentrelation.Stances[in.DefaultStance]; !ok {
+			return fmt.Errorf("默认立场无效")
+		}
 	}
 	for _, a := range in.DefaultAllowedActions {
 		if _, ok := agentrelation.Actions[a]; !ok {
@@ -131,7 +133,11 @@ func relationTypeFromInput(in *RelationTypeInput) *agentrelation.RelationTypeTem
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	return &agentrelation.RelationTypeTemplate{Name: strings.TrimSpace(in.Name), Title: strings.TrimSpace(in.Title), Description: strings.TrimSpace(in.Description), BaseType: in.BaseType, DirectionPolicy: in.DirectionPolicy, DefaultStance: in.DefaultStance, DefaultAllowedActions: in.DefaultAllowedActions, DefaultContextPolicy: in.DefaultContextPolicy, DefaultDeliveryPolicy: in.DefaultDeliveryPolicy, DefaultConstraint: strings.TrimSpace(in.DefaultConstraint), LineColor: in.LineColor, LineStyle: in.LineStyle, Enabled: enabled}
+	legacyStance := in.DefaultStance
+	if legacyStance == "" {
+		legacyStance = "neutral"
+	}
+	return &agentrelation.RelationTypeTemplate{Name: strings.TrimSpace(in.Name), Title: strings.TrimSpace(in.Title), Description: strings.TrimSpace(in.Description), BaseType: in.BaseType, DirectionPolicy: in.DirectionPolicy, DefaultStance: legacyStance, DefaultAllowedActions: in.DefaultAllowedActions, DefaultContextPolicy: in.DefaultContextPolicy, DefaultDeliveryPolicy: in.DefaultDeliveryPolicy, DefaultConstraint: strings.TrimSpace(in.DefaultConstraint), LineColor: in.LineColor, LineStyle: in.LineStyle, Enabled: enabled}
 }
 func relationTypeSnapshot(r *agentrelation.RelationTypeTemplate) map[string]any {
 	return map[string]any{"title": r.Title, "baseType": r.BaseType, "directionPolicy": r.DirectionPolicy, "stance": r.DefaultStance, "actions": r.DefaultAllowedActions, "contextPolicy": r.DefaultContextPolicy, "deliveryPolicy": r.DefaultDeliveryPolicy, "constraint": r.DefaultConstraint, "lineColor": r.LineColor, "lineStyle": r.LineStyle}

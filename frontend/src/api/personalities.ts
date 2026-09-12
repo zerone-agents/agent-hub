@@ -6,6 +6,7 @@ export interface PersonalityVersion {
   templateId: number
   version: number
   prompt: string
+  /** @deprecated Read-only compatibility data from an historical version. */
   behaviorProfile?: BehaviorProfile | null
   changeNote: string
   createdAt: string
@@ -17,6 +18,7 @@ export interface Personality {
   title: string
   description: string
   prompt: string
+  /** @deprecated Read-only compatibility data from an historical template. */
   behaviorProfile?: BehaviorProfile | null
   currentVersion: number
   enabled: boolean

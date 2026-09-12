@@ -171,6 +171,7 @@ func AutoMigrate(backfillTenant string) error {
 		&eventdomain.DeliveryAttempt{},
 		&eventdomain.CausalBudget{},
 		&capability.Package{},
+		&capability.ResourceProvenance{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

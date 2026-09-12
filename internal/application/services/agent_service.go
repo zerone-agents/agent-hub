@@ -518,8 +518,8 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 
 // applyPersonalitySelection makes the personality library the only editable
 // source of personality content. Agent requests choose a template by name;
-// the server snapshots its current prompt, version, and compatibility
-// projection so runtime deployments remain reproducible.
+// the server snapshots its current prompt and version so runtime deployments
+// remain reproducible. Legacy behavior profiles are never copied forward.
 func (s *AgentService) applyPersonalitySelection(tenantID string, cfg *agent.AgentConfig, config map[string]interface{}, allowDisabledSnapshot bool) error {
 	raw, exists := config["personalityTemplateName"]
 	name, ok := raw.(string)
@@ -549,12 +549,7 @@ func (s *AgentService) applyPersonalitySelection(tenantID string, cfg *agent.Age
 	cfg.PersonalityTemplateName = template.Name
 	cfg.PersonalityTemplateVersion = template.CurrentVersion
 	cfg.PersonalityPrompt = template.Prompt
-	if template.BehaviorProfile == nil {
-		cfg.BehaviorProfile = nil
-	} else {
-		profile := *template.BehaviorProfile
-		cfg.BehaviorProfile = &profile
-	}
+	cfg.BehaviorProfile = nil
 	return nil
 }
 
@@ -644,22 +639,6 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	if _, exists := config["maxSessionTurns"]; exists {
 		return fmt.Errorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
 	}
-	var parsedBehaviorProfile *agent.BehaviorProfile
-	behaviorProfilePresent := false
-	if raw, exists := config["behaviorProfile"]; exists {
-		behaviorProfilePresent = true
-		if raw != nil {
-			profileMap, ok := raw.(map[string]interface{})
-			if !ok {
-				return fmt.Errorf("behaviorProfile 必须是对象或 null")
-			}
-			profile, err := parseBehaviorProfile(profileMap)
-			if err != nil {
-				return err
-			}
-			parsedBehaviorProfile = profile
-		}
-	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
 	}
@@ -710,9 +689,6 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	}
 	if v, ok := config["personalityPrompt"].(string); ok {
 		cfg.PersonalityPrompt = v
-	}
-	if behaviorProfilePresent {
-		cfg.BehaviorProfile = parsedBehaviorProfile
 	}
 
 	// Handle maxSessionQueries field

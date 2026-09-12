@@ -117,6 +117,37 @@ type AgentRelation struct {
 	UpdatedAt         time.Time         `gorm:"column:updated_at;index" json:"updatedAt"`
 }
 
+// ConnectionContract is the platform-owned, stable part of an AgentRelation.
+// Social stance and scores deliberately do not appear here: message routing
+// must continue to work when no relationship-dynamics capability is installed.
+// AgentRelation remains the persistence compatibility model while callers
+// migrate to this projection.
+type ConnectionContract struct {
+	ID             uint64
+	Scope          string
+	SourceAgentID  uint64
+	TargetAgentID  uint64
+	RelationType   string
+	AllowedActions []string
+	ContextPolicy  string
+	DeliveryPolicy string
+	Constraint     string
+	Enabled        bool
+}
+
+func (r *AgentRelation) ConnectionContract() ConnectionContract {
+	if r == nil {
+		return ConnectionContract{}
+	}
+	return ConnectionContract{
+		ID: r.ID, Scope: r.Scope, SourceAgentID: r.SourceAgentID,
+		TargetAgentID: r.TargetAgentID, RelationType: r.RelationType,
+		AllowedActions: append([]string(nil), r.AllowedActions...),
+		ContextPolicy:  r.ContextPolicy, DeliveryPolicy: r.DeliveryPolicy,
+		Constraint: r.Constraint, Enabled: r.Enabled,
+	}
+}
+
 // RelationTypeTemplate is the editable product-language layer over the stable
 // runtime relation protocol. BaseType remains constrained to RelationTypes.
 type RelationTypeTemplate struct {

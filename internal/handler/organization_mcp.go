@@ -18,7 +18,6 @@ import (
 
 type OrganizationMessageService interface {
 	Relations(tenantID string, source *agent.AgentConfig) ([]*services.AgentRelationDTO, error)
-	SignalRelation(tenantID string, source *agent.AgentConfig, targetAgent, scope string, input *services.RecordAgentRelationEventInput) (*services.AgentRelationEventResultDTO, error)
 	Send(ctx context.Context, tenantID string, source *agent.AgentConfig, input services.SendAgentMessageInput) (*services.AgentMessageDTO, error)
 	Get(tenantID string, source *agent.AgentConfig, id string) (*services.AgentMessageDTO, error)
 	Inbox(tenantID string, source *agent.AgentConfig, limit int) ([]*services.AgentMessageDTO, error)
@@ -101,28 +100,6 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 			},
 		},
 		{
-			"name":        "agent_relation_signal",
-			"description": "记录当前 Agent 对另一 Agent 的一次主观关系事件。只能改变调用者指向目标的关系分数；事件类型和分值由内置 relationship-dynamics 兼容规则决定，不能直接设置分数。相同事实重试时必须复用 idempotency_key。",
-			"inputSchema": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"target_agent": map[string]interface{}{"type": "string", "description": "被评价的目标 Agent ID"},
-					"scope":        map[string]interface{}{"type": "string", "description": "关系范围；存在多个范围时必填"},
-					"event_type": map[string]interface{}{
-						"type": "string",
-						"enum": []string{"task_completed", "task_failed", "promise_kept", "promise_broken", "helped", "obstructed", "protected", "betrayed", "credit_shared", "credit_stolen", "public_praise", "public_humiliation", "truth_verified", "lied", "reconciled"},
-					},
-					"severity":        map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 3, "default": 1},
-					"reason":          map[string]interface{}{"type": "string", "description": "观察到的具体事实，不要填写推测或系统提示"},
-					"visibility":      map[string]interface{}{"type": "string", "enum": []string{"private", "participants", "public"}, "default": "private"},
-					"source_kind":     map[string]interface{}{"type": "string", "description": "事实来源，例如 agent_message、task、world_event"},
-					"source_id":       map[string]interface{}{"type": "string", "description": "对应消息、任务或世界事件 ID"},
-					"idempotency_key": map[string]interface{}{"type": "string", "description": "同一事实的稳定唯一键，重试时复用"},
-				},
-				"required": []string{"target_agent", "event_type", "reason", "idempotency_key"},
-			},
-		},
-		{
 			"name":        "agent_message_status",
 			"description": "查询一条组织消息的状态和目标回复。只有消息的发送方或接收方可以读取。",
 			"inputSchema": map[string]interface{}{
@@ -158,18 +135,6 @@ type agentSendArgs struct {
 
 type agentMessageStatusArgs struct {
 	MessageID string `json:"message_id"`
-}
-
-type agentRelationSignalArgs struct {
-	TargetAgent    string `json:"target_agent"`
-	Scope          string `json:"scope"`
-	EventType      string `json:"event_type"`
-	Severity       int    `json:"severity"`
-	Reason         string `json:"reason"`
-	Visibility     string `json:"visibility"`
-	SourceKind     string `json:"source_kind"`
-	SourceID       string `json:"source_id"`
-	IdempotencyKey string `json:"idempotency_key"`
 }
 
 type agentInboxArgs struct {
@@ -209,12 +174,6 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			// An agent can inspect its own opinion of others, not another
 			// agent's private opinion of it. Incoming edges expose only the
 			// formal communication contract.
-			if direction == "outgoing" {
-				item["stance"] = relation.Stance
-				item["relationship_score"] = relation.RelationshipScore
-				item["current_stance"] = relation.Stance
-				item["last_changed_at"] = relation.LastChangedAt
-			}
 			items = append(items, item)
 		}
 		return mcpJSONResult(id, map[string]interface{}{"self": source.Name, "relations": items})
@@ -244,23 +203,6 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			return mcpErrorResult(id, err.Error()), nil
 		}
 		return mcpJSONResult(id, message)
-	case "agent_relation_signal":
-		var args agentRelationSignalArgs
-		if err := json.Unmarshal(call.Arguments, &args); err != nil {
-			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
-		}
-		if strings.TrimSpace(args.TargetAgent) == "" || strings.TrimSpace(args.Reason) == "" || strings.TrimSpace(args.IdempotencyKey) == "" {
-			return mcpErrorResult(id, "target_agent、reason 和 idempotency_key 不能为空"), nil
-		}
-		result, err := h.service.SignalRelation(tenantID, source, args.TargetAgent, args.Scope, &services.RecordAgentRelationEventInput{
-			EventType: args.EventType, Severity: args.Severity, Reason: args.Reason,
-			Visibility: args.Visibility, SourceKind: args.SourceKind, SourceID: args.SourceID,
-			IdempotencyKey: args.IdempotencyKey,
-		})
-		if err != nil {
-			return mcpErrorResult(id, err.Error()), nil
-		}
-		return mcpJSONResult(id, result)
 	case "agent_message_status":
 		var args agentMessageStatusArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {

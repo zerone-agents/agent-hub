@@ -471,7 +471,9 @@ func main() {
 	adminRead.GET("/runs/:id/agents/:agentId/prompt", promptComposerHandler.Latest)
 	adminRead.GET("/capability-packages", capabilityRegistryHandler.List)
 	adminWrite.POST("/capability-packages", capabilityRegistryHandler.Register)
+	adminWrite.POST("/capability-packages/:id/approve", capabilityRegistryHandler.Approve)
 	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
+	adminRead.GET("/capability-packages/:id/resources", capabilityRegistryHandler.Resources)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

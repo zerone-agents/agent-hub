@@ -32,6 +32,9 @@ func TestPersonalityService_SeedsPerTenant(t *testing.T) {
 	require.Len(t, rowsA, 4)
 	require.True(t, rowsA[0].IsBuiltin)
 	require.NotEmpty(t, rowsA[0].Prompt)
+	for _, row := range rowsA {
+		require.Nil(t, row.BehaviorProfile, "新初始化的人格只能以提示词为行为来源")
+	}
 
 	rowsB, err := service.List("org-b")
 	require.NoError(t, err)
@@ -74,6 +77,26 @@ func TestPersonalityService_VersionsAndAgentSnapshot(t *testing.T) {
 	got, err := service.Get("org-a", created.Name)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), got.UsageCount)
+}
+
+func TestPersonalityService_NewVersionDoesNotCopyLegacyBehaviorProfile(t *testing.T) {
+	service, db := setupPersonalityServiceTest(t)
+	profile := agent.DefaultBehaviorProfile()
+	row := &personality.Template{
+		TenantID: "org-a", Name: "legacy", Title: "旧人格", Prompt: "原稿 v1",
+		BehaviorProfile: &profile, CurrentVersion: 1, Enabled: true,
+	}
+	version := &personality.Version{Version: 1, Prompt: row.Prompt, BehaviorProfile: &profile}
+	require.NoError(t, service.repo.Create("org-a", row, version))
+
+	nextPrompt := "原稿 v2"
+	updated, err := service.Update("org-a", row.Name, &UpdatePersonalityInput{Prompt: &nextPrompt})
+	require.NoError(t, err)
+	require.NotNil(t, updated.BehaviorProfile, "旧模板字段保留只读兼容")
+
+	var latest personality.Version
+	require.NoError(t, db.Where("template_id = ?", row.ID).Order("version DESC").First(&latest).Error)
+	require.Nil(t, latest.BehaviorProfile, "新版本不能继续写入结构化滑杆")
 }
 
 func TestPersonalityService_BuiltinCannotBeDeleted(t *testing.T) {

@@ -9,7 +9,6 @@ import type {
   ContextPolicy,
   DeliveryPolicy,
   RelationAction,
-  RelationStance,
   RelationType,
 } from '@/api/agent-relations'
 import type { Agent } from '@/api/agents'
@@ -19,7 +18,6 @@ import {
   CONTEXT_POLICIES,
   DEFAULT_ACTIONS,
   DELIVERY_POLICIES,
-  STANCES,
 } from './relationOptions'
 import { useCreateAgentRelation, useUpdateAgentRelation } from '@/queries/useAgentRelations'
 import { useRelationTypes } from '@/queries/useRelationTypes'
@@ -151,7 +149,6 @@ interface FormValues {
   scope: string
   relationType: RelationType
   relationTypeTemplateName?: string
-  stance: RelationStance
   allowedActions: RelationAction[]
   contextPolicy: ContextPolicy
   deliveryPolicy: DeliveryPolicy
@@ -184,7 +181,6 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
         scope: editingRelation.scope,
         relationType: editingRelation.relationType,
         relationTypeTemplateName: editingRelation.relationTypeTemplateName,
-        stance: editingRelation.stance,
         allowedActions: editingRelation.allowedActions,
         contextPolicy: editingRelation.contextPolicy,
         deliveryPolicy: editingRelation.deliveryPolicy,
@@ -202,7 +198,6 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
       scope: 'global',
       relationType: 'peer',
       relationTypeTemplateName: defaultTemplate?.name,
-      stance: 'neutral',
       allowedActions: DEFAULT_ACTIONS.peer,
       contextPolicy: 'summary_only',
       deliveryPolicy: 'async',
@@ -231,9 +226,6 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
         constraint: values.constraint.trim(),
         enabled: values.enabled,
       }
-      if (values.stance !== editingRelation.stance) {
-        payload.stance = values.stance
-      }
       await updateRelation.mutateAsync({
         id: editingRelation.id,
         data: payload,
@@ -246,7 +238,6 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
         scope: values.scope.trim(),
         relationType: values.relationType,
         relationTypeTemplateName: values.relationTypeTemplateName,
-        stance: values.stance,
         allowedActions: values.allowedActions,
         contextPolicy: values.contextPolicy,
         deliveryPolicy: values.deliveryPolicy,
@@ -271,11 +262,11 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
     >
       <div className={styles.head}>
         <div>
-          <div className={styles.title}>{editingRelation ? '编辑有向关系' : '新建 Agent 关系'}</div>
+          <div className={styles.title}>{editingRelation ? '编辑有向连接' : '新建 Agent 连接'}</div>
           <div className={styles.subtitle}>
             {editingRelation
-              ? '关系两端不可更换；需要换人时请新建一条关系。'
-              : '先确定关系方向，再约定这条边允许发生什么。'}
+              ? '连接两端不可更换；需要换人时请新建一条连接。'
+              : '先确定消息方向，再约定这条连接允许的动作。'}
           </div>
         </div>
         <button type="button" className={styles.closeButton} aria-label="关闭" onClick={onClose}>
@@ -337,11 +328,11 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
         <div className={styles.sectionTitle}>协作约定</div>
         <div className={styles.grid}>
           <Form.Item
-            label="关系范围"
+            label="连接范围"
             name="scope"
-            tooltip="同一对 Agent 可在不同组织或项目范围内拥有不同关系"
+            tooltip="同一对 Agent 可在不同组织或项目范围内配置不同连接"
             rules={[
-              { required: true, message: '请输入关系范围' },
+              { required: true, message: '请输入连接范围' },
               {
                 pattern: /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/,
                 message: '使用字母、数字、点、横线、下划线或冒号',
@@ -350,10 +341,10 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
           >
             <Input placeholder="global" />
           </Form.Item>
-          <Form.Item label="关系类型" name="relationTypeTemplateName" tooltip="在关系类型库统一维护默认动作、立场和通信策略">
+          <Form.Item label="连接类型" name="relationTypeTemplateName" tooltip="在连接类型库统一维护默认动作和通信策略">
             <Select
               allowClear
-              placeholder="选择关系类型模板"
+              placeholder="选择连接类型模板"
               options={relationTypes.filter(item=>item.enabled || item.name===editingRelation?.relationTypeTemplateName).map((item) => ({
                 value: item.name,
                 label: `${item.title} · v${item.currentVersion}`,
@@ -362,7 +353,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
               onChange={(name?: string) => {
                 const template=relationTypes.find(item=>item.name===name)
                 if (!template) return
-                form.setFieldsValue({relationType:template.baseType,stance:template.defaultStance,allowedActions:template.defaultAllowedActions,contextPolicy:template.defaultContextPolicy,deliveryPolicy:template.defaultDeliveryPolicy,constraint:template.defaultConstraint,direction:template.directionPolicy==='one_way'?'one_way':direction})
+                form.setFieldsValue({relationType:template.baseType,allowedActions:template.defaultAllowedActions,contextPolicy:template.defaultContextPolicy,deliveryPolicy:template.defaultDeliveryPolicy,constraint:template.defaultConstraint,direction:template.directionPolicy==='one_way'?'one_way':direction})
               }}
               optionRender={(option) => (
                 <div>
@@ -378,16 +369,6 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
               非对称关系需要分别配置两个方向，避免把“下属”和“负责人”等语义错误镜像。
             </div>
           )}
-          <Form.Item
-            label={editingRelation ? '重设立场' : '初始立场'}
-            name="stance"
-            tooltip={
-              editingRelation ? '修改后会把动态关系分值重设到该立场的起始值' : '创建后，事件将继续改变分值与当前立场'
-            }
-            rules={[{ required: true }]}
-          >
-            <Select options={STANCES.map(({ value, label }) => ({ value, label }))} />
-          </Form.Item>
           <Form.Item label="投递方式" name="deliveryPolicy" rules={[{ required: true }]}>
             <Select options={DELIVERY_POLICIES} />
           </Form.Item>
@@ -418,7 +399,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
         >
           <Input.TextArea rows={3} showCount maxLength={2000} placeholder="写下这条关系特有的边界和升级条件" />
         </Form.Item>
-        <Form.Item label="启用关系" name="enabled" valuePropName="checked">
+        <Form.Item label="启用连接" name="enabled" valuePropName="checked">
           <Switch />
         </Form.Item>
       </Form>
@@ -426,7 +407,7 @@ export default function RelationForm({ open, editingRelation, agents, onClose, p
       <div className={styles.foot}>
         <Button onClick={onClose}>取消</Button>
         <PrimaryButton loading={submitting} onClick={() => void handleSubmit()}>
-          {editingRelation ? '保存关系' : '创建关系'}
+          {editingRelation ? '保存连接' : '创建连接'}
         </PrimaryButton>
       </div>
     </Modal>

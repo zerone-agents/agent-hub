@@ -67,7 +67,7 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "-"))), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	b := agent.AgentConfig{Name: "agent-b", TenantID: "tenant-a"}
@@ -170,8 +170,8 @@ func TestAgentMessageServiceRoutesEveryOrganizationRelationship(t *testing.T) {
 
 			calls := f.runner.snapshot()
 			require.Len(t, calls, 1)
-			require.Contains(t, calls[0].message, "结构关系："+tt.relationType)
-			require.Contains(t, calls[0].message, "你对发送方的当前关系：neutral（0，尚无反向关系状态）")
+			require.Contains(t, calls[0].message, "连接类型："+tt.relationType)
+			require.NotContains(t, calls[0].message, "人物关系上下文")
 			require.Contains(t, calls[0].message, "动作："+tt.action)
 		})
 	}
@@ -436,12 +436,14 @@ func TestBuildAgentMessageEnvelopeUsesPlatformNeutralProtocolLabel(t *testing.T)
 	}
 
 	deadline := time.Now().UTC().Add(time.Minute)
-	envelope := buildAgentMessageEnvelope(source, target, relation, nil, &agentrelation.AgentMessage{ID: "msg-1", ConversationID: "conv-1", RootMessageID: "msg-1", Hop: 1, MaxHops: 8, EventCount: 1, EventBudget: 64, TokenBudget: 65536, DeadlineAt: &deadline, Action: "consult", Content: "请复核结论"})
+	envelope := buildAgentMessageEnvelope(source, target, relation, &agentrelation.AgentMessage{ID: "msg-1", ConversationID: "conv-1", RootMessageID: "msg-1", Hop: 1, MaxHops: 8, EventCount: 1, EventBudget: 64, TokenBudget: 65536, DeadlineAt: &deadline, Action: "consult", Content: "请复核结论"})
 
 	require.Contains(t, envelope, "[Agent Hub 组织消息]")
 	require.NotContains(t, envelope, "SPEEDING")
 	require.Contains(t, envelope, "接收方 finance-reviewer")
 	require.Contains(t, envelope, "发送方是 research-lead")
+	require.NotContains(t, envelope, "neutral（0")
+	require.NotContains(t, envelope, "人物关系上下文")
 }
 
 func TestAgentMessageServiceDerivesAuthorizedMultiHopChain(t *testing.T) {

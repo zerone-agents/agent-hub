@@ -2,8 +2,6 @@ import type {
   ContextPolicy,
   DeliveryPolicy,
   RelationAction,
-  RecordableRelationEventType,
-  RelationStance,
   RelationType,
 } from '@/api/agent-relations'
 
@@ -50,19 +48,6 @@ export const RELATION_TYPES: {
   { value: 'external', label: '外部关系', description: '组织边界外的有限协作' },
 ]
 
-export const STANCES: {
-  value: RelationStance
-  label: string
-  color: string
-}[] = [
-  { value: 'allied', label: '同盟', color: 'green' },
-  { value: 'friendly', label: '友好', color: 'cyan' },
-  { value: 'neutral', label: '中立', color: 'default' },
-  { value: 'wary', label: '戒备', color: 'gold' },
-  { value: 'competitive', label: '竞争', color: 'orange' },
-  { value: 'hostile', label: '敌对', color: 'red' },
-]
-
 export const ACTIONS: { value: RelationAction; label: string }[] = [
   { value: 'inform', label: '通知' },
   { value: 'consult', label: '协商' },
@@ -97,28 +82,6 @@ export const DEFAULT_ACTIONS: Record<RelationType, RelationAction[]> = {
   opponent: ['challenge', 'submit'],
   external: ['inform', 'consult', 'invite'],
 }
-
-export const RELATION_EVENTS: {
-  value: RecordableRelationEventType
-  label: string
-  delta: number
-}[] = [
-  { value: 'task_completed', label: '完成任务', delta: 10 },
-  { value: 'task_failed', label: '任务失败', delta: -8 },
-  { value: 'promise_kept', label: '兑现承诺', delta: 12 },
-  { value: 'promise_broken', label: '违背承诺', delta: -20 },
-  { value: 'helped', label: '提供帮助', delta: 8 },
-  { value: 'obstructed', label: '蓄意阻挠', delta: -12 },
-  { value: 'protected', label: '公开保护', delta: 18 },
-  { value: 'betrayed', label: '背叛', delta: -35 },
-  { value: 'credit_shared', label: '分享功劳', delta: 8 },
-  { value: 'credit_stolen', label: '抢夺功劳', delta: -25 },
-  { value: 'public_praise', label: '公开赞扬', delta: 6 },
-  { value: 'public_humiliation', label: '公开羞辱', delta: -20 },
-  { value: 'truth_verified', label: '事实得到验证', delta: 8 },
-  { value: 'lied', label: '撒谎被证实', delta: -22 },
-  { value: 'reconciled', label: '主动和解', delta: 20 },
-]
 
 export function optionLabel<T extends string>(options: { value: T; label: string }[], value: T): string {
   return options.find((option) => option.value === value)?.label ?? value
