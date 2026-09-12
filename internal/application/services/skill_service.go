@@ -182,7 +182,10 @@ func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*S
 func (s *SkillService) UpdateSkill(tenantID, name string, input *UpdateSkillInput) (*SkillDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	s.updateSkillFields(sk, input)
@@ -242,7 +245,7 @@ func (s *SkillService) updateSkillFile(sk *skill.Skill, input *UpdateSkillInput)
 
 	if oldKey != "" && oldKey != ossKey {
 		if err := s.uploader.Delete(ctx, oldKey); err != nil {
-			log.Printf("删除旧 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, oldKey, err)
+			log.Printf("delete old OSS file failed (skill=%s, key=%s): %v", sk.Name, oldKey, err)
 		}
 	}
 
@@ -256,7 +259,10 @@ func (s *SkillService) updateSkillFile(sk *skill.Skill, input *UpdateSkillInput)
 func (s *SkillService) DeleteSkill(tenantID, name string) error {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return skill.ErrSkillNotFound
+		}
+		return fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	own, foreign, err := s.repo.GetSkillBindingsScoped(tenantID, sk.ID)
@@ -283,7 +289,7 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 	if sk.URL != "" && s.uploader != nil {
 		ctx := context.Background()
 		if err := s.uploader.Delete(ctx, sk.URL); err != nil {
-			log.Printf("删除 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
+			log.Printf("delete OSS file failed (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
 		}
 	}
 
@@ -296,7 +302,10 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	if sk.URL == "" {
@@ -392,7 +401,7 @@ func (s *SkillService) resolveURL(sk *skill.Skill) string {
 	ctx := context.Background()
 	url, err := s.uploader.GetPresignedURL(ctx, sk.URL)
 	if err != nil {
-		log.Printf("生成预签名 URL 失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
+		log.Printf("generate presigned URL failed (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
 		return ""
 	}
 	return url

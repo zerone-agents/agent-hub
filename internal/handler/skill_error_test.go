@@ -51,6 +51,8 @@ func newSkillErrorRouter(t *testing.T, h *SkillHandler) *gin.Engine {
 	r.GET("/api/v1/skills/:name", h.GetPublic)
 	r.GET("/api/v1/skills/:name/download", h.Download)
 	r.POST("/api/v1/admin/skills", h.Create)
+	r.PUT("/api/v1/admin/skills/:name", h.Update)
+	r.DELETE("/api/v1/admin/skills/:name", h.Delete)
 	r.GET("/api/v1/admin/agents/:name/skills", h.GetAgentSkills)
 	r.PUT("/api/v1/admin/agents/:name/skills", h.UpdateAgentSkills)
 	return r
@@ -347,4 +349,99 @@ func TestSkillHandler_UpdateAgentSkills_DBFailure500Neutral(t *testing.T) {
 	require.NotContains(t, respBody, "Agent 'ghost' 不存在", "DB 故障不得伪装为 400 用户文案")
 	require.NotContains(t, respBody, "database is closed")
 	require.Contains(t, logBuf.String(), "get agent ghost failed", "基础设施诊断必须进服务端日志")
+}
+
+// TestSkillHandler_UpdateSkill_DBFailure500Neutral 锁定 batch5 收官的吞错
+// 分叉修复（#95）：UpdateSkill 的 GetByName 非 not-found 错误（DB 关闭）
+// 不得再伪装为「技能不存在」404（修前一律 ErrSkillNotFound），须走英文
+// 诊断 "get skill %s failed" → handler 500 中性 + 完整错误链只在服务端日志。
+// 执行两次请求：PUT（UpdateSkill 代表锁）+ DELETE（DeleteSkill 同构分叉，
+// 一并对齐）；Download 与该二者同构（GetByName 短路点在文件访问之前），
+// 由 Download_FileNotFound404 的 not-found 分支与本次 500 分支共同覆盖。
+func TestSkillHandler_UpdateSkill_DBFailure500Neutral(t *testing.T) {
+	db := setupSkillErrorTestDB(t)
+
+	// 关闭底层连接：GetByName 随即返回错误，触发 gorm 分叉的非 not-found 分支。
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	// 捕获服务端日志，锁定「完整错误链只在日志」。
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	// PUT：UpdateSkill 真实锁（合法名 + 合法 multipart form（无 file part），
+	// 越过 binding 与 FormFile 拦截直达 service 层）。
+	var putBuf bytes.Buffer
+	mw := multipart.NewWriter(&putBuf)
+	require.NoError(t, mw.WriteField("title", "NewTitle"))
+	require.NoError(t, mw.Close())
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/skills/some-skill", &putBuf)
+	putReq.Header.Set("Content-Type", mw.FormDataContentType())
+	putW := httptest.NewRecorder()
+	r.ServeHTTP(putW, putReq)
+
+	require.Equal(t, http.StatusInternalServerError, putW.Code, "PUT body=%s", putW.Body.String())
+	putBody := putW.Body.String()
+	require.Contains(t, putBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, putBody, "技能不存在", "DB 故障不得伪装为 404 not-found")
+	require.NotContains(t, putBody, "get skill", "英文诊断不得泄漏到响应体")
+	require.NotContains(t, putBody, "database is closed", "DB 细节不得泄漏到响应体")
+
+	// DELETE：DeleteSkill 同构分叉一并锁定。
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/skills/some-skill", nil)
+	delW := httptest.NewRecorder()
+	r.ServeHTTP(delW, delReq)
+
+	require.Equal(t, http.StatusInternalServerError, delW.Code, "DELETE body=%s", delW.Body.String())
+	delBody := delW.Body.String()
+	require.Contains(t, delBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, delBody, "技能不存在", "DB 故障不得伪装为 404 not-found")
+	require.NotContains(t, delBody, "get skill", "英文诊断不得泄漏到响应体")
+
+	// 两个请求都产生同一服务端诊断（PUT/DELETE 各一条）。
+	require.Contains(t, logBuf.String(), "get skill some-skill failed", "内部诊断必须进服务端日志")
+	require.Equal(t, 2, bytes.Count([]byte(logBuf.String()), []byte("get skill some-skill failed")))
+}
+
+// TestSkillHandler_UpdateAndDelete_NotFound404 锁定新分叉的 not-found 分支
+// 语义保留：合法名但技能不存在（gorm.ErrRecordNotFound）→ 仍走
+// ErrSkillNotFound sentinel → 404「技能不存在」（不因分叉退化，
+// gorm 英文诊断不得泄漏）。
+func TestSkillHandler_UpdateAndDelete_NotFound404(t *testing.T) {
+	setupSkillErrorTestDB(t)
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	// PUT 未知技能（multipart form 无 file part，越过 FormFile 拦截）。
+	var putBuf bytes.Buffer
+	mw := multipart.NewWriter(&putBuf)
+	require.NoError(t, mw.WriteField("title", "NewTitle"))
+	require.NoError(t, mw.Close())
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/skills/nonexistent", &putBuf)
+	putReq.Header.Set("Content-Type", mw.FormDataContentType())
+	putW := httptest.NewRecorder()
+	r.ServeHTTP(putW, putReq)
+
+	require.Equal(t, http.StatusNotFound, putW.Code, "PUT body=%s", putW.Body.String())
+	putBody := putW.Body.String()
+	require.Contains(t, putBody, "技能不存在")
+	require.NotContains(t, putBody, "record not found", "gorm 英文诊断不得泄漏到响应体")
+	require.NotContains(t, putBody, "服务器内部错误")
+
+	// DELETE 未知技能。
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/skills/nonexistent", nil)
+	delW := httptest.NewRecorder()
+	r.ServeHTTP(delW, delReq)
+
+	require.Equal(t, http.StatusNotFound, delW.Code, "DELETE body=%s", delW.Body.String())
+	delBody := delW.Body.String()
+	require.Contains(t, delBody, "技能不存在")
+	require.NotContains(t, delBody, "record not found", "gorm 英文诊断不得泄漏到响应体")
+	require.NotContains(t, delBody, "服务器内部错误", "not-found 不得退化为 500 中性")
 }
