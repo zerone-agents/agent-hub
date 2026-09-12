@@ -324,7 +324,7 @@ func truncateRunes(value string, limit int) string {
 
 func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation, recipientView *agentrelation.AgentRelation, action, message, sharedContext string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[SPEEDING 组织消息]\n消息ID由 Hub 管理。你是接收方 %s；发送方是 %s。\n", target.Name, source.Name)
+	fmt.Fprintf(&b, "[Agent Hub 组织消息]\n消息ID由 Hub 管理。你是接收方 %s；发送方是 %s。\n", target.Name, source.Name)
 	fmt.Fprintf(&b, "关系范围：%s\n结构关系：%s\n动作：%s\n上下文策略：%s\n", relation.Scope, relation.RelationType, action, relation.ContextPolicy)
 	if recipientView == nil {
 		b.WriteString("你对发送方的当前关系：neutral（0，尚无反向关系状态）\n")

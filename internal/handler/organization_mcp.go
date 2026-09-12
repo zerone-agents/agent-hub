@@ -85,7 +85,7 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"target_agent":    map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 speeding-mo-yuncen"},
+					"target_agent":    map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 finance-reviewer"},
 					"scope":           map[string]interface{}{"type": "string", "description": "关系范围。仅存在一个匹配范围时可省略；多范围必须明确填写。"},
 					"action":          map[string]interface{}{"type": "string", "enum": []string{"inform", "consult", "assign", "report", "submit", "review", "challenge", "handoff", "escalate", "invite"}},
 					"message":         map[string]interface{}{"type": "string", "description": "给接收方的任务、事实、问题或挑战。不要在此伪造对方回复。"},
@@ -97,7 +97,7 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 		},
 		{
 			"name":        "agent_relation_signal",
-			"description": "记录当前 Agent 对另一 Agent 的一次主观关系事件。只能改变调用者指向目标的关系分数；事件类型和分值由 Hub 固定规则决定，不能直接设置分数。相同事实重试时必须复用 idempotency_key。",
+			"description": "记录当前 Agent 对另一 Agent 的一次主观关系事件。只能改变调用者指向目标的关系分数；事件类型和分值由内置 relationship-dynamics 兼容规则决定，不能直接设置分数。相同事实重试时必须复用 idempotency_key。",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{

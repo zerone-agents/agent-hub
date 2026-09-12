@@ -6,7 +6,10 @@ const (
 	MinRelationshipScore = -100
 	MaxRelationshipScore = 100
 	DefaultEventSeverity = 1
-	RelationshipRuleV1   = "v1"
+	// RelationshipRuleSource identifies the owner of the fixed compatibility
+	// table without changing the persisted v1 value used by existing events.
+	RelationshipRuleSource = "builtin:relationship-dynamics"
+	RelationshipRuleV1     = "v1"
 )
 
 // StanceForScore deliberately uses broad bands so ordinary interactions do

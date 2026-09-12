@@ -4,8 +4,10 @@ package agent
 // changes in a way that requires a different runtime projection.
 const BehaviorProfileVersion = 1
 
-// BehaviorProfile stores stable behavioral tendencies independently from an
-// agent's authored identity and task prompt. All scores use a 0-100 scale.
+// BehaviorProfile is a deprecated compatibility projection of a prompt-first
+// personality. New runtime capabilities must not use it as their source of
+// truth; it remains persisted only for legacy clients, filtering, and stable
+// prompt rendering while those callers migrate. All scores use a 0-100 scale.
 //
 // The profile is deliberately descriptive rather than permissive: it may
 // influence how an agent makes a decision, but it never grants tools, data
@@ -22,9 +24,9 @@ type BehaviorProfile struct {
 	EscalationThreshold int `json:"escalationThreshold"`
 }
 
-// DefaultBehaviorProfile is the conservative baseline used by the creation
-// UI. Existing agents keep a nil profile until an administrator explicitly
-// saves one, so upgrading the Hub does not silently change deployed behavior.
+// DefaultBehaviorProfile returns the legacy compatibility projection used by
+// built-in personality seeds. New Agent creation flows should select a
+// prompt-first personality template instead of editing this projection.
 func DefaultBehaviorProfile() BehaviorProfile {
 	return BehaviorProfile{
 		Version:             BehaviorProfileVersion,

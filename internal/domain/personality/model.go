@@ -7,8 +7,8 @@ import (
 )
 
 // Template is a tenant-owned, prompt-first personality definition. Prompt is
-// the current editable source of truth; BehaviorProfile is only an optional
-// structured projection used by legacy clients and filtering.
+// the current editable source of truth; BehaviorProfile is only a deprecated,
+// optional compatibility projection used by legacy clients and filtering.
 type Template struct {
 	ID              uint64                 `gorm:"primaryKey;autoIncrement" json:"id"`
 	Name            string                 `gorm:"type:varchar(64);uniqueIndex:uk_personalities_tenant_name,priority:2;not null" json:"name"`

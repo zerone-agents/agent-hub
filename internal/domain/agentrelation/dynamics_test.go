@@ -2,6 +2,15 @@ package agentrelation
 
 import "testing"
 
+func TestBuiltInRelationshipRuleKeepsCompatibleVersionAndDeclaresSource(t *testing.T) {
+	if RelationshipRuleSource != "builtin:relationship-dynamics" {
+		t.Fatalf("unexpected relationship rule source %q", RelationshipRuleSource)
+	}
+	if RelationshipRuleV1 != "v1" {
+		t.Fatalf("persisted compatibility version changed to %q", RelationshipRuleV1)
+	}
+}
+
 func TestRelationshipScoreProjectionAndBounds(t *testing.T) {
 	tests := []struct {
 		score  int

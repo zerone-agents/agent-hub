@@ -1,0 +1,32 @@
+apiVersion: agenthub.extension/v1alpha1
+kind: CapabilityPackage
+metadata:
+  name: emotion-state
+  namespace: io.zerone.organization.emotion
+  version: 1.2.0
+  displayName: 情绪状态
+  description: 为运行中的 Agent 提供短期心理状态
+  license: Apache-2.0
+  publisher: zerone
+compatibility:
+  hub: ">=0.9.0 <2.0.0"
+  runtimeProtocol: ">=1.0.0 <2.0.0"
+dependencies: []
+permissions:
+  state:
+    read: ["io.zerone.organization.emotion/*"]
+    write: ["io.zerone.organization.emotion/*"]
+  events:
+    consume: ["agenthub.task.*"]
+    emit: ["io.zerone.organization.emotion.state.changed.v1"]
+  tools:
+    expose: ["emotion.get_state"]
+  network:
+    outbound: []
+contributes:
+  stateSchemas:
+    - id: character-state
+      version: 1.0.0
+      file: schemas/character-state.schema.json
+  promptFragments:
+    - file: prompts/current-state.yaml

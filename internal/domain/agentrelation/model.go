@@ -62,9 +62,10 @@ var DeliveryPolicies = map[string]struct{}{
 	"async": {},
 }
 
-// RelationEventBaseDeltas is the authoritative, bounded mapping from a
-// perceived event to a relationship-score change. Runtime agents choose an
-// event type and severity; they never get to write an arbitrary score.
+// RelationEventBaseDeltas is the built-in relationship-dynamics compatibility
+// ruleset: a bounded mapping from a perceived event to a relationship-score
+// change. Runtime agents choose an event type and severity; they never get to
+// write an arbitrary score. New rule vocabularies belong in capability packages.
 var RelationEventBaseDeltas = map[string]int{
 	"task_completed":     10,
 	"task_failed":        -8,

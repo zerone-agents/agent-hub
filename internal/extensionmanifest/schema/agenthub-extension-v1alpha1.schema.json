@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerone.dev/schemas/agenthub-extension-v1alpha1.schema.json",
+  "title": "Agent Hub capability package manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "compatibility", "permissions", "contributes"],
+  "properties": {
+    "apiVersion": { "const": "agenthub.extension/v1alpha1" },
+    "kind": { "const": "CapabilityPackage" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "compatibility": { "$ref": "#/$defs/compatibility" },
+    "dependencies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/dependency" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "permissions": { "$ref": "#/$defs/permissions" },
+    "contributes": { "$ref": "#/$defs/contributes" }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*){2,}$",
+      "maxLength": 253
+    },
+    "relativeFile": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*(?:/[A-Za-z0-9][A-Za-z0-9_.-]*)*$",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "namespace", "version", "displayName", "description", "publisher"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "namespace": { "$ref": "#/$defs/namespace" },
+        "version": { "$ref": "#/$defs/semver" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "license": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "publisher": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hub", "runtimeProtocol"],
+      "properties": {
+        "hub": { "type": "string", "minLength": 1 },
+        "runtimeProtocol": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "version"],
+      "properties": {
+        "package": { "$ref": "#/$defs/namespace" },
+        "version": { "type": "string", "minLength": 1 },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "events", "tools", "network"],
+      "properties": {
+        "state": {
+          "type": "object", "additionalProperties": false,
+          "required": ["read", "write"],
+          "properties": { "read": { "$ref": "#/$defs/stringList" }, "write": { "$ref": "#/$defs/stringList" } }
+        },
+        "events": {
+          "type": "object", "additionalProperties": false,
+          "required": ["consume", "emit"],
+          "properties": { "consume": { "$ref": "#/$defs/stringList" }, "emit": { "$ref": "#/$defs/stringList" } }
+        },
+        "tools": {
+          "type": "object", "additionalProperties": false,
+          "required": ["expose"],
+          "properties": { "expose": { "$ref": "#/$defs/stringList" } }
+        },
+        "network": {
+          "type": "object", "additionalProperties": false,
+          "required": ["outbound"],
+          "properties": { "outbound": { "$ref": "#/$defs/stringList" } }
+        }
+      }
+    },
+    "resourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "$ref": "#/$defs/semver" },
+        "file": { "$ref": "#/$defs/relativeFile" }
+      }
+    },
+    "stateSchemaRef": {
+      "allOf": [
+        { "$ref": "#/$defs/resourceRef" },
+        { "type": "object", "required": ["id", "version", "file"] }
+      ]
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stateSchemas": { "type": "array", "items": { "$ref": "#/$defs/stateSchemaRef" } },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "tools": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "relationTypes": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "promptFragments": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "uiViews": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "templates": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } },
+        "handlers": { "type": "array", "items": { "$ref": "#/$defs/resourceRef" } }
+      },
+      "minProperties": 1
+    }
+  }
+}

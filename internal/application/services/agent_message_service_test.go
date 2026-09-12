@@ -372,3 +372,21 @@ func TestExtractOneShotReply(t *testing.T) {
 	_, err = extractOneShotReply("event: result\ndata: {\"subtype\":\"error\",\"errors\":[\"模型失败\"]}\n\n")
 	require.EqualError(t, err, "模型失败")
 }
+
+func TestBuildAgentMessageEnvelopeUsesPlatformNeutralProtocolLabel(t *testing.T) {
+	source := &agent.AgentConfig{Name: "research-lead"}
+	target := &agent.AgentConfig{Name: "finance-reviewer"}
+	relation := &agentrelation.AgentRelation{
+		Scope:          "research-team",
+		RelationType:   "peer",
+		ContextPolicy:  "summary_only",
+		AllowedActions: []string{"consult"},
+	}
+
+	envelope := buildAgentMessageEnvelope(source, target, relation, nil, "consult", "请复核结论", "")
+
+	require.Contains(t, envelope, "[Agent Hub 组织消息]")
+	require.NotContains(t, envelope, "SPEEDING")
+	require.Contains(t, envelope, "接收方 finance-reviewer")
+	require.Contains(t, envelope, "发送方是 research-lead")
+}
