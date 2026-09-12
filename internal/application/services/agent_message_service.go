@@ -225,7 +225,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			return nil, agentrelation.ErrRouteNotFound
 		}
 		if !participantsValid {
-			return persistAuthorizationGuard("run_participant_denied", agentrelation.ErrRouteNotFound)
+			return persistAuthorizationGuard("run_participant_denied", agentrelation.ErrRunParticipantDenied)
 		}
 	}
 	if _, ok := agentrelation.Actions[input.Action]; !ok {
@@ -616,6 +616,8 @@ func guardDescription(reason string) string {
 		return "当前 Agent 没有向目标发送该消息的组织关系"
 	case "action_not_allowed":
 		return "该组织关系不允许这类动作"
+	case "run_participant_denied":
+		return "目标 Agent 未加入本次运行"
 	default:
 		return ""
 	}

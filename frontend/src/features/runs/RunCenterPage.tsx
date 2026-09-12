@@ -219,6 +219,7 @@ const MESSAGE_STATUS: Record<string, { label: string; color?: string }> = {
 }
 const GUARD_REASON: Record<string, string> = {
   route_not_found: '双方没有允许这次联络的关系', action_not_allowed: '这段关系不允许该动作',
+  run_participant_denied: '目标 Agent 未加入本次运行',
   max_hops_exceeded: '已达到最大传递层数', event_budget_exceeded: '本次协作的消息额度已用完',
   token_budget_exceeded: '本次协作的内容额度已用完', deadline_exceeded: '已超过本次协作的截止时间',
   sync_wait_cycle: '同步等待会形成死锁', repeated_agent: '检测到可能反复传递的路径',

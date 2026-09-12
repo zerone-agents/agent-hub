@@ -500,6 +500,19 @@ func TestAgentMessageServiceAuthorizationGuardIsInUnifiedRunEvents(t *testing.T)
 	require.Equal(t, guarded.RootMessageID, events[0].RootEventID)
 }
 
+func TestAgentMessageServiceExplainsRunParticipantGuard(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.c, "audit", "async", "summary_only", "consult")
+	require.NoError(t, f.db.Where("run_id=? AND agent_id=?", "run-1", f.c.ID).Delete(&rundomain.RunAgent{}).Error)
+
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.c.Name, Scope: "audit", Action: "consult", Message: "review", RunID: "run-1", IdempotencyKey: "participant-guard",
+	})
+	require.ErrorIs(t, err, agentrelation.ErrRunParticipantDenied)
+	require.Equal(t, "run_participant_denied", guarded.GuardReason)
+	require.Equal(t, "目标 Agent 未加入本次运行", guarded.GuardDescription)
+}
+
 func TestAgentMessageServiceAllowsAsyncReturnButRejectsSyncWaitCycle(t *testing.T) {
 	f := setupAgentMessageService(t)
 	addMessageRelation(t, f, f.a, f.b, "return", "sync", "summary_only", "consult")
