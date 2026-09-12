@@ -252,7 +252,8 @@ func main() {
 		cfg.Deployer.RuntimeAPIKey,
 		cfg.Deployer.DeployerURLHost,
 	)
-	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
+	runService := services.NewRunService(database.GetDB())
+	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, runService)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
@@ -270,6 +271,8 @@ func main() {
 	relationTypeHandler := handler.NewRelationTypeHandler(services.NewRelationTypeService())
 	agentRelationService := services.NewAgentRelationService()
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
+	runHandler := handler.NewRunHandler(runService)
+	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
 
 	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
 	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
@@ -438,6 +441,22 @@ func main() {
 	// manager-only and never resolves file references from pasted manifests.
 	adminRead.GET("/extensions/h0", extensionVerificationHandler.Overview)
 	adminWrite.POST("/extensions/validate", extensionVerificationHandler.Validate)
+
+	// ---------- H1 isolated runs and generic state ----------
+	adminRead.GET("/runs", runHandler.List)
+	adminWrite.POST("/runs", runHandler.Create)
+	adminRead.GET("/runs/:id", runHandler.Get)
+	adminWrite.POST("/runs/:id/transitions", runHandler.Transition)
+	adminWrite.POST("/runs/:id/agents", runHandler.AddAgent)
+	adminWrite.POST("/state-schemas", runHandler.RegisterSchema)
+	adminWrite.POST("/runs/:id/states", runHandler.InitializeState)
+	adminWrite.PUT("/runs/:id/states/:stateId", runHandler.CommitState)
+	adminRead.GET("/runs/:id/state-changes", runHandler.StateChanges)
+	adminRead.GET("/runs/:id/activities", runHandler.Activities)
+	adminWrite.POST("/runs/:id/activities", runHandler.AppendActivity)
+	adminRead.GET("/capability-packages", capabilityRegistryHandler.List)
+	adminWrite.POST("/capability-packages", capabilityRegistryHandler.Register)
+	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

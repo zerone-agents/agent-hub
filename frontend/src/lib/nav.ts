@@ -11,7 +11,8 @@ import {
   ChatsIcon,
   ShareNetworkIcon,
   FingerprintIcon,
-  PackageIcon
+  PackageIcon,
+  PulseIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -26,6 +27,7 @@ export interface NavItem {
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'dashboard', label: '仪表盘', path: '/dashboard', icon: GaugeIcon },
+  { id: 'runs', label: '运行中心', path: '/runs', icon: PulseIcon },
   { id: 'agents', label: 'Agent管理', path: '/agents', icon: RobotIcon },
   { id: 'personalities', label: '人格库', path: '/personalities', icon: FingerprintIcon },
   { id: 'relations', label: '组织关系', path: '/relations', icon: ShareNetworkIcon },

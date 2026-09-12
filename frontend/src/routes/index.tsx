@@ -46,6 +46,11 @@ export const router = createBrowserRouter(
             import('@/features/agents/AgentListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'runs/:runId?',
+          lazy: () =>
+            import('@/features/runs/RunCenterPage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'personalities',
           lazy: () =>
             import('@/features/personalities/PersonalityLibraryPage').then((m) => ({ Component: m.default }))

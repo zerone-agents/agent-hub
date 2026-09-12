@@ -135,7 +135,8 @@ export const agentChatApi = {
     sessionId: string,
     content: string,
     signal?: AbortSignal,
-    attachments?: AttachmentDesc[]
+    attachments?: AttachmentDesc[],
+    runId?: string
   ): Promise<Response> => {
     const resp = await fetch(
       `/api/v1/agents/${encodeURIComponent(agentName)}/chat/sessions/${sessionId}/messages`,
@@ -145,9 +146,11 @@ export const agentChatApi = {
           'Content-Type': 'application/json',
           ...authHeaders(),
         },
-        body: JSON.stringify(
-          attachments && attachments.length > 0 ? { content, attachments } : { content }
-        ),
+        body: JSON.stringify({
+          content,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(runId ? { runId } : {}),
+        }),
         signal,
       }
     )

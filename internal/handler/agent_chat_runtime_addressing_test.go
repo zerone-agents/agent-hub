@@ -10,6 +10,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/chat"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/infrastructure/deployer"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/internal/infrastructure/runtime"
@@ -149,6 +150,34 @@ func TestSendMessage_AddressesRuntimeWithBareAgentID(t *testing.T) {
 	require.Equal(t, "/v1/agents/min/runs", runtimePath)
 	// The SSE stream was piped through to the client.
 	require.Contains(t, w.Body.String(), `"subtype":"success"`)
+}
+
+func TestSendMessage_RecordsRealRuntimeExecutionInRunTimeline(t *testing.T) {
+	var runtimePath string
+	h := newAgentChatHandlerWithFakes(t, &runtimePath)
+	trace := &runTraceStub{run: &rundomain.Run{
+		Status: rundomain.StatusRunning,
+		Agents: []rundomain.RunAgent{{AgentNameSnapshot: "min"}},
+	}}
+	h.runTrace = trace
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"content":"hi","runId":"run-1"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", "u1")
+	c.Set("tenant_id", chatTestTenant)
+	c.Params = gin.Params{{Key: "name", Value: "min"}, {Key: "id", Value: "s-run"}}
+
+	h.SendMessage(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, trace.activities, 3)
+	require.Equal(t, "participant", trace.activities[0].Kind)
+	require.Equal(t, "started", trace.activities[1].Kind)
+	require.Equal(t, "completed", trace.activities[2].Kind)
+	require.Equal(t, trace.activities[1].StepID, trace.activities[2].StepID)
 }
 
 // Session-bound-to-other-agent requests must 404 BEFORE persisting anything

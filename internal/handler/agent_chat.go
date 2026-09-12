@@ -14,6 +14,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/chat"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/runtime"
 
@@ -21,11 +22,21 @@ import (
 )
 
 type AgentChatHandler struct {
-	svc *services.AgentChatService
+	svc      *services.AgentChatService
+	runTrace runTraceService
 }
 
-func NewAgentChatHandler(svc *services.AgentChatService) *AgentChatHandler {
-	return &AgentChatHandler{svc: svc}
+type runTraceService interface {
+	Get(tenantID, id string) (*rundomain.Run, error)
+	AppendActivity(tenantID, runID string, input services.AppendRunActivityInput) (*rundomain.RunActivity, error)
+}
+
+func NewAgentChatHandler(svc *services.AgentChatService, runTrace ...runTraceService) *AgentChatHandler {
+	h := &AgentChatHandler{svc: svc}
+	if len(runTrace) > 0 {
+		h.runTrace = runTrace[0]
+	}
+	return h
 }
 
 func (h *AgentChatHandler) ListSessions(c *gin.Context) {
@@ -112,6 +123,7 @@ func (h *AgentChatHandler) Capabilities(c *gin.Context) {
 type sendMessageReq struct {
 	Content     string                    `json:"content"`
 	Attachments []services.AttachmentDesc `json:"attachments"`
+	RunID       string                    `json:"runId,omitempty"`
 }
 
 // runRequestBody is the POST /v1/agents/{agentId}/runs JSON body. attachments
@@ -168,6 +180,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if sess.AgentID != agentName {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
+	}
+	// A chat execution may be attached to an explicit H1 Run. Legacy chat
+	// remains valid without runId; once supplied, the Run must be running and
+	// contain this Agent in its immutable participant snapshot.
+	if req.RunID != "" {
+		if err := h.validateRunParticipant(tenantID, req.RunID, agentName); err != nil {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
 	}
 	// 2. Resolve runtime URL, API key, and the deployer-reported container id
 	// BEFORE anything is persisted: the attachment probe below needs the base
@@ -232,6 +253,18 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
+	executionID := msg.ID
+	if req.RunID != "" {
+		h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+			Kind: "participant", Status: "active", ActorType: "agent", ActorID: agentName,
+			StepID: executionID, Name: agentName,
+		})
+		h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+			Kind: "started", Status: "running", ActorType: "agent", ActorID: agentName,
+			StepID: executionID, Name: "agent_execution",
+			Input: map[string]any{"sessionId": sessionID, "messageId": msg.ID, "hasAttachments": len(req.Attachments) > 0},
+		})
+	}
 
 	// 5. Build runtime request body. Re-use the runtime SDK session id if this
 	// control-panel session has already been bound to one.
@@ -258,6 +291,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey, bodyBytes, expectedContainerID)
 	if err != nil {
+		if req.RunID != "" {
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: "failed", Status: "failed", ActorType: "agent", ActorID: agentName,
+				StepID: executionID, Name: "agent_execution", Error: "runtime request failed",
+			})
+		}
 		// Runtime run-attachment domain errors (attachment_missing etc.) are
 		// pre-run failures: surface the code so the frontend can retry from
 		// local files instead of persisting a system error message. The code
@@ -369,6 +408,23 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// showed nothing. Now we always flush buffered content to the DB; the
 	// runtime keeps executing regardless of the downstream connection.
 	aggregateStr := aggregate.String()
+	if req.RunID != "" {
+		for _, activity := range extractRuntimeActivities(aggregateStr) {
+			input := decodeActivityObject(activity.InputJSON)
+			output := decodeActivityObject(activity.OutputJSON)
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: activity.Kind, Status: activity.Status, ActorType: "agent", ActorID: agentName,
+				StepID: firstNonEmpty(activity.StepID, executionID), Name: activity.Name,
+				Input: input, Output: output, Error: activity.Error,
+			})
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: "failed", Status: "failed", ActorType: "agent", ActorID: agentName,
+				StepID: executionID, Name: "agent_execution", Error: "runtime stream interrupted",
+			})
+		}
+	}
 
 	// result/subtype=error（如 429 配额耗尽）是正常结束的流里携带的运行时
 	// 失败，scanner.Err 为 nil 覆盖不到；落库为系统错误消息，刷新后历史可见。
@@ -396,6 +452,56 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		aigcLabel := extractAigcLabel(aggregateStr)
 		_, _ = h.svc.SaveAssistantMessage(tenantID, userID, sessionID, contentJSON, aigcLabel)
 	}
+}
+
+func (h *AgentChatHandler) validateRunParticipant(tenantID, runID, agentName string) error {
+	if h.runTrace == nil {
+		return fmt.Errorf("运行跟踪服务暂不可用")
+	}
+	run, err := h.runTrace.Get(tenantID, runID)
+	if err != nil {
+		return fmt.Errorf("运行不存在或不可访问")
+	}
+	if run.Status != rundomain.StatusRunning {
+		return fmt.Errorf("运行当前不是执行中状态")
+	}
+	for _, participant := range run.Agents {
+		if services.NormalizeAgentName(participant.AgentNameSnapshot) == agentName {
+			return nil
+		}
+	}
+	return fmt.Errorf("当前 Agent 不在该运行的参与者中")
+}
+
+func (h *AgentChatHandler) appendRunActivity(tenantID, runID string, input services.AppendRunActivityInput) {
+	if h.runTrace == nil {
+		return
+	}
+	if _, err := h.runTrace.AppendActivity(tenantID, runID, input); err != nil {
+		log.Printf("[chat] append run activity failed: tenant=%s run=%s kind=%s err=%v", tenantID, runID, input.Kind, err)
+	}
+}
+
+func decodeActivityObject(raw string) map[string]any {
+	if raw == "" {
+		return nil
+	}
+	var object map[string]any
+	if json.Unmarshal([]byte(raw), &object) == nil {
+		return object
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) == nil {
+		return map[string]any{"value": value}
+	}
+	return map[string]any{"value": raw}
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 // saveErrorMessage persists a system error message so the failure is visible

@@ -61,7 +61,7 @@ fixture、Agent、关系、输入和预期结果。
 4. **平台边界在哪里？** 哪些数据和规则仍由应用拥有。
 5. **通过证据是什么？** API、真实 Agent 运行、审计记录和自动化测试缺一不可。
 
-## 5. H0：平台边界收口（当前版本）
+## 5. H0：平台边界收口（已完成）
 
 目标：确保后续功能从一开始按平台方式建设。
 
@@ -94,19 +94,21 @@ fixture、Agent、关系、输入和预期结果。
 
 ## 6. H1：Run 与通用状态
 
+> 状态：已完成（2026-09-12）。实现、页面与 Speeding/非游戏双案例验收均已通过。
+
 目标：让 Agent 在多个任务、推演或游戏中拥有互不污染的运行状态。
 
 ### Agent Hub P0
 
-- [ ] `runs` 与 draft/running/paused/completed/archived 状态机；
-- [ ] `run_agents`，保存参与者和 Agent 配置/人格快照引用；
-- [ ] 能力包静态注册、启用及 Run 显式绑定；
-- [ ] Run 锁定包、Schema、提示词和规则版本；
-- [ ] `state_schemas`、`run_states`、`run_state_changes`；
-- [ ] revision 乐观锁和 idempotency key；
-- [ ] Run 完成后冻结写入；
-- [ ] 状态初始化、读取、提交和历史 API；
-- [ ] 最小“运行详情 / Agent 状态 / 变化历史”声明式 UI。
+- [x] `runs` 与 draft/running/paused/completed/archived 状态机；
+- [x] `run_agents`，保存参与者和 Agent 配置/人格快照引用；
+- [x] 能力包静态注册、启用及 Run 显式绑定；
+- [x] Run 锁定包、Schema、提示词和规则版本；
+- [x] `state_schemas`、`run_states`、`run_state_changes`；
+- [x] revision 乐观锁和 idempotency key；
+- [x] Run 完成后冻结写入；
+- [x] 状态初始化、读取、提交和历史 API；
+- [x] 最小“运行详情 / Agent 状态 / 变化历史”声明式 UI。
 
 当前不做：第三方代码执行、包市场、复杂 reducer DSL、游戏虚拟时钟。
 

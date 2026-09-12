@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useSearchParams } from 'react-router'
 import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -137,6 +137,8 @@ function sendErrorMessage(errorCode: string | undefined, fallback: string | null
 export default function AgentChatPage() {
   const { styles } = useStyles()
   const { name = '' } = useParams<{ name: string }>()
+  const [searchParams] = useSearchParams()
+  const runId = searchParams.get('runId') ?? undefined
   const [selected, setSelected] = useState<AgentChatSession | null>(null)
   const { data: msgData } = useAgentChatMessages(name, selected?.id ?? null)
   const stream = useChatStream()
@@ -362,7 +364,7 @@ export default function AgentChatPage() {
     void stream.send(name, selected.id, content, descriptors, () => {
       chatInputRef.current?.clearText()
       attachments.clearAll()
-    })
+    }, runId)
     return true
   }
 

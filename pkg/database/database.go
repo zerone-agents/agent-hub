@@ -13,10 +13,12 @@ import (
 	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/aigc"
 	authdomain "control-panel/internal/domain/auth"
+	"control-panel/internal/domain/capability"
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
 	"control-panel/internal/domain/provider"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/systemsetting"
@@ -152,6 +154,14 @@ func AutoMigrate(backfillTenant string) error {
 		&authdomain.UserIdentity{},
 		&authdomain.TenantOAuthClient{},
 		&systemsetting.SystemSetting{},
+		&rundomain.Run{},
+		&rundomain.RunAgent{},
+		&rundomain.CapabilityBinding{},
+		&rundomain.StateSchema{},
+		&rundomain.RunState{},
+		&rundomain.RunStateChange{},
+		&rundomain.RunActivity{},
+		&capability.Package{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

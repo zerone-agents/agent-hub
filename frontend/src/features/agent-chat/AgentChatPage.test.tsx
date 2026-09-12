@@ -6,6 +6,7 @@ import AgentChatPage from './AgentChatPage'
 
 vi.mock('react-router', () => ({
   useParams: () => ({ name: 'test-agent' }),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }))
 
 vi.mock('@/queries/useAgentChat', () => ({

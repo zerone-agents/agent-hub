@@ -69,3 +69,16 @@ describe('authFetchBlob', () => {
     ).rejects.toMatchObject({ code: 'attachment_missing', status: 400 })
   })
 })
+
+describe('agentChatApi.sendMessageStream', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValueOnce(new Response('event: done\ndata: {}\n\n', { status: 200 }))
+  })
+
+  it('attaches an explicit run without changing the runtime message payload', async () => {
+    await agentChatApi.sendMessageStream('min', 's1', 'hello', undefined, undefined, 'run-uuid')
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ content: 'hello', runId: 'run-uuid' })
+  })
+})
