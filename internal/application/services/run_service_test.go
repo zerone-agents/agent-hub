@@ -5,6 +5,7 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/capability"
+	eventdomain "control-panel/internal/domain/event"
 	rundomain "control-panel/internal/domain/run"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -15,7 +16,7 @@ func newRunTestService(t *testing.T) (*RunService, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &capability.Package{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.CapabilityBinding{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &rundomain.RunActivity{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &capability.Package{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.CapabilityBinding{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &rundomain.RunActivity{}, &rundomain.ToolResultRecord{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 	require.True(t, db.Migrator().HasIndex(&rundomain.RunStateChange{}, "uk_run_state_change_idempotency"))
 	return NewRunService(db), db
 }

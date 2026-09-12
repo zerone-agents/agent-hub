@@ -15,6 +15,7 @@ import (
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/capability"
 	"control-panel/internal/domain/chat"
+	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
 	"control-panel/internal/domain/provider"
@@ -154,6 +155,7 @@ func AutoMigrate(backfillTenant string) error {
 		&authdomain.UserIdentity{},
 		&authdomain.TenantOAuthClient{},
 		&systemsetting.SystemSetting{},
+		&rundomain.PromptSnapshot{},
 		&rundomain.Run{},
 		&rundomain.RunAgent{},
 		&rundomain.CapabilityBinding{},
@@ -161,6 +163,12 @@ func AutoMigrate(backfillTenant string) error {
 		&rundomain.RunState{},
 		&rundomain.RunStateChange{},
 		&rundomain.RunActivity{},
+		&rundomain.ToolResultRecord{},
+		&eventdomain.StreamCursor{},
+		&eventdomain.Envelope{},
+		&eventdomain.Delivery{},
+		&eventdomain.DeliveryAttempt{},
+		&eventdomain.CausalBudget{},
 		&capability.Package{},
 	)
 	if err != nil {

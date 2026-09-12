@@ -30,6 +30,15 @@ const runs = [
 const createMutate = vi.fn()
 const transitionMutate = vi.fn()
 const addAgentMutate = vi.fn()
+const composePromptMutate = vi.fn((_variables: unknown, options?: { onSuccess?: (value: unknown) => void }) => options?.onSuccess?.({
+  id: 'prompt-1', runId: 'run-market', runAgentId: 11, agentId: 7,
+  renderedText: '## 平台安全边界\n不得越权。\n\n## 职责\n分析市场。', renderedHash: '1234567890abcdef',
+  provenance: [
+    { stage: 'platform_safety', label: '平台安全边界', sourceType: 'platform', sourceId: 'agenthub.safety', sourceVersion: '1', contentHash: 'a'.repeat(64), tokenEstimate: 12 },
+    { stage: 'responsibilities', label: '职责', sourceType: 'agent_snapshot', sourceId: '研究分析师', sourceVersion: 'v1', contentHash: 'b'.repeat(64), tokenEstimate: 8 },
+  ],
+  createdAt: '2026-09-12T09:00:00Z',
+}))
 let detailStatus = 'running'
 
 vi.mock('@/hooks/useCanWrite', () => ({ useCanWrite: () => true }))
@@ -57,10 +66,19 @@ vi.mock('@/queries/useRuns', () => ({
     isLoading: false,
     isError: false,
   }),
+  useRunEvents: () => ({
+    data: [{ event: { id: 'evt-1', type: 'agenthub.state.changed.v1', source: 'tool:review', actor: { type: 'agent', id: 'analyst' }, occurredAt: '2026-09-12T08:55:00Z', recordedAt: '2026-09-12T08:55:00Z' }, delivery: { status: 'delivered' } }],
+    isLoading: false, isError: false,
+  }),
+  useRunToolResults: () => ({
+    data: [{ id: 'tool-result-1', toolName: '报告审核', actorId: 'reviewer', status: 'applied', stateProposals: [{ stateId: 21, reason: '通过' }], committedChangeIds: ['change-31'], createdAt: '2026-09-12T08:54:00Z' }],
+    isLoading: false, isError: false,
+  }),
   useCreateRun: () => ({ mutate: createMutate, isPending: false }),
   useEnabledCapabilityPackages: () => ({ data: [{ id: 41, namespace: 'io.zerone.research', name: 'research-team', displayName: '研究协作', version: '1.0.0', contentHash: 'abc', enabled: true }], isLoading: false }),
   useTransitionRun: () => ({ mutate: transitionMutate, isPending: false }),
   useAddRunAgent: () => ({ mutate: addAgentMutate, isPending: false }),
+  useComposeRunPrompt: () => ({ mutate: composePromptMutate, isPending: false }),
 }))
 
 function renderPage(path = '/runs/run-market') {
@@ -85,10 +103,21 @@ describe('RunCenterPage', () => {
     expect(screen.getByText('65')).toBeInTheDocument()
   })
 
-  it('shows real execution activity and explains the H2 boundary', () => {
+  it('shows real execution, tool decisions and causality in product language', () => {
     renderPage()
     expect(screen.getByText(/工具完成 · 网络检索/)).toBeInTheDocument()
-    expect(screen.getByText(/完整因果链将在 H2/)).toBeInTheDocument()
+    expect(screen.getByText('已生效')).toBeInTheDocument()
+    expect(screen.getByText(/因果链起点/)).toBeInTheDocument()
+    expect(screen.getByText(/H2 已将事件、工具结果/)).toBeInTheDocument()
+  })
+
+  it('explains an Agent judgment context in product language', () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /查看判断背景/ }))
+    expect(screen.getByText('研究分析师 的判断背景')).toBeInTheDocument()
+    expect(screen.getByText(/2 个判断依据/)).toBeInTheDocument()
+    expect(screen.getByText(/人格和上下文不会赋予额外权限/)).toBeInTheDocument()
+    expect(screen.getByText('职责')).toBeInTheDocument()
   })
 
   it('filters runs by task name', () => {

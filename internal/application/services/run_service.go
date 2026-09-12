@@ -164,7 +164,15 @@ func (s *RunService) AddAgent(tenantID, runID string, agentID uint64, role strin
 			return fmt.Errorf("agent not found")
 		}
 		ph := sha256.Sum256([]byte(a.PersonalityPrompt))
-		*row = rundomain.RunAgent{TenantID: tenantID, RunID: runID, AgentID: a.ID, Role: role, AgentNameSnapshot: a.Name, AgentConfigHashSnapshot: a.ContentHash, PersonalityTemplateName: a.PersonalityTemplateName, PersonalityTemplateVersion: a.PersonalityTemplateVersion, PersonalityPromptHash: hex.EncodeToString(ph[:]), Snapshot: map[string]any{"modelId": a.ModelID, "providerId": a.ProviderID}}
+		identity := a.Name
+		title := strings.TrimSpace(a.Title["zh-CN"])
+		if title == "" {
+			title = strings.TrimSpace(a.Title["zh"])
+		}
+		if title != "" {
+			identity += "（" + title + "）"
+		}
+		*row = rundomain.RunAgent{TenantID: tenantID, RunID: runID, AgentID: a.ID, Role: role, AgentNameSnapshot: a.Name, AgentConfigHashSnapshot: a.ContentHash, PersonalityTemplateName: a.PersonalityTemplateName, PersonalityTemplateVersion: a.PersonalityTemplateVersion, PersonalityPromptHash: hex.EncodeToString(ph[:]), Snapshot: map[string]any{"modelId": a.ModelID, "providerId": a.ProviderID, "identity": identity, "responsibilities": a.SystemPrompt, "personality": a.PersonalityPrompt, "group": a.Group}}
 		return tx.Create(row).Error
 	})
 	if err != nil {

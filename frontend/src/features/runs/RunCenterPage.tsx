@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, Form, Input, Modal, Select, Skeleton, Tag } from 'antd'
+import { Alert, Button, Collapse, Empty, Form, Input, Modal, Select, Skeleton, Tag } from 'antd'
 import {
   ArrowRightIcon,
   CheckCircleIcon,
@@ -7,17 +7,18 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
   RobotIcon,
+  EyeIcon,
   StackIcon,
   PlusIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useNavigate, useParams } from 'react-router'
-import type { Run, RunActivity, RunState, RunStateChange, RunStatus } from '@/api/runs'
+import type { PromptSnapshot, Run, RunActivity, RunEventItem, RunState, RunStateChange, RunStatus, ToolResultRecord } from '@/api/runs'
 import { parseApiError } from '@/api/client'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { useAgents } from '@/queries/useAgents'
-import { useAddRunAgent, useCreateRun, useEnabledCapabilityPackages, useRun, useRunActivities, useRuns, useRunStateChanges, useTransitionRun } from '@/queries/useRuns'
+import { useAddRunAgent, useComposeRunPrompt, useCreateRun, useEnabledCapabilityPackages, useRun, useRunActivities, useRunEvents, useRuns, useRunStateChanges, useRunToolResults, useTransitionRun } from '@/queries/useRuns'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 
@@ -94,6 +95,13 @@ const useStyles = createStyles(({ css }) => ({
   avatar: css`display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 9px; background: var(--primary-soft); color: var(--primary);`,
   personName: css`min-width: 0; flex: 1; color: ${t.text}; font-size: ${t.textSm}; font-weight: 620;`,
   role: css`color: ${t.textMuted}; font-size: 11px;`,
+  promptIntro: css`margin: 0 0 16px; color: ${t.textTertiary}; font-size: ${t.textBase}; line-height: 1.65;`,
+  promptSummary: css`display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 0 16px; border-bottom: 1px solid var(--border); color: ${t.textSecondary}; font-size: ${t.textSm};`,
+  promptSource: css`padding: 13px 0; border-bottom: 1px solid var(--border); &:last-child { border-bottom: 0; }`,
+  promptSourceTop: css`display: flex; align-items: baseline; justify-content: space-between; gap: 12px;`,
+  promptSourceName: css`color: ${t.text}; font-size: ${t.textBase}; font-weight: 650;`,
+  promptSourceMeta: css`margin-top: 4px; color: ${t.textMuted}; font-size: ${t.textSm}; line-height: 1.5;`,
+  promptText: css`max-height: 310px; margin: 0; overflow: auto; color: ${t.textSecondary}; font-family: ${t.fontMono}; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;`,
   addAgent: css`display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 8px; margin-bottom: 10px; @media (max-width: 600px) { grid-template-columns: 1fr; }`,
   stateCard: css`padding: 12px; border-bottom: 1px solid var(--border); &:last-child { border-bottom: 0; }`,
   stateHead: css`display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; color: ${t.textSecondary}; font-size: 12px;`,
@@ -166,11 +174,54 @@ function ActivityTimeline({ activities }: { activities: RunActivity[] }) {
   ))}</div>
 }
 
+const DELIVERY_LABEL: Record<string, string> = { pending: '等待处理', processing: '处理中', retry: '正在重试', delivered: '已处理', cancelled: '已取消', dead_letter: '处理失败' }
+
+function EventTimeline({ items }: { items: RunEventItem[] }) {
+  const { styles } = useStyles()
+  if (items.length === 0) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有形成可追溯的因果事件" />
+  return <div className={styles.timeline}>{items.map(({ event, delivery }) => <div className={styles.change} key={event.id}>
+    <div className={styles.changeTop}><span className={styles.changeTitle}>{event.type.replace(/\.v\d+$/, '').replaceAll('.', ' · ')}</span><time className={styles.changeTime}>{formatTime(event.occurredAt || event.recordedAt)}</time></div>
+    <div className={styles.changeBody}>{event.actor?.id ? `${event.actor.id} 发起 · ` : ''}{DELIVERY_LABEL[delivery?.status ?? ''] ?? '已记录'}{event.causationId ? ' · 由上一事件触发' : ' · 因果链起点'}</div>
+  </div>)}</div>
+}
+
+const TOOL_DECISION: Record<string, string> = { accepted: '等待规则确认', rejected: '未生效', applied: '已生效' }
+
+function ToolDecisionList({ items }: { items: ToolResultRecord[] }) {
+  const { styles } = useStyles()
+  if (items.length === 0) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="工具尚未提出状态变化" />
+  return <div className={styles.quietList}>{items.map((item) => <div className={styles.stateCard} key={item.id}>
+    <div className={styles.stateHead}><span>{item.actorId ? `${item.actorId} 使用了 ` : ''}{item.toolName}</span><Tag color={item.status === 'applied' ? 'success' : item.status === 'rejected' ? 'error' : 'processing'} variant="filled">{TOOL_DECISION[item.status] ?? item.status}</Tag></div>
+    <div className={styles.changeBody}>{item.status === 'rejected' ? `原因：${item.decisionReason || '未通过规则校验'}` : item.stateProposals?.length ? `${item.stateProposals.length} 项状态建议，${item.committedChangeIds?.length ?? 0} 项已经写入` : '工具只返回结果，没有要求修改状态'}</div>
+  </div>)}</div>
+}
+
 const NEXT_ACTION: Partial<Record<RunStatus, { label: string; target: RunStatus }[]>> = {
   draft: [{ label: '开始运行', target: 'running' }, { label: '归档', target: 'archived' }],
   running: [{ label: '暂停', target: 'paused' }, { label: '完成运行', target: 'completed' }],
   paused: [{ label: '继续运行', target: 'running' }, { label: '完成运行', target: 'completed' }],
   completed: [{ label: '归档', target: 'archived' }],
+}
+
+const PROMPT_STAGE_LABEL: Record<string, string> = {
+  platform_safety: '平台安全边界', identity: '身份', responsibilities: '职责',
+  personality_baseline: '人格基线', organization_policy: '组织角色', dynamic_state: '运行中的状态',
+  relationship_context: '与其他 Agent 的关系', application_context: '本次任务背景',
+}
+
+function PromptExplanation({ snapshot }: { snapshot: PromptSnapshot }) {
+  const { styles } = useStyles()
+  const totalTokens = snapshot.provenance.reduce((sum, item) => sum + item.tokenEstimate, 0)
+  const deliveryLabel = snapshot.deliveryStatus === 'delivered' ? '本次对话实际使用' : snapshot.deliveryStatus === 'failed' ? '发送失败，未被 Agent 使用' : '预览，尚未用于对话'
+  return <>
+    <p className={styles.promptIntro}>这是平台按本次运行档案生成的判断背景。内容按固定顺序合并，并保留每一部分的来源；人格和上下文不会赋予额外权限。</p>
+    <div className={styles.promptSummary}><span>{deliveryLabel}</span><span>{snapshot.provenance.length} 个判断依据</span><span>约 {totalTokens} tokens</span><span>版本指纹 {snapshot.renderedHash.slice(0, 10)}</span></div>
+    <div>{snapshot.provenance.map((item) => <div className={styles.promptSource} key={`${item.stage}-${item.sourceId}-${item.contentHash}`}>
+      <div className={styles.promptSourceTop}><span className={styles.promptSourceName}>{PROMPT_STAGE_LABEL[item.stage] ?? item.label}</span><Tag variant="filled">约 {item.tokenEstimate} tokens</Tag></div>
+      <div className={styles.promptSourceMeta}>{item.label} · 来源：{item.sourceType === 'platform' ? 'Agent Hub' : item.sourceId || '本次运行'}{item.sourceVersion ? ` · 版本 ${item.sourceVersion}` : ''}</div>
+    </div>)}</div>
+    <Collapse ghost size="small" items={[{ key: 'rendered', label: '查看完整合成文本', children: <pre className={styles.promptText}>{snapshot.renderedText}</pre> }]} />
+  </>
 }
 
 function RunDetailPanel({ id }: { id: string }) {
@@ -179,9 +230,14 @@ function RunDetailPanel({ id }: { id: string }) {
   const detail = useRun(id)
   const history = useRunStateChanges(id)
   const activities = useRunActivities(id)
+  const events = useRunEvents(id)
+  const toolResults = useRunToolResults(id)
   const agents = useAgents()
   const transition = useTransitionRun()
   const addAgent = useAddRunAgent()
+  const composePrompt = useComposeRunPrompt()
+  const [promptSnapshot, setPromptSnapshot] = useState<PromptSnapshot | null>(null)
+  const [promptAgentName, setPromptAgentName] = useState('')
   const [agentId, setAgentId] = useState<number>()
   const [role, setRole] = useState('参与者')
   if (detail.isLoading) return <div className={styles.detail}><Skeleton active paragraph={{ rows: 10 }} /></div>
@@ -201,7 +257,7 @@ function RunDetailPanel({ id }: { id: string }) {
     <div className={styles.grid}>
       <section className={styles.section}><h3 className={styles.sectionTitle}><RobotIcon size={17} />谁在参与</h3>
         {canWrite && run.status === 'draft' && <div className={styles.addAgent}><Select aria-label="选择 Agent" value={agentId} onChange={setAgentId} options={agentOptions} placeholder="选择 Agent" showSearch optionFilterProp="label" /><Input aria-label="参与角色" value={role} onChange={(event) => setRole(event.target.value)} placeholder="参与角色" /><PrimaryButton icon={<PlusIcon size={15} />} disabled={!agentId} loading={addAgent.isPending} onClick={() => agentId && addAgent.mutate({ id, agentId, role: role.trim() || '参与者' }, { onSuccess: () => setAgentId(undefined) })}>添加</PrimaryButton></div>}
-        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span></div>)}</div>}
+        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断背景</Button></div>)}</div>}
       </section>
       <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
     </div>
@@ -211,7 +267,12 @@ function RunDetailPanel({ id }: { id: string }) {
     <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><ClockCounterClockwiseIcon size={17} />状态变化</h3>
       {history.isError ? <Alert type="error" showIcon title="变化记录加载失败" description={parseApiError(history.error)} /> : history.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ChangeTimeline changes={history.data ?? []} />}
     </section>
-    <div className={styles.future}>本版本已记录真实执行和工具结果，并确保每次运行的人员与状态互不污染。可重试的事件投递和完整因果链将在 H2 加入。</div>
+    <div className={styles.grid} style={{ marginTop: 22 }}>
+      <section className={styles.section}><h3 className={styles.sectionTitle}>工具提出的变化是否生效</h3>{toolResults.isError ? <Alert type="error" showIcon title="工具结果加载失败" description={parseApiError(toolResults.error)} /> : toolResults.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ToolDecisionList items={toolResults.data ?? []} />}</section>
+      <section className={styles.section}><h3 className={styles.sectionTitle}>事情为什么会接着发生</h3>{events.isError ? <Alert type="error" showIcon title="因果记录加载失败" description={parseApiError(events.error)} /> : events.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <EventTimeline items={events.data ?? []} />}</section>
+    </div>
+    <div className={styles.future}>H2 已将事件、工具结果、状态提交和 Agent 判断依据放进同一份运行档案。这里展示的是可验证结果，底层工程数据默认收起。</div>
+    <Modal title={`${promptAgentName || 'Agent'} 的判断背景`} open={promptSnapshot !== null} onCancel={() => setPromptSnapshot(null)} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
   </article>
 }
 
@@ -231,7 +292,7 @@ export default function RunCenterPage() {
   useEffect(() => { if (!selectedId && runs[0]) void navigate(`/runs/${runs[0].id}`, { replace: true }) }, [navigate, runs, selectedId])
 
   return <main className={styles.page}>
-    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每次任务都有独立档案。在这里查看谁在参与、运行到什么状态，以及过程中发生了哪些变化。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />H1 · 运行数据已隔离</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setCreateOpen(true)}>新建运行</PrimaryButton>}</div></header>
+    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每次任务都有独立档案。在这里查看谁在参与、运行到什么状态，以及事情为什么继续发生。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />H2 · 过程与原因可追溯</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setCreateOpen(true)}>新建运行</PrimaryButton>}</div></header>
     <div className={styles.shell}>
       <aside className={styles.rail}><div className={styles.railHead}><div className={styles.railTitle}>运行档案</div><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索任务" /></div>
         {list.isError ? <div className={styles.center}><Alert type="error" showIcon title="无法加载运行" description={parseApiError(list.error)} /></div> : list.isLoading ? <div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 7 }} /></div> : runs.length === 0 ? <div className={styles.center}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search ? '没有匹配的运行' : '还没有运行记录'} /></div> : <div className={styles.runList}>{runs.map((run: Run) => <button type="button" className={cx(styles.runButton, run.id === selectedId && styles.runButtonActive)} key={run.id} onClick={() => void navigate(`/runs/${run.id}`)}><div className={styles.runTop}><span className={styles.runName}>{run.name}</span><RunStatusLabel status={run.status} /></div><p className={styles.runDesc}>{run.description || '未填写运行说明'}</p><div className={styles.runMeta}><span>{run.agents?.length ?? 0} 个 Agent</span><ArrowRightIcon size={12} /><time>{formatTime(run.updatedAt)}</time></div></button>)}</div>}

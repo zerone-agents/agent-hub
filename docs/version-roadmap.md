@@ -132,20 +132,22 @@ fixture、Agent、关系、输入和预期结果。
 
 ## 7. H2：统一事件、工具结果与提示词合成
 
+> 状态：已完成（2026-09-12）。事件投递、工具状态提交、真实提示词送达和双案例验收均已通过。
+
 目标：让平台内所有变化可追踪、可恢复、可解释。
 
 ### Agent Hub P0
 
-- [ ] 持久化统一事件信封；
-- [ ] correlation、causation、root、scope、subject 和 idempotency；
-- [ ] 至少一次投递、重试、超时、取消和死信；
-- [ ] 同一 scope + subject 的稳定排序；
-- [ ] 标准 ToolResult：结果、成本、状态提议、事件和延迟时间；
-- [ ] `proposal → validate → commit` 状态提交；
-- [ ] 最小声明式 reducer；
-- [ ] Prompt Composer：身份、职责、人格、组织、动态状态、关系、应用上下文；
-- [ ] 保存提示词 provenance、资源版本和渲染哈希；
-- [ ] Run、Agent 和因果链的事件数、Token、工具次数及时间预算。
+- [x] 持久化统一事件信封；
+- [x] correlation、causation、root、scope、subject 和 idempotency；
+- [x] 至少一次投递、重试、超时、取消和死信；
+- [x] 同一 scope + subject 的稳定排序；
+- [x] 标准 ToolResult：结果、成本、状态提议、事件和延迟时间；
+- [x] `proposal → validate → commit` 状态提交；
+- [x] 最小声明式 reducer；
+- [x] Prompt Composer：身份、职责、人格、组织、动态状态、关系、应用上下文；
+- [x] 保存提示词 provenance、资源版本和渲染哈希；
+- [x] Run、Agent 和因果链的事件数、Token、工具次数及时间预算。
 
 ### Speeding 验收案例
 

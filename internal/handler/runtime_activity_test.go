@@ -71,11 +71,15 @@ func TestValidateRunParticipant_RequiresRunningAndBoundAgent(t *testing.T) {
 	}}
 	h := NewAgentChatHandler(nil, stub)
 
-	require.NoError(t, h.validateRunParticipant("tenant-a", "run-a", "research-agent"))
-	require.EqualError(t, h.validateRunParticipant("tenant-a", "run-a", "other-agent"), "当前 Agent 不在该运行的参与者中")
+	participant, err := h.validateRunParticipant("tenant-a", "run-a", "research-agent")
+	require.NoError(t, err)
+	require.Equal(t, "Research-Agent", participant.AgentNameSnapshot)
+	_, err = h.validateRunParticipant("tenant-a", "run-a", "other-agent")
+	require.EqualError(t, err, "当前 Agent 不在该运行的参与者中")
 
 	stub.run.Status = rundomain.StatusPaused
-	require.EqualError(t, h.validateRunParticipant("tenant-a", "run-a", "research-agent"), "运行当前不是执行中状态")
+	_, err = h.validateRunParticipant("tenant-a", "run-a", "research-agent")
+	require.EqualError(t, err, "运行当前不是执行中状态")
 }
 
 func TestAppendRunActivity_IsBestEffort(t *testing.T) {

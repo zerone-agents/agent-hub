@@ -76,6 +76,47 @@ export interface RunActivity {
   occurredAt: string
 }
 
+export interface PromptProvenance {
+  stage: string
+  label: string
+  sourceType: string
+  sourceId: string
+  sourceVersion: string
+  contentHash: string
+  tokenEstimate: number
+}
+
+export interface PromptSnapshot {
+  id: string
+  runId: string
+  runAgentId: number
+  agentId: number
+  renderedText: string
+  renderedHash: string
+  userInputHash?: string
+  deliveryHash?: string
+  deliveryStatus: 'preview' | 'prepared' | 'delivered' | 'failed' | string
+  provenance: PromptProvenance[]
+  createdAt: string
+}
+
+export interface RunEventItem {
+  event: { id: string; type: string; source: string; actor?: { type: string; id: string }; subject?: { type: string; id: string }; causationId?: string; rootEventId?: string; occurredAt: string; recordedAt: string }
+  delivery?: { status: 'pending' | 'processing' | 'retry' | 'delivered' | 'cancelled' | 'dead_letter' | string; attempts?: number; lastError?: string }
+}
+
+export interface ToolResultRecord {
+  id: string
+  toolName: string
+  actorId?: string
+  status: 'accepted' | 'rejected' | 'applied' | string
+  decisionReason?: string
+  result?: Record<string, unknown>
+  stateProposals?: { stateId: number; reason?: string }[]
+  committedChangeIds?: string[]
+  createdAt: string
+}
+
 export interface Run {
   id: string
   name: string
@@ -117,6 +158,12 @@ export const runApi = {
     apiClient.post(`/api/v1/admin/runs/${id}/transitions`, { status }),
   addAgent: (id: string, agentId: number, role: string) =>
     apiClient.post(`/api/v1/admin/runs/${id}/agents`, { agentId, role }),
+  composePrompt: (id: string, agentId: number) =>
+    apiClient.post(`/api/v1/admin/runs/${id}/agents/${agentId}/prompt`),
+  latestPrompt: (id: string, agentId: number) =>
+    apiClient.get(`/api/v1/admin/runs/${id}/agents/${agentId}/prompt`),
+  listEvents: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/events`),
+  listToolResults: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/tool-results`),
   listCapabilityPackages: () =>
     apiClient.get('/api/v1/admin/capability-packages', { params: { enabled: 'true' } }),
 }

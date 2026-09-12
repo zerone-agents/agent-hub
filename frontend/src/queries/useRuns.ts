@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { parseApiError, unwrapResponse } from '@/api/client'
-import { runApi, type CapabilityPackage, type CreateRunInput, type Run, type RunActivity, type RunDetail, type RunStateChange, type RunStatus } from '@/api/runs'
+import { runApi, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
 
 export function useRuns() {
   return useQuery<Run[]>({
@@ -41,6 +41,14 @@ export function useRunActivities(id?: string) {
   })
 }
 
+export function useRunEvents(id?: string) {
+  return useQuery<RunEventItem[]>({ queryKey: ['runs', id, 'events'], queryFn: async () => unwrapResponse<RunEventItem[]>(await runApi.listEvents(id as string)), enabled: id !== undefined })
+}
+
+export function useRunToolResults(id?: string) {
+  return useQuery<ToolResultRecord[]>({ queryKey: ['runs', id, 'tool-results'], queryFn: async () => unwrapResponse<ToolResultRecord[]>(await runApi.listToolResults(id as string)), enabled: id !== undefined })
+}
+
 function useRefreshRuns() {
   const qc = useQueryClient()
   return (id?: string) => {
@@ -72,6 +80,21 @@ export function useAddRunAgent() {
   return useMutation<void, Error, { id: string; agentId: number; role: string }>({
     mutationFn: async ({ id, agentId, role }) => { await runApi.addAgent(id, agentId, role) },
     onSuccess: (_data, variables) => { refresh(variables.id); message.success('Agent 已加入运行') },
+    onError: (error) => message.error(parseApiError(error)),
+  })
+}
+
+export function useComposeRunPrompt() {
+  return useMutation<PromptSnapshot, Error, { id: string; agentId: number }>({
+    mutationFn: async ({ id, agentId }) => {
+	  // Prefer the snapshot actually used by the latest chat execution. A Run
+	  // without an execution yet falls back to a clearly labelled preview.
+	  try {
+	    return unwrapResponse<PromptSnapshot>(await runApi.latestPrompt(id, agentId))
+	  } catch {
+	    return unwrapResponse<PromptSnapshot>(await runApi.composePrompt(id, agentId))
+	  }
+	},
     onError: (error) => message.error(parseApiError(error)),
   })
 }
