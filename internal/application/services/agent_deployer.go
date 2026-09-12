@@ -1079,7 +1079,7 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 
 	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true})
 	if err != nil {
-		return nil, fmt.Errorf("构造根 Agent 定义失败: %w", err)
+		return nil, fmt.Errorf("build root agent definition failed: %w", err)
 	}
 	defs := []deployer.AgentDefinition{*rootDef}
 
@@ -1099,7 +1099,7 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 		}
 		subDef, subSubNames, err := s.buildAgentDefinition(ctx, tenantID, sub, definitionOpts{})
 		if err != nil {
-			return nil, fmt.Errorf("构造子 Agent %q 定义失败: %w", subName, err)
+			return nil, fmt.Errorf("build sub agent %q definition failed: %w", subName, err)
 		}
 		for _, grand := range subSubNames {
 			if grand == rootCfg.Name {
