@@ -316,3 +316,35 @@ func TestSkillHandler_Download_FileNotFound404(t *testing.T) {
 	require.Contains(t, body, "技能文件不存在")
 	require.NotContains(t, body, "服务器内部错误")
 }
+
+// TestSkillHandler_UpdateAgentSkills_DBFailure500Neutral 锁定 review 裁决的
+// fix：UpdateAgentSkills 的 DB 故障不得伪装为 400 中文「不存在」——gorm 分叉
+// 后非 not-found 走英文诊断 → 500 中性 + 日志（对齐 #144 5db0991 的
+// UpdateAgentMcps 模式）。
+func TestSkillHandler_UpdateAgentSkills_DBFailure500Neutral(t *testing.T) {
+	db := setupSkillErrorTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := newSkillErrorHandler(t)
+	r := newSkillErrorRouter(t, h)
+
+	body := `{"skillNames":["ghost-skill"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/ghost/skills", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	respBody := w.Body.String()
+	require.Contains(t, respBody, "服务器内部错误，请稍后重试")
+	require.NotContains(t, respBody, "Agent 'ghost' 不存在", "DB 故障不得伪装为 400 用户文案")
+	require.NotContains(t, respBody, "database is closed")
+	require.Contains(t, logBuf.String(), "get agent ghost failed", "基础设施诊断必须进服务端日志")
+}

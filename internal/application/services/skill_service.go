@@ -447,14 +447,20 @@ func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames 
 	toolRepo := repository.NewToolRepository()
 	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return skill.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return skill.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		}
+		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
 	skillIDs := make([]uint64, 0, len(skillNames))
 	for _, name := range skillNames {
 		sk, err := s.repo.GetByName(tenantID, name)
 		if err != nil {
-			return skill.NewValidationErrorf("Skill '%s' 不存在", name)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return skill.NewValidationErrorf("Skill '%s' 不存在", name)
+			}
+			return fmt.Errorf("get skill %s failed: %w", name, err)
 		}
 		skillIDs = append(skillIDs, sk.ID)
 	}
