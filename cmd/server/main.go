@@ -340,6 +340,7 @@ func main() {
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
+	agentMessageAdminHandler := handler.NewAgentMessageAdminHandler(organizationMessageService)
 
 	// ==================== 路由管理 ====================
 
@@ -461,6 +462,7 @@ func main() {
 	adminRead.GET("/runs/:id/events", eventHandler.ListRun)
 	adminWrite.POST("/runs/:id/activities", runHandler.AppendActivity)
 	adminRead.GET("/runs/:id/tool-results", toolResultHandler.List)
+	adminRead.GET("/runs/:id/agent-messages", agentMessageAdminHandler.ListRun)
 	adminRead.GET("/runs/:id/tool-results/:toolResultId", toolResultHandler.Get)
 	adminWrite.POST("/runs/:id/tool-results/validate", toolResultHandler.Validate)
 	adminWrite.POST("/runs/:id/tool-results", toolResultHandler.Commit)

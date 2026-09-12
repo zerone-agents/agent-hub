@@ -117,6 +117,38 @@ export interface ToolResultRecord {
   createdAt: string
 }
 
+export interface AgentMessage {
+  id: string
+  relationId: number
+  runId?: string
+  conversationId: string
+  rootMessageId: string
+  parentMessageId?: string
+  hop: number
+  maxHops: number
+  deadlineAt?: string
+  eventBudget?: number
+  eventCount?: number
+  tokenBudget?: number
+  tokensUsed?: number
+  visitedAgentIds?: number[]
+  guardReason?: string
+  guardDescription?: string
+  scope: string
+  sourceAgent: string
+  targetAgent: string
+  action: string
+  deliveryPolicy: 'sync' | 'async' | string
+  contextPolicy: string
+  content?: string
+  reply?: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'guarded' | string
+  error?: string
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+}
+
 export interface Run {
   id: string
   name: string
@@ -164,6 +196,7 @@ export const runApi = {
     apiClient.get(`/api/v1/admin/runs/${id}/agents/${agentId}/prompt`),
   listEvents: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/events`),
   listToolResults: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/tool-results`),
+  listAgentMessages: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/agent-messages`),
   listCapabilityPackages: () =>
     apiClient.get('/api/v1/admin/capability-packages', { params: { enabled: 'true' } }),
 }

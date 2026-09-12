@@ -22,6 +22,8 @@ func NewAgentRelationRepositoryWithDB(db *gorm.DB) *AgentRelationRepository {
 	return &AgentRelationRepository{db: db}
 }
 
+func (r *AgentRelationRepository) DB() *gorm.DB { return r.db }
+
 func (r *AgentRelationRepository) ListAll(tenantID string) ([]*agentrelation.AgentRelation, error) {
 	var relations []*agentrelation.AgentRelation
 	err := TenantOwned(r.db.Model(&agentrelation.AgentRelation{}), tenantID).
@@ -270,6 +272,8 @@ func NewAgentMessageRepositoryWithDB(db *gorm.DB) *AgentMessageRepository {
 	return &AgentMessageRepository{db: db}
 }
 
+func (r *AgentMessageRepository) DB() *gorm.DB { return r.db }
+
 func (r *AgentMessageRepository) Create(tenantID string, message *agentrelation.AgentMessage) error {
 	if tenantID == "" {
 		return ErrTenantIDRequired
@@ -278,12 +282,78 @@ func (r *AgentMessageRepository) Create(tenantID string, message *agentrelation.
 	return r.db.Create(message).Error
 }
 
+// CreateIdempotent reserves the caller-scoped key and writes the message in
+// one transaction. It closes the concurrent check-then-insert race without
+// imposing a unique index on legacy agent_messages rows.
+func (r *AgentMessageRepository) CreateIdempotent(tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
+	if tenantID == "" {
+		return nil, false, ErrTenantIDRequired
+	}
+	message.TenantID = tenantID
+	var result *agentrelation.AgentMessage
+	created := false
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		result, created, err = r.CreateIdempotentTx(tx, tenantID, message)
+		return err
+	})
+	return result, created, err
+}
+
+func (r *AgentMessageRepository) CreateIdempotentTx(tx *gorm.DB, tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
+	if tenantID == "" {
+		return nil, false, ErrTenantIDRequired
+	}
+	message.TenantID = tenantID
+	var result *agentrelation.AgentMessage
+	created := false
+	reservation := agentrelation.AgentMessageDedupe{TenantID: tenantID, SourceAgentID: message.SourceAgentID, IdempotencyKey: message.IdempotencyKey, MessageID: message.ID}
+	insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&reservation)
+	if insert.Error != nil {
+		return nil, false, insert.Error
+	}
+	if insert.RowsAffected == 0 {
+		var existingReservation agentrelation.AgentMessageDedupe
+		if err := tx.Where("tenant_id=? AND source_agent_id=? AND idempotency_key=?", tenantID, message.SourceAgentID, message.IdempotencyKey).First(&existingReservation).Error; err != nil {
+			return nil, false, err
+		}
+		var existing agentrelation.AgentMessage
+		if err := tx.Where("tenant_id=? AND id=?", tenantID, existingReservation.MessageID).First(&existing).Error; err != nil {
+			return nil, false, err
+		}
+		result = &existing
+		return result, false, nil
+	}
+	if err := tx.Create(message).Error; err != nil {
+		return nil, false, err
+	}
+	result, created = message, true
+	return result, created, nil
+}
+
+func (r *AgentMessageRepository) FindByIdempotencyKey(tenantID, key string, sourceAgentID uint64) (*agentrelation.AgentMessage, error) {
+	var message agentrelation.AgentMessage
+	result := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
+		Where("idempotency_key = ? AND source_agent_id = ?", key, sourceAgentID).Limit(1).Find(&message)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &message, nil
+}
+
 func (r *AgentMessageRepository) Save(tenantID string, message *agentrelation.AgentMessage) error {
+	return r.SaveTx(r.db, tenantID, message)
+}
+
+func (r *AgentMessageRepository) SaveTx(tx *gorm.DB, tenantID string, message *agentrelation.AgentMessage) error {
 	if tenantID == "" {
 		return ErrTenantIDRequired
 	}
 	message.TenantID = tenantID
-	result := TenantOwned(r.db, tenantID).Where("id = ?", message.ID).Updates(message)
+	result := TenantOwned(tx, tenantID).Where("id = ?", message.ID).Updates(message)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -313,4 +383,40 @@ func (r *AgentMessageRepository) ListForAgent(tenantID string, agentID uint64, l
 		Where("source_agent_id = ? OR target_agent_id = ?", agentID, agentID).
 		Order("created_at DESC").Limit(limit).Find(&messages).Error
 	return messages, err
+}
+
+func (r *AgentMessageRepository) ListForRun(tenantID, runID string, limit int) ([]*agentrelation.AgentMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var messages []*agentrelation.AgentMessage
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
+		Where("run_id = ?", runID).Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error
+	return messages, err
+}
+
+func (r *AgentMessageRepository) ValidateRunParticipants(tenantID, runID string, sourceAgentID, targetAgentID uint64) (bool, bool, error) {
+	var runCount int64
+	if err := r.db.Table("runs").Where("tenant_id = ? AND id = ? AND status = ?", tenantID, runID, "running").Count(&runCount).Error; err != nil {
+		return false, false, err
+	}
+	if runCount != 1 {
+		return false, false, nil
+	}
+	var participantCount int64
+	if err := r.db.Table("run_agents").Where("tenant_id = ? AND run_id = ? AND agent_id IN ?", tenantID, runID, []uint64{sourceAgentID, targetAgentID}).Distinct("agent_id").Count(&participantCount).Error; err != nil {
+		return true, false, err
+	}
+	if participantCount != 2 {
+		return true, false, nil
+	}
+	return true, true, nil
+}
+
+func (r *AgentMessageRepository) HasRunningSourceInChain(tenantID, rootMessageID string, agentID uint64) (bool, error) {
+	var count int64
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
+		Where("root_message_id = ? AND source_agent_id = ? AND status = ?", rootMessageID, agentID, agentrelation.MessageStatusRunning).
+		Count(&count).Error
+	return count > 0, err
 }

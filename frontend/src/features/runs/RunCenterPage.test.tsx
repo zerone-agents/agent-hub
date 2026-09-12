@@ -40,6 +40,7 @@ const composePromptMutate = vi.fn((_variables: unknown, options?: { onSuccess?: 
   createdAt: '2026-09-12T09:00:00Z',
 }))
 let detailStatus = 'running'
+let collaborationMessages: unknown[] = []
 
 vi.mock('@/hooks/useCanWrite', () => ({ useCanWrite: () => true }))
 vi.mock('@/queries/useAgents', () => ({
@@ -74,6 +75,7 @@ vi.mock('@/queries/useRuns', () => ({
     data: [{ id: 'tool-result-1', toolName: '报告审核', actorId: 'reviewer', status: 'applied', stateProposals: [{ stateId: 21, reason: '通过' }], committedChangeIds: ['change-31'], createdAt: '2026-09-12T08:54:00Z' }],
     isLoading: false, isError: false,
   }),
+  useRunAgentMessages: () => ({ data: collaborationMessages, isLoading: false, isError: false }),
   useCreateRun: () => ({ mutate: createMutate, isPending: false }),
   useEnabledCapabilityPackages: () => ({ data: [{ id: 41, namespace: 'io.zerone.research', name: 'research-team', displayName: '研究协作', version: '1.0.0', contentHash: 'abc', enabled: true }], isLoading: false }),
   useTransitionRun: () => ({ mutate: transitionMutate, isPending: false }),
@@ -95,7 +97,7 @@ function renderPage(path = '/runs/run-market') {
 }
 
 describe('RunCenterPage', () => {
-  beforeEach(() => { vi.clearAllMocks(); detailStatus = 'running' })
+  beforeEach(() => { vi.clearAllMocks(); detailStatus = 'running'; collaborationMessages = [] })
 
   it('shows a product-readable run archive', () => {
     renderPage()
@@ -111,7 +113,7 @@ describe('RunCenterPage', () => {
     expect(screen.getByText(/工具完成 · 网络检索/)).toBeInTheDocument()
     expect(screen.getByText('已生效')).toBeInTheDocument()
     expect(screen.getByText(/因果链起点/)).toBeInTheDocument()
-    expect(screen.getByText(/H2 已将事件、工具结果/)).toBeInTheDocument()
+    expect(screen.getByText(/H3 在原有运行档案/)).toBeInTheDocument()
   })
 
   it('opens participant chat inside the selected run', () => {
@@ -127,6 +129,29 @@ describe('RunCenterPage', () => {
     expect(screen.getByText(/2 个判断依据/)).toBeInTheDocument()
     expect(screen.getByText(/人格和上下文不会赋予额外权限/)).toBeInTheDocument()
     expect(screen.getByText('职责')).toBeInTheDocument()
+  })
+
+  it('guides a product manager through a real multi-hop acceptance test without JSON', () => {
+    renderPage()
+    expect(screen.getByRole('heading', { name: 'Agent 协作链' })).toBeInTheDocument()
+    expect(screen.getByText('1. 配置传递方向')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /从 研究分析师 发起测试/ })).toBeInTheDocument()
+    expect(screen.queryByText(/JSON/)).not.toBeInTheDocument()
+  })
+
+  it('shows A to B to C, return, queue timing and budget guard in product language', () => {
+    collaborationMessages = [
+      { id: 'm1', relationId: 1, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', hop: 1, maxHops: 3, eventBudget: 3, eventCount: 1, tokenBudget: 1000, tokensUsed: 100, visitedAgentIds: [1, 2], scope: 'project', sourceAgent: 'A', targetAgent: 'B', action: 'handoff', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'completed', createdAt: '2026-09-12T08:00:00Z', startedAt: '2026-09-12T08:00:02Z', completedAt: '2026-09-12T08:00:05Z' },
+      { id: 'm2', relationId: 2, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', parentMessageId: 'm1', hop: 2, maxHops: 3, eventBudget: 3, eventCount: 2, tokenBudget: 1000, tokensUsed: 300, visitedAgentIds: [1, 2, 3], scope: 'project', sourceAgent: 'B', targetAgent: 'C', action: 'assign', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'completed', createdAt: '2026-09-12T08:00:05Z', startedAt: '2026-09-12T08:00:06Z', completedAt: '2026-09-12T08:00:10Z' },
+      { id: 'm3', relationId: 3, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', parentMessageId: 'm2', hop: 3, maxHops: 3, eventBudget: 3, eventCount: 4, tokenBudget: 1000, tokensUsed: 500, visitedAgentIds: [1, 2, 3, 1], scope: 'project', sourceAgent: 'C', targetAgent: 'A', action: 'report', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'guarded', guardReason: 'event_budget_exceeded', createdAt: '2026-09-12T08:00:10Z' },
+    ]
+    renderPage()
+    expect(screen.getAllByText('A').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('B').length).toBeGreaterThan(0)
+    expect(screen.getByText(/回报发起人/)).toBeInTheDocument()
+    expect(screen.getByText(/排队 2.0 秒/)).toBeInTheDocument()
+    expect(screen.getByText(/消息额度已用完/)).toBeInTheDocument()
+    expect(screen.getByText('已拦截')).toBeInTheDocument()
   })
 
   it('filters runs by task name', () => {

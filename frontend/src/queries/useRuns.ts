@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { parseApiError, unwrapResponse } from '@/api/client'
-import { runApi, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
+import { runApi, type AgentMessage, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
 
 export function useRuns() {
   return useQuery<Run[]>({
@@ -47,6 +47,15 @@ export function useRunEvents(id?: string) {
 
 export function useRunToolResults(id?: string) {
   return useQuery<ToolResultRecord[]>({ queryKey: ['runs', id, 'tool-results'], queryFn: async () => unwrapResponse<ToolResultRecord[]>(await runApi.listToolResults(id as string)), enabled: id !== undefined })
+}
+
+export function useRunAgentMessages(id?: string) {
+  return useQuery<AgentMessage[]>({
+    queryKey: ['runs', id, 'agent-messages'],
+    queryFn: async () => unwrapResponse<AgentMessage[]>(await runApi.listAgentMessages(id as string)),
+    enabled: id !== undefined,
+    refetchInterval: ({ state }) => state.data?.some((item) => item.status === 'queued' || item.status === 'running') ? 1500 : 5000,
+  })
 }
 
 function useRefreshRuns() {

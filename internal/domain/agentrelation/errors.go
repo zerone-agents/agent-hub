@@ -22,6 +22,8 @@ var (
 	ErrMessageRequired     = errors.New("组织消息内容不能为空")
 	ErrMessageTooLong      = errors.New("组织消息内容不能超过 16000 个字符")
 	ErrNestedDispatch      = errors.New("当前 Agent 正在处理组织消息，不能在同一轮继续转发")
+	ErrChainGuarded        = errors.New("消息链路已被预算守卫终止")
+	ErrSyncDeadlock        = errors.New("同步消息会形成循环等待，请改用异步投递")
 	ErrInvalidEventType    = errors.New("关系事件类型无效")
 	ErrInvalidSeverity     = errors.New("关系事件严重程度必须为 1、2 或 3")
 	ErrInvalidVisibility   = errors.New("关系事件可见范围无效")

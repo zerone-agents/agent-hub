@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +10,8 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
+	eventdomain "control-panel/internal/domain/event"
+	rundomain "control-panel/internal/domain/run"
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/glebarez/sqlite"
@@ -66,7 +67,7 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "-"))), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentMessage{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	b := agent.AgentConfig{Name: "agent-b", TenantID: "tenant-a"}
@@ -74,6 +75,10 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	require.NoError(t, db.Create(&a).Error)
 	require.NoError(t, db.Create(&b).Error)
 	require.NoError(t, db.Create(&c).Error)
+	require.NoError(t, db.Create(&rundomain.Run{ID: "run-1", TenantID: "tenant-a", Name: "chain", Status: rundomain.StatusRunning}).Error)
+	for _, item := range []agent.AgentConfig{a, b, c} {
+		require.NoError(t, db.Create(&rundomain.RunAgent{TenantID: "tenant-a", RunID: "run-1", AgentID: item.ID, AgentNameSnapshot: item.Name}).Error)
+	}
 
 	runner := &recordingAgentMessageRunner{reply: "B 的真实回复"}
 	service := newAgentMessageService(
@@ -248,7 +253,13 @@ func TestAgentMessageServiceRejectsReverseAndUnauthorizedAction(t *testing.T) {
 
 	var count int64
 	require.NoError(t, f.db.Model(&agentrelation.AgentMessage{}).Count(&count).Error)
-	require.Zero(t, count, "rejected messages must not be queued")
+	require.Equal(t, int64(2), count, "rejected hops remain visible as guards")
+	var guards []agentrelation.AgentMessage
+	require.NoError(t, f.db.Order("created_at ASC").Find(&guards).Error)
+	require.Equal(t, []string{"route_not_found", "action_not_allowed"}, []string{guards[0].GuardReason, guards[1].GuardReason})
+	for _, guard := range guards {
+		require.Equal(t, agentrelation.MessageStatusGuarded, guard.Status)
+	}
 }
 
 func TestAgentMessageServiceNoneContextDropsAllCallerContext(t *testing.T) {
@@ -338,7 +349,7 @@ func TestAgentMessageServiceQueuesConcurrentDeliveriesToSameTarget(t *testing.T)
 	require.Len(t, f.runner.snapshot(), 2)
 }
 
-func TestAgentMessageServicePreventsNestedDispatchFromDeliveredTarget(t *testing.T) {
+func TestAgentMessageServiceAllowsAuthorizedNestedDispatchToThirdAgent(t *testing.T) {
 	f := setupAgentMessageService(t)
 	addMessageRelation(t, f, f.a, f.b, "speeding-hq", "sync", "summary_only", "consult")
 	addMessageRelation(t, f, f.b, f.c, "speeding-hq", "sync", "summary_only", "inform")
@@ -357,8 +368,49 @@ func TestAgentMessageServicePreventsNestedDispatchFromDeliveredTarget(t *testing
 		TargetAgent: f.b.Name, Scope: "speeding-hq", Action: "consult", Message: "先问 B",
 	})
 	require.NoError(t, err)
-	require.True(t, errors.Is(nestedErr, agentrelation.ErrNestedDispatch))
-	require.Len(t, f.runner.snapshot(), 1)
+	require.NoError(t, nestedErr)
+	require.Len(t, f.runner.snapshot(), 2)
+}
+
+func TestAgentMessageServiceAsyncRecipientContinuesSameChain(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "project", "async", "summary_only", "handoff")
+	addMessageRelation(t, f, f.b, f.c, "project", "async", "summary_only", "report")
+
+	nested := make(chan error, 1)
+	f.runner.onRun = func(_, agentName, _ string) {
+		if agentName != f.b.Name {
+			return
+		}
+		var parent agentrelation.AgentMessage
+		if err := f.db.Where("target_agent_id=?", f.b.ID).Order("created_at DESC").First(&parent).Error; err != nil {
+			nested <- err
+			return
+		}
+		_, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+			TargetAgent: f.c.Name, Scope: "project", Action: "report", Message: "B completed, C please review",
+			ParentMessageID: parent.ID, IdempotencyKey: "async-hop-2",
+		})
+		nested <- err
+	}
+
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "project", Action: "handoff", Message: "A asks B",
+		IdempotencyKey: "async-hop-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusQueued, first.Status)
+	select {
+	case err := <-nested:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("B did not continue the asynchronous chain")
+	}
+	require.Eventually(t, func() bool {
+		var row agentrelation.AgentMessage
+		err := f.db.Where("idempotency_key=?", "async-hop-2").First(&row).Error
+		return err == nil && row.TargetAgent == f.c.Name && row.ParentMessageID == first.ID && row.Hop == 2 && row.ConversationID == first.ConversationID
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestExtractOneShotReply(t *testing.T) {
@@ -383,10 +435,103 @@ func TestBuildAgentMessageEnvelopeUsesPlatformNeutralProtocolLabel(t *testing.T)
 		AllowedActions: []string{"consult"},
 	}
 
-	envelope := buildAgentMessageEnvelope(source, target, relation, nil, "consult", "请复核结论", "")
+	deadline := time.Now().UTC().Add(time.Minute)
+	envelope := buildAgentMessageEnvelope(source, target, relation, nil, &agentrelation.AgentMessage{ID: "msg-1", ConversationID: "conv-1", RootMessageID: "msg-1", Hop: 1, MaxHops: 8, EventCount: 1, EventBudget: 64, TokenBudget: 65536, DeadlineAt: &deadline, Action: "consult", Content: "请复核结论"})
 
 	require.Contains(t, envelope, "[Agent Hub 组织消息]")
 	require.NotContains(t, envelope, "SPEEDING")
 	require.Contains(t, envelope, "接收方 finance-reviewer")
 	require.Contains(t, envelope, "发送方是 research-lead")
+}
+
+func TestAgentMessageServiceDerivesAuthorizedMultiHopChain(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "chain", "sync", "summary_only", "handoff")
+	addMessageRelation(t, f, f.b, f.c, "chain", "sync", "summary_only", "report")
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "chain", Action: "handoff", Message: "A to B", RunID: "run-1", IdempotencyKey: "hop-1"})
+	require.NoError(t, err)
+	second, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "chain", Action: "report", Message: "B to C", ParentMessageID: first.ID, IdempotencyKey: "hop-2", Hop: 99, RootMessageID: "forged"})
+	require.NoError(t, err)
+	require.Equal(t, 2, second.Hop)
+	require.Equal(t, first.RootMessageID, second.RootMessageID)
+	require.Equal(t, first.ConversationID, second.ConversationID)
+	require.Equal(t, first.ID, second.ParentMessageID)
+	require.Equal(t, "run-1", second.RunID)
+	require.Equal(t, []uint64{f.a.ID, f.b.ID, f.c.ID}, second.VisitedAgentIDs)
+	require.Greater(t, second.TokensUsed, first.TokensUsed)
+
+	rows, err := f.service.ListRun("tenant-a", "run-1", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	var eventTypes []string
+	require.NoError(t, f.db.Model(&eventdomain.Envelope{}).Where("tenant_id=? AND run_id=?", "tenant-a", "run-1").Order("recorded_at ASC, sequence ASC").Pluck("type", &eventTypes).Error)
+	require.Equal(t, []string{
+		"agenthub.message.accepted.v1", "agenthub.message.queued.v1", "agenthub.message.running.v1", "agenthub.message.completed.v1",
+		"agenthub.message.accepted.v1", "agenthub.message.queued.v1", "agenthub.message.running.v1", "agenthub.message.completed.v1",
+	}, eventTypes)
+	var outboxCount int64
+	require.NoError(t, f.db.Model(&eventdomain.Delivery{}).Count(&outboxCount).Error)
+	require.Equal(t, int64(len(eventTypes)), outboxCount)
+}
+
+func TestAgentMessageServicePausedRunRejectsNewDelivery(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "paused", "sync", "summary_only", "inform")
+	require.NoError(t, f.db.Model(&rundomain.Run{}).Where("id=?", "run-1").Update("status", rundomain.StatusPaused).Error)
+	_, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "paused", Action: "inform", Message: "must wait", RunID: "run-1", IdempotencyKey: "paused-1"})
+	require.ErrorIs(t, err, agentrelation.ErrRouteNotFound)
+	var messages int64
+	require.NoError(t, f.db.Model(&agentrelation.AgentMessage{}).Count(&messages).Error)
+	require.Zero(t, messages)
+}
+
+func TestAgentMessageServiceAuthorizationGuardIsInUnifiedRunEvents(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "audit", "sync", "summary_only", "review")
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "audit", Action: "assign", Message: "unauthorized", RunID: "run-1", IdempotencyKey: "guard-audit"})
+	require.ErrorIs(t, err, agentrelation.ErrActionNotAllowed)
+	require.Equal(t, agentrelation.MessageStatusGuarded, guarded.Status)
+	var events []eventdomain.Envelope
+	require.NoError(t, f.db.Where("run_id=?", "run-1").Order("recorded_at ASC, sequence ASC").Find(&events).Error)
+	require.Len(t, events, 2)
+	require.Equal(t, "agenthub.message.accepted.v1", events[0].Type)
+	require.Equal(t, "agenthub.message.guarded.v1", events[1].Type)
+	require.Equal(t, events[0].ID, events[1].CausationID)
+	require.Equal(t, guarded.RootMessageID, events[0].RootEventID)
+}
+
+func TestAgentMessageServiceAllowsAsyncReturnButRejectsSyncWaitCycle(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "return", "sync", "summary_only", "consult")
+	addMessageRelation(t, f, f.b, f.a, "return", "async", "summary_only", "report")
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "return", Action: "consult", Message: "ask", IdempotencyKey: "return-1"})
+	require.NoError(t, err)
+	returned, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "return", Action: "report", Message: "answer", ParentMessageID: first.ID, IdempotencyKey: "return-2"})
+	require.NoError(t, err)
+	require.Equal(t, 2, returned.Hop)
+	require.Equal(t, f.a.ID, returned.VisitedAgentIDs[len(returned.VisitedAgentIDs)-1])
+
+	// Changing the current edge to sync turns the same legal graph cycle into
+	// a synchronous call-stack deadlock, so it is persisted as a guard.
+	require.NoError(t, f.db.Model(&agentrelation.AgentRelation{}).Where("source_agent_id=? AND target_agent_id=?", f.b.ID, f.a.ID).Update("delivery_policy", "sync").Error)
+	require.NoError(t, f.db.Model(&agentrelation.AgentMessage{}).Where("id=?", first.ID).Update("status", agentrelation.MessageStatusRunning).Error)
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "return", Action: "report", Message: "sync answer", ParentMessageID: first.ID, IdempotencyKey: "return-sync"})
+	require.ErrorIs(t, err, agentrelation.ErrSyncDeadlock)
+	require.Equal(t, agentrelation.MessageStatusGuarded, guarded.Status)
+	require.Equal(t, "sync_wait_cycle", guarded.GuardReason)
+}
+
+func TestAgentMessageServiceGuardsBudgetAndDeduplicatesRepeatedHop(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "loop", "sync", "summary_only", "inform")
+	addMessageRelation(t, f, f.b, f.a, "loop", "async", "summary_only", "report")
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "loop", Action: "inform", Message: "one", IdempotencyKey: "loop-1"})
+	require.NoError(t, err)
+	require.NoError(t, f.db.Model(&agentrelation.AgentMessage{}).Where("id=?", first.ID).Updates(map[string]any{"max_hops": 1, "event_budget": 1}).Error)
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "loop", Action: "report", Message: "two", ParentMessageID: first.ID, IdempotencyKey: "loop-2"})
+	require.ErrorIs(t, err, agentrelation.ErrChainGuarded)
+	require.Equal(t, "max_hops_exceeded", guarded.GuardReason)
+	again, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "loop", Action: "report", Message: "must not duplicate", ParentMessageID: first.ID, IdempotencyKey: "loop-2"})
+	require.NoError(t, err)
+	require.Equal(t, guarded.ID, again.ID)
 }

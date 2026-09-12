@@ -169,6 +169,34 @@ func TestOrganizationMcpDerivesSourceFromRuntimeToken(t *testing.T) {
 	require.Equal(t, "review", service.input.Action)
 }
 
+func TestOrganizationMcpContinuationCannotResetServerOwnedChain(t *testing.T) {
+	service := &fakeOrganizationMessageService{sent: &services.AgentMessageDTO{
+		ID: "message-2", ConversationID: "server-conversation", RootMessageID: "root-1", ParentMessageID: "parent-1", Hop: 3, MaxHops: 8, Status: "queued",
+	}}
+	router := setupOrganizationMcpRouter(service)
+	params := json.RawMessage(`{
+		"name":"agent_send",
+		"arguments":{
+			"target_agent":"agent-c","action":"handoff","message":"continue",
+			"parent_message_id":"parent-1","idempotency_key":"parent-1:handoff:c",
+			"conversation_id":"spoofed","root_message_id":"spoofed","hop":1,"max_hops":999,
+			"budget":{"max_events":999999,"events_used":0},"trace":{"visited_agent_ids":[],"sync_stack":[]}
+		}
+	}`)
+	rec := postOrganizationRPC(t, router, "tools/call", params, "agent-a-token")
+	require.Equal(t, http.StatusOK, rec.Code)
+	payload := decodeMcpTextResult(t, rec)
+	require.Equal(t, float64(3), payload["hop"])
+	require.Equal(t, "server-conversation", payload["conversationId"])
+	require.Equal(t, "parent-1", service.input.ParentMessageID)
+	require.Equal(t, "parent-1:handoff:c", service.input.IdempotencyKey)
+	require.Empty(t, service.input.ConversationID)
+	require.Empty(t, service.input.RootMessageID)
+	require.Zero(t, service.input.Hop)
+	require.Zero(t, service.input.EventBudget)
+	require.Empty(t, service.input.VisitedAgentIDs)
+}
+
 func TestOrganizationMcpRelationsExposeDirection(t *testing.T) {
 	service := &fakeOrganizationMessageService{relations: []*services.AgentRelationDTO{
 		{SourceAgentID: 41, SourceAgentName: "agent-a", TargetAgentID: 42, TargetAgentName: "agent-b", Scope: "hq", AllowedActions: []string{"review"}},

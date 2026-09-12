@@ -175,15 +175,15 @@ fixture、Agent、关系、输入和预期结果。
 
 ### Agent Hub P0
 
-- [ ] `agent_messages` 接入统一事件因果链；
-- [ ] conversation/root/parent、hop、deadline 和链路预算；
-- [ ] 同步调用栈继续禁止互相等待；
-- [ ] 异步链路允许接收方继续发送；
-- [ ] 每一跳重新校验 relation、action、scope 和上下文；
-- [ ] A→B→A 合法回报；
-- [ ] A→B→A→B 由幂等和预算停止，不按人物身份永久禁止；
-- [ ] 消息排队位置、耗时、失败和 guard 原因可见；
-- [ ] Organization MCP 接受并返回链路字段。
+- [x] `agent_messages` 接入统一事件因果链；
+- [x] conversation/root/parent、hop、deadline 和链路预算；
+- [x] 同步调用栈继续禁止互相等待；
+- [x] 异步链路允许接收方继续发送；
+- [x] 每一跳重新校验 relation、action、scope 和上下文；
+- [x] A→B→A 合法回报；
+- [x] A→B→A→B 由幂等和预算停止，不按人物身份永久禁止；
+- [x] 消息排队位置、耗时、失败和 guard 原因可见；
+- [x] Organization MCP 接受并返回链路字段。
 
 ### Speeding 验收案例
 

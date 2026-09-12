@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
@@ -81,16 +82,20 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 		},
 		{
 			"name":        "agent_send",
-			"description": "按已配置的有向关系向另一个 Agent 发送消息。Hub 从运行时凭证确定发送者并校验目标、scope 与 action；同步关系直接返回目标回复，异步关系返回消息 ID，随后用 agent_message_status 查询。",
+			"description": "按已配置的有向关系向另一个 Agent 发送消息。续跳只需提供 parent_message_id，Hub 会校验当前 Agent 是父消息接收方，并继承 conversation、root、hop、deadline、budget 和 trace；Agent 不能自行重置链路。",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"target_agent":    map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 finance-reviewer"},
-					"scope":           map[string]interface{}{"type": "string", "description": "关系范围。仅存在一个匹配范围时可省略；多范围必须明确填写。"},
-					"action":          map[string]interface{}{"type": "string", "enum": []string{"inform", "consult", "assign", "report", "submit", "review", "challenge", "handoff", "escalate", "invite"}},
-					"message":         map[string]interface{}{"type": "string", "description": "给接收方的任务、事实、问题或挑战。不要在此伪造对方回复。"},
-					"context_summary": map[string]interface{}{"type": "string", "description": "当关系允许 summary_only/shared_thread 时可附带的必要摘要；none 策略会由 Hub 丢弃。"},
-					"shared_context":  map[string]interface{}{"type": "string", "description": "仅 shared_thread 策略可传递的完整上下文；其他策略会截断或丢弃。"},
+					"target_agent":      map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 finance-reviewer"},
+					"scope":             map[string]interface{}{"type": "string", "description": "关系范围。仅存在一个匹配范围时可省略；多范围必须明确填写。"},
+					"action":            map[string]interface{}{"type": "string", "enum": []string{"inform", "consult", "assign", "report", "submit", "review", "challenge", "handoff", "escalate", "invite"}},
+					"message":           map[string]interface{}{"type": "string", "description": "给接收方的任务、事实、问题或挑战。不要在此伪造对方回复。"},
+					"context_summary":   map[string]interface{}{"type": "string", "description": "当关系允许 summary_only/shared_thread 时可附带的必要摘要；none 策略会由 Hub 丢弃。"},
+					"shared_context":    map[string]interface{}{"type": "string", "description": "仅 shared_thread 策略可传递的完整上下文；其他策略会截断或丢弃。"},
+					"run_id":            map[string]interface{}{"type": "string", "description": "所属 Run；后续转发必须继承。"},
+					"parent_message_id": map[string]interface{}{"type": "string", "description": "当前这一跳的直接上游消息 ID。"},
+					"deadline":          map[string]interface{}{"type": "string", "format": "date-time", "description": "RFC3339 链路截止时间。"},
+					"idempotency_key":   map[string]interface{}{"type": "string", "description": "本跳稳定唯一键；重试时必须复用。"},
 				},
 				"required": []string{"target_agent", "action", "message"},
 			},
@@ -139,12 +144,16 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 }
 
 type agentSendArgs struct {
-	TargetAgent    string `json:"target_agent"`
-	Scope          string `json:"scope"`
-	Action         string `json:"action"`
-	Message        string `json:"message"`
-	ContextSummary string `json:"context_summary"`
-	SharedContext  string `json:"shared_context"`
+	TargetAgent     string `json:"target_agent"`
+	Scope           string `json:"scope"`
+	Action          string `json:"action"`
+	Message         string `json:"message"`
+	ContextSummary  string `json:"context_summary"`
+	SharedContext   string `json:"shared_context"`
+	RunID           string `json:"run_id"`
+	ParentMessageID string `json:"parent_message_id"`
+	Deadline        string `json:"deadline"`
+	IdempotencyKey  string `json:"idempotency_key"`
 }
 
 type agentMessageStatusArgs struct {
@@ -214,9 +223,22 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
 			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
 		}
+		var deadline *time.Time
+		if strings.TrimSpace(args.Deadline) != "" {
+			parsed, parseErr := time.Parse(time.RFC3339, args.Deadline)
+			if parseErr != nil {
+				return mcpErrorResult(id, "deadline 必须为 RFC3339 时间"), nil
+			}
+			deadline = &parsed
+		}
 		message, err := h.service.Send(ctx, tenantID, source, services.SendAgentMessageInput{
 			TargetAgent: args.TargetAgent, Scope: args.Scope, Action: args.Action,
 			Message: args.Message, ContextSummary: args.ContextSummary, SharedContext: args.SharedContext,
+			// Only first-hop Run/deadline and continuation identity are accepted
+			// from MCP. The service derives all causal counters and budgets from
+			// ParentMessageID, preventing an Agent from resetting hop or budget.
+			RunID: args.RunID, ParentMessageID: args.ParentMessageID, DeadlineAt: deadline,
+			IdempotencyKey: args.IdempotencyKey,
 		})
 		if err != nil {
 			return mcpErrorResult(id, err.Error()), nil
