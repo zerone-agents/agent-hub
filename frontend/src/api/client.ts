@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { loginRedirectUrl } from '@/lib/redirect'
 
 const TOKEN_KEY = 'access_token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
@@ -57,14 +58,14 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest && !isCredentialCheck) {
       if (originalRequest.headers['X-Refresh-Attempt']) {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
 
       const refreshToken = getRefreshToken()
       if (!refreshToken) {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
 
@@ -84,7 +85,7 @@ apiClient.interceptors.response.use(
         }
       } catch {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
     }

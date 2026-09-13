@@ -10,7 +10,7 @@ import { queryClient } from '@/lib/query-client'
 import { createAntdTheme, formValidateMessages } from '@/lib/antd-theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ManualCopyHost } from '@/components/ManualCopyDialog'
-import { setTokens } from '@/api/client'
+import { consumeAuthParams } from '@/lib/consume-auth-params'
 import { tokens as t } from '@/styles/tokens'
 import { getTheme, type ThemeColors } from '@/styles/themes'
 import { useThemeStore } from '@/stores/theme'
@@ -49,18 +49,19 @@ const cssVariableNames: Record<keyof ThemeColors, string> = {
   sidebarRing: '--sidebar-ring'
 }
 
-// One-shot SSO token extraction. Done at module load (before React mounts)
-// so the credentials are already stored when RequireAuth runs its first
-// render. Previously this lived inside the App component behind a useRef
-// guard, but reading a ref during render violates react-hooks/refs and
-// reassigning module-scope let from within a component violates
-// react-hooks/globals — both are side effects during render.
+// One-shot SSO token extraction via consumeAuthParams. Done at module load
+// (before React mounts) so the credentials are already stored when
+// RequireAuth runs its first render; the helper strips only the
+// token/refreshToken params and preserves the rest of the query + hash
+// (the previous inline logic wiped the whole query string). Previously
+// this lived inside the App component behind a useRef guard, but reading
+// a ref during render violates react-hooks/refs and reassigning
+// module-scope let from within a component violates react-hooks/globals —
+// both are side effects during render.
 if (typeof window !== 'undefined') {
-  const params = new URLSearchParams(window.location.search)
-  const token = params.get('token')
-  if (token) {
-    setTokens(token, params.get('refreshToken') ?? undefined)
-    window.history.replaceState({}, '', window.location.pathname)
+  const cleaned = consumeAuthParams(window.location.href)
+  if (cleaned !== null) {
+    window.history.replaceState({}, '', cleaned)
   }
 }
 
