@@ -93,14 +93,26 @@ const useStyles = createStyles(({ css }) => ({
   fact: css`padding: 13px 15px; border-right: 1px solid var(--border); &:last-child { border-right: 0; } @media (max-width: 700px) { &:nth-child(2) { border-right: 0; } &:nth-child(-n+2) { border-bottom: 1px solid var(--border); } }`,
   factLabel: css`color: ${t.textMuted}; font-size: 11px;`,
   factValue: css`margin-top: 3px; overflow: hidden; color: ${t.text}; font-size: ${t.textSm}; font-weight: 620; text-overflow: ellipsis; white-space: nowrap;`,
-  grid: css`display: grid; grid-template-columns: minmax(230px, .78fr) minmax(0, 1.4fr); gap: 20px; @media (max-width: 760px) { grid-template-columns: 1fr; }`,
+  grid: css`display: grid; grid-template-columns: minmax(280px, .9fr) minmax(0, 1.4fr); gap: 20px; @media (max-width: 980px) { grid-template-columns: 1fr; }`,
   section: css`min-width: 0;`,
+  participantSection: css`min-width: 0; container-type: inline-size;`,
   sectionTitle: css`display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: ${t.text}; font-size: ${t.textBase}; font-weight: 680;`,
   quietList: css`overflow: hidden; border: 1px solid var(--border); border-radius: ${t.radiusSm}px;`,
-  person: css`display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--border); &:last-child { border-bottom: 0; }`,
+  person: css`
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 10px;
+    padding: 12px; border-bottom: 1px solid var(--border);
+    &:last-child { border-bottom: 0; }
+    @container (min-width: 620px) { grid-template-columns: auto minmax(140px, 1fr) auto auto; gap: 10px; }
+  `,
   avatar: css`display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 9px; background: var(--primary-soft); color: var(--primary);`,
-  personName: css`min-width: 0; flex: 1; color: ${t.text}; font-size: ${t.textSm}; font-weight: 620;`,
-  role: css`color: ${t.textMuted}; font-size: 11px;`,
+  personName: css`min-width: 0; overflow-wrap: anywhere; color: ${t.text}; font-size: ${t.textSm}; font-weight: 620;`,
+  role: css`grid-column: 2; color: ${t.textMuted}; font-size: 11px; @container (min-width: 620px) { grid-column: auto; white-space: nowrap; }`,
+  personActions: css`
+    grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px;
+    & > button { min-height: 36px; }
+    @container (min-width: 620px) { grid-column: auto; flex-wrap: nowrap; margin-top: 0; }
+    @media (max-width: 520px) { & > button { min-height: 44px; flex: 1 1 150px; } }
+  `,
   promptIntro: css`margin: 0 0 16px; color: ${t.textTertiary}; font-size: ${t.textBase}; line-height: 1.65;`,
   promptSummary: css`display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 0 16px; border-bottom: 1px solid var(--border); color: ${t.textSecondary}; font-size: ${t.textSm};`,
   promptSource: css`padding: 13px 0; border-bottom: 1px solid var(--border); &:last-child { border-bottom: 0; }`,
@@ -412,9 +424,9 @@ function RunDetailPanel({ id }: { id: string }) {
     </div>
     {(run.capabilityBindings?.length ?? 0) > 0 && <div className={styles.bindings} aria-label="已锁定能力包">{run.capabilityBindings?.map((binding) => <div className={styles.binding} key={`${binding.namespace}-${binding.version}`}><strong>{binding.packageName}</strong><span>{binding.version}</span><Tag color="success" variant="filled">本次固定</Tag></div>)}</div>}
     <div className={styles.grid}>
-      <section className={styles.section}><h3 className={styles.sectionTitle}><RobotIcon size={17} />谁在参与</h3>
+      <section className={styles.participantSection}><h3 className={styles.sectionTitle}><RobotIcon size={17} />谁在参与</h3>
         {canWrite && run.status === 'draft' && <div className={styles.addAgent}><Select aria-label="选择 Agent" value={agentId} onChange={setAgentId} options={agentOptions} placeholder="选择 Agent" showSearch optionFilterProp="label" /><Input aria-label="参与角色" value={role} onChange={(event) => setRole(event.target.value)} placeholder="参与角色" /><PrimaryButton icon={<PlusIcon size={15} />} disabled={!agentId} loading={addAgent.isPending} onClick={() => agentId && addAgent.mutate({ id, agentId, role: role.trim() || '参与者' }, { onSuccess: () => setAgentId(undefined) })}>添加</PrimaryButton></div>}
-        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断背景</Button></div>)}</div>}
+        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><span className={styles.personActions}>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断背景</Button></span></div>)}</div>}
       </section>
       <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
     </div>
