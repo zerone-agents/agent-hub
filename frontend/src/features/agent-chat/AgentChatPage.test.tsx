@@ -1,11 +1,40 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import AgentChatPage from './AgentChatPage'
 
+// 可变路由状态：重挂载用例需要在本用例内改写 name 参数；useNavigate 为 inner
+// 顶部返回按钮所需（switcherBar）。
+const router = vi.hoisted(() => ({
+  params: { name: 'test-agent' } as { name?: string },
+  navigate: vi.fn(),
+}))
+
 vi.mock('react-router', () => ({
-  useParams: () => ({ name: 'test-agent' }),
+  useParams: () => router.params,
+  useNavigate: () => router.navigate,
+}))
+
+// guest 谓词数据源（Task 8）：默认非 guest，既有用例不受影响；用例可改写。
+const authState = vi.hoisted(() => ({
+  mode: 'builtin' as string | undefined,
+  user: { id: 'u1', email: 'admin@example.com', name: 'Admin', avatar: '', role: 'admin' },
+}))
+
+vi.mock('@/features/login/useAuthMode', () => ({
+  useAuthMode: () => ({ data: { mode: authState.mode } }),
+}))
+
+vi.mock('@/queries/useUserInfo', () => ({
+  useUserInfo: () => ({ data: authState.user }),
+}))
+
+// 切换器只断言透传的 current（导航行为在 AgentSwitcher.test.tsx 覆盖）
+vi.mock('./AgentSwitcher', () => ({
+  default: ({ current }: { current: string }) => (
+    <div data-testid="agent-switcher" data-current={current} />
+  ),
 }))
 
 vi.mock('@/queries/useAgentChat', () => ({
@@ -37,18 +66,21 @@ vi.mock('./useChatStream', () => ({
   }),
 }))
 
+// 挂载日志（agentName + 次数）：重挂载用例据此断言 key={name} 生效
+const sessionList = vi.hoisted(() => ({ mounts: [] as (string | undefined)[] }))
+
 // 自动选中一个会话，让主聊天区渲染出来
 vi.mock('./ChatSessionList', () => {
-  function MockChatSessionList({ onSelect }: { onSelect: (s: { id: string }) => void }) {
+  function MockChatSessionList({ onSelect, agentName }: { onSelect: (s: { id: string }) => void; agentName?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only auto-select for tests
-    useEffect(() => { onSelect({ id: 'session-1' }) }, [])
+    useEffect(() => { sessionList.mounts.push(agentName); onSelect({ id: 'session-1' }) }, [])
     return <div data-testid="session-list" />
   }
   return { default: MockChatSessionList }
 })
 
 vi.mock('./AgentDetailBar', () => ({ default: () => <div /> }))
-vi.mock('./CwdFilePanel', () => ({ default: () => <div /> }))
+vi.mock('./CwdFilePanel', () => ({ default: () => <div data-testid="cwd-file-panel" /> }))
 vi.mock('./SceneWelcome', () => ({ default: () => <div /> }))
 // MessageBubble 渲染消息 content 文本，让 transient 流式内容可被断言
 vi.mock('@/features/chat/MessageBubble', () => ({
@@ -210,5 +242,48 @@ describe('AgentChatPage session scoping', { timeout: 15000 }, () => {
       'session-1',
     ])
     expect(selectedCache?.items.some((m) => m.id === '__streaming__')).toBeFalsy()
+  })
+})
+
+describe('AgentChatPage per-agent remount & guest gating', { timeout: 15000 }, () => {
+  afterEach(() => {
+    // 还原可变 mock 状态，保证用例顺序无关
+    router.params = { name: 'test-agent' }
+    authState.mode = 'builtin'
+    authState.user = { id: 'u1', email: 'admin@example.com', name: 'Admin', avatar: '', role: 'admin' }
+  })
+
+  it('remounts the inner page when the name param changes (key={name}, fresh state)', () => {
+    sessionList.mounts.length = 0
+    router.params = { name: 'agent-a' }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={qc}>
+        <AgentChatPage />
+      </QueryClientProvider>
+    )
+    expect(sessionList.mounts).toEqual(['agent-a'])
+    expect(screen.getByTestId('agent-switcher')).toHaveAttribute('data-current', 'agent-a')
+
+    router.params = { name: 'agent-b' }
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <AgentChatPage />
+      </QueryClientProvider>
+    )
+    // key={name} 重挂载：内层以全新状态再次挂载，会话选择/输入不跨 Agent 残留
+    expect(sessionList.mounts).toEqual(['agent-a', 'agent-b'])
+    expect(screen.getByTestId('agent-switcher')).toHaveAttribute('data-current', 'agent-b')
+  })
+
+  it('renders CwdFilePanel for non-guest users', () => {
+    renderPage()
+    expect(screen.getByTestId('cwd-file-panel')).toBeInTheDocument()
+  })
+
+  it('hides CwdFilePanel for guests (admin files endpoint would 403)', () => {
+    authState.user = { id: 'g1', email: 'guest@example.com', name: 'Guest', avatar: '', role: 'guest' }
+    renderPage()
+    expect(screen.queryByTestId('cwd-file-panel')).not.toBeInTheDocument()
   })
 })
