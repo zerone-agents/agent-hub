@@ -5,7 +5,7 @@ import { getAccessToken } from '@/api/client'
 import { authApi } from '@/api/auth'
 import { useUserInfo } from '@/queries/useUserInfo'
 import LoadingState from '@/components/LoadingState'
-import PendingApprovalPage from '@/features/auth/PendingApprovalPage'
+import GuestLandingPage from '@/features/auth/GuestLandingPage'
 
 /**
  * Auth guard. Renders children only when a valid access token exists and
@@ -35,6 +35,6 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
   if (isLoading || modeLoading) return <LoadingState />
   if (isError || !user) return <Navigate to="/login" replace />
   // casdoor 待审批：userinfo 成功但未分配任何角色 → 专属页面，不进主框架。
-  if (authMode?.mode === 'casdoor' && !user.role) return <PendingApprovalPage />
+  if (authMode?.mode === 'casdoor' && !user.role) return <GuestLandingPage />
   return <>{children}</>
 }
