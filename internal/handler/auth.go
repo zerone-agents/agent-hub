@@ -31,7 +31,8 @@ func Login(c *gin.Context) {
 		return
 	}
 	org := strings.TrimSpace(c.Query("org"))
-	loginURL, err := auth.GetLoginURL(org, state, codeVerifier)
+	redirect := auth.SanitizeRedirect(strings.TrimSpace(c.Query("redirect")))
+	loginURL, err := auth.GetLoginURL(org, state, codeVerifier, redirect)
 	if err != nil {
 		// 未注册/不存在的组织统一文案，不区分两种情况（避免探测）。
 		c.JSON(http.StatusNotFound, gin.H{
@@ -92,14 +93,28 @@ func Callback(provider *auth.CasdoorProvider) gin.HandlerFunc {
 			}
 		}
 
-		redirectURL := "/static/?token=" + url.QueryEscape(tokenResp.AccessToken)
-		if tokenResp.RefreshToken != "" {
-			redirectURL += "&refreshToken=" + url.QueryEscape(tokenResp.RefreshToken)
-		}
+		redirectURL := buildCallbackRedirect(session.Redirect, tokenResp.AccessToken, tokenResp.RefreshToken)
 
-		log.Printf("[Callback] Redirecting with tokens to /static/")
+		log.Printf("[Callback] Redirecting with tokens to %s", session.Redirect)
 		c.Redirect(http.StatusFound, redirectURL)
 	}
+}
+
+// buildCallbackRedirect 构造落地 URL："/static"+redirect 经 url.Parse 后
+// Query().Set 注入 token/refreshToken（与 redirect 自带 query 正确合并），
+// hash 保持在末尾；解析异常回退 /static/（失败闭合）。
+func buildCallbackRedirect(redirectPath, accessToken, refreshToken string) string {
+	u, err := url.Parse("/static" + redirectPath)
+	if err != nil || !strings.HasPrefix(u.Path, "/static") {
+		u = &url.URL{Path: "/static/"}
+	}
+	q := u.Query()
+	q.Set("token", accessToken)
+	if refreshToken != "" {
+		q.Set("refreshToken", refreshToken)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // UserInfo returns the authenticated user's profile information.

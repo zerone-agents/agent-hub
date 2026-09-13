@@ -29,7 +29,7 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := auth.GenerateCodeVerifier()
 	require.NoError(t, err)
-	_, err = auth.GetLoginURL("orga", state, verifier) // 副作用：存 session
+	_, err = auth.GetLoginURL("orga", state, verifier, "") // 副作用：存 session
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -44,6 +44,30 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	// 原始错误细节（endpoint / exchange 失败原文）不得外泄给客户端。
 	require.NotContains(t, w.Body.String(), "127.0.0.1")
 	require.NotContains(t, w.Body.String(), "exchange")
+}
+
+// TestBuildCallbackRedirect callback 落地 URL 构造：query 合并、hash 置尾、
+// token 始终可被 URLSearchParams 提取（review 第 3 项）。
+func TestBuildCallbackRedirect(t *testing.T) {
+	cases := []struct{ name, redirect, want string }{
+		{"默认根路径", "/", "/static/?token=t1"},
+		{"聊天首页", "/agents/chat", "/static/agents/chat?token=t1"},
+		{"带 query", "/agents/chat?x=1", "/static/agents/chat?token=t1&x=1"},
+		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?token=t1&x=1#f"},
+		{"仅 hash", "/agents/chat#f", "/static/agents/chat?token=t1#f"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildCallbackRedirect(tc.redirect, "t1", "")
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+	// refreshToken 存在时追加
+	if got := buildCallbackRedirect("/", "t1", "r1"); got != "/static/?refreshToken=r1&token=t1" && got != "/static/?token=t1&refreshToken=r1" {
+		t.Fatalf("refreshToken missing: %q", got)
+	}
 }
 
 func TestRefreshToken_NeutralErrorMessage(t *testing.T) {
