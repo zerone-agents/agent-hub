@@ -1,40 +1,46 @@
 import { type ReactNode } from 'react'
-import { Navigate } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { Navigate, useLocation } from 'react-router'
 import { getAccessToken } from '@/api/client'
-import { authApi } from '@/api/auth'
+import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
+import { isGuestUser } from '@/lib/auth-guest'
 import LoadingState from '@/components/LoadingState'
 import GuestLandingPage from '@/features/auth/GuestLandingPage'
 
 /**
  * Auth guard. Renders children only when a valid access token exists and
- * /auth/userinfo succeeds. Otherwise redirects to /login.
+ * /auth/userinfo succeeds. Otherwise redirects to /login?redirect=<origin>.
  *
- * casdoor 模式下 roles 为空的用户处于待审批状态（后端对业务接口返回
- * PENDING_APPROVAL 403），此时渲染待审批专属页替代主框架。
- *
- * Set `VITE_BYPASS_AUTH=true` in `.env.local` to skip auth for local preview
- * (renders a mock admin user without calling the backend).
+ * guest（体验用户，spec 5.2）：allowGuest（聊天路由）放行；'/' 分流到
+ * /agents/chat（登录落地无来源时的角色兜底）；其余管理路径渲染
+ * GuestLandingPage（待审核 + 前往聊天入口）。
  */
 const BYPASS_AUTH = import.meta.env.VITE_BYPASS_AUTH === 'true'
 
-export default function RequireAuth({ children }: { children: ReactNode }) {
+export default function RequireAuth({
+  allowGuest = false,
+  children
+}: {
+  allowGuest?: boolean
+  children: ReactNode
+}) {
+  const location = useLocation()
   const token = getAccessToken()
-  const { data: user, isLoading, isError } = useUserInfo({
-    enabled: !BYPASS_AUTH && !!token
-  })
-  const { data: authMode, isLoading: modeLoading } = useQuery({
-    queryKey: ['auth', 'mode'],
-    queryFn: authApi.getAuthMode,
-    enabled: !BYPASS_AUTH && !!token
-  })
+  const { data: user, isLoading, isError } = useUserInfo({ enabled: !BYPASS_AUTH && !!token })
+  const { data: authMode, isLoading: modeLoading } = useAuthMode()
 
   if (BYPASS_AUTH) return <>{children}</>
-  if (!token) return <Navigate to="/login" replace />
+  if (!token) {
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
+  }
   if (isLoading || modeLoading) return <LoadingState />
-  if (isError || !user) return <Navigate to="/login" replace />
-  // casdoor 待审批：userinfo 成功但未分配任何角色 → 专属页面，不进主框架。
-  if (authMode?.mode === 'casdoor' && !user.role) return <GuestLandingPage />
+  if (isError || !user) {
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
+  }
+  if (isGuestUser(user, authMode?.mode)) {
+    if (allowGuest) return <>{children}</>
+    if (location.pathname === '/') return <Navigate to="/agents/chat" replace />
+    return <GuestLandingPage />
+  }
   return <>{children}</>
 }

@@ -23,7 +23,7 @@ export function getAuthUser() {
   return authUser.user
 }
 
-/** @/stores/auth 的 mock 模块内容：selector 形式，与 PendingApprovalPage.test.tsx 既有风格一致。 */
+/** @/stores/auth 的 mock 模块内容：selector 形式，与 GuestLandingPage.test.tsx 既有风格一致。 */
 export function createAuthStoreMock() {
   return {
     useAuthStore: (selector: (s: {
