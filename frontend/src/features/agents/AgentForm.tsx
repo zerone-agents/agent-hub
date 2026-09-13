@@ -102,6 +102,7 @@ interface FormValues {
   systemPrompt: string
   desktopEnabled: boolean
   mobileEnabled: boolean
+  guestEnabled: boolean
   isDefault: boolean
   group: string
 }
@@ -150,13 +151,14 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
+          guestEnabled: editingAgent.guestEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
           group: editingAgent.group ?? ''
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
-        permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
+        permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, guestEnabled: false, isDefault: false,
         iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
         })
       }
@@ -202,7 +204,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
     if (editingAgent) {
       await updateAgent.mutateAsync({
         name: editingAgent.name,
-        data: { config, desktopEnabled: v.desktopEnabled, mobileEnabled: v.mobileEnabled, isDefault: v.isDefault }
+        data: { config, desktopEnabled: v.desktopEnabled, mobileEnabled: v.mobileEnabled, guestEnabled: v.guestEnabled, isDefault: v.isDefault }
       })
     } else {
       await createAgent.mutateAsync({
@@ -210,6 +212,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         config,
         desktopEnabled: v.desktopEnabled,
         mobileEnabled: v.mobileEnabled,
+        guestEnabled: v.guestEnabled,
         isDefault: v.isDefault
       })
     }
@@ -370,6 +373,12 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
             <ToggleItem
               title="桌面端代理"
               desc="桌面客户端加载此代理"
+            />
+          </Form.Item>
+          <Form.Item name="guestEnabled" valuePropName="checked" style={{ marginBottom: 0 }}>
+            <ToggleItem
+              title="对体验用户开放"
+              desc="开启后，体验用户（guest）可在聊天页使用该 Agent"
             />
           </Form.Item>
           <Form.Item name="mobileEnabled" valuePropName="checked" style={{ marginBottom: 0 }}>

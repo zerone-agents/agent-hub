@@ -60,6 +60,7 @@ export interface Agent {
   skillCount?: number
   desktopEnabled?: boolean
   mobileEnabled?: boolean
+  guestEnabled?: boolean
   isDefault?: boolean
   group?: string
   createdAt?: string

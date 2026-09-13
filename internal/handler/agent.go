@@ -143,6 +143,7 @@ type createAgentReq struct {
 	Config         map[string]interface{} `json:"config" binding:"required"`
 	DesktopEnabled *bool                  `json:"desktopEnabled"`
 	MobileEnabled  *bool                  `json:"mobileEnabled"`
+	GuestEnabled   *bool                  `json:"guestEnabled"`
 	IsDefault      *bool                  `json:"isDefault"`
 }
 
@@ -161,6 +162,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
 		MobileEnabled:  req.MobileEnabled,
+		GuestEnabled:   req.GuestEnabled,
 		IsDefault:      req.IsDefault,
 	})
 	if err != nil {
@@ -178,6 +180,7 @@ type updateAgentReq struct {
 	Config         *map[string]interface{} `json:"config"`
 	DesktopEnabled *bool                   `json:"desktopEnabled"`
 	MobileEnabled  *bool                   `json:"mobileEnabled"`
+	GuestEnabled   *bool                   `json:"guestEnabled"`
 	IsDefault      *bool                   `json:"isDefault"`
 	Source         string                  `json:"source"`
 }
@@ -198,6 +201,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
 		MobileEnabled:  req.MobileEnabled,
+		GuestEnabled:   req.GuestEnabled,
 		IsDefault:      req.IsDefault,
 		Source:         req.Source,
 	})

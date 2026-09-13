@@ -203,6 +203,7 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			source VARCHAR(16) NOT NULL DEFAULT 'remote',
 			desktop_enabled INTEGER NOT NULL DEFAULT 0,
 			mobile_enabled INTEGER NOT NULL DEFAULT 0,
+			guest_enabled INTEGER NOT NULL DEFAULT 0,
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
@@ -426,4 +427,34 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "不存在")
 	})
+}
+
+// TestAgentGuestEnabledRoundTrip create/update 全链路落库 guest_enabled。
+// 复用 tool_service_tenant_test.go 的 setupToolTenantServiceTestDB（包内可见，
+// 已补齐 CreateAgent 末尾 GetAgent 链路所需的全部关联表）；服务构造与
+// TestAgentService_CreateAgent_DoesNotBindOtherTenantDefaultTools 同款。
+func TestAgentGuestEnabledRoundTrip(t *testing.T) {
+	setupToolTenantServiceTestDB(t)
+	svc := NewAgentService("test-encryption-key", "")
+
+	on := true
+	created, err := svc.CreateAgent("default", &CreateAgentInput{
+		Name: "guest-agent", Config: map[string]interface{}{"systemPrompt": "x"},
+		GuestEnabled: &on,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !created.GuestEnabled {
+		t.Fatal("created agent should be guest-enabled")
+	}
+
+	off := false
+	updated, err := svc.UpdateAgent("default", "guest-agent", &UpdateAgentInput{GuestEnabled: &off})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.GuestEnabled {
+		t.Fatal("updated agent should be guest-disabled")
+	}
 }

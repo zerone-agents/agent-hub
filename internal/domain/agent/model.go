@@ -27,6 +27,7 @@ type AgentConfig struct {
 	Source            string            `gorm:"type:varchar(16);not null;default:'remote'"`
 	DesktopEnabled    bool              `gorm:"not null;default:false;index"`
 	MobileEnabled     bool              `gorm:"not null;default:false"`
+	GuestEnabled      bool              `gorm:"column:guest_enabled;not null;default:false"`
 	IsDefault         bool              `gorm:"column:is_default;default:false"`
 	Group             string            `gorm:"column:group_name;type:varchar(64);default:''"`
 	MaxSessionQueries *int              `gorm:"column:max_session_queries;type:int;default:null"`

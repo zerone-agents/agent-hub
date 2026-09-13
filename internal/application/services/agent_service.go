@@ -55,6 +55,7 @@ type CreateAgentInput struct {
 	Config         map[string]interface{}
 	DesktopEnabled *bool
 	MobileEnabled  *bool
+	GuestEnabled   *bool
 	IsDefault      *bool
 }
 
@@ -63,6 +64,7 @@ type UpdateAgentInput struct {
 	Config         *map[string]interface{}
 	DesktopEnabled *bool
 	MobileEnabled  *bool
+	GuestEnabled   *bool
 	IsDefault      *bool
 	Source         string
 }
@@ -98,6 +100,7 @@ type AgentDTO struct {
 	Datasets       []string               `json:"datasets"`
 	DesktopEnabled bool                   `json:"desktopEnabled"`
 	MobileEnabled  bool                   `json:"mobileEnabled"`
+	GuestEnabled   bool                   `json:"guestEnabled"`
 	IsDefault      bool                   `json:"isDefault"`
 	Group          string                 `json:"group"`
 	CreatedAt      string                 `json:"createdAt"`
@@ -353,6 +356,7 @@ func (s *AgentService) buildAgentDTO(cfg *agent.AgentConfig, subs, tools, skills
 		Datasets:       datasets,
 		DesktopEnabled: cfg.DesktopEnabled,
 		MobileEnabled:  cfg.MobileEnabled,
+		GuestEnabled:   cfg.GuestEnabled,
 		IsDefault:      cfg.IsDefault,
 		Group:          cfg.Group,
 		CreatedAt:      cfg.CreatedAt.UTC().Format(time.RFC3339),
@@ -418,6 +422,10 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.Agen
 	if input.MobileEnabled != nil {
 		mobile = *input.MobileEnabled
 	}
+	guest := false
+	if input.GuestEnabled != nil {
+		guest = *input.GuestEnabled
+	}
 	isDefault := false
 	if input.IsDefault != nil {
 		isDefault = *input.IsDefault
@@ -428,6 +436,7 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.Agen
 		Source:         "remote",
 		DesktopEnabled: desktop,
 		MobileEnabled:  mobile,
+		GuestEnabled:   guest,
 		IsDefault:      isDefault,
 	}
 	if err := unpackConfigToModel(input.Config, cfg, s.encryptionKey); err != nil {
@@ -489,6 +498,9 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 	}
 	if input.MobileEnabled != nil {
 		cfg.MobileEnabled = *input.MobileEnabled
+	}
+	if input.GuestEnabled != nil {
+		cfg.GuestEnabled = *input.GuestEnabled
 	}
 	if input.IsDefault != nil {
 		if err := s.handleDefaultUpdate(tenantID, cfg.ID, *input.IsDefault); err != nil {
