@@ -27,7 +27,7 @@ export default function RequireAuth({
   const location = useLocation()
   const token = getAccessToken()
   const { data: user, isLoading, isError } = useUserInfo({ enabled: !BYPASS_AUTH && !!token })
-  const { data: authMode, isLoading: modeLoading } = useAuthMode()
+  const { data: authMode, isLoading: modeLoading } = useAuthMode({ enabled: !BYPASS_AUTH && !!token })
 
   if (BYPASS_AUTH) return <>{children}</>
   if (!token) {
