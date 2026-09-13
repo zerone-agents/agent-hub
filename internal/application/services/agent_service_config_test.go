@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"sort"
 	"strings"
 	"testing"
 
@@ -457,4 +458,103 @@ func TestAgentGuestEnabledRoundTrip(t *testing.T) {
 	if updated.GuestEnabled {
 		t.Fatal("updated agent should be guest-disabled")
 	}
+}
+
+// TestAgentVisibilityMatrix 组合矩阵：guestEnabled × desktop/mobile × 角色 × 视图。
+// 场景铺设（sqlite，复用 setupToolTenantServiceTestDB，buildAgentsDTO 触碰的
+// 全部关联表齐备）：五个 agent——
+//
+//	A: guest=true,  desktop=true,  mobile=false
+//	B: guest=true,  desktop=false, mobile=false
+//	C: guest=false, desktop=true,  mobile=false
+//	D: guest=false, desktop=false, mobile=false
+//	E: guest=true,  desktop=false, mobile=true   ← manifest mobile 回归锚点
+func TestAgentVisibilityMatrix(t *testing.T) {
+	const tenant = "t-visibility"
+	db := setupToolTenantServiceTestDB(t)
+	seed := func(name string, guest, desktop, mobile bool) {
+		t.Helper()
+		require.NoError(t, db.Create(&agent.AgentConfig{
+			Name:           name,
+			TenantID:       tenant,
+			GuestEnabled:   guest,
+			DesktopEnabled: desktop,
+			MobileEnabled:  mobile,
+		}).Error)
+	}
+	seed("agent-a", true, true, false)
+	seed("agent-b", true, false, false)
+	seed("agent-c", false, true, false)
+	seed("agent-d", false, false, false)
+	seed("agent-e", true, false, true)
+
+	svc := NewAgentService("test-encryption-key", "")
+
+	listNames := func(t *testing.T, dto *AgentsDTO, err error) []string {
+		t.Helper()
+		require.NoError(t, err)
+		names := make([]string, 0, len(dto.Agents))
+		for _, a := range dto.Agents {
+			names = append(names, a.Name)
+		}
+		sort.Strings(names)
+		return names
+	}
+	manifestNames := func(t *testing.T, m *ManifestDTO, err error) []string {
+		t.Helper()
+		require.NoError(t, err)
+		names := make([]string, 0, len(m.Agents))
+		for _, a := range m.Agents {
+			names = append(names, a.Name)
+		}
+		sort.Strings(names)
+		return names
+	}
+
+	t.Run("GetChatAgents guest=true 只看 guest-enabled（不看 platform）", func(t *testing.T) {
+		dto, err := svc.GetChatAgents(tenant, true)
+		assert.Equal(t, []string{"agent-a", "agent-b", "agent-e"}, listNames(t, dto, err))
+	})
+	t.Run("GetChatAgents guest=false 全量", func(t *testing.T) {
+		dto, err := svc.GetChatAgents(tenant, false)
+		assert.Equal(t, []string{"agent-a", "agent-b", "agent-c", "agent-d", "agent-e"}, listNames(t, dto, err))
+	})
+	t.Run("GetDesktopAgents guest=true → desktop ∧ guest", func(t *testing.T) {
+		dto, err := svc.GetDesktopAgents(tenant, true)
+		assert.Equal(t, []string{"agent-a"}, listNames(t, dto, err))
+	})
+	t.Run("GetDesktopAgents guest=false desktop 语义回归不变", func(t *testing.T) {
+		dto, err := svc.GetDesktopAgents(tenant, false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, listNames(t, dto, err))
+	})
+	t.Run("GetManifest desktop × guest 矩阵", func(t *testing.T) {
+		mGuest, err := svc.GetManifest(tenant, agent.PlatformDesktop, true)
+		assert.Equal(t, []string{"agent-a"}, manifestNames(t, mGuest, err))
+		mFormal, err := svc.GetManifest(tenant, agent.PlatformDesktop, false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, manifestNames(t, mFormal, err))
+	})
+	t.Run("GetManifest mobile × guest 矩阵（防误写成固定 desktop 过滤）", func(t *testing.T) {
+		mGuest, err := svc.GetManifest(tenant, agent.PlatformMobile, true)
+		assert.Equal(t, []string{"agent-e"}, manifestNames(t, mGuest, err))
+		mFormal, err := svc.GetManifest(tenant, agent.PlatformMobile, false)
+		assert.Equal(t, []string{"agent-e"}, manifestNames(t, mFormal, err))
+	})
+	t.Run("GetManifest 空 platform 缺省 desktop 回归", func(t *testing.T) {
+		m, err := svc.GetManifest(tenant, "", false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, manifestNames(t, m, err))
+	})
+	t.Run("AgentGuestVisible 三态", func(t *testing.T) {
+		visible, err := svc.AgentGuestVisible(tenant, "agent-b")
+		require.NoError(t, err)
+		assert.True(t, visible)
+
+		visible, err = svc.AgentGuestVisible(tenant, "agent-c")
+		require.NoError(t, err)
+		assert.False(t, visible)
+
+		// 不存在的 agent 报 (false, nil)：调用方渲染与真不存在同形的中性 404。
+		visible, err = svc.AgentGuestVisible(tenant, "missing-agent")
+		require.NoError(t, err)
+		assert.False(t, visible)
+	})
 }

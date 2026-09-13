@@ -115,7 +115,8 @@ type AgentDTO struct {
 // GetManifest returns the agent manifest for the given client platform
 // (agent.PlatformDesktop / agent.PlatformMobile; empty defaults to desktop),
 // containing the agents enabled for that platform and their content hashes.
-func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, error) {
+// guest callers additionally see only guest-enabled agents (spec 4.3).
+func (s *AgentService) GetManifest(tenantID, platform string, guest bool) (*ManifestDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("list agents failed: %w", err)
@@ -124,6 +125,9 @@ func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, err
 	var maxUpdatedAt time.Time
 	agents := make([]ManifestAgentDTO, 0, len(configs))
 	for _, cfg := range configs {
+		if guest && !cfg.GuestEnabled {
+			continue
+		}
 		agents = append(agents, ManifestAgentDTO{
 			ID:          cfg.ID,
 			Name:        cfg.Name,
@@ -142,14 +146,57 @@ func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, err
 	return &ManifestDTO{Agents: agents, UpdatedAt: updatedAt}, nil
 }
 
+// GetChatAgents returns agents for the chat home/switcher: no platform
+// filter; guest callers only see guest-enabled agents (spec 4.3 view=chat).
+func (s *AgentService) GetChatAgents(tenantID string, guest bool) (*AgentsDTO, error) {
+	configs, err := s.repo.ListAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents failed: %w", err)
+	}
+	if guest {
+		kept := make([]*agent.AgentConfig, 0, len(configs))
+		for _, cfg := range configs {
+			if cfg.GuestEnabled {
+				kept = append(kept, cfg)
+			}
+		}
+		configs = kept
+	}
+	return s.buildAgentsDTO(tenantID, configs)
+}
+
 // GetDesktopAgents returns all desktop-enabled agents with their full details.
-func (s *AgentService) GetDesktopAgents(tenantID string) (*AgentsDTO, error) {
+// guest callers additionally see only guest-enabled agents (spec 4.3).
+func (s *AgentService) GetDesktopAgents(tenantID string, guest bool) (*AgentsDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, agent.PlatformDesktop)
 	if err != nil {
 		return nil, fmt.Errorf("list agents failed: %w", err)
 	}
+	if guest {
+		kept := make([]*agent.AgentConfig, 0, len(configs))
+		for _, cfg := range configs {
+			if cfg.GuestEnabled {
+				kept = append(kept, cfg)
+			}
+		}
+		configs = kept
+	}
 
 	return s.buildAgentsDTO(tenantID, configs)
+}
+
+// AgentGuestVisible reports whether the named agent is visible to guests.
+// Not-found agents report (false, nil) so callers render a neutral 404
+// identical to a missing agent (anti-enumeration, spec 7).
+func (s *AgentService) AgentGuestVisible(tenantID, name string) (bool, error) {
+	cfg, err := s.repo.GetByName(tenantID, name)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get agent %s failed: %w", name, err)
+	}
+	return cfg.GuestEnabled, nil
 }
 
 // GetAllAgentsAdmin returns all agents (including disabled) with their full details.

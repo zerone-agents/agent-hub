@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"control-panel/internal/infrastructure/runtime"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // chatRepositoryForAgent is the subset of ChatRepository used by AgentChatService.
@@ -73,6 +75,24 @@ func NewAgentChatService(
 		runtimeKey:    runtimeKey,
 		upstreamHost:  upstreamHost,
 	}
+}
+
+// AgentGuestVisible reports whether the named agent is visible to guests.
+// Not-found agents report (false, nil) so the chat handlers render a neutral
+// 404 identical to a missing agent (anti-enumeration, spec 7). Semantics are
+// identical to AgentService.AgentGuestVisible (the canonical implementation
+// for the agent detail endpoint); this delegation exists because the chat
+// handlers hold *AgentChatService, whose agentRepoForChat subset already
+// carries GetByName.
+func (s *AgentChatService) AgentGuestVisible(tenantID, name string) (bool, error) {
+	cfg, err := s.agentRepo.GetByName(tenantID, name)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get agent %s failed: %w", name, err)
+	}
+	return cfg.GuestEnabled, nil
 }
 
 // RuntimeClient exposes the runtime client for the handler to stream from.

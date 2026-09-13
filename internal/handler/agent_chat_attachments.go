@@ -37,6 +37,9 @@ var uploadMaxRequestBytes int64 = 60 << 20
 // hub 边流边限额。Runtime Token 只在此处注入，绝不经浏览器。
 func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 	tenantID := tenant.GetTenantID(c)
@@ -293,6 +296,9 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 // session 的服务端上传记录（上传时落库，不可伪造；消息 file parts 仅展示）。
 func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 	tenantID := tenant.GetTenantID(c)
