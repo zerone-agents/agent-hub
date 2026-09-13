@@ -18,6 +18,10 @@ type AgentMessage struct {
 	ID              string     `gorm:"type:varchar(36);primaryKey" json:"id"`
 	TenantID        string     `gorm:"type:varchar(64);not null;default:'';index:idx_agent_messages_tenant_created,priority:1;index" json:"-"`
 	RelationID      uint64     `gorm:"column:relation_id;not null;index" json:"relationId"`
+	DispatchID      string     `gorm:"column:dispatch_id;type:char(36);not null;default:'';index" json:"dispatchId,omitempty"`
+	GroupID         string     `gorm:"column:group_id;type:char(36);not null;default:'';index" json:"groupId,omitempty"`
+	ChannelID       string     `gorm:"column:channel_id;type:char(36);not null;default:'';index" json:"channelId,omitempty"`
+	SessionID       string     `gorm:"column:session_id;type:char(36);not null;default:'';index" json:"sessionId,omitempty"`
 	RunID           string     `gorm:"column:run_id;type:char(36);not null;default:'';index" json:"runId,omitempty"`
 	ConversationID  string     `gorm:"column:conversation_id;type:char(36);not null;default:'';index" json:"conversationId"`
 	RootMessageID   string     `gorm:"column:root_message_id;type:char(36);not null;default:'';index" json:"rootMessageId"`
@@ -65,3 +69,56 @@ type AgentMessageDedupe struct {
 }
 
 func (AgentMessageDedupe) TableName() string { return "agent_message_dedupes" }
+
+const (
+	DispatchStatusQueued    = "queued"
+	DispatchStatusRunning   = "running"
+	DispatchStatusCompleted = "completed"
+	DispatchStatusFailed    = "failed"
+	DispatchStatusPartial   = "partial"
+
+	AggregationAllReplies   = "all_replies"
+	AggregationFirstSuccess = "first_success"
+	AggregationLeader       = "leader_summary"
+)
+
+// AgentMessageDispatch is the durable parent record for an asynchronous
+// group/channel fanout. Every recipient still gets its own AgentMessage row;
+// this record defines how those independently audited results are aggregated.
+type AgentMessageDispatch struct {
+	ID             string     `gorm:"type:char(36);primaryKey" json:"id"`
+	TenantID       string     `gorm:"type:varchar(64);not null;index:idx_agent_dispatches_tenant_created,priority:1;index;uniqueIndex:uk_agent_dispatch_dedupe,priority:1" json:"-"`
+	SourceAgentID  uint64     `gorm:"not null;index;uniqueIndex:uk_agent_dispatch_dedupe,priority:2" json:"sourceAgentId"`
+	SourceAgent    string     `gorm:"type:varchar(64);not null" json:"sourceAgent"`
+	GroupID        string     `gorm:"type:char(36);not null;default:'';index" json:"groupId,omitempty"`
+	ChannelID      string     `gorm:"type:char(36);not null;default:'';index" json:"channelId,omitempty"`
+	SessionID      string     `gorm:"type:char(36);not null;default:'';index" json:"sessionId,omitempty"`
+	Audience       string     `gorm:"type:varchar(16);not null" json:"audience"`
+	AudienceRole   string     `gorm:"type:varchar(32);not null;default:''" json:"audienceRole,omitempty"`
+	Action         string     `gorm:"type:varchar(32);not null" json:"action"`
+	Content        string     `gorm:"type:text;not null" json:"content"`
+	Aggregation    string     `gorm:"type:varchar(24);not null" json:"aggregation"`
+	Status         string     `gorm:"type:varchar(16);not null;index" json:"status"`
+	RecipientCount int        `gorm:"not null;default:0" json:"recipientCount"`
+	CompletedCount int        `gorm:"not null;default:0" json:"completedCount"`
+	FailedCount    int        `gorm:"not null;default:0" json:"failedCount"`
+	Result         string     `gorm:"type:longtext" json:"result,omitempty"`
+	IdempotencyKey string     `gorm:"type:varchar(191);not null;index;uniqueIndex:uk_agent_dispatch_dedupe,priority:3" json:"idempotencyKey,omitempty"`
+	RunID          string     `gorm:"type:char(36);not null;default:'';index" json:"runId,omitempty"`
+	CreatedAt      time.Time  `gorm:"index:idx_agent_dispatches_tenant_created,priority:2" json:"createdAt"`
+	CompletedAt    *time.Time `json:"completedAt,omitempty"`
+}
+
+func (AgentMessageDispatch) TableName() string { return "agent_message_dispatches" }
+
+// AgentMessageDispatchCursor keeps round-robin selection stable across Hub
+// restarts. ScopeKey includes the group/channel and optional role filter.
+type AgentMessageDispatchCursor struct {
+	ID          uint64    `gorm:"primaryKey;autoIncrement"`
+	TenantID    string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_agent_dispatch_cursor,priority:1"`
+	ScopeKey    string    `gorm:"type:varchar(191);not null;uniqueIndex:uk_agent_dispatch_cursor,priority:2"`
+	LastAgentID uint64    `gorm:"not null;default:0"`
+	UpdatedAt   time.Time `gorm:"not null"`
+}
+
+func (AgentMessageDispatchCursor) TableName() string { return "agent_message_dispatch_cursors" }

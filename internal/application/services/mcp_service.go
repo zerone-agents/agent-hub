@@ -439,6 +439,11 @@ var builtinOrganizationTools = []McpTool{
 	{Name: "agent_message_status", Description: "查询同步或异步组织消息的状态与回复"},
 	{Name: "agent_message_chain", Description: "查询当前 Agent 实际参与且由 Hub 留痕的协作消息链"},
 	{Name: "agent_inbox", Description: "列出当前 Agent 最近的组织消息记录"},
+	{Name: "group_send", Description: "向群组成员异步群发并分别留痕"},
+	{Name: "channel_publish", Description: "向频道订阅者异步发布消息"},
+	{Name: "group_message_status", Description: "查询群消息的聚合状态与逐人投递记录"},
+	{Name: "session_start", Description: "开始轻量会话房间"},
+	{Name: "session_end", Description: "结束轻量会话房间并保存总结"},
 }
 
 // BuiltinKnowledgeToolNames 返回内置 knowledge MCP 种子的工具名集合，

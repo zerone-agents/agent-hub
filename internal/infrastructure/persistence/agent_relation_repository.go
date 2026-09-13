@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"time"
 
 	"control-panel/internal/domain/agentrelation"
 	rundomain "control-panel/internal/domain/run"
@@ -396,6 +397,16 @@ func (r *AgentMessageRepository) ListForRun(tenantID, runID string, limit int) (
 	return messages, err
 }
 
+func (r *AgentMessageRepository) ListForChannel(tenantID, channelID string, limit int) ([]*agentrelation.AgentMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var messages []*agentrelation.AgentMessage
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
+		Where("channel_id = ?", channelID).Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error
+	return messages, err
+}
+
 // ListChain returns a tenant-scoped, deterministic audit trail for one causal
 // conversation. Exactly one selector should be supplied by the service layer.
 func (r *AgentMessageRepository) ListChain(tenantID, conversationID, rootMessageID string, limit int) ([]*agentrelation.AgentMessage, error) {
@@ -472,4 +483,94 @@ func (r *AgentMessageRepository) HasRunningSourceInChain(tenantID, rootMessageID
 		Where("root_message_id = ? AND source_agent_id = ? AND status = ?", rootMessageID, agentID, agentrelation.MessageStatusRunning).
 		Count(&count).Error
 	return count > 0, err
+}
+
+func (r *AgentMessageRepository) CreateDispatch(tenantID string, dispatch *agentrelation.AgentMessageDispatch) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
+	dispatch.TenantID = tenantID
+	return r.db.Create(dispatch).Error
+}
+
+func (r *AgentMessageRepository) FindDispatchByIdempotencyKey(tenantID, key string, sourceAgentID uint64) (*agentrelation.AgentMessageDispatch, error) {
+	var row agentrelation.AgentMessageDispatch
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessageDispatch{}), tenantID).
+		Where("idempotency_key = ? AND source_agent_id = ?", key, sourceAgentID).First(&row).Error
+	return &row, err
+}
+
+func (r *AgentMessageRepository) GetDispatchForAgent(tenantID, id string, agentID uint64) (*agentrelation.AgentMessageDispatch, []*agentrelation.AgentMessage, error) {
+	var dispatch agentrelation.AgentMessageDispatch
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessageDispatch{}), tenantID).
+		Where("id = ?", id).First(&dispatch).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	var count int64
+	if dispatch.SourceAgentID != agentID {
+		if err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
+			Where("dispatch_id = ? AND target_agent_id = ?", id, agentID).Count(&count).Error; err != nil {
+			return nil, nil, err
+		}
+		if count == 0 {
+			return nil, nil, gorm.ErrRecordNotFound
+		}
+	}
+	var messages []*agentrelation.AgentMessage
+	query := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).Where("dispatch_id = ?", id)
+	// Recipients may only inspect their own delivery. The source may inspect the
+	// complete fanout because it initiated the dispatch.
+	if dispatch.SourceAgentID != agentID {
+		query = query.Where("target_agent_id = ?", agentID)
+	}
+	if err := query.Order("created_at ASC, id ASC").Find(&messages).Error; err != nil {
+		return nil, nil, err
+	}
+	return &dispatch, messages, nil
+}
+
+func (r *AgentMessageRepository) RefreshDispatch(tenantID, id string) (*agentrelation.AgentMessageDispatch, error) {
+	var dispatch agentrelation.AgentMessageDispatch
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := TenantOwned(tx.Model(&agentrelation.AgentMessageDispatch{}), tenantID).Where("id = ?", id).First(&dispatch).Error; err != nil {
+			return err
+		}
+		var completed, failed, terminal int64
+		base := TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).Where("dispatch_id = ?", id)
+		if err := base.Session(&gorm.Session{}).Where("status = ?", agentrelation.MessageStatusCompleted).Count(&completed).Error; err != nil {
+			return err
+		}
+		if err := base.Session(&gorm.Session{}).Where("status IN ?", []string{agentrelation.MessageStatusFailed, agentrelation.MessageStatusGuarded}).Count(&failed).Error; err != nil {
+			return err
+		}
+		terminal = completed + failed
+		status := agentrelation.DispatchStatusRunning
+		if terminal >= int64(dispatch.RecipientCount) {
+			switch {
+			case failed == 0:
+				status = agentrelation.DispatchStatusCompleted
+			case completed == 0:
+				status = agentrelation.DispatchStatusFailed
+			default:
+				status = agentrelation.DispatchStatusPartial
+			}
+		} else if dispatch.Aggregation == agentrelation.AggregationFirstSuccess && completed > 0 {
+			status = agentrelation.DispatchStatusCompleted
+		}
+		now := time.Now().UTC()
+		updates := map[string]any{"completed_count": completed, "failed_count": failed, "status": status}
+		if dispatch.CompletedAt == nil && (status == agentrelation.DispatchStatusCompleted || status == agentrelation.DispatchStatusFailed || status == agentrelation.DispatchStatusPartial) {
+			updates["completed_at"] = &now
+		}
+		if err := TenantOwned(tx.Model(&agentrelation.AgentMessageDispatch{}), tenantID).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+		return TenantOwned(tx.Model(&agentrelation.AgentMessageDispatch{}), tenantID).Where("id = ?", id).First(&dispatch).Error
+	})
+	return &dispatch, err
+}
+
+func (r *AgentMessageRepository) UpdateDispatchResult(tenantID, id, result string) error {
+	return TenantOwned(r.db.Model(&agentrelation.AgentMessageDispatch{}), tenantID).Where("id = ?", id).Update("result", result).Error
 }

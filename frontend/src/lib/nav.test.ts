@@ -16,6 +16,10 @@ describe('getBreadcrumbs', () => {
       { label: '首页', path: '/dashboard' },
       { label: 'MCP配置' }
     ])
+    expect(getBreadcrumbs('/groups')).toEqual([
+      { label: '首页', path: '/dashboard' },
+      { label: '组织协作' }
+    ])
   })
 
   it('matches nested routes under a nav item', () => {

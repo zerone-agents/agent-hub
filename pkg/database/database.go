@@ -15,6 +15,7 @@ import (
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/capability"
 	"control-panel/internal/domain/chat"
+	"control-panel/internal/domain/collaboration"
 	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
@@ -133,6 +134,8 @@ func AutoMigrate(backfillTenant string) error {
 		&agentrelation.AgentRelationEvent{},
 		&agentrelation.AgentMessage{},
 		&agentrelation.AgentMessageDedupe{},
+		&agentrelation.AgentMessageDispatch{},
+		&agentrelation.AgentMessageDispatchCursor{},
 		&agent.AgentSubagent{},
 		&agent.AgentKnowledgeDataset{},
 		&agent.Tool{},
@@ -146,6 +149,13 @@ func AutoMigrate(backfillTenant string) error {
 		&chat.Session{},
 		&chat.Message{},
 		&chat.UploadRecord{},
+		&collaboration.Group{},
+		&collaboration.GroupMember{},
+		&collaboration.Channel{},
+		&collaboration.ChannelSubscription{},
+		&collaboration.Session{},
+		&collaboration.SessionParticipant{},
+		&collaboration.MemberAudit{},
 		&aigc.Config{},
 		&provider.ProviderSummary{},
 		&provider.ProviderAttribute{},

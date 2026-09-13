@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +14,14 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
+	"control-panel/internal/domain/collaboration"
 	eventdomain "control-panel/internal/domain/event"
 	rundomain "control-panel/internal/domain/run"
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -46,7 +49,9 @@ type AgentMessageService struct {
 	events           *EventService
 	syncWaitTimeout  time.Duration
 	executionTimeout time.Duration
+	collaboration    *CollaborationService
 	targetQueues     sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
+	roundRobinMu     sync.Mutex
 }
 
 type agentMessageTargetQueue struct {
@@ -65,6 +70,7 @@ func NewAgentMessageService(runner AgentMessageRunner) *AgentMessageService {
 		events:           NewEventService(relationRepo.DB()),
 		syncWaitTimeout:  defaultSyncWaitTimeout,
 		executionTimeout: defaultExecutionTimeout,
+		collaboration:    NewCollaborationService(relationRepo.DB()),
 	}
 }
 
@@ -83,6 +89,7 @@ func newAgentMessageService(
 		events:           NewEventService(messageRepo.DB()),
 		syncWaitTimeout:  defaultSyncWaitTimeout,
 		executionTimeout: defaultExecutionTimeout,
+		collaboration:    NewCollaborationService(messageRepo.DB()),
 	}
 }
 
@@ -110,6 +117,10 @@ type SendAgentMessageInput struct {
 type AgentMessageDTO struct {
 	ID               string   `json:"id"`
 	RelationID       uint64   `json:"relationId"`
+	DispatchID       string   `json:"dispatchId,omitempty"`
+	GroupID          string   `json:"groupId,omitempty"`
+	ChannelID        string   `json:"channelId,omitempty"`
+	SessionID        string   `json:"sessionId,omitempty"`
 	SourceAgentID    uint64   `json:"sourceAgentId"`
 	TargetAgentID    uint64   `json:"targetAgentId"`
 	Scope            string   `json:"scope"`
@@ -153,6 +164,405 @@ type AgentMessageChainDTO struct {
 	Messages       []*AgentMessageDTO `json:"messages"`
 	MessageCount   int                `json:"messageCount"`
 	Verified       bool               `json:"verified"`
+}
+
+type GroupMessageInput struct {
+	GroupID, ChannelID, SessionID           string
+	Action, Message, Audience, AudienceRole string
+	MentionedAgents                         []string
+	Aggregation, RunID, IdempotencyKey      string
+}
+
+type AgentMessageDispatchDTO struct {
+	ID             string             `json:"id"`
+	GroupID        string             `json:"groupId,omitempty"`
+	ChannelID      string             `json:"channelId,omitempty"`
+	SessionID      string             `json:"sessionId,omitempty"`
+	Status         string             `json:"status"`
+	Audience       string             `json:"audience"`
+	AudienceRole   string             `json:"audienceRole,omitempty"`
+	Aggregation    string             `json:"aggregation"`
+	RecipientCount int                `json:"recipientCount"`
+	CompletedCount int                `json:"completedCount"`
+	FailedCount    int                `json:"failedCount"`
+	Result         string             `json:"result,omitempty"`
+	Deliveries     []*AgentMessageDTO `json:"deliveries"`
+}
+
+// GroupSend creates one durable dispatch and one independently executable
+// delivery per recipient. It never waits for model responses; callers poll
+// GroupMessageStatus, which prevents broadcast wait cycles and request storms.
+func (s *AgentMessageService) GroupSend(tenantID string, source *agent.AgentConfig, input GroupMessageInput) (*AgentMessageDispatchDTO, error) {
+	if source == nil || source.TenantID != tenantID {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	input.GroupID, input.ChannelID, input.SessionID = strings.TrimSpace(input.GroupID), strings.TrimSpace(input.ChannelID), strings.TrimSpace(input.SessionID)
+	input.Message, input.Action = strings.TrimSpace(input.Message), strings.TrimSpace(input.Action)
+	if input.Message == "" {
+		return nil, agentrelation.ErrMessageRequired
+	}
+	if utf8.RuneCountInString(input.Message) > maxAgentMessageRunes {
+		return nil, agentrelation.ErrMessageTooLong
+	}
+	if input.Action == "" {
+		input.Action = "inform"
+	}
+	if _, ok := agentrelation.Actions[input.Action]; !ok {
+		return nil, agentrelation.ErrInvalidAction
+	}
+	if input.Audience == "" {
+		input.Audience = "all"
+	}
+	if input.Aggregation == "" {
+		input.Aggregation = agentrelation.AggregationAllReplies
+	}
+	if !validDispatchAudience(input.Audience, input.AudienceRole) {
+		return nil, fmt.Errorf("audience 必须为 all、role、leaders 或 round_robin；role 模式必须提供 audience_role")
+	}
+	if !validDispatchAggregation(input.Aggregation) {
+		return nil, fmt.Errorf("aggregation 必须为 all_replies、first_success 或 leader_summary")
+	}
+	if input.ChannelID != "" {
+		channel, err := s.collaboration.Channel(tenantID, input.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+		if input.GroupID != "" && input.GroupID != channel.GroupID {
+			return nil, fmt.Errorf("channel 不属于指定 group")
+		}
+		input.GroupID = channel.GroupID
+	}
+	if input.GroupID == "" {
+		return nil, fmt.Errorf("group_id 不能为空")
+	}
+	if _, err := s.collaboration.GetGroupMember(tenantID, input.GroupID, source.ID); err != nil {
+		return nil, fmt.Errorf("发送方不是群组成员")
+	}
+	if input.SessionID != "" {
+		room, err := s.collaboration.Session(tenantID, input.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if room.Status != collaboration.SessionActive || room.ChannelID != input.ChannelID {
+			return nil, fmt.Errorf("会话房间未开始或不属于指定频道")
+		}
+		participant := false
+		for _, item := range room.Participants {
+			if item.AgentID == source.ID {
+				participant = true
+				break
+			}
+		}
+		if !participant {
+			return nil, fmt.Errorf("发送方不是会话房间参与者")
+		}
+	}
+	key := strings.TrimSpace(input.IdempotencyKey)
+	if key == "" {
+		key = uuid.NewString()
+	}
+	if existing, err := s.messageRepo.FindDispatchByIdempotencyKey(tenantID, key, source.ID); err == nil {
+		return s.GroupMessageStatus(tenantID, source, existing.ID)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	recipients, err := s.resolveGroupRecipients(tenantID, source.ID, input)
+	if err != nil {
+		return nil, err
+	}
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("没有符合受众和订阅条件的接收方")
+	}
+	if input.Audience == "round_robin" {
+		selected, selectErr := s.selectRoundRobinRecipient(tenantID, input, recipients)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		recipients = []agent.AgentConfig{selected}
+	}
+	if strings.TrimSpace(input.RunID) != "" {
+		for _, target := range recipients {
+			runValid, participantsValid, validateErr := s.messageRepo.ValidateRunParticipants(tenantID, input.RunID, source.ID, target.ID)
+			if validateErr != nil {
+				return nil, validateErr
+			}
+			if !runValid {
+				return nil, agentrelation.ErrRouteNotFound
+			}
+			if !participantsValid {
+				return nil, fmt.Errorf("群消息接收方 %s 不是 Run 参与者: %w", target.Name, agentrelation.ErrRunParticipantDenied)
+			}
+		}
+	}
+	dispatch := &agentrelation.AgentMessageDispatch{ID: uuid.NewString(), SourceAgentID: source.ID, SourceAgent: source.Name, GroupID: input.GroupID, ChannelID: input.ChannelID, SessionID: input.SessionID, Audience: input.Audience, AudienceRole: input.AudienceRole, Action: input.Action, Content: input.Message, Aggregation: input.Aggregation, Status: agentrelation.DispatchStatusQueued, RecipientCount: len(recipients), IdempotencyKey: key, RunID: strings.TrimSpace(input.RunID), CreatedAt: time.Now().UTC()}
+	if err := s.messageRepo.CreateDispatch(tenantID, dispatch); err != nil {
+		if existing, findErr := s.messageRepo.FindDispatchByIdempotencyKey(tenantID, key, source.ID); findErr == nil {
+			return s.GroupMessageStatus(tenantID, source, existing.ID)
+		}
+		return nil, err
+	}
+	type deliveryPlan struct {
+		target   agent.AgentConfig
+		message  *agentrelation.AgentMessage
+		envelope string
+	}
+	plans := make([]deliveryPlan, 0, len(recipients))
+	deliveries := make([]*AgentMessageDTO, 0, len(recipients))
+	for _, target := range recipients {
+		message := &agentrelation.AgentMessage{ID: uuid.NewString(), DispatchID: dispatch.ID, GroupID: input.GroupID, ChannelID: input.ChannelID, SessionID: input.SessionID, RunID: dispatch.RunID, ConversationID: dispatch.ID, RootMessageID: dispatch.ID, Hop: 1, MaxHops: 8, EventBudget: 64, EventCount: 1, TokenBudget: 65536, TokensUsed: estimateMessageTokens(input.Message), VisitedAgentIDs: []uint64{source.ID, target.ID}, IdempotencyKey: key + ":" + fmt.Sprint(target.ID), Scope: "group:" + input.GroupID, SourceAgentID: source.ID, SourceAgent: source.Name, TargetAgentID: target.ID, TargetAgent: target.Name, Action: input.Action, DeliveryPolicy: "async", ContextPolicy: "none", Content: input.Message, Status: agentrelation.MessageStatusQueued, CreatedAt: time.Now().UTC()}
+		persisted, created, createErr := s.createMessageWithEvents(tenantID, message)
+		if createErr != nil {
+			return nil, fmt.Errorf("创建群消息收件人投递失败: %w", createErr)
+		}
+		if !created {
+			return nil, fmt.Errorf("群消息收件人投递幂等键冲突")
+		}
+		relation := &agentrelation.AgentRelation{Scope: message.Scope, RelationType: "group_member", DeliveryPolicy: "async", ContextPolicy: "none"}
+		envelope := buildAgentMessageEnvelope(source, &target, relation, persisted)
+		deliveries = append(deliveries, agentMessageToDTO(persisted))
+		plans = append(plans, deliveryPlan{target: target, message: persisted, envelope: envelope})
+	}
+	for _, plan := range plans {
+		go func(target agent.AgentConfig, msg *agentrelation.AgentMessage, env string) {
+			ctx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
+			defer cancel()
+			s.execute(ctx, tenantID, target.ID, msg, env)
+		}(plan.target, plan.message, plan.envelope)
+	}
+	return &AgentMessageDispatchDTO{ID: dispatch.ID, GroupID: dispatch.GroupID, ChannelID: dispatch.ChannelID, SessionID: dispatch.SessionID, Status: dispatch.Status, Audience: dispatch.Audience, AudienceRole: dispatch.AudienceRole, Aggregation: dispatch.Aggregation, RecipientCount: dispatch.RecipientCount, Deliveries: deliveries}, nil
+}
+
+func validDispatchAudience(audience, role string) bool {
+	return audience == "all" || audience == "leaders" || audience == "round_robin" || (audience == "role" && strings.TrimSpace(role) != "")
+}
+func validDispatchAggregation(v string) bool {
+	return v == agentrelation.AggregationAllReplies || v == agentrelation.AggregationFirstSuccess || v == agentrelation.AggregationLeader
+}
+
+func (s *AgentMessageService) resolveGroupRecipients(tenantID string, sourceID uint64, input GroupMessageInput) ([]agent.AgentConfig, error) {
+	members, err := s.collaboration.Members(tenantID, input.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[uint64]bool, len(members))
+	roles := make(map[uint64]string, len(members))
+	for _, member := range members {
+		if member.AgentID != sourceID {
+			allowed[member.AgentID] = true
+			roles[member.AgentID] = member.Role
+		}
+	}
+	if input.ChannelID != "" {
+		recipients, err := s.collaboration.ListChannelRecipients(tenantID, input.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+		mentioned := map[string]bool{}
+		for _, name := range input.MentionedAgents {
+			mentioned[NormalizeAgentName(name)] = true
+		}
+		allowed = map[uint64]bool{}
+		for _, recipient := range recipients {
+			if recipient.Member.AgentID == sourceID {
+				continue
+			}
+			if recipient.SubscriptionMode == collaboration.SubscriptionMentions {
+				a, findErr := s.agentRepo.GetByID(tenantID, recipient.Member.AgentID)
+				if findErr != nil || !mentioned[a.Name] {
+					continue
+				}
+			}
+			allowed[recipient.Member.AgentID] = true
+		}
+	}
+	if input.SessionID != "" {
+		room, err := s.collaboration.Session(tenantID, input.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		participants := make(map[uint64]bool, len(room.Participants))
+		for _, participant := range room.Participants {
+			participants[participant.AgentID] = true
+		}
+		for id := range allowed {
+			if !participants[id] {
+				delete(allowed, id)
+			}
+		}
+	}
+	result := make([]agent.AgentConfig, 0, len(allowed))
+	for id := range allowed {
+		role := roles[id]
+		if input.Audience == "leaders" && role != collaboration.RoleLeader {
+			continue
+		}
+		if input.Audience == "role" && role != input.AudienceRole {
+			continue
+		}
+		if input.Audience == "round_robin" && strings.TrimSpace(input.AudienceRole) != "" && role != input.AudienceRole {
+			continue
+		}
+		target, err := s.agentRepo.GetByID(tenantID, id)
+		if err != nil {
+			continue
+		}
+		result = append(result, *target)
+	}
+	return result, nil
+}
+
+func (s *AgentMessageService) selectRoundRobinRecipient(tenantID string, input GroupMessageInput, candidates []agent.AgentConfig) (agent.AgentConfig, error) {
+	if len(candidates) == 0 {
+		return agent.AgentConfig{}, fmt.Errorf("没有可轮询的接收方")
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	scope := "group:" + input.GroupID
+	if input.ChannelID != "" {
+		scope = "channel:" + input.ChannelID
+	}
+	if strings.TrimSpace(input.AudienceRole) != "" {
+		scope += ":role:" + strings.TrimSpace(input.AudienceRole)
+	}
+	s.roundRobinMu.Lock()
+	defer s.roundRobinMu.Unlock()
+	selected := candidates[0]
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		selected = candidates[0]
+		err = s.collaboration.db.Transaction(func(tx *gorm.DB) error {
+			var cursor agentrelation.AgentMessageDispatchCursor
+			result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id=? AND scope_key=?", tenantID, scope).First(&cursor)
+			if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return result.Error
+			}
+			if result.Error == nil {
+				for _, candidate := range candidates {
+					if candidate.ID > cursor.LastAgentID {
+						selected = candidate
+						break
+					}
+				}
+				cursor.LastAgentID = selected.ID
+				cursor.UpdatedAt = time.Now().UTC()
+				return tx.Save(&cursor).Error
+			}
+			cursor = agentrelation.AgentMessageDispatchCursor{TenantID: tenantID, ScopeKey: scope, LastAgentID: selected.ID, UpdatedAt: time.Now().UTC()}
+			return tx.Create(&cursor).Error
+		})
+		if err == nil {
+			return selected, nil
+		}
+		// Another Hub replica may have inserted the unique cursor between our
+		// miss and create. Retrying converts that race into a locked update.
+		var count int64
+		if countErr := s.collaboration.db.Model(&agentrelation.AgentMessageDispatchCursor{}).Where("tenant_id=? AND scope_key=?", tenantID, scope).Count(&count).Error; countErr != nil || count == 0 {
+			break
+		}
+	}
+	return selected, err
+}
+
+func (s *AgentMessageService) GroupMessageStatus(tenantID string, source *agent.AgentConfig, id string) (*AgentMessageDispatchDTO, error) {
+	if source == nil || source.TenantID != tenantID {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	if _, err := s.messageRepo.RefreshDispatch(tenantID, id); err != nil {
+		return nil, err
+	}
+	dispatch, messages, err := s.messageRepo.GetDispatchForAgent(tenantID, id, source.ID)
+	if err != nil {
+		return nil, err
+	}
+	if source.ID == dispatch.SourceAgentID {
+		result := aggregateDispatchResult(dispatch.Aggregation, messages, func(agentID uint64) bool {
+			member, memberErr := s.collaboration.GetGroupMember(tenantID, dispatch.GroupID, agentID)
+			return memberErr == nil && member.Role == collaboration.RoleLeader
+		})
+		if result != dispatch.Result {
+			_ = s.messageRepo.UpdateDispatchResult(tenantID, dispatch.ID, result)
+			dispatch.Result = result
+		}
+	} else {
+		dispatch.Result = ""
+	}
+	dto := &AgentMessageDispatchDTO{ID: dispatch.ID, GroupID: dispatch.GroupID, ChannelID: dispatch.ChannelID, SessionID: dispatch.SessionID, Status: dispatch.Status, Audience: dispatch.Audience, AudienceRole: dispatch.AudienceRole, Aggregation: dispatch.Aggregation, RecipientCount: dispatch.RecipientCount, CompletedCount: dispatch.CompletedCount, FailedCount: dispatch.FailedCount, Result: dispatch.Result, Deliveries: make([]*AgentMessageDTO, 0, len(messages))}
+	for _, message := range messages {
+		dto.Deliveries = append(dto.Deliveries, agentMessageToDTO(message))
+	}
+	return dto, nil
+}
+
+func aggregateDispatchResult(mode string, messages []*agentrelation.AgentMessage, isLeader func(uint64) bool) string {
+	type reply struct {
+		Agent string `json:"agent"`
+		Reply string `json:"reply"`
+	}
+	replies := make([]reply, 0, len(messages))
+	for _, message := range messages {
+		if message.Status != agentrelation.MessageStatusCompleted || strings.TrimSpace(message.Reply) == "" {
+			continue
+		}
+		if mode == agentrelation.AggregationLeader && !isLeader(message.TargetAgentID) {
+			continue
+		}
+		if mode == agentrelation.AggregationFirstSuccess || mode == agentrelation.AggregationLeader {
+			return message.Reply
+		}
+		replies = append(replies, reply{Agent: message.TargetAgent, Reply: message.Reply})
+	}
+	if len(replies) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(replies)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func (s *AgentMessageService) StartSession(tenantID string, source *agent.AgentConfig, sessionID string) (*collaboration.Session, error) {
+	if source == nil || source.TenantID != tenantID {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	room, err := s.collaboration.Session(tenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	channel, err := s.collaboration.Channel(tenantID, room.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	member, err := s.collaboration.GetGroupMember(tenantID, channel.GroupID, source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("当前 Agent 不是会话房间成员")
+	}
+	if room.HostAgentID != 0 && room.HostAgentID != source.ID && member.Role != collaboration.RoleLeader {
+		return nil, fmt.Errorf("只有主持人或群组 leader 可以开始会话")
+	}
+	return s.collaboration.StartSession(tenantID, room.ID)
+}
+
+func (s *AgentMessageService) EndSession(tenantID string, source *agent.AgentConfig, sessionID, summary string) (*collaboration.Session, error) {
+	if source == nil || source.TenantID != tenantID {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	room, err := s.collaboration.Session(tenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	channel, err := s.collaboration.Channel(tenantID, room.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	member, err := s.collaboration.GetGroupMember(tenantID, channel.GroupID, source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("当前 Agent 不是会话房间成员")
+	}
+	if room.HostAgentID != 0 && room.HostAgentID != source.ID && member.Role != collaboration.RoleLeader {
+		return nil, fmt.Errorf("只有主持人或群组 leader 可以结束会话")
+	}
+	return s.collaboration.CompleteSession(tenantID, room.ID, summary)
 }
 
 func (s *AgentMessageService) Relations(tenantID string, source *agent.AgentConfig) ([]*AgentRelationDTO, error) {
@@ -456,6 +866,24 @@ func (s *AgentMessageService) ListRun(tenantID, runID string, limit int) ([]*Age
 	return result, nil
 }
 
+func (s *AgentMessageService) ListChannel(tenantID, channelID string, limit int) ([]*AgentMessageDTO, error) {
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(channelID) == "" {
+		return nil, fmt.Errorf("tenant and channel are required")
+	}
+	if _, err := s.collaboration.Channel(tenantID, channelID); err != nil {
+		return nil, err
+	}
+	rows, err := s.messageRepo.ListForChannel(tenantID, channelID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*AgentMessageDTO, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, agentMessageToDTO(row))
+	}
+	return result, nil
+}
+
 // MessageChainForAgent exposes only hops in which the runtime identity is an
 // endpoint. Knowing a conversation/root id never grants access to other hops.
 func (s *AgentMessageService) MessageChainForAgent(tenantID string, source *agent.AgentConfig, conversationID, rootMessageID string, limit int) (*AgentMessageChainDTO, error) {
@@ -658,6 +1086,10 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 	dto := &AgentMessageDTO{
 		ID:               message.ID,
 		RelationID:       message.RelationID,
+		DispatchID:       message.DispatchID,
+		GroupID:          message.GroupID,
+		ChannelID:        message.ChannelID,
+		SessionID:        message.SessionID,
 		SourceAgentID:    message.SourceAgentID,
 		TargetAgentID:    message.TargetAgentID,
 		Scope:            message.Scope,

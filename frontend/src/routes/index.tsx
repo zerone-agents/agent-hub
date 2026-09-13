@@ -61,6 +61,11 @@ export const router = createBrowserRouter(
             import('@/features/relations/RelationListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'groups',
+          lazy: () =>
+            import('@/features/groups/GroupWorkspacePage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'collaboration-audit',
           lazy: () =>
             import('@/features/audit/CollaborationAuditPage').then((m) => ({ Component: m.default }))

@@ -120,13 +120,11 @@ func TestOrganizationMcpListsRuntimeTools(t *testing.T) {
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox", "agent_message_chain"}, []string{
-		response.Result.Tools[0].Name,
-		response.Result.Tools[1].Name,
-		response.Result.Tools[2].Name,
-		response.Result.Tools[3].Name,
-		response.Result.Tools[4].Name,
-	})
+	names := make([]string, 0, len(response.Result.Tools))
+	for _, tool := range response.Result.Tools {
+		names = append(names, tool.Name)
+	}
+	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox", "agent_message_chain", "group_send", "channel_publish", "group_message_status", "session_start", "session_end"}, names)
 }
 
 func TestOrganizationMcpMessageChainUsesRuntimeIdentity(t *testing.T) {

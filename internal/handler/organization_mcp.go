@@ -10,6 +10,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/collaboration"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/middleware"
 
@@ -22,6 +23,13 @@ type OrganizationMessageService interface {
 	Get(tenantID string, source *agent.AgentConfig, id string) (*services.AgentMessageDTO, error)
 	Inbox(tenantID string, source *agent.AgentConfig, limit int) ([]*services.AgentMessageDTO, error)
 	MessageChainForAgent(tenantID string, source *agent.AgentConfig, conversationID, rootMessageID string, limit int) (*services.AgentMessageChainDTO, error)
+}
+
+type GroupOrganizationMessageService interface {
+	GroupSend(tenantID string, source *agent.AgentConfig, input services.GroupMessageInput) (*services.AgentMessageDispatchDTO, error)
+	GroupMessageStatus(tenantID string, source *agent.AgentConfig, id string) (*services.AgentMessageDispatchDTO, error)
+	StartSession(tenantID string, source *agent.AgentConfig, sessionID string) (*collaboration.Session, error)
+	EndSession(tenantID string, source *agent.AgentConfig, sessionID, summary string) (*collaboration.Session, error)
 }
 
 // OrganizationMcpHandler exposes relation-authorized agent-to-agent delivery
@@ -130,8 +138,38 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 				},
 			},
 		},
+		groupMessageTool("group_send", "向群组成员异步群发消息；每个接收方独立执行并留痕，不同步等待全部回复。", false),
+		groupMessageTool("channel_publish", "向频道订阅者异步发布消息；支持全员、按角色、仅 leader 和 @提及订阅。", true),
+		{
+			"name": "group_message_status", "description": "查询群发聚合状态和当前 Agent 有权查看的逐收件人投递记录。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"dispatch_id": map[string]interface{}{"type": "string"}}, "required": []string{"dispatch_id"}},
+		},
+		{
+			"name": "session_start", "description": "开始一个已创建的轻量会话房间。仅主持人或群组 leader 可执行。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"session_id": map[string]interface{}{"type": "string"}}, "required": []string{"session_id"}},
+		},
+		{
+			"name": "session_end", "description": "结束活动中的轻量会话房间并保存总结。仅主持人或群组 leader 可执行。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"session_id": map[string]interface{}{"type": "string"}, "summary": map[string]interface{}{"type": "string"}}, "required": []string{"session_id", "summary"}},
+		},
 	}
 	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": tools}}
+}
+
+func groupMessageTool(name, description string, channel bool) map[string]interface{} {
+	properties := map[string]interface{}{
+		"group_id": map[string]interface{}{"type": "string"}, "action": map[string]interface{}{"type": "string"}, "message": map[string]interface{}{"type": "string"},
+		"audience": map[string]interface{}{"type": "string", "enum": []string{"all", "role", "leaders", "round_robin"}, "default": "all", "description": "round_robin 每次只选一个符合订阅与 audience_role 的接收方，并持久化轮换"}, "audience_role": map[string]interface{}{"type": "string"},
+		"aggregation": map[string]interface{}{"type": "string", "enum": []string{"all_replies", "first_success", "leader_summary"}, "default": "all_replies", "description": "leader_summary 采用本次收件人中 leader 的回复，不会隐式触发第二次 Agent 总结"},
+		"run_id":      map[string]interface{}{"type": "string"}, "session_id": map[string]interface{}{"type": "string"}, "idempotency_key": map[string]interface{}{"type": "string"},
+	}
+	required := []string{"group_id", "message"}
+	if channel {
+		properties["channel_id"] = map[string]interface{}{"type": "string"}
+		properties["mentioned_agents"] = map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}
+		required = []string{"channel_id", "message"}
+	}
+	return map[string]interface{}{"name": name, "description": description, "inputSchema": map[string]interface{}{"type": "object", "properties": properties, "required": required}}
 }
 
 type agentSendArgs struct {
@@ -160,6 +198,30 @@ type agentMessageChainArgs struct {
 	ConversationID string `json:"conversation_id"`
 	RootMessageID  string `json:"root_message_id"`
 	Limit          int    `json:"limit"`
+}
+
+type groupMessageArgs struct {
+	GroupID         string   `json:"group_id"`
+	ChannelID       string   `json:"channel_id"`
+	SessionID       string   `json:"session_id"`
+	Action          string   `json:"action"`
+	Message         string   `json:"message"`
+	Audience        string   `json:"audience"`
+	AudienceRole    string   `json:"audience_role"`
+	MentionedAgents []string `json:"mentioned_agents"`
+	Aggregation     string   `json:"aggregation"`
+	RunID           string   `json:"run_id"`
+	IdempotencyKey  string   `json:"idempotency_key"`
+}
+type groupMessageStatusArgs struct {
+	DispatchID string `json:"dispatch_id"`
+}
+type sessionStartArgs struct {
+	SessionID string `json:"session_id"`
+}
+type sessionEndArgs struct {
+	SessionID string `json:"session_id"`
+	Summary   string `json:"summary"`
 }
 
 func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
@@ -260,6 +322,65 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			return mcpErrorResult(id, err.Error()), nil
 		}
 		return mcpJSONResult(id, chain)
+	case "group_send", "channel_publish":
+		groupService, ok := h.service.(GroupOrganizationMessageService)
+		if !ok {
+			return mcpErrorResult(id, "群组协作能力尚未启用"), nil
+		}
+		var args groupMessageArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if call.Name == "group_send" {
+			args.ChannelID = ""
+		}
+		dispatch, err := groupService.GroupSend(tenantID, source, services.GroupMessageInput{GroupID: args.GroupID, ChannelID: args.ChannelID, SessionID: args.SessionID, Action: args.Action, Message: args.Message, Audience: args.Audience, AudienceRole: args.AudienceRole, MentionedAgents: args.MentionedAgents, Aggregation: args.Aggregation, RunID: args.RunID, IdempotencyKey: args.IdempotencyKey})
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, dispatch)
+	case "group_message_status":
+		groupService, ok := h.service.(GroupOrganizationMessageService)
+		if !ok {
+			return mcpErrorResult(id, "群组协作能力尚未启用"), nil
+		}
+		var args groupMessageStatusArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		dispatch, err := groupService.GroupMessageStatus(tenantID, source, args.DispatchID)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, dispatch)
+	case "session_start":
+		groupService, ok := h.service.(GroupOrganizationMessageService)
+		if !ok {
+			return mcpErrorResult(id, "会话房间能力尚未启用"), nil
+		}
+		var args sessionStartArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		room, err := groupService.StartSession(tenantID, source, args.SessionID)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, room)
+	case "session_end":
+		groupService, ok := h.service.(GroupOrganizationMessageService)
+		if !ok {
+			return mcpErrorResult(id, "会话房间能力尚未启用"), nil
+		}
+		var args sessionEndArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		room, err := groupService.EndSession(tenantID, source, args.SessionID, args.Summary)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, room)
 	default:
 		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", call.Name)
 	}

@@ -278,6 +278,7 @@ func main() {
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
 	runHandler := handler.NewRunHandler(runService)
 	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
+	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
 
 	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
 	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
@@ -465,6 +466,7 @@ func main() {
 	adminWrite.POST("/runs/:id/activities", runHandler.AppendActivity)
 	adminRead.GET("/runs/:id/tool-results", toolResultHandler.List)
 	adminRead.GET("/runs/:id/agent-messages", agentMessageAdminHandler.ListRun)
+	adminRead.GET("/channels/:id/messages", agentMessageAdminHandler.ListChannel)
 	adminWrite.GET("/agent-message-chains", agentMessageAdminHandler.GetChain)
 	adminRead.GET("/runs/:id/tool-results/:toolResultId", toolResultHandler.Get)
 	adminWrite.POST("/runs/:id/tool-results/validate", toolResultHandler.Validate)
@@ -477,6 +479,9 @@ func main() {
 	adminWrite.POST("/capability-packages/:id/approve", capabilityRegistryHandler.Approve)
 	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
 	adminRead.GET("/capability-packages/:id/resources", capabilityRegistryHandler.Resources)
+
+	// ---------- H4 group and channel collaboration ----------
+	handler.RegisterCollaborationRoutes(adminWrite, adminRead, collaborationHandler)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

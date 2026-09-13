@@ -143,6 +143,57 @@ curl -X POST http://localhost:8081/api/v1/admin/providers/probe \
 | **Scene** | `GET /api/v1/scenes` |
 | **Chat** | `POST /api/v1/chat/push` |
 
+## Group collaboration (H4)
+
+Groups are tenant-scoped, durable collaboration units. Channels belong to one
+group; sessions are lightweight, agenda-bound channel conversations rather
+than approval or voting workflows.
+
+| Method | Path | Description |
+|---|---|---|
+| GET/POST | `/api/v1/admin/groups` | List/create groups |
+| GET/PUT/DELETE | `/api/v1/admin/groups/:id` | Read/update/delete a group |
+| GET/POST | `/api/v1/admin/groups/:id/members` | List/add Agent members |
+| PATCH/DELETE | `/api/v1/admin/groups/:id/members/:agentId` | Change role/remove member |
+| GET | `/api/v1/admin/groups/:id/audit` | Read the append-only collaboration audit for the group |
+| GET/POST | `/api/v1/admin/groups/:id/channels` | List/create channels |
+| GET/PUT/DELETE | `/api/v1/admin/channels/:id` | Read/update/delete a channel |
+| GET/PUT | `/api/v1/admin/channels/:id/subscriptions` | List/upsert Agent subscription |
+| GET/POST | `/api/v1/admin/channels/:id/sessions` | List/create lightweight sessions; create accepts optional `participantAgentIds` |
+| GET | `/api/v1/admin/sessions/:id` | Read session |
+| POST | `/api/v1/admin/sessions/:id/start` | Start a draft session |
+| POST | `/api/v1/admin/sessions/:id/complete` | Complete with `{ "summary": "..." }` |
+
+Values: group visibility `private|tenant`; member role
+`leader|member|observer|guest`; channel visibility `group|members`;
+subscription mode `all|mentions|none`. Every lookup and mutation is constrained
+by the authenticated tenant. Session transitions are only
+`draft -> active -> completed`.
+
+Session creation snapshots participants into durable rows. Send
+`participantAgentIds` to choose them explicitly; when omitted, the current
+effective channel recipients are snapshotted. An optional host is always
+included and marked with role `host`; other attendees use `participant`.
+
+The group audit covers group create/update/delete, member add/role change/remove,
+channel create/update/delete, subscription upsert and session create/start/
+complete. Each event exposes `resourceType`, `resourceId`, `action`, `before`,
+`after` and `createdAt`, allowing the UI to reconstruct what actually changed.
+
+Organization MCP `group_send` and `channel_publish` always deliver
+asynchronously and persist a separate status/reply/error record per recipient.
+`audience=round_robin` selects exactly one eligible subscriber/member per call;
+its cursor is persisted per tenant and group/channel (plus optional role), so a
+Hub restart does not reset the rotation. `aggregation=all_replies` collects all
+completed replies, while `first_success` reaches aggregate success on the first
+successful reply without cancelling the remaining deliveries.
+
+`aggregation=leader_summary` means **use the reply from a leader among this
+dispatch's recipients as the aggregate result**. It does not secretly invoke a
+second Agent summarization pass (which could recurse or deadlock). If this
+dispatch has no recipient leader, the aggregate result stays empty while every
+recipient delivery remains available in the audit trail.
+
 ### Custom Tools (issue #88)
 
 - 单文件 `.ts/.mts/.js/.mjs`，≤5 MiB；工具名来自文件默认导出的 `name`（Hub 不执行代码，Runtime 部署时校验）。
