@@ -201,3 +201,20 @@ recipient delivery remains available in the audit trail.
 - 删除仍被 Agent 挂载的自定义工具返回 `409` + `data.agents` 名单；内置工具拒绝一切写操作。
 - 部署请求向 agent-deployer 下发 `customTools []ToolSource{name,url,hash,fileName}`（仅 custom+ready，按名排序；URL = OSS_CDN_HOST + 内容寻址 key）。
 - PUT /api/v1/admin/tools/:name 仅接受 title/description/descriptionEn；其他字段（如 isDefault）会被静默忽略。
+# H5 工作流与审批
+
+工作流是租户隔离、版本冻结的通用有向图，不包含任何垂直业务步骤。`dependsOn` 表达串行、并行与汇合；`transitions[].condition.equals` 提供确定性的条件分支。步骤类型为 `task`、`handoff` 或 `approval`。
+
+- `POST/GET /api/v1/admin/workflows`：新建、列出工作流模板。
+- `GET /api/v1/admin/workflows/:id`：模板、版本、步骤与转移。
+- `POST /api/v1/admin/workflows/:id/versions`：创建不可变草稿版本。
+- `POST /api/v1/admin/workflow-versions/:id/publish`：发布版本。
+- `POST /api/v1/admin/workflow-versions/:id/executions`：以 `runId`、`input` 和 `idempotencyKey` 启动执行。
+- `GET /api/v1/admin/workflow-executions?workflowId=&status=`：执行列表。
+- `GET /api/v1/admin/workflow-executions/:id`：步骤、审批与决定快照。
+- `GET /api/v1/admin/workflow-executions/:id/audit`：完整执行审计。
+- `POST /api/v1/admin/workflow-step-runs/:id/complete|fail`：完成或失败一个任务步骤。
+- `POST /api/v1/admin/workflow-approvals/:id/decisions`：`approve`、`reject` 或 `conditional_approve`。
+- `POST /api/v1/admin/workflow-executions/:id/process-timeouts`：处理到期步骤并激活升级路径。
+
+Agent 运行时可通过 organization MCP 的 `workflow_start`、`workflow_step_complete`、`workflow_step_fail` 和 `approval_vote` 使用相同能力。步骤启动时会把 `agent`、群组 `role` 或整个 `group` 解析为不可变的受派人快照，异步派发到每个 Agent；普通步骤只有快照中的 Agent 可以回执。审批人在审批创建时同样冻结为快照，后续成员与角色变化不会改写历史。所有幂等键都绑定请求指纹，同一个键换目标或载荷会明确冲突。

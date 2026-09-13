@@ -298,13 +298,13 @@ H4 不实现正式会议治理。行动项审批、投票、法定人数、否�
 
 ### Agent Hub P1
 
-- [ ] workflow/version/step/run 数据模型；
-- [ ] 串行、并行、交接、会签和条件分支；
-- [ ] approval、vote、quorum、veto 和 timeout escalation；
-- [ ] 投票开始时冻结成员、角色和权重；
-- [ ] 工作流输入输出 Schema、重试和补偿；
-- [ ] workflow_start、approval_vote MCP 工具；
-- [ ] 工作流及审批历史 UI。
+- [x] workflow/version/step/run 数据模型；
+- [x] 串行、并行、交接、会签和条件分支；
+- [x] approval、vote、quorum、veto 和 timeout escalation；
+- [x] 投票开始时冻结成员、角色和权重；
+- [x] 工作流输入输出 Schema、重试和补偿；
+- [x] workflow_start、approval_vote MCP 工具；
+- [x] 工作流及审批历史 UI。
 
 ### Speeding 验收案例
 

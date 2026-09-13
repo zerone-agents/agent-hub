@@ -279,6 +279,12 @@ func main() {
 	runHandler := handler.NewRunHandler(runService)
 	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
 	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
+	workflowService := services.NewWorkflowService(database.GetDB())
+	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
+	workflowHandler := handler.NewWorkflowHandler(workflowService)
+	decisionService := services.NewDecisionService(database.GetDB())
+	decisionService.SetWorkflowService(workflowService)
+	decisionHandler := handler.NewDecisionHandler(decisionService)
 
 	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
 	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
@@ -341,6 +347,8 @@ func main() {
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
+	organizationMcpHandler.SetWorkflowService(workflowService)
+	organizationMcpHandler.SetDecisionService(decisionService)
 	agentMessageAdminHandler := handler.NewAgentMessageAdminHandler(organizationMessageService)
 
 	// ==================== 路由管理 ====================
@@ -482,6 +490,9 @@ func main() {
 
 	// ---------- H4 group and channel collaboration ----------
 	handler.RegisterCollaborationRoutes(adminWrite, adminRead, collaborationHandler)
+	// ---------- H5 reusable workflows and approvals ----------
+	handler.RegisterWorkflowRoutes(adminWrite, adminRead, workflowHandler)
+	handler.RegisterDecisionRoutes(adminWrite, adminRead, decisionHandler)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

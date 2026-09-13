@@ -36,7 +36,16 @@ type GroupOrganizationMessageService interface {
 // through MCP. Authentication is the caller runtime's Bearer token; source
 // identity is never accepted from tool arguments.
 type OrganizationMcpHandler struct {
-	service OrganizationMessageService
+	service         OrganizationMessageService
+	workflowService *services.WorkflowService
+	decisionService *services.DecisionService
+}
+
+func (h *OrganizationMcpHandler) SetWorkflowService(service *services.WorkflowService) {
+	h.workflowService = service
+}
+func (h *OrganizationMcpHandler) SetDecisionService(service *services.DecisionService) {
+	h.decisionService = service
 }
 
 func NewOrganizationMcpHandler(service OrganizationMessageService) *OrganizationMcpHandler {
@@ -152,6 +161,20 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 			"name": "session_end", "description": "结束活动中的轻量会话房间并保存总结。仅主持人或群组 leader 可执行。",
 			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"session_id": map[string]interface{}{"type": "string"}, "summary": map[string]interface{}{"type": "string"}}, "required": []string{"session_id", "summary"}},
 		},
+		{
+			"name": "workflow_start", "description": "启动一个已发布的通用工作流版本。相同 idempotency_key 重试会返回同一执行实例。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"version_id": map[string]interface{}{"type": "string"}, "run_id": map[string]interface{}{"type": "string"}, "input": map[string]interface{}{"type": "object"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"version_id", "idempotency_key"}},
+		},
+		{
+			"name": "approval_vote", "description": "对分配给当前 Agent 的审批做出批准、拒绝或附条件批准决定。审批开始时的审批人快照不会被后续组织变化改写。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"approval_id": map[string]interface{}{"type": "string"}, "decision": map[string]interface{}{"type": "string", "enum": []string{"approve", "reject", "conditional_approve"}}, "reason": map[string]interface{}{"type": "string"}, "conditions": map[string]interface{}{"type": "object"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"approval_id", "decision", "idempotency_key"}},
+		},
+		{
+			"name": "decision_vote", "description": "当前 Agent 对群体决策投赞成、反对或弃权票。投票身份来自运行时令牌，且必须属于决策开始时冻结的选民快照。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"decision_id": map[string]interface{}{"type": "string"}, "choice": map[string]interface{}{"type": "string", "enum": []string{"approve", "reject", "abstain"}}, "reason": map[string]interface{}{"type": "string"}}, "required": []string{"decision_id", "choice"}},
+		},
+		{"name": "workflow_step_complete", "description": "回执当前 Agent 被分配的普通工作流步骤，并推进后续步骤。", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"step_run_id": map[string]interface{}{"type": "string"}, "output": map[string]interface{}{"type": "object"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"step_run_id", "idempotency_key"}}},
+		{"name": "workflow_step_fail", "description": "报告当前 Agent 被分配的工作流步骤失败，触发重试、补偿或确定性失败收敛。", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"step_run_id": map[string]interface{}{"type": "string"}, "error": map[string]interface{}{"type": "string"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"step_run_id", "error", "idempotency_key"}}},
 	}
 	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": tools}}
 }
@@ -222,6 +245,30 @@ type sessionStartArgs struct {
 type sessionEndArgs struct {
 	SessionID string `json:"session_id"`
 	Summary   string `json:"summary"`
+}
+type workflowStartArgs struct {
+	VersionID      string         `json:"version_id"`
+	RunID          string         `json:"run_id"`
+	Input          map[string]any `json:"input"`
+	IdempotencyKey string         `json:"idempotency_key"`
+}
+type approvalVoteArgs struct {
+	ApprovalID     string         `json:"approval_id"`
+	Decision       string         `json:"decision"`
+	Reason         string         `json:"reason"`
+	Conditions     map[string]any `json:"conditions"`
+	IdempotencyKey string         `json:"idempotency_key"`
+}
+type workflowStepArgs struct {
+	StepRunID      string         `json:"step_run_id"`
+	Output         map[string]any `json:"output"`
+	Error          string         `json:"error"`
+	IdempotencyKey string         `json:"idempotency_key"`
+}
+type decisionVoteArgs struct {
+	DecisionID string `json:"decision_id"`
+	Choice     string `json:"choice"`
+	Reason     string `json:"reason"`
 }
 
 func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
@@ -381,6 +428,64 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			return mcpErrorResult(id, err.Error()), nil
 		}
 		return mcpJSONResult(id, room)
+	case "workflow_start":
+		if h.workflowService == nil {
+			return mcpErrorResult(id, "工作流能力尚未启用"), nil
+		}
+		var args workflowStartArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		execution, err := h.workflowService.StartExecution(tenantID, args.VersionID, args.RunID, args.Input, args.IdempotencyKey, source.Name)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, execution)
+	case "approval_vote":
+		if h.workflowService == nil {
+			return mcpErrorResult(id, "审批能力尚未启用"), nil
+		}
+		var args approvalVoteArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		execution, err := h.workflowService.DecideApproval(tenantID, args.ApprovalID, source.Name, args.Decision, args.Reason, args.Conditions, args.IdempotencyKey)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, execution)
+	case "decision_vote":
+		if h.decisionService == nil {
+			return mcpErrorResult(id, "群体决策能力尚未启用"), nil
+		}
+		var args decisionVoteArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		vote, err := h.decisionService.CastAgentVote(tenantID, source, args.DecisionID, args.Choice, args.Reason)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, vote)
+	case "workflow_step_complete", "workflow_step_fail":
+		if h.workflowService == nil {
+			return mcpErrorResult(id, "工作流能力尚未启用"), nil
+		}
+		var args workflowStepArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, err
+		}
+		var execution any
+		var err error
+		if call.Name == "workflow_step_complete" {
+			execution, err = h.workflowService.CompleteStep(tenantID, args.StepRunID, args.Output, args.IdempotencyKey, source.Name)
+		} else {
+			execution, err = h.workflowService.FailStep(tenantID, args.StepRunID, args.Error, args.IdempotencyKey, source.Name)
+		}
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, execution)
 	default:
 		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", call.Name)
 	}

@@ -16,6 +16,7 @@ import (
 	"control-panel/internal/domain/capability"
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/collaboration"
+	"control-panel/internal/domain/decision"
 	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
@@ -24,6 +25,7 @@ import (
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/systemsetting"
+	"control-panel/internal/domain/workflow"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -156,6 +158,12 @@ func AutoMigrate(backfillTenant string) error {
 		&collaboration.Session{},
 		&collaboration.SessionParticipant{},
 		&collaboration.MemberAudit{},
+		&decision.Decision{},
+		&decision.Elector{},
+		&decision.Vote{},
+		&decision.Result{},
+		&decision.Audit{},
+		&decision.Escalation{},
 		&aigc.Config{},
 		&provider.ProviderSummary{},
 		&provider.ProviderAttribute{},
@@ -184,6 +192,17 @@ func AutoMigrate(backfillTenant string) error {
 		&eventdomain.CausalBudget{},
 		&capability.Package{},
 		&capability.ResourceProvenance{},
+		&workflow.Definition{},
+		&workflow.Version{},
+		&workflow.Step{},
+		&workflow.Transition{},
+		&workflow.Execution{},
+		&workflow.StepRun{},
+		&workflow.StepDispatch{},
+		&workflow.StepReceipt{},
+		&workflow.Approval{},
+		&workflow.ApprovalDecision{},
+		&workflow.Audit{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

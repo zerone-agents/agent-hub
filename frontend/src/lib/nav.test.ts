@@ -20,6 +20,10 @@ describe('getBreadcrumbs', () => {
       { label: '首页', path: '/dashboard' },
       { label: '组织协作' }
     ])
+    expect(getBreadcrumbs('/governance')).toEqual([
+      { label: '首页', path: '/dashboard' },
+      { label: '流程与决策' }
+    ])
   })
 
   it('matches nested routes under a nav item', () => {

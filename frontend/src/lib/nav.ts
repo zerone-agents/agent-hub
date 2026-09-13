@@ -14,7 +14,8 @@ import {
   PackageIcon,
   PulseIcon,
   ShieldCheckIcon,
-  UsersThreeIcon
+  UsersThreeIcon,
+  GitBranchIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -34,6 +35,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'personalities', label: '人格库', path: '/personalities', icon: FingerprintIcon },
   { id: 'relations', label: '组织关系', path: '/relations', icon: ShareNetworkIcon },
   { id: 'groups', label: '组织协作', path: '/groups', icon: UsersThreeIcon },
+  { id: 'governance', label: '流程与决策', path: '/governance', icon: GitBranchIcon },
   { id: 'collaboration-audit', label: '协作审计', path: '/collaboration-audit', icon: ShieldCheckIcon },
   { id: 'extensions', label: '扩展能力', path: '/extensions', icon: PackageIcon },
   { id: 'tools', label: '工具管理', path: '/tools', icon: WrenchIcon },
