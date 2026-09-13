@@ -6,15 +6,16 @@ const (
 	RoleAdmin      = "admin"
 	RoleMaintainer = "maintainer"
 	RoleMember     = "member"
+	RoleGuest      = "guest"
 
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
 	StatusPending  = "pending"
 )
 
-// IsValidRole reports whether r is one of the three built-in roles.
+// IsValidRole reports whether r is one of the four built-in roles.
 func IsValidRole(r string) bool {
-	return r == RoleAdmin || r == RoleMaintainer || r == RoleMember
+	return r == RoleAdmin || r == RoleMaintainer || r == RoleMember || r == RoleGuest
 }
 
 // IsValidStatus reports whether s is one of the three account statuses.
