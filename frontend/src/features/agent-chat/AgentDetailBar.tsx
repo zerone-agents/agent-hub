@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { createStyles } from 'antd-style'
 import { useAgentDetail } from '@/queries/useAgentDetail'
-import { useAgents } from '@/queries/useAgents'
+import { usePublicAgents } from '@/queries/useAgents'
+import { useAuthMode } from '@/features/login/useAuthMode'
+import { useUserInfo } from '@/queries/useUserInfo'
+import { isGuestUser } from '@/lib/auth-guest'
 import { tokens as t } from '@/styles/tokens'
 import AgentDetailSummary, { type AgentDetailCounts } from './AgentDetailSummary'
 import AgentDetailGrid from './AgentDetailGrid'
@@ -19,18 +22,45 @@ interface Props {
 
 export default function AgentDetailBar({ agentName }: Props) {
   const { styles } = useStyles()
-  const { data, isLoading, isError } = useAgentDetail(agentName)
-  const agents = useAgents()
+  const { data: mode } = useAuthMode()
+  const { data: user } = useUserInfo()
+  const guest = isGuestUser(user, mode?.mode)
+  // guest 不发 admin detail 请求（403 注定失败）；formal 现状不变。
+  const { data, isLoading, isError } = useAgentDetail(agentName, { enabled: !guest })
+  const agents = usePublicAgents()
   const [expanded, setExpanded] = useState(false)
+
+  const hubAgent = agents.data?.find((a) => a.name === agentName)
+  const displayName = hubAgent?.config.title?.zh ?? hubAgent?.config.title?.en ?? agentName
+
+  if (guest) {
+    // guest 降级：公开列表数据（view=chat 的完整 AgentDTO）渲染 Summary；
+    // 无 transport 级详情（Grid 不可用），counts 取绑定名单长度。
+    if (!hubAgent) return null
+    const guestCounts: AgentDetailCounts = {
+      tools: hubAgent.tools?.length ?? 0,
+      mcps: hubAgent.mcps?.length ?? 0,
+      skills: hubAgent.skills?.length ?? 0,
+      subagents: hubAgent.subagents?.length ?? 0,
+      datasets: hubAgent.datasets?.length ?? 0,
+    }
+    return (
+      <div className={styles.wrapper}>
+        <AgentDetailSummary
+          name={displayName}
+          model={hubAgent.config.modelId || '—'}
+          status="ready"
+          counts={guestCounts}
+          expanded={false}
+          onToggle={() => { /* guest 无可展开详情 */ }}
+        />
+      </div>
+    )
+  }
 
   // Silent hide on loading/error/success-no-data. Chat flow continues
   // independently — this panel is non-blocking decoration.
   if (isLoading || isError || !data) return null
-
-  // Prefer the human-readable title from the hub agent record; fall back
-  // to the technical identifier when the record/title is unavailable.
-  const hubAgent = agents.data?.find((a) => a.name === agentName)
-  const displayName = hubAgent?.config.title?.zh ?? hubAgent?.config.title?.en ?? data.name
 
   const counts: AgentDetailCounts = {
     tools: data.allowedTools?.length ?? 0,

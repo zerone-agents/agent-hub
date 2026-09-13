@@ -70,6 +70,8 @@ export interface Agent {
 
 export const agentApi = {
   list: () => apiClient.get('/api/v1/admin/agents'),
+  /** 聊天视图公开列表（guest 白名单端点；guest 仅见 guestEnabled，正式全量）。 */
+  publicList: () => apiClient.get('/api/v1/agents?view=chat'),
   get: (name: string) => apiClient.get(`/api/v1/agents/${encodeURIComponent(name)}`),
   create: (data: Partial<Agent>) => apiClient.post('/api/v1/admin/agents', data),
   update: (name: string, data: Partial<Agent>) => apiClient.put(`/api/v1/admin/agents/${encodeURIComponent(name)}`, data),

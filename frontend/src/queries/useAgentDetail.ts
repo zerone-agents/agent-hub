@@ -9,7 +9,7 @@ import { agentApi, type AgentDetail } from '@/api/agents'
  * chat session. On error the consuming component silently hides, so we
  * retry once to absorb transient runtime hiccups before giving up.
  */
-export function useAgentDetail(name: string) {
+export function useAgentDetail(name: string, options?: { enabled?: boolean }) {
   return useQuery<AgentDetail>({
     queryKey: ['agents', name, 'detail'],
     queryFn: async () => {
@@ -17,7 +17,7 @@ export function useAgentDetail(name: string) {
       const res = await agentApi.getDetail(name)
       return res.data as AgentDetail
     },
-    enabled: !!name,
+    enabled: !!name && options?.enabled !== false,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
