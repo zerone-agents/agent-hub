@@ -149,6 +149,32 @@ export interface AgentMessage {
   completedAt?: string
 }
 
+export type RunRouteMode = 'strict' | 'adaptive'
+
+export interface RunRouteStep {
+  id?: number
+  sequence?: number
+  sourceAgentId: number
+  targetAgentId: number
+  action?: string
+}
+
+export interface RunRoutePlan {
+  id: number
+  runId: string
+  mode: RunRouteMode
+  metadata?: Record<string, unknown>
+  steps: RunRouteStep[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PutRunRoutePlanInput {
+  mode: RunRouteMode
+  steps: RunRouteStep[]
+  metadata?: Record<string, unknown>
+}
+
 export interface Run {
   id: string
   name: string
@@ -197,6 +223,9 @@ export const runApi = {
   listEvents: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/events`),
   listToolResults: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/tool-results`),
   listAgentMessages: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/agent-messages`),
+  getRoutePlan: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/route-plan`),
+  putRoutePlan: (id: string, input: PutRunRoutePlanInput) =>
+    apiClient.put(`/api/v1/admin/runs/${id}/route-plan`, input),
   listCapabilityPackages: () =>
     apiClient.get('/api/v1/admin/capability-packages', { params: { enabled: 'true' } }),
 }

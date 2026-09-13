@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { parseApiError, unwrapResponse } from '@/api/client'
-import { runApi, type AgentMessage, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
+import { runApi, type AgentMessage, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type PutRunRoutePlanInput, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunRoutePlan, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
 
 export function useRuns() {
   return useQuery<Run[]>({
@@ -55,6 +55,34 @@ export function useRunAgentMessages(id?: string) {
     queryFn: async () => unwrapResponse<AgentMessage[]>(await runApi.listAgentMessages(id as string)),
     enabled: id !== undefined,
     refetchInterval: ({ state }) => state.data?.some((item) => item.status === 'queued' || item.status === 'running') ? 1500 : 5000,
+  })
+}
+
+export function useRunRoutePlan(id?: string) {
+  return useQuery<RunRoutePlan | null>({
+    queryKey: ['runs', id, 'route-plan'],
+    queryFn: async () => {
+      try {
+        return unwrapResponse<RunRoutePlan>(await runApi.getRoutePlan(id as string))
+      } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } })?.response?.status
+        if (status === 404) return null
+        throw error
+      }
+    },
+    enabled: id !== undefined,
+  })
+}
+
+export function usePutRunRoutePlan() {
+  const qc = useQueryClient()
+  return useMutation<RunRoutePlan, Error, { id: string; input: PutRunRoutePlanInput }>({
+    mutationFn: async ({ id, input }) => unwrapResponse<RunRoutePlan>(await runApi.putRoutePlan(id, input)),
+    onSuccess: (plan, variables) => {
+      qc.setQueryData(['runs', variables.id, 'route-plan'], plan)
+      message.success('任务路径已保存')
+    },
+    onError: (error) => message.error(parseApiError(error)),
   })
 }
 

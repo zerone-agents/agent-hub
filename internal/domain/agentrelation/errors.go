@@ -25,6 +25,8 @@ var (
 	ErrChainGuarded         = errors.New("消息链路已被预算守卫终止")
 	ErrSyncDeadlock         = errors.New("同步消息会形成循环等待，请改用异步投递")
 	ErrRunParticipantDenied = errors.New("目标 Agent 未参与本次运行，不能接收本次运行的消息")
+	ErrRunRouteDenied       = errors.New("本次任务的严格路径不允许该次跳转")
+	ErrRouteReasonRequired  = errors.New("自适应路由偏离计划时必须说明原因")
 	ErrInvalidEventType     = errors.New("关系事件类型无效")
 	ErrInvalidSeverity      = errors.New("关系事件严重程度必须为 1、2 或 3")
 	ErrInvalidVisibility    = errors.New("关系事件可见范围无效")

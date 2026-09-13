@@ -21,6 +21,7 @@ type fakeOrganizationMessageService struct {
 	sent         *services.AgentMessageDTO
 	got          *services.AgentMessageDTO
 	inbox        []*services.AgentMessageDTO
+	chain        *services.AgentMessageChainDTO
 	source       *agent.AgentConfig
 	tenantID     string
 	input        services.SendAgentMessageInput
@@ -51,6 +52,11 @@ func (f *fakeOrganizationMessageService) Get(tenantID string, source *agent.Agen
 func (f *fakeOrganizationMessageService) Inbox(tenantID string, source *agent.AgentConfig, _ int) ([]*services.AgentMessageDTO, error) {
 	f.tenantID, f.source = tenantID, source
 	return f.inbox, nil
+}
+
+func (f *fakeOrganizationMessageService) MessageChainForAgent(tenantID string, source *agent.AgentConfig, _, _ string, _ int) (*services.AgentMessageChainDTO, error) {
+	f.tenantID, f.source = tenantID, source
+	return f.chain, nil
 }
 
 func setupOrganizationMcpRouter(service OrganizationMessageService) *gin.Engine {
@@ -114,12 +120,26 @@ func TestOrganizationMcpListsRuntimeTools(t *testing.T) {
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox"}, []string{
+	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox", "agent_message_chain"}, []string{
 		response.Result.Tools[0].Name,
 		response.Result.Tools[1].Name,
 		response.Result.Tools[2].Name,
 		response.Result.Tools[3].Name,
+		response.Result.Tools[4].Name,
 	})
+}
+
+func TestOrganizationMcpMessageChainUsesRuntimeIdentity(t *testing.T) {
+	service := &fakeOrganizationMessageService{chain: &services.AgentMessageChainDTO{
+		ConversationID: "conv-1", RootMessageID: "root-1", MessageCount: 1, Verified: true,
+		Messages: []*services.AgentMessageDTO{{ID: "m1", SourceAgentID: 41, TargetAgentID: 42, Verified: true}},
+	}}
+	router := setupOrganizationMcpRouter(service)
+	rec := postOrganizationRPC(t, router, "tools/call", json.RawMessage(`{"name":"agent_message_chain","arguments":{"conversation_id":"conv-1"}}`), "agent-a-token")
+	payload := decodeMcpTextResult(t, rec)
+	require.Equal(t, "conv-1", payload["conversationId"])
+	require.Equal(t, "tenant-a", service.tenantID)
+	require.Equal(t, uint64(41), service.source.ID)
 }
 
 func TestOrganizationMcpDoesNotExposeLegacyRelationshipMutation(t *testing.T) {

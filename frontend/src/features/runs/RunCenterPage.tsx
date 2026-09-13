@@ -13,15 +13,18 @@ import {
   EyeIcon,
   StackIcon,
   PlusIcon,
+  CaretUpIcon,
+  CaretDownIcon,
+  TrashIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useNavigate, useParams } from 'react-router'
-import type { AgentMessage, PromptSnapshot, Run, RunActivity, RunEventItem, RunState, RunStateChange, RunStatus, ToolResultRecord } from '@/api/runs'
+import type { AgentMessage, PromptSnapshot, Run, RunActivity, RunEventItem, RunRouteMode, RunRouteStep, RunState, RunStateChange, RunStatus, ToolResultRecord } from '@/api/runs'
 import { parseApiError } from '@/api/client'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { useAgents } from '@/queries/useAgents'
-import { useAddRunAgent, useComposeRunPrompt, useCreateRun, useEnabledCapabilityPackages, useRun, useRunActivities, useRunAgentMessages, useRunEvents, useRuns, useRunStateChanges, useRunToolResults, useTransitionRun } from '@/queries/useRuns'
+import { useAddRunAgent, useComposeRunPrompt, useCreateRun, useEnabledCapabilityPackages, usePutRunRoutePlan, useRun, useRunActivities, useRunAgentMessages, useRunEvents, useRunRoutePlan, useRuns, useRunStateChanges, useRunToolResults, useTransitionRun } from '@/queries/useRuns'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 
@@ -131,9 +134,19 @@ const useStyles = createStyles(({ css }) => ({
   route: css`display: flex; align-items: center; gap: 7px; min-width: 0; color: ${t.text}; font-size: ${t.textSm}; font-weight: 620; span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
   hopMeta: css`min-width: 0; color: ${t.textTertiary}; font-size: 12px; line-height: 1.5; @media (max-width: 720px) { grid-column: 2; }`,
   hopStatus: css`display: flex; justify-content: flex-end; gap: 7px; align-items: center; color: ${t.textSecondary}; font-size: 12px; @media (max-width: 720px) { grid-column: 2; justify-content: flex-start; }`,
+  hopTree: css`position: relative; min-width: 0;`,
+  evidence: css`display: inline-flex; align-items: center; gap: 4px; color: ${t.textMuted}; font-size: 11px;`,
   guide: css`padding: 16px; border: 1px dashed var(--border); border-radius: ${t.radiusSm}px; background: var(--background);`,
   guideSteps: css`display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-bottom: 14px; @media (max-width: 720px) { grid-template-columns: 1fr; }`,
   guideStep: css`padding: 0 14px; border-right: 1px solid var(--border); color: ${t.textTertiary}; font-size: 12px; line-height: 1.55; &:first-child { padding-left: 0; } &:last-child { padding-right: 0; border-right: 0; } strong { display: block; margin-bottom: 3px; color: ${t.text}; font-size: ${t.textSm}; } @media (max-width: 720px) { padding: 10px 0; border-right: 0; border-bottom: 1px solid var(--border); &:first-child { padding-top: 0; } &:last-child { padding-bottom: 0; border-bottom: 0; } }`,
+  routePlan: css`margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border);`,
+  routePlanHead: css`display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; @media (max-width: 620px) { flex-direction: column; }`,
+  routeMode: css`display: inline-flex; gap: 4px; padding: 3px; border-radius: ${t.radiusSm}px; background: var(--background);`,
+  routeModeSelected: css`&&& { color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }`,
+  routeStep: css`display: grid; grid-template-columns: 38px minmax(0, 1fr) 22px minmax(0, 1fr) minmax(110px, .55fr) auto; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); &:last-child { border-bottom: 0; } @media (max-width: 720px) { grid-template-columns: 34px minmax(0, 1fr) 22px minmax(0, 1fr); & > :nth-last-child(-n+2) { grid-column: 2 / -1; } }`,
+  routeIndex: css`color: ${t.textMuted}; font-family: ${t.fontMono}; font-size: 11px;`,
+  routeControls: css`display: flex; align-items: center; gap: 2px;`,
+  routeFooter: css`display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 12px;`,
   center: css`display: grid; min-height: 470px; place-items: center; padding: 30px;`,
 }))
 
@@ -243,19 +256,32 @@ function CollaborationTimeline({ items }: { items: AgentMessage[] }) {
   }, [items])
   return <div style={{ display: 'grid', gap: 12 }}>{conversations.map((messages) => {
     const first = messages[0]
-    const routeNames = [first.sourceAgent, ...messages.map((item) => item.targetAgent)]
+    const byParent = new Map<string, AgentMessage[]>()
+    const ids = new Set(messages.map((item) => item.id))
+    messages.forEach((item) => {
+      const parent = item.parentMessageId && ids.has(item.parentMessageId) ? item.parentMessageId : '__root__'
+      byParent.set(parent, [...(byParent.get(parent) ?? []), item])
+    })
+    const ordered: { item: AgentMessage; depth: number }[] = []
+    const append = (parent: string, depth: number) => (byParent.get(parent) ?? []).forEach((item) => {
+      ordered.push({ item, depth }); append(item.id, depth + 1)
+    })
+    append('__root__', 0)
     return <div className={styles.chain} key={first.conversationId || first.id}>
-      <div className={styles.chainHead}><span>协作路径</span>{routeNames.map((name, index) => <span key={`${name}-${index}`} style={{ display: 'contents' }}>{index > 0 && <ArrowRightIcon size={12} />}<span className={styles.chainNode}>{name}</span></span>)}</div>
-      {messages.map((item) => {
+      <div className={styles.chainHead}><span>协作记录</span><span className={styles.chainNode}>{messages.length} 次实际联络</span><span>· 根消息 {first.rootMessageId || first.id}</span></div>
+      {ordered.map(({ item, depth }) => {
         const status = MESSAGE_STATUS[item.status] ?? { label: item.status }
         const isReturn = item.hop > 1 && item.targetAgent === first.sourceAgent
         const reason = item.guardDescription || (item.guardReason ? (GUARD_REASON[item.guardReason] ?? item.guardReason) : item.error)
-        return <div className={styles.hopRow} key={item.id}>
+        const verified = item.status === 'completed' && Boolean(item.reply)
+        const evidence = verified ? '结果已验证' : item.status === 'queued' || item.status === 'running' ? '等待结果验证' : '系统已留痕'
+        return <div className={styles.hopTree} key={item.id} style={{ paddingLeft: Math.min(depth, 5) * 22 }} data-parent-message-id={item.parentMessageId ?? ''} data-root-message-id={item.rootMessageId}>
+        <div className={styles.hopRow}>
           <div className={styles.hopNumber}>第 {item.hop} 跳</div>
           <div className={styles.route}><span>{item.sourceAgent}</span>{item.action === 'escalate' ? <ArrowBendUpRightIcon size={15} /> : <ArrowRightIcon size={15} />}<span>{item.targetAgent}</span></div>
-          <div className={styles.hopMeta}>{isReturn ? '回报发起人 · ' : ''}{ACTION_LABEL[item.action] ?? item.action} · {item.deliveryPolicy === 'sync' ? '同步等待' : '异步投递'}<br />排队 {elapsed(item.createdAt, item.startedAt)}{item.startedAt ? ` · 处理 ${elapsed(item.startedAt, item.completedAt)}` : ''}{reason ? ` · 停止原因：${reason}` : ''}</div>
-          <div className={styles.hopStatus}><Tag color={status.color} variant="filled">{status.label}</Tag><span>{item.hop}/{item.maxHops} 跳</span></div>
-        </div>
+          <div className={styles.hopMeta}>{isReturn ? '回报发起人 · ' : ''}{ACTION_LABEL[item.action] ?? item.action} · {item.deliveryPolicy === 'sync' ? '同步等待' : '异步投递'}<br />排队 {elapsed(item.createdAt, item.startedAt)}{item.startedAt ? ` · 处理 ${elapsed(item.startedAt, item.completedAt)}` : ''}{reason ? ` · 停止原因：${reason}` : ''}<br /><span className={styles.evidence}>{evidence} · 消息 {item.id.slice(0, 8)}{item.parentMessageId ? ` · 上一步 ${item.parentMessageId.slice(0, 8)}` : ''}</span></div>
+          <div className={styles.hopStatus}><Tag color={status.color} variant="filled">{status.label}</Tag><Tag color={verified ? 'success' : item.status === 'queued' || item.status === 'running' ? 'processing' : 'default'} variant="filled">{verified ? '已验证' : '未验证'}</Tag><span>{item.hop}/{item.maxHops} 跳</span></div>
+        </div></div>
       })}
     </div>
   })}</div>
@@ -273,6 +299,56 @@ function CollaborationGuide({ run, onConfigure }: { run: Run; onConfigure: () =>
     </div>
     <div className={styles.detailActions} style={{ justifyContent: 'flex-start' }}><Button onClick={onConfigure}>配置 Agent 关系</Button>{run.status === 'running' && firstAgent && <PrimaryButton icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(firstAgent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(run.id)}`)}>从 {firstAgent.agentNameSnapshot} 发起测试</PrimaryButton>}</div>
   </div>
+}
+
+const ROUTE_ACTION_OPTIONS = Object.entries(ACTION_LABEL).map(([value, label]) => ({ value, label }))
+
+function TaskRoutePlan({ run, canWrite }: { run: Run; canWrite: boolean }) {
+  const { styles } = useStyles()
+  const plan = useRunRoutePlan(run.id)
+  const save = usePutRunRoutePlan()
+  const [mode, setMode] = useState<RunRouteMode>('strict')
+  const [steps, setSteps] = useState<RunRouteStep[]>([])
+  const editable = canWrite && run.status === 'draft'
+  const participants = (run.agents ?? []).map((agent) => ({ value: agent.agentId, label: agent.agentNameSnapshot || `Agent ${agent.agentId}` }))
+
+  useEffect(() => {
+    if (!plan.data) return
+    setMode(plan.data.mode)
+    setSteps(plan.data.steps.map(({ sourceAgentId, targetAgentId, action }) => ({ sourceAgentId, targetAgentId, action })))
+  }, [plan.data])
+
+  const addStep = () => setSteps((current) => [...current, { sourceAgentId: participants[0]?.value ?? 0, targetAgentId: participants[1]?.value ?? 0, action: '' }])
+  const updateStep = (index: number, patch: Partial<RunRouteStep>) => setSteps((current) => current.map((step, at) => at === index ? { ...step, ...patch } : step))
+  const moveStep = (index: number, offset: number) => setSteps((current) => {
+    const next = [...current]
+    const target = index + offset
+    if (target < 0 || target >= next.length) return current
+    ;[next[index], next[target]] = [next[target], next[index]]
+    return next
+  })
+  const valid = steps.length > 0 && steps.every((step) => step.sourceAgentId > 0 && step.targetAgentId > 0 && step.sourceAgentId !== step.targetAgentId)
+
+  return <section className={styles.routePlan} aria-labelledby={`route-plan-${run.id}`}>
+    <div className={styles.routePlanHead}>
+      <div><h3 className={styles.sectionTitle} id={`route-plan-${run.id}`}><ArrowRightIcon size={17} />任务路径</h3><p className={styles.collaborationHelp}>连接表示 Agent 长期可以联系谁；任务路径表示本次运行应该按什么顺序协作。</p></div>
+      <div className={styles.routeMode} role="radiogroup" aria-label="路径模式">
+        <Button type="text" className={mode === 'strict' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'strict'} disabled={!editable} onClick={() => setMode('strict')}>严格执行</Button>
+        <Button type="text" className={mode === 'adaptive' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'adaptive'} disabled={!editable} onClick={() => setMode('adaptive')}>允许调整</Button>
+      </div>
+    </div>
+    {mode === 'strict' ? <Alert type="info" showIcon title="严格执行：只允许计划中的传递路径，长期存在的其他连接也不能绕过本次安排。" /> : <Alert type="warning" showIcon title="允许调整：Agent 可以改走其他已有连接，但必须说明偏离原因，系统会保留记录。" />}
+    {plan.isError ? <Alert style={{ marginTop: 10 }} type="error" showIcon title="任务路径加载失败" description={parseApiError(plan.error)} /> : plan.isLoading ? <Skeleton active paragraph={{ rows: 2 }} /> : steps.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={editable ? '还没有任务路径，请添加第一步' : '本次运行没有锁定任务路径'} /> : <div className={styles.quietList} style={{ marginTop: 10 }}>{steps.map((step, index) => <div className={styles.routeStep} key={`${index}-${step.sourceAgentId}-${step.targetAgentId}`}>
+      <span className={styles.routeIndex}>{index + 1}</span>
+      <Select aria-label={`第 ${index + 1} 步发送方`} value={step.sourceAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => updateStep(index, { sourceAgentId: value })} />
+      <ArrowRightIcon size={16} aria-hidden="true" />
+      <Select aria-label={`第 ${index + 1} 步接收方`} value={step.targetAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => updateStep(index, { targetAgentId: value })} />
+      <Select aria-label={`第 ${index + 1} 步动作`} allowClear placeholder="任意已授权动作" value={step.action || undefined} options={ROUTE_ACTION_OPTIONS} disabled={!editable} onChange={(value) => updateStep(index, { action: value ?? '' })} />
+      {editable && <div className={styles.routeControls}><Button type="text" size="small" aria-label={`上移第 ${index + 1} 步`} disabled={index === 0} icon={<CaretUpIcon />} onClick={() => moveStep(index, -1)} /><Button type="text" size="small" aria-label={`下移第 ${index + 1} 步`} disabled={index === steps.length - 1} icon={<CaretDownIcon />} onClick={() => moveStep(index, 1)} /><Button type="text" danger size="small" aria-label={`删除第 ${index + 1} 步`} icon={<TrashIcon />} onClick={() => setSteps((current) => current.filter((_, at) => at !== index))} /></div>}
+    </div>)}</div>}
+    {editable && <div className={styles.routeFooter}><Button type="dashed" size="small" icon={<PlusIcon />} onClick={addStep}>添加一步</Button><PrimaryButton disabled={!valid} loading={save.isPending} onClick={() => save.mutate({ id: run.id, input: { mode, steps: steps.map(({ sourceAgentId, targetAgentId, action }) => ({ sourceAgentId, targetAgentId, ...(action ? { action } : {}) })) } })}>保存任务路径</PrimaryButton></div>}
+    {!editable && plan.data && <div className={styles.future}>这份任务路径已随运行开始锁定。如需更换路径，请新建一次运行。</div>}
+  </section>
 }
 
 const NEXT_ACTION: Partial<Record<RunStatus, { label: string; target: RunStatus }[]>> = {
@@ -342,11 +418,12 @@ function RunDetailPanel({ id }: { id: string }) {
       </section>
       <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
     </div>
+    <TaskRoutePlan run={run} canWrite={canWrite} />
     <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><PlayCircleIcon size={17} />执行过程</h3>
       {activities.isError ? <Alert type="error" showIcon title="执行过程加载失败" description={parseApiError(activities.error)} /> : activities.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ActivityTimeline activities={activities.data ?? []} />}
     </section>
     <section className={styles.collaboration}>
-      <div className={styles.collaborationHead}><div><h3 className={styles.sectionTitle}><ArrowsLeftRightIcon size={17} />Agent 协作链</h3><p className={styles.collaborationHelp}>展示实际发生的 A→B→C、回报和越级尝试。每一跳都单独经过关系、动作权限和运行预算检查。</p></div>{(agentMessages.data?.length ?? 0) > 0 && <Button onClick={() => void navigate('/relations')}>查看关系配置</Button>}</div>
+      <div className={styles.collaborationHead}><div><h3 className={styles.sectionTitle}><ArrowsLeftRightIcon size={17} />Agent 协作链</h3><p className={styles.collaborationHelp}>展示实际发生的 A→B→C、回报和越级尝试。每一跳都单独经过关系、动作权限和运行预算检查。</p></div>{(agentMessages.data?.length ?? 0) > 0 && <div className={styles.detailActions}><Button onClick={() => void navigate('/relations')}>查看关系配置</Button><PrimaryButton onClick={() => { const first = agentMessages.data?.[0]; if (first) void navigate(`/collaboration-audit?conversation_id=${encodeURIComponent(first.conversationId)}`) }}>核验完整链路</PrimaryButton></div>}</div>
       {agentMessages.isError ? <Alert type="error" showIcon title="协作记录加载失败" description={`${parseApiError(agentMessages.error)}。确认后端已升级到 H3 版本后重试。`} /> : agentMessages.isLoading ? <Skeleton active paragraph={{ rows: 4 }} /> : (agentMessages.data?.length ?? 0) > 0 ? <CollaborationTimeline items={agentMessages.data ?? []} /> : <CollaborationGuide run={run} onConfigure={() => void navigate('/relations')} />}
     </section>
     <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><ClockCounterClockwiseIcon size={17} />状态变化</h3>

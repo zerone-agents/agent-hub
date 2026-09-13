@@ -91,6 +91,33 @@ func (h *RunHandler) AddAgent(c *gin.Context) {
 	respondCreated(c, row)
 }
 
+func (h *RunHandler) PutRoutePlan(c *gin.Context) {
+	var req struct {
+		Mode     string                       `json:"mode"`
+		Metadata map[string]any               `json:"metadata"`
+		Steps    []services.RunRouteStepInput `json:"steps"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, 400, err.Error())
+		return
+	}
+	plan, err := h.service.PutRoutePlan(tenant.GetTenantID(c), c.Param("id"), services.PutRunRoutePlanInput{Mode: req.Mode, Metadata: req.Metadata, Steps: req.Steps, CreatedBy: actorID(c)})
+	if err != nil {
+		writeRunError(c, err)
+		return
+	}
+	respondSuccess(c, plan)
+}
+
+func (h *RunHandler) GetRoutePlan(c *gin.Context) {
+	plan, err := h.service.GetRoutePlan(tenant.GetTenantID(c), c.Param("id"))
+	if err != nil {
+		writeRunError(c, err)
+		return
+	}
+	respondSuccess(c, plan)
+}
+
 type schemaRequest struct {
 	Namespace    string         `json:"namespace"`
 	Name         string         `json:"name"`

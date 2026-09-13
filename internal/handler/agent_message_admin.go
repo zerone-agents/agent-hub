@@ -11,6 +11,19 @@ import (
 
 type RunAgentMessageReader interface {
 	ListRun(tenantID, runID string, limit int) ([]*services.AgentMessageDTO, error)
+	MessageChainAdmin(tenantID, conversationID, rootMessageID string, limit int) (*services.AgentMessageChainDTO, error)
+}
+
+// GetChain is the administrator view of the complete tenant-local causal
+// chain. Tenant identity always comes from auth context, never query input.
+func (h *AgentMessageAdminHandler) GetChain(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	chain, err := h.service.MessageChainAdmin(tenant.GetTenantID(c), c.Query("conversation_id"), c.Query("root_message_id"), limit)
+	if err != nil {
+		writeRunError(c, err)
+		return
+	}
+	respondSuccess(c, chain)
 }
 
 type AgentMessageAdminHandler struct{ service RunAgentMessageReader }

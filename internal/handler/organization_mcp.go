@@ -21,6 +21,7 @@ type OrganizationMessageService interface {
 	Send(ctx context.Context, tenantID string, source *agent.AgentConfig, input services.SendAgentMessageInput) (*services.AgentMessageDTO, error)
 	Get(tenantID string, source *agent.AgentConfig, id string) (*services.AgentMessageDTO, error)
 	Inbox(tenantID string, source *agent.AgentConfig, limit int) ([]*services.AgentMessageDTO, error)
+	MessageChainForAgent(tenantID string, source *agent.AgentConfig, conversationID, rootMessageID string, limit int) (*services.AgentMessageChainDTO, error)
 }
 
 // OrganizationMcpHandler exposes relation-authorized agent-to-agent delivery
@@ -85,16 +86,17 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"target_agent":      map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 finance-reviewer"},
-					"scope":             map[string]interface{}{"type": "string", "description": "关系范围。仅存在一个匹配范围时可省略；多范围必须明确填写。"},
-					"action":            map[string]interface{}{"type": "string", "enum": []string{"inform", "consult", "assign", "report", "submit", "review", "challenge", "handoff", "escalate", "invite"}},
-					"message":           map[string]interface{}{"type": "string", "description": "给接收方的任务、事实、问题或挑战。不要在此伪造对方回复。"},
-					"context_summary":   map[string]interface{}{"type": "string", "description": "当关系允许 summary_only/shared_thread 时可附带的必要摘要；none 策略会由 Hub 丢弃。"},
-					"shared_context":    map[string]interface{}{"type": "string", "description": "仅 shared_thread 策略可传递的完整上下文；其他策略会截断或丢弃。"},
-					"run_id":            map[string]interface{}{"type": "string", "description": "所属 Run；后续转发必须继承。"},
-					"parent_message_id": map[string]interface{}{"type": "string", "description": "当前这一跳的直接上游消息 ID。"},
-					"deadline":          map[string]interface{}{"type": "string", "format": "date-time", "description": "RFC3339 链路截止时间。"},
-					"idempotency_key":   map[string]interface{}{"type": "string", "description": "本跳稳定唯一键；重试时必须复用。"},
+					"target_agent":           map[string]interface{}{"type": "string", "description": "关系中接收方的 Agent ID，例如 finance-reviewer"},
+					"scope":                  map[string]interface{}{"type": "string", "description": "关系范围。仅存在一个匹配范围时可省略；多范围必须明确填写。"},
+					"action":                 map[string]interface{}{"type": "string", "enum": []string{"inform", "consult", "assign", "report", "submit", "review", "challenge", "handoff", "escalate", "invite"}},
+					"message":                map[string]interface{}{"type": "string", "description": "给接收方的任务、事实、问题或挑战。不要在此伪造对方回复。"},
+					"context_summary":        map[string]interface{}{"type": "string", "description": "当关系允许 summary_only/shared_thread 时可附带的必要摘要；none 策略会由 Hub 丢弃。"},
+					"shared_context":         map[string]interface{}{"type": "string", "description": "仅 shared_thread 策略可传递的完整上下文；其他策略会截断或丢弃。"},
+					"run_id":                 map[string]interface{}{"type": "string", "description": "所属 Run；后续转发必须继承。"},
+					"parent_message_id":      map[string]interface{}{"type": "string", "description": "当前这一跳的直接上游消息 ID。"},
+					"deadline":               map[string]interface{}{"type": "string", "format": "date-time", "description": "RFC3339 链路截止时间。"},
+					"idempotency_key":        map[string]interface{}{"type": "string", "description": "本跳稳定唯一键；重试时必须复用。"},
+					"route_deviation_reason": map[string]interface{}{"type": "string", "description": "Run 使用 adaptive 路由且本跳不在计划内时必填，用于审计偏离原因。"},
 				},
 				"required": []string{"target_agent", "action", "message"},
 			},
@@ -116,21 +118,34 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 				"properties": map[string]interface{}{"limit": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 100, "default": 20}},
 			},
 		},
+		{
+			"name":        "agent_message_chain",
+			"description": "按 conversation_id 或 root_message_id 查询当前 Agent 实际参与的协作链路。只返回当前 Agent 作为发送方或接收方的消息；verified 表示 Hub 是否留有可核验执行证据。",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"conversation_id": map[string]interface{}{"type": "string"},
+					"root_message_id": map[string]interface{}{"type": "string"},
+					"limit":           map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+				},
+			},
+		},
 	}
 	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": tools}}
 }
 
 type agentSendArgs struct {
-	TargetAgent     string `json:"target_agent"`
-	Scope           string `json:"scope"`
-	Action          string `json:"action"`
-	Message         string `json:"message"`
-	ContextSummary  string `json:"context_summary"`
-	SharedContext   string `json:"shared_context"`
-	RunID           string `json:"run_id"`
-	ParentMessageID string `json:"parent_message_id"`
-	Deadline        string `json:"deadline"`
-	IdempotencyKey  string `json:"idempotency_key"`
+	TargetAgent          string `json:"target_agent"`
+	Scope                string `json:"scope"`
+	Action               string `json:"action"`
+	Message              string `json:"message"`
+	ContextSummary       string `json:"context_summary"`
+	SharedContext        string `json:"shared_context"`
+	RunID                string `json:"run_id"`
+	ParentMessageID      string `json:"parent_message_id"`
+	Deadline             string `json:"deadline"`
+	IdempotencyKey       string `json:"idempotency_key"`
+	RouteDeviationReason string `json:"route_deviation_reason"`
 }
 
 type agentMessageStatusArgs struct {
@@ -139,6 +154,12 @@ type agentMessageStatusArgs struct {
 
 type agentInboxArgs struct {
 	Limit int `json:"limit"`
+}
+
+type agentMessageChainArgs struct {
+	ConversationID string `json:"conversation_id"`
+	RootMessageID  string `json:"root_message_id"`
+	Limit          int    `json:"limit"`
 }
 
 func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
@@ -197,7 +218,8 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			// from MCP. The service derives all causal counters and budgets from
 			// ParentMessageID, preventing an Agent from resetting hop or budget.
 			RunID: args.RunID, ParentMessageID: args.ParentMessageID, DeadlineAt: deadline,
-			IdempotencyKey: args.IdempotencyKey,
+			IdempotencyKey:       args.IdempotencyKey,
+			RouteDeviationReason: args.RouteDeviationReason,
 		})
 		if err != nil {
 			return mcpErrorResult(id, err.Error()), nil
@@ -228,6 +250,16 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			return mcpErrorResult(id, "组织消息箱读取失败"), nil
 		}
 		return mcpJSONResult(id, map[string]interface{}{"messages": messages})
+	case "agent_message_chain":
+		var args agentMessageChainArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		chain, err := h.service.MessageChainForAgent(tenantID, source, args.ConversationID, args.RootMessageID, args.Limit)
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, chain)
 	default:
 		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", call.Name)
 	}

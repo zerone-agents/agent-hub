@@ -14,7 +14,7 @@ const runs = [
     createdBy: '林经理',
     createdAt: '2026-09-12T08:00:00Z',
     updatedAt: '2026-09-12T09:00:00Z',
-    agents: [{ id: 11, agentId: 7, agentNameSnapshot: '研究分析师', role: '主分析' }],
+    agents: [{ id: 11, agentId: 7, agentNameSnapshot: '研究分析师', role: '主分析' }, { id: 13, agentId: 8, agentNameSnapshot: '法务顾问', role: '顾问' }],
     capabilityBindings: [{ namespace: 'io.zerone.research', packageName: '研究协作', version: '1.0.0' }],
   },
   {
@@ -39,8 +39,10 @@ const composePromptMutate = vi.fn((_variables: unknown, options?: { onSuccess?: 
   ],
   createdAt: '2026-09-12T09:00:00Z',
 }))
+const putRoutePlanMutate = vi.fn()
 let detailStatus = 'running'
 let collaborationMessages: unknown[] = []
+let routePlan: unknown = null
 
 vi.mock('@/hooks/useCanWrite', () => ({ useCanWrite: () => true }))
 vi.mock('@/queries/useAgents', () => ({
@@ -76,6 +78,8 @@ vi.mock('@/queries/useRuns', () => ({
     isLoading: false, isError: false,
   }),
   useRunAgentMessages: () => ({ data: collaborationMessages, isLoading: false, isError: false }),
+  useRunRoutePlan: () => ({ data: routePlan, isLoading: false, isError: false }),
+  usePutRunRoutePlan: () => ({ mutate: putRoutePlanMutate, isPending: false }),
   useCreateRun: () => ({ mutate: createMutate, isPending: false }),
   useEnabledCapabilityPackages: () => ({ data: [{ id: 41, namespace: 'io.zerone.research', name: 'research-team', displayName: '研究协作', version: '1.0.0', contentHash: 'abc', enabled: true }], isLoading: false }),
   useTransitionRun: () => ({ mutate: transitionMutate, isPending: false }),
@@ -97,7 +101,7 @@ function renderPage(path = '/runs/run-market') {
 }
 
 describe('RunCenterPage', () => {
-  beforeEach(() => { vi.clearAllMocks(); detailStatus = 'running'; collaborationMessages = [] })
+  beforeEach(() => { vi.clearAllMocks(); detailStatus = 'running'; collaborationMessages = []; routePlan = null })
 
   it('shows a product-readable run archive', () => {
     renderPage()
@@ -118,13 +122,13 @@ describe('RunCenterPage', () => {
 
   it('opens participant chat inside the selected run', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /进入本次对话/ }))
+    fireEvent.click(screen.getAllByRole('button', { name: /进入本次对话/ })[0])
     expect(screen.getByText('Agent Run Chat')).toBeInTheDocument()
   })
 
   it('explains an Agent judgment context in product language', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /查看判断背景/ }))
+    fireEvent.click(screen.getAllByRole('button', { name: /查看判断背景/ })[0])
     expect(screen.getByText('研究分析师 的判断背景')).toBeInTheDocument()
     expect(screen.getByText(/2 个判断依据/)).toBeInTheDocument()
     expect(screen.getByText(/人格和上下文不会赋予额外权限/)).toBeInTheDocument()
@@ -141,7 +145,7 @@ describe('RunCenterPage', () => {
 
   it('shows A to B to C, return, queue timing and budget guard in product language', () => {
     collaborationMessages = [
-      { id: 'm1', relationId: 1, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', hop: 1, maxHops: 3, eventBudget: 3, eventCount: 1, tokenBudget: 1000, tokensUsed: 100, visitedAgentIds: [1, 2], scope: 'project', sourceAgent: 'A', targetAgent: 'B', action: 'handoff', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'completed', createdAt: '2026-09-12T08:00:00Z', startedAt: '2026-09-12T08:00:02Z', completedAt: '2026-09-12T08:00:05Z' },
+      { id: 'm1', relationId: 1, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', hop: 1, maxHops: 3, eventBudget: 3, eventCount: 1, tokenBudget: 1000, tokensUsed: 100, visitedAgentIds: [1, 2], scope: 'project', sourceAgent: 'A', targetAgent: 'B', action: 'handoff', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'completed', reply: 'B 已完成', createdAt: '2026-09-12T08:00:00Z', startedAt: '2026-09-12T08:00:02Z', completedAt: '2026-09-12T08:00:05Z' },
       { id: 'm2', relationId: 2, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', parentMessageId: 'm1', hop: 2, maxHops: 3, eventBudget: 3, eventCount: 2, tokenBudget: 1000, tokensUsed: 300, visitedAgentIds: [1, 2, 3], scope: 'project', sourceAgent: 'B', targetAgent: 'C', action: 'assign', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'completed', createdAt: '2026-09-12T08:00:05Z', startedAt: '2026-09-12T08:00:06Z', completedAt: '2026-09-12T08:00:10Z' },
       { id: 'm3', relationId: 3, runId: 'run-market', conversationId: 'c1', rootMessageId: 'm1', parentMessageId: 'm2', hop: 3, maxHops: 3, eventBudget: 3, eventCount: 4, tokenBudget: 1000, tokensUsed: 500, visitedAgentIds: [1, 2, 3, 1], scope: 'project', sourceAgent: 'C', targetAgent: 'A', action: 'report', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'guarded', guardReason: 'event_budget_exceeded', createdAt: '2026-09-12T08:00:10Z' },
     ]
@@ -152,6 +156,9 @@ describe('RunCenterPage', () => {
     expect(screen.getByText(/排队 2.0 秒/)).toBeInTheDocument()
     expect(screen.getByText(/消息额度已用完/)).toBeInTheDocument()
     expect(screen.getByText('已拦截')).toBeInTheDocument()
+    expect(screen.getByText('已验证')).toBeInTheDocument()
+    expect(screen.getAllByText('未验证').length).toBeGreaterThan(0)
+    expect(screen.getByText(/上一步 m1/)).toBeInTheDocument()
   })
 
   it('filters runs by task name', () => {
@@ -189,10 +196,31 @@ describe('RunCenterPage', () => {
     fireEvent.mouseDown(screen.getByLabelText('选择 Agent'))
     fireEvent.click(await screen.findByText('风险复核员'))
     fireEvent.change(screen.getByLabelText('参与角色'), { target: { value: '复核者' } })
-    fireEvent.click(screen.getByRole('button', { name: /添加/ }))
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
     expect(addAgentMutate).toHaveBeenCalledWith(
       { id: 'run-market', agentId: 9, role: '复核者' },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
+  })
+
+  it('explains and saves a strict task route separately from long-lived connections', () => {
+    detailStatus = 'draft'
+    renderPage()
+    expect(screen.getByRole('heading', { name: '任务路径' })).toBeInTheDocument()
+    expect(screen.getByText(/连接表示 Agent 长期可以联系谁/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '添加一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存任务路径' }))
+    expect(putRoutePlanMutate).toHaveBeenCalledWith({
+      id: 'run-market',
+      input: { mode: 'strict', steps: [{ sourceAgentId: 7, targetAgentId: 8 }] },
+    })
+  })
+
+  it('shows a locked adaptive route and its deviation rule after execution starts', () => {
+    routePlan = { id: 1, runId: 'run-market', mode: 'adaptive', steps: [{ sourceAgentId: 7, targetAgentId: 8, action: 'consult' }], createdAt: '', updatedAt: '' }
+    renderPage()
+    expect(screen.getByText(/允许调整：Agent 可以改走其他已有连接/)).toBeInTheDocument()
+    expect(screen.getByText(/这份任务路径已随运行开始锁定/)).toBeInTheDocument()
+    expect(screen.getByLabelText('第 1 步发送方')).toBeDisabled()
   })
 })

@@ -32,6 +32,9 @@ type AgentMessage struct {
 	VisitedAgentIDs []uint64   `gorm:"column:visited_agent_ids;type:json;serializer:json" json:"visitedAgentIds"`
 	IdempotencyKey  string     `gorm:"column:idempotency_key;type:varchar(191);not null;default:'';index" json:"idempotencyKey,omitempty"`
 	GuardReason     string     `gorm:"column:guard_reason;type:varchar(64);not null;default:''" json:"guardReason,omitempty"`
+	RouteMode       string     `gorm:"column:route_mode;type:varchar(16);not null;default:''" json:"routeMode,omitempty"`
+	RoutePlanned    bool       `gorm:"column:route_planned;not null;default:false" json:"routePlanned"`
+	RouteDeviation  string     `gorm:"column:route_deviation;type:text" json:"routeDeviation,omitempty"`
 	Scope           string     `gorm:"type:varchar(64);not null;index" json:"scope"`
 	SourceAgentID   uint64     `gorm:"column:source_agent_id;not null;index" json:"sourceAgentId"`
 	SourceAgent     string     `gorm:"column:source_agent;type:varchar(64);not null" json:"sourceAgent"`

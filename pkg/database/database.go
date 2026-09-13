@@ -159,6 +159,8 @@ func AutoMigrate(backfillTenant string) error {
 		&rundomain.PromptSnapshot{},
 		&rundomain.Run{},
 		&rundomain.RunAgent{},
+		&rundomain.RunRoutePlan{},
+		&rundomain.RunRouteStep{},
 		&rundomain.CapabilityBinding{},
 		&rundomain.StateSchema{},
 		&rundomain.RunState{},

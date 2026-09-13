@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"control-panel/internal/domain/agentrelation"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/pkg/database"
 
 	"gorm.io/gorm"
@@ -395,6 +396,40 @@ func (r *AgentMessageRepository) ListForRun(tenantID, runID string, limit int) (
 	return messages, err
 }
 
+// ListChain returns a tenant-scoped, deterministic audit trail for one causal
+// conversation. Exactly one selector should be supplied by the service layer.
+func (r *AgentMessageRepository) ListChain(tenantID, conversationID, rootMessageID string, limit int) ([]*agentrelation.AgentMessage, error) {
+	return r.listChain(tenantID, conversationID, rootMessageID, 0, limit)
+}
+
+// ListChainForAgent deliberately filters every row, rather than merely
+// checking that the caller knows one message id. This prevents a participant
+// in one hop from reading unrelated/private hops in the same conversation.
+func (r *AgentMessageRepository) ListChainForAgent(tenantID, conversationID, rootMessageID string, agentID uint64, limit int) ([]*agentrelation.AgentMessage, error) {
+	return r.listChain(tenantID, conversationID, rootMessageID, agentID, limit)
+}
+
+func (r *AgentMessageRepository) listChain(tenantID, conversationID, rootMessageID string, agentID uint64, limit int) ([]*agentrelation.AgentMessage, error) {
+	if tenantID == "" {
+		return nil, ErrTenantIDRequired
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID)
+	if conversationID != "" {
+		query = query.Where("conversation_id = ?", conversationID)
+	} else {
+		query = query.Where("root_message_id = ?", rootMessageID)
+	}
+	if agentID != 0 {
+		query = query.Where("source_agent_id = ? OR target_agent_id = ?", agentID, agentID)
+	}
+	var messages []*agentrelation.AgentMessage
+	err := query.Order("hop ASC, created_at ASC, id ASC").Limit(limit).Find(&messages).Error
+	return messages, err
+}
+
 func (r *AgentMessageRepository) ValidateRunParticipants(tenantID, runID string, sourceAgentID, targetAgentID uint64) (bool, bool, error) {
 	var runCount int64
 	if err := r.db.Table("runs").Where("tenant_id = ? AND id = ? AND status = ?", tenantID, runID, "running").Count(&runCount).Error; err != nil {
@@ -411,6 +446,24 @@ func (r *AgentMessageRepository) ValidateRunParticipants(tenantID, runID string,
 		return true, false, nil
 	}
 	return true, true, nil
+}
+
+// EvaluateRunRoute returns the Run's route mode and whether this exact hop is
+// planned. No plan is represented by an empty mode to preserve legacy calls.
+func (r *AgentMessageRepository) EvaluateRunRoute(tenantID, runID string, hop int, sourceAgentID, targetAgentID uint64, action string) (mode string, planned bool, err error) {
+	var plan rundomain.RunRoutePlan
+	result := r.db.Where("tenant_id = ? AND run_id = ?", tenantID, runID).First(&plan)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return "", false, nil
+	}
+	if result.Error != nil {
+		return "", false, result.Error
+	}
+	var count int64
+	err = r.db.Model(&rundomain.RunRouteStep{}).
+		Where("tenant_id = ? AND plan_id = ? AND sequence = ? AND source_agent_id = ? AND target_agent_id = ? AND (action = '' OR action = ?)", tenantID, plan.ID, hop, sourceAgentID, targetAgentID, action).
+		Count(&count).Error
+	return plan.Mode, count > 0, err
 }
 
 func (r *AgentMessageRepository) HasRunningSourceInChain(tenantID, rootMessageID string, agentID uint64) (bool, error) {

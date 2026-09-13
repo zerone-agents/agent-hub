@@ -14,6 +14,7 @@ import (
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
 	eventdomain "control-panel/internal/domain/event"
+	rundomain "control-panel/internal/domain/run"
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/google/uuid"
@@ -25,6 +26,8 @@ const (
 	maxAgentSummaryContextRunes = 4000
 	maxAgentSharedContextRunes  = 12000
 	maxAgentRunResponseBytes    = 16 << 20
+	defaultSyncWaitTimeout      = 45 * time.Second
+	defaultExecutionTimeout     = 5 * time.Minute
 )
 
 // AgentMessageRunner is deliberately small so relation policy can be tested
@@ -35,13 +38,15 @@ type AgentMessageRunner interface {
 }
 
 type AgentMessageService struct {
-	relationRepo *repository.AgentRelationRepository
-	messageRepo  *repository.AgentMessageRepository
-	agentRepo    *repository.AgentRepository
-	relationSvc  *AgentRelationService
-	runner       AgentMessageRunner
-	events       *EventService
-	targetQueues sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
+	relationRepo     *repository.AgentRelationRepository
+	messageRepo      *repository.AgentMessageRepository
+	agentRepo        *repository.AgentRepository
+	relationSvc      *AgentRelationService
+	runner           AgentMessageRunner
+	events           *EventService
+	syncWaitTimeout  time.Duration
+	executionTimeout time.Duration
+	targetQueues     sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
 }
 
 type agentMessageTargetQueue struct {
@@ -52,12 +57,14 @@ func NewAgentMessageService(runner AgentMessageRunner) *AgentMessageService {
 	relationRepo := repository.NewAgentRelationRepository()
 	agentRepo := repository.NewAgentRepository()
 	return &AgentMessageService{
-		relationRepo: relationRepo,
-		messageRepo:  repository.NewAgentMessageRepository(),
-		agentRepo:    agentRepo,
-		relationSvc:  &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
-		runner:       runner,
-		events:       NewEventService(relationRepo.DB()),
+		relationRepo:     relationRepo,
+		messageRepo:      repository.NewAgentMessageRepository(),
+		agentRepo:        agentRepo,
+		relationSvc:      &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
+		runner:           runner,
+		events:           NewEventService(relationRepo.DB()),
+		syncWaitTimeout:  defaultSyncWaitTimeout,
+		executionTimeout: defaultExecutionTimeout,
 	}
 }
 
@@ -68,12 +75,14 @@ func newAgentMessageService(
 	runner AgentMessageRunner,
 ) *AgentMessageService {
 	return &AgentMessageService{
-		relationRepo: relationRepo,
-		messageRepo:  messageRepo,
-		agentRepo:    agentRepo,
-		relationSvc:  &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
-		runner:       runner,
-		events:       NewEventService(messageRepo.DB()),
+		relationRepo:     relationRepo,
+		messageRepo:      messageRepo,
+		agentRepo:        agentRepo,
+		relationSvc:      &AgentRelationService{repo: relationRepo, agentRepo: agentRepo},
+		runner:           runner,
+		events:           NewEventService(messageRepo.DB()),
+		syncWaitTimeout:  defaultSyncWaitTimeout,
+		executionTimeout: defaultExecutionTimeout,
 	}
 }
 
@@ -94,12 +103,15 @@ type SendAgentMessageInput struct {
 	TokenBudget, TokensUsed int64
 	VisitedAgentIDs         []uint64
 	IdempotencyKey          string
+	RouteDeviationReason    string
 	SyncStack               []uint64
 }
 
 type AgentMessageDTO struct {
 	ID               string   `json:"id"`
 	RelationID       uint64   `json:"relationId"`
+	SourceAgentID    uint64   `json:"sourceAgentId"`
+	TargetAgentID    uint64   `json:"targetAgentId"`
 	Scope            string   `json:"scope"`
 	SourceAgent      string   `json:"sourceAgent"`
 	TargetAgent      string   `json:"targetAgent"`
@@ -107,6 +119,7 @@ type AgentMessageDTO struct {
 	DeliveryPolicy   string   `json:"deliveryPolicy"`
 	ContextPolicy    string   `json:"contextPolicy"`
 	Status           string   `json:"status"`
+	Content          string   `json:"content,omitempty"`
 	Reply            string   `json:"reply,omitempty"`
 	Error            string   `json:"error,omitempty"`
 	CreatedAt        string   `json:"createdAt"`
@@ -127,6 +140,19 @@ type AgentMessageDTO struct {
 	TokenBudget      int64    `json:"tokenBudget"`
 	TokensUsed       int64    `json:"tokensUsed"`
 	IdempotencyKey   string   `json:"idempotencyKey,omitempty"`
+	RouteMode        string   `json:"routeMode,omitempty"`
+	RoutePlanned     bool     `json:"routePlanned"`
+	RouteDeviation   string   `json:"routeDeviation,omitempty"`
+	Verified         bool     `json:"verified"`
+	Verification     string   `json:"verification"`
+}
+
+type AgentMessageChainDTO struct {
+	ConversationID string             `json:"conversationId"`
+	RootMessageID  string             `json:"rootMessageId"`
+	Messages       []*AgentMessageDTO `json:"messages"`
+	MessageCount   int                `json:"messageCount"`
+	Verified       bool               `json:"verified"`
 }
 
 func (s *AgentMessageService) Relations(tenantID string, source *agent.AgentConfig) ([]*AgentRelationDTO, error) {
@@ -208,8 +234,9 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	// A deterministic conservative estimate keeps budget enforcement stable
 	// across model providers. Actual output is added when delivery completes.
 	tokensUsed += estimateMessageTokens(input.Message)
+	routeMode, routePlanned, routeDeviation := "", false, strings.TrimSpace(input.RouteDeviationReason)
 	persistAuthorizationGuard := func(reason string, authErr error) (*AgentMessageDTO, error) {
-		guard := &agentrelation.AgentMessage{ID: messageID, RunID: runID, ConversationID: chainID, RootMessageID: rootID, ParentMessageID: strings.TrimSpace(input.ParentMessageID), Hop: hop, MaxHops: maxHops, DeadlineAt: &deadline, EventBudget: eventBudget, EventCount: eventCount, TokenBudget: tokenBudget, TokensUsed: tokensUsed, VisitedAgentIDs: visited, IdempotencyKey: idempotencyKey, GuardReason: reason, Scope: input.Scope, SourceAgentID: source.ID, SourceAgent: source.Name, TargetAgentID: target.ID, TargetAgent: target.Name, Action: input.Action, DeliveryPolicy: "async", ContextPolicy: "none", Content: input.Message, Status: agentrelation.MessageStatusGuarded, CreatedAt: time.Now().UTC()}
+		guard := &agentrelation.AgentMessage{ID: messageID, RunID: runID, ConversationID: chainID, RootMessageID: rootID, ParentMessageID: strings.TrimSpace(input.ParentMessageID), Hop: hop, MaxHops: maxHops, DeadlineAt: &deadline, EventBudget: eventBudget, EventCount: eventCount, TokenBudget: tokenBudget, TokensUsed: tokensUsed, VisitedAgentIDs: visited, IdempotencyKey: idempotencyKey, GuardReason: reason, RouteMode: routeMode, RoutePlanned: routePlanned, RouteDeviation: routeDeviation, Scope: input.Scope, SourceAgentID: source.ID, SourceAgent: source.Name, TargetAgentID: target.ID, TargetAgent: target.Name, Action: input.Action, DeliveryPolicy: "async", ContextPolicy: "none", Content: input.Message, Status: agentrelation.MessageStatusGuarded, CreatedAt: time.Now().UTC()}
 		persisted, _, persistErr := s.createMessageWithEvents(tenantID, guard)
 		if persistErr != nil {
 			return nil, fmt.Errorf("记录链路守卫失败: %w", persistErr)
@@ -239,6 +266,18 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		}
 		return persistAuthorizationGuard(reason, err)
 	}
+	if runID != "" {
+		routeMode, routePlanned, err = s.messageRepo.EvaluateRunRoute(tenantID, runID, hop, source.ID, target.ID, input.Action)
+		if err != nil {
+			return nil, err
+		}
+		if routeMode == rundomain.RouteModeStrict && !routePlanned {
+			return persistAuthorizationGuard("run_route_denied", agentrelation.ErrRunRouteDenied)
+		}
+		if routeMode == rundomain.RouteModeAdaptive && !routePlanned && routeDeviation == "" {
+			return persistAuthorizationGuard("route_deviation_reason_required", agentrelation.ErrRouteReasonRequired)
+		}
+	}
 	sharedContext := relationContext(relation.ContextPolicy, input.ContextSummary, input.SharedContext)
 	tokensUsed += estimateMessageTokens(sharedContext)
 	guardReason := chainGuardReason(time.Now().UTC(), hop, maxHops, &deadline, eventCount, eventBudget, tokensUsed, tokenBudget)
@@ -257,6 +296,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		RunID:      runID, ConversationID: chainID, RootMessageID: rootID, ParentMessageID: strings.TrimSpace(input.ParentMessageID),
 		Hop: hop, MaxHops: maxHops, DeadlineAt: &deadline, EventBudget: eventBudget, EventCount: eventCount,
 		TokenBudget: tokenBudget, TokensUsed: tokensUsed, VisitedAgentIDs: visited, IdempotencyKey: idempotencyKey, GuardReason: guardReason,
+		RouteMode: routeMode, RoutePlanned: routePlanned, RouteDeviation: routeDeviation,
 		Scope:          relation.Scope,
 		SourceAgentID:  source.ID,
 		SourceAgent:    source.Name,
@@ -291,15 +331,40 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	if relation.DeliveryPolicy == "async" {
 		dto := agentMessageToDTO(message)
 		go func() {
-			asyncCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			asyncCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
 			defer cancel()
 			s.execute(asyncCtx, tenantID, target.ID, message, envelope)
 		}()
 		return dto, nil
 	}
 
-	s.execute(ctx, tenantID, target.ID, message, envelope)
-	return agentMessageToDTO(message), nil
+	// A synchronous connection controls how long the caller waits, not the
+	// lifetime of the target execution. Browser/MCP cancellation must not turn
+	// accepted work into a false failure. The durable message can be polled with
+	// the same idempotency key or agent_message_status after this wait expires.
+	done := make(chan struct{})
+	go func() {
+		executionCtx, cancel := context.WithTimeout(context.Background(), s.executionTimeout)
+		defer cancel()
+		s.execute(executionCtx, tenantID, target.ID, message, envelope)
+		close(done)
+	}()
+	wait := s.syncWaitTimeout
+	if wait <= 0 {
+		wait = defaultSyncWaitTimeout
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return agentMessageToDTO(message), nil
+	case <-timer.C:
+		current, getErr := s.messageRepo.GetForAgent(tenantID, message.ID, source.ID)
+		if getErr == nil {
+			return agentMessageToDTO(current), nil
+		}
+		return agentMessageToDTO(message), nil
+	}
 }
 
 func (s *AgentMessageService) createMessageWithEvents(tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
@@ -330,7 +395,7 @@ func (s *AgentMessageService) publishMessageEventTx(tx *gorm.DB, tenantID string
 		Scope: eventdomain.Ref{Type: "run", ID: message.RunID}, Subject: eventdomain.Ref{Type: "agent", ID: fmt.Sprint(message.TargetAgentID)}, Actor: eventdomain.Ref{Type: "agent", ID: fmt.Sprint(message.SourceAgentID)},
 		Visibility: "participants", CorrelationID: message.ConversationID, CausationID: cause, RootEventID: message.RootMessageID,
 		IdempotencyKey: "agent-message:" + message.ID + ":" + state,
-		Data:           map[string]any{"messageId": message.ID, "parentMessageId": message.ParentMessageID, "sourceAgent": message.SourceAgent, "targetAgent": message.TargetAgent, "action": message.Action, "hop": message.Hop, "status": state, "guardReason": message.GuardReason, "tokensUsed": message.TokensUsed},
+		Data:           map[string]any{"messageId": message.ID, "parentMessageId": message.ParentMessageID, "sourceAgent": message.SourceAgent, "targetAgent": message.TargetAgent, "action": message.Action, "hop": message.Hop, "status": state, "guardReason": message.GuardReason, "tokensUsed": message.TokensUsed, "routeMode": message.RouteMode, "routePlanned": message.RoutePlanned, "routeDeviation": message.RouteDeviation},
 	})
 }
 
@@ -387,6 +452,47 @@ func (s *AgentMessageService) ListRun(tenantID, runID string, limit int) ([]*Age
 	result := make([]*AgentMessageDTO, 0, len(messages))
 	for _, message := range messages {
 		result = append(result, agentMessageToDTO(message))
+	}
+	return result, nil
+}
+
+// MessageChainForAgent exposes only hops in which the runtime identity is an
+// endpoint. Knowing a conversation/root id never grants access to other hops.
+func (s *AgentMessageService) MessageChainForAgent(tenantID string, source *agent.AgentConfig, conversationID, rootMessageID string, limit int) (*AgentMessageChainDTO, error) {
+	if source == nil || source.TenantID != tenantID {
+		return nil, agentrelation.ErrAgentNotFound
+	}
+	return s.messageChain(tenantID, source.ID, conversationID, rootMessageID, limit)
+}
+
+// MessageChainAdmin returns the complete tenant-local chain for audit users.
+func (s *AgentMessageService) MessageChainAdmin(tenantID, conversationID, rootMessageID string, limit int) (*AgentMessageChainDTO, error) {
+	return s.messageChain(tenantID, 0, conversationID, rootMessageID, limit)
+}
+
+func (s *AgentMessageService) messageChain(tenantID string, agentID uint64, conversationID, rootMessageID string, limit int) (*AgentMessageChainDTO, error) {
+	conversationID, rootMessageID = strings.TrimSpace(conversationID), strings.TrimSpace(rootMessageID)
+	if (conversationID == "") == (rootMessageID == "") {
+		return nil, fmt.Errorf("必须且只能提供 conversation_id 或 root_message_id")
+	}
+	var rows []*agentrelation.AgentMessage
+	var err error
+	if agentID == 0 {
+		rows, err = s.messageRepo.ListChain(tenantID, conversationID, rootMessageID, limit)
+	} else {
+		rows, err = s.messageRepo.ListChainForAgent(tenantID, conversationID, rootMessageID, agentID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, agentrelation.ErrMessageNotFound
+	}
+	result := &AgentMessageChainDTO{ConversationID: rows[0].ConversationID, RootMessageID: rows[0].RootMessageID, Messages: make([]*AgentMessageDTO, 0, len(rows)), MessageCount: len(rows), Verified: true}
+	for _, row := range rows {
+		dto := agentMessageToDTO(row)
+		result.Messages = append(result.Messages, dto)
+		result.Verified = result.Verified && dto.Verified
 	}
 	return result, nil
 }
@@ -552,6 +658,8 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 	dto := &AgentMessageDTO{
 		ID:               message.ID,
 		RelationID:       message.RelationID,
+		SourceAgentID:    message.SourceAgentID,
+		TargetAgentID:    message.TargetAgentID,
 		Scope:            message.Scope,
 		SourceAgent:      message.SourceAgent,
 		TargetAgent:      message.TargetAgent,
@@ -559,6 +667,7 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 		DeliveryPolicy:   message.DeliveryPolicy,
 		ContextPolicy:    message.ContextPolicy,
 		Status:           message.Status,
+		Content:          message.Content,
 		Reply:            message.Reply,
 		Error:            message.Error,
 		CreatedAt:        message.CreatedAt.UTC().Format(time.RFC3339),
@@ -571,9 +680,13 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 		VisitedAgentIDs:  append([]uint64(nil), message.VisitedAgentIDs...),
 		GuardReason:      message.GuardReason,
 		GuardDescription: guardDescription(message.GuardReason),
+		RouteMode:        message.RouteMode,
+		RoutePlanned:     message.RoutePlanned,
+		RouteDeviation:   message.RouteDeviation,
 		EventBudget:      message.EventBudget, EventCount: message.EventCount,
 		TokenBudget: message.TokenBudget, TokensUsed: message.TokensUsed, IdempotencyKey: message.IdempotencyKey,
 	}
+	dto.Verified, dto.Verification = messageVerification(message)
 	if message.DeadlineAt != nil {
 		value := message.DeadlineAt.UTC().Format(time.RFC3339)
 		dto.DeadlineAt = &value
@@ -587,6 +700,30 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 		dto.CompletedAt = &value
 	}
 	return dto
+}
+
+func messageVerification(message *agentrelation.AgentMessage) (bool, string) {
+	switch message.Status {
+	case agentrelation.MessageStatusCompleted:
+		if message.CompletedAt != nil && strings.TrimSpace(message.Reply) != "" {
+			return true, "completed_with_reply"
+		}
+		return false, "completion_evidence_incomplete"
+	case agentrelation.MessageStatusGuarded:
+		if strings.TrimSpace(message.GuardReason) != "" {
+			return true, "guard_decision_recorded"
+		}
+		return false, "guard_evidence_incomplete"
+	case agentrelation.MessageStatusFailed:
+		if message.CompletedAt != nil && strings.TrimSpace(message.Error) != "" {
+			return true, "failure_recorded"
+		}
+		return false, "failure_evidence_incomplete"
+	case agentrelation.MessageStatusQueued, agentrelation.MessageStatusRunning:
+		return true, "delivery_recorded"
+	default:
+		return false, "unknown_status"
+	}
 }
 
 func guardDescription(reason string) string {
@@ -607,6 +744,10 @@ func guardDescription(reason string) string {
 		return "该组织关系不允许这类动作"
 	case "run_participant_denied":
 		return "目标 Agent 未加入本次运行"
+	case "run_route_denied":
+		return "该次跳转不在本次任务的严格路径中"
+	case "route_deviation_reason_required":
+		return "自适应路由偏离计划时必须记录原因"
 	default:
 		return ""
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/agentrelation"
 	rundomain "control-panel/internal/domain/run"
 
 	"github.com/google/uuid"
@@ -182,6 +183,107 @@ func (s *RunService) AddAgent(tenantID, runID string, agentID uint64, role strin
 		return nil, err
 	}
 	return row, nil
+}
+
+type RunRouteStepInput struct {
+	SourceAgentID uint64 `json:"sourceAgentId"`
+	TargetAgentID uint64 `json:"targetAgentId"`
+	Action        string `json:"action"`
+}
+
+type PutRunRoutePlanInput struct {
+	Mode, CreatedBy string
+	Metadata        map[string]any
+	Steps           []RunRouteStepInput
+}
+
+// PutRoutePlan replaces the task route while the Run is still a draft. The
+// resulting rows are immutable once execution begins, matching other Run
+// snapshots. An empty action means any action permitted by the long-lived
+// connection; it never grants an action the connection itself forbids.
+func (s *RunService) PutRoutePlan(tenantID, runID string, input PutRunRoutePlanInput) (*rundomain.RunRoutePlan, error) {
+	input.Mode = strings.ToLower(strings.TrimSpace(input.Mode))
+	if input.Mode != rundomain.RouteModeStrict && input.Mode != rundomain.RouteModeAdaptive {
+		return nil, fmt.Errorf("route mode must be strict or adaptive")
+	}
+	if len(input.Steps) == 0 {
+		return nil, fmt.Errorf("route plan requires at least one step")
+	}
+	for _, step := range input.Steps {
+		if step.SourceAgentID == 0 || step.TargetAgentID == 0 || step.SourceAgentID == step.TargetAgentID {
+			return nil, fmt.Errorf("route step requires distinct sourceAgentId and targetAgentId")
+		}
+		if step.Action != "" {
+			if _, ok := agentrelation.Actions[strings.TrimSpace(step.Action)]; !ok {
+				return nil, agentrelation.ErrInvalidAction
+			}
+		}
+	}
+	var plan rundomain.RunRoutePlan
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var r rundomain.Run
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", tenantID, runID).First(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return rundomain.ErrNotFound
+			}
+			return err
+		}
+		if r.Status != rundomain.StatusDraft {
+			return rundomain.ErrFrozen
+		}
+		ids := make([]uint64, 0, len(input.Steps)*2)
+		for _, step := range input.Steps {
+			ids = append(ids, step.SourceAgentID, step.TargetAgentID)
+		}
+		var participantCount int64
+		if err := tx.Model(&rundomain.RunAgent{}).Where("tenant_id = ? AND run_id = ? AND agent_id IN ?", tenantID, runID, ids).Distinct("agent_id").Count(&participantCount).Error; err != nil {
+			return err
+		}
+		unique := map[uint64]struct{}{}
+		for _, id := range ids {
+			unique[id] = struct{}{}
+		}
+		if int(participantCount) != len(unique) {
+			return agentrelation.ErrRunParticipantDenied
+		}
+		var old rundomain.RunRoutePlan
+		if err := tx.Where("tenant_id = ? AND run_id = ?", tenantID, runID).First(&old).Error; err == nil {
+			if err := tx.Where("plan_id = ?", old.ID).Delete(&rundomain.RunRouteStep{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&old).Error; err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		plan = rundomain.RunRoutePlan{TenantID: tenantID, RunID: runID, Mode: input.Mode, CreatedBy: input.CreatedBy, Metadata: input.Metadata}
+		if err := tx.Create(&plan).Error; err != nil {
+			return err
+		}
+		for i, step := range input.Steps {
+			row := rundomain.RunRouteStep{TenantID: tenantID, PlanID: plan.ID, Sequence: i + 1, SourceAgentID: step.SourceAgentID, TargetAgentID: step.TargetAgentID, Action: strings.TrimSpace(step.Action)}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetRoutePlan(tenantID, runID)
+}
+
+func (s *RunService) GetRoutePlan(tenantID, runID string) (*rundomain.RunRoutePlan, error) {
+	var plan rundomain.RunRoutePlan
+	if err := s.db.Where("tenant_id = ? AND run_id = ?", tenantID, runID).Preload("Steps", func(db *gorm.DB) *gorm.DB { return db.Order("sequence ASC") }).First(&plan).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rundomain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &plan, nil
 }
 
 type RegisterStateSchemaInput struct {

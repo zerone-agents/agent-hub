@@ -54,6 +54,41 @@ type RunAgent struct {
 
 func (RunAgent) TableName() string { return "run_agents" }
 
+const (
+	RouteModeStrict   = "strict"
+	RouteModeAdaptive = "adaptive"
+)
+
+// RunRoutePlan narrows the long-lived organization graph for one Run. Agent
+// relations answer "may these agents communicate?"; this snapshot answers
+// "is this hop part of the task the Run is currently executing?".
+type RunRoutePlan struct {
+	ID        uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID  string         `gorm:"type:varchar(64);not null;uniqueIndex:uk_run_route_plans,priority:1;index" json:"-"`
+	RunID     string         `gorm:"type:char(36);not null;uniqueIndex:uk_run_route_plans,priority:2;index" json:"runId"`
+	Mode      string         `gorm:"type:varchar(16);not null" json:"mode"`
+	CreatedBy string         `gorm:"type:varchar(128);not null;default:''" json:"createdBy"`
+	Metadata  map[string]any `gorm:"type:json;serializer:json" json:"metadata,omitempty"`
+	Steps     []RunRouteStep `gorm:"foreignKey:PlanID" json:"steps"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+}
+
+func (RunRoutePlan) TableName() string { return "run_route_plans" }
+
+type RunRouteStep struct {
+	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID      string    `gorm:"type:varchar(64);not null;index" json:"-"`
+	PlanID        uint64    `gorm:"not null;uniqueIndex:uk_run_route_steps,priority:1;index" json:"planId"`
+	Sequence      int       `gorm:"not null;uniqueIndex:uk_run_route_steps,priority:2" json:"sequence"`
+	SourceAgentID uint64    `gorm:"not null;index" json:"sourceAgentId"`
+	TargetAgentID uint64    `gorm:"not null;index" json:"targetAgentId"`
+	Action        string    `gorm:"type:varchar(32);not null;default:''" json:"action,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+func (RunRouteStep) TableName() string { return "run_route_steps" }
+
 type CapabilityBinding struct {
 	ID           uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
 	TenantID     string         `gorm:"type:varchar(64);not null;uniqueIndex:uk_run_capability_bindings,priority:1;index" json:"-"`

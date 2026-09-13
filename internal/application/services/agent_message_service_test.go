@@ -67,7 +67,7 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "-"))), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.RunRoutePlan{}, &rundomain.RunRouteStep{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	b := agent.AgentConfig{Name: "agent-b", TenantID: "tenant-a"}
@@ -88,6 +88,46 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 		runner,
 	)
 	return agentMessageFixture{service: service, db: db, runner: runner, a: a, b: b, c: c}
+}
+
+func TestAgentMessageChainSeparatesAdminAuditFromParticipantVisibility(t *testing.T) {
+	f := setupAgentMessageService(t)
+	now := time.Now().UTC()
+	completed := now.Add(time.Second)
+	rows := []*agentrelation.AgentMessage{
+		{ID: "m1", TenantID: "tenant-a", RelationID: 1, ConversationID: "conv-1", RootMessageID: "m1", Hop: 1, SourceAgentID: f.a.ID, SourceAgent: f.a.Name, TargetAgentID: f.b.ID, TargetAgent: f.b.Name, Action: "assign", DeliveryPolicy: "async", ContextPolicy: "none", Content: "A asks B", Reply: "B replies", Status: agentrelation.MessageStatusCompleted, CreatedAt: now, CompletedAt: &completed},
+		{ID: "m2", TenantID: "tenant-a", RelationID: 2, ConversationID: "conv-1", RootMessageID: "m1", ParentMessageID: "m1", Hop: 2, SourceAgentID: f.b.ID, SourceAgent: f.b.Name, TargetAgentID: f.c.ID, TargetAgent: f.c.Name, Action: "consult", DeliveryPolicy: "async", ContextPolicy: "none", Content: "B asks C", Reply: "C replies", Status: agentrelation.MessageStatusCompleted, CreatedAt: now.Add(time.Second), CompletedAt: &completed},
+		{ID: "other-tenant", TenantID: "tenant-b", RelationID: 3, ConversationID: "conv-1", RootMessageID: "m1", Hop: 3, SourceAgentID: f.a.ID, SourceAgent: f.a.Name, TargetAgentID: f.c.ID, TargetAgent: f.c.Name, Action: "inform", DeliveryPolicy: "async", ContextPolicy: "none", Content: "secret", Status: agentrelation.MessageStatusQueued, CreatedAt: now.Add(2 * time.Second)},
+	}
+	for _, row := range rows {
+		require.NoError(t, f.db.Create(row).Error)
+	}
+
+	admin, err := f.service.MessageChainAdmin("tenant-a", "conv-1", "", 100)
+	require.NoError(t, err)
+	require.Equal(t, 2, admin.MessageCount)
+	require.True(t, admin.Verified)
+	require.Equal(t, []string{"m1", "m2"}, []string{admin.Messages[0].ID, admin.Messages[1].ID})
+
+	aView, err := f.service.MessageChainForAgent("tenant-a", &f.a, "conv-1", "", 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, aView.MessageCount)
+	require.Equal(t, "m1", aView.Messages[0].ID, "A must not read the B-to-C private hop")
+
+	outsider := agent.AgentConfig{ID: 999, Name: "outsider", TenantID: "tenant-a"}
+	_, err = f.service.MessageChainForAgent("tenant-a", &outsider, "conv-1", "", 100)
+	require.ErrorIs(t, err, agentrelation.ErrMessageNotFound)
+
+	_, err = f.service.MessageChainForAgent("tenant-b", &f.a, "conv-1", "", 100)
+	require.ErrorIs(t, err, agentrelation.ErrAgentNotFound)
+}
+
+func TestAgentMessageChainRequiresExactlyOneSelector(t *testing.T) {
+	f := setupAgentMessageService(t)
+	_, err := f.service.MessageChainAdmin("tenant-a", "", "", 100)
+	require.EqualError(t, err, "必须且只能提供 conversation_id 或 root_message_id")
+	_, err = f.service.MessageChainAdmin("tenant-a", "conv", "root", 100)
+	require.EqualError(t, err, "必须且只能提供 conversation_id 或 root_message_id")
 }
 
 func addMessageRelation(t *testing.T, f agentMessageFixture, source, target agent.AgentConfig, scope, delivery, contextPolicy string, actions ...string) agentrelation.AgentRelation {
@@ -203,6 +243,59 @@ func TestAgentMessageServiceSupportsSequentialThreeAgentChain(t *testing.T) {
 	require.Equal(t, []string{f.b.Name, f.c.Name}, []string{calls[0].agent, calls[1].agent})
 }
 
+func TestAgentMessageServiceStrictRunRouteRejectsShortcutButAllowsPlannedRelay(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "task", "sync", "summary_only", "consult")
+	addMessageRelation(t, f, f.b, f.c, "task", "sync", "summary_only", "consult")
+	addMessageRelation(t, f, f.a, f.c, "task", "sync", "summary_only", "consult")
+	plan := rundomain.RunRoutePlan{TenantID: "tenant-a", RunID: "run-1", Mode: rundomain.RouteModeStrict}
+	require.NoError(t, f.db.Create(&plan).Error)
+	require.NoError(t, f.db.Create([]rundomain.RunRouteStep{
+		{TenantID: "tenant-a", PlanID: plan.ID, Sequence: 1, SourceAgentID: f.a.ID, TargetAgentID: f.b.ID, Action: "consult"},
+		{TenantID: "tenant-a", PlanID: plan.ID, Sequence: 2, SourceAgentID: f.b.ID, TargetAgentID: f.c.ID, Action: "consult"},
+	}).Error)
+
+	// An edge appearing later in the plan is not a valid entry point. Without
+	// A's parent message this is hop 1, while B -> C is explicitly step 2.
+	early, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "task", Action: "consult", Message: "B starts at step two", RunID: "run-1"})
+	require.ErrorIs(t, err, agentrelation.ErrRunRouteDenied)
+	require.Equal(t, "run_route_denied", early.GuardReason)
+	require.Equal(t, 1, early.Hop)
+
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.b.Name, Scope: "task", Action: "consult", Message: "A asks B", RunID: "run-1"})
+	require.NoError(t, err)
+	require.True(t, first.RoutePlanned)
+	second, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "task", Action: "consult", Message: "B asks C", ParentMessageID: first.ID})
+	require.NoError(t, err)
+	require.True(t, second.RoutePlanned)
+	require.Equal(t, 2, second.Hop)
+
+	shortcut, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "task", Action: "consult", Message: "A bypasses B", RunID: "run-1"})
+	require.ErrorIs(t, err, agentrelation.ErrRunRouteDenied)
+	require.Equal(t, agentrelation.MessageStatusGuarded, shortcut.Status)
+	require.Equal(t, "run_route_denied", shortcut.GuardReason)
+	require.Equal(t, rundomain.RouteModeStrict, shortcut.RouteMode)
+	require.False(t, shortcut.RoutePlanned)
+}
+
+func TestAgentMessageServiceAdaptiveRunRouteRequiresAndAuditsDeviationReason(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.c, "task", "sync", "summary_only", "consult")
+	plan := rundomain.RunRoutePlan{TenantID: "tenant-a", RunID: "run-1", Mode: rundomain.RouteModeAdaptive}
+	require.NoError(t, f.db.Create(&plan).Error)
+	require.NoError(t, f.db.Create(&rundomain.RunRouteStep{TenantID: "tenant-a", PlanID: plan.ID, Sequence: 1, SourceAgentID: f.a.ID, TargetAgentID: f.b.ID, Action: "consult"}).Error)
+
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "task", Action: "consult", Message: "shortcut", RunID: "run-1"})
+	require.ErrorIs(t, err, agentrelation.ErrRouteReasonRequired)
+	require.Equal(t, "route_deviation_reason_required", guarded.GuardReason)
+
+	allowed, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{TargetAgent: f.c.Name, Scope: "task", Action: "consult", Message: "urgent shortcut", RunID: "run-1", RouteDeviationReason: "B unavailable; deadline at risk"})
+	require.NoError(t, err)
+	require.Equal(t, rundomain.RouteModeAdaptive, allowed.RouteMode)
+	require.False(t, allowed.RoutePlanned)
+	require.Equal(t, "B unavailable; deadline at risk", allowed.RouteDeviation)
+}
+
 func TestAgentMessageServiceSyncDeliveryUsesDirectedAuthorizedRoute(t *testing.T) {
 	f := setupAgentMessageService(t)
 	relation := addMessageRelation(t, f, f.a, f.b, "speeding-hq", "sync", "summary_only", "consult", "review")
@@ -308,6 +401,50 @@ func TestAgentMessageServiceAsyncCanBePolledByEitherParty(t *testing.T) {
 	foreign := agent.AgentConfig{ID: f.a.ID, Name: f.a.Name, TenantID: "tenant-b"}
 	_, err = f.service.Get("tenant-b", &foreign, got.ID)
 	require.ErrorIs(t, err, agentrelation.ErrMessageNotFound)
+}
+
+func TestAgentMessageServiceFastSyncReturnsCompleted(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "sync-fast", "sync", "none", "consult")
+	result, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "sync-fast", Action: "consult", Message: "quick", IdempotencyKey: "sync-fast-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusCompleted, result.Status)
+	require.Equal(t, "B 的真实回复", result.Reply)
+}
+
+func TestAgentMessageServiceSlowSyncReturnsRunningAndFinishesAfterRequestCancellation(t *testing.T) {
+	f := setupAgentMessageService(t)
+	release := make(chan struct{})
+	f.runner.blocking = release
+	f.service.syncWaitTimeout = 10 * time.Millisecond
+	f.service.executionTimeout = time.Second
+	addMessageRelation(t, f, f.a, f.b, "sync-slow", "sync", "none", "consult")
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+
+	result, err := f.service.Send(requestCtx, "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "sync-slow", Action: "consult", Message: "slow", IdempotencyKey: "sync-slow-1",
+	})
+	require.NoError(t, err)
+	require.Contains(t, []string{agentrelation.MessageStatusQueued, agentrelation.MessageStatusRunning}, result.Status)
+	require.Len(t, f.runner.snapshot(), 1)
+
+	// A retry reuses the durable row and must never start a second execution.
+	retry, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "sync-slow", Action: "consult", Message: "slow", IdempotencyKey: "sync-slow-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, result.ID, retry.ID)
+	require.Len(t, f.runner.snapshot(), 1)
+
+	close(release)
+	require.Eventually(t, func() bool {
+		current, getErr := f.service.Get("tenant-a", &f.a, result.ID)
+		return getErr == nil && current.Status == agentrelation.MessageStatusCompleted && current.Reply == "B 的真实回复"
+	}, time.Second, 10*time.Millisecond)
+	require.Len(t, f.runner.snapshot(), 1)
 }
 
 func TestAgentMessageServiceQueuesConcurrentDeliveriesToSameTarget(t *testing.T) {
