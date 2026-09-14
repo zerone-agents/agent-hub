@@ -47,3 +47,19 @@
   2. 单测增加原始报文大小写断言（`"factRef"` 必须存在、`"FactRef"` 必须不存在）防回归；
   3. 前端 PersonaPanel 对无 `entries` 的争议条目做防御性过滤。
 - 验证：go test（handler + services）通过；前端 vitest 18 用例通过；生产构建通过；部署后实测接口返回 `{"factRef":...,"entries":[{"agentId":...}]}`，线上首页引用新 chunk（index-Bd1Vx_D9 / RunCenterPage-CuB6aYUJ）。
+
+## 第二轮审查修复（2026-09-14 晚，审查结论 NO-GO 后的整改）
+
+审查发现 2 个 P0 + 2 个 P1，全部修复并部署（HEAD 2de2d6d）：
+
+1. **P0 扩展权限未生效**：`ExtensionAuthz` 中间件已实现但从未挂载到路由。已挂到 admin 核心路由（runs 读写、states 读写、persona 视图、agents 只读、workflow 读写），Enforce 语义确认为默认拒绝（无 grants 记录即 403）。回归测试：无头请求行为不变、无授权扩展 403、已授权扩展放行、未知扩展拒绝。（eda6540）
+2. **P0 SSRF 绕过**：代理转发存在 DNS 重解析 TOCTOU 与 302 跳转绕过。新增 `ValidateAndResolveIPs` + `SecureHTTPClient`（DialContext 固定已校验 IP、TLS ServerName 保持域名、禁止跟随跳转并把 3xx 原样透传含 Location）。（4f6bfed）
+3. **P1 生命周期半完成状态**：Install/Upgrade/Rollback/Enable/Disable/Uninstall 的授权同步全部纳入同一事务，同步失败整体回滚（页面报错且状态未变）。新增 6 个失败注入回归测试。（fa8552e）
+4. **P1 H6 硬编码**：情绪/认知/记忆/动态关系注册为四个内置扩展（io.zerone.emotion 等，默认已安装已启用，行为零变化），新增 PersonaCapabilityGate 运行时门控：停用后提示词不再注入记忆、工作流情绪/关系钩子不生效、组织 MCP 对应工具返回"能力已被停用"；数据与 schema 保留、persona 只读视图不受限。（9941f77 + fe30ee6 + 2de2d6d）
+
+另修复交付可追溯性：
+- 全部改动为真实 Git 提交并推送，GitHub `codex/agent-relations` HEAD = 2de2d6d；本地主仓已快进同步（README.zh-CN.md 的未提交改动原样保留）。
+- 服务器 `/opt/speeding/current` 软链已指向实际运行目录 `/opt/speeding/releases/agent-hub-h6-03d243b`。
+- 部署后验证：四个内置扩展 installed/enabled（查库确认）；H6 回归基线 emotion_status 返回 `{"mood":"angry","intensity":-75}` 不变。
+
+遗留决策项：H7.4 权限白名单十类不含 "run"，扩展无法声明 run 类权限（当前对带扩展头的 run 端点请求恒 403，最严默认拒绝）。若 SDK 需要扩展读 run 数据，需 spec owner 决定是否在白名单加 "run" 类。
