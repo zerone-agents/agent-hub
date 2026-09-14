@@ -522,16 +522,19 @@ func main() {
 	adminWrite.POST("/extensions/validate", extensionVerificationHandler.Validate)
 
 	// ---------- H1 isolated runs and generic state ----------
-	adminRead.GET("/runs", runHandler.List)
+	// H7.4 扩展身份强制检查：带 X-Extension-Name 头的请求按授权判定，
+	// 无授权 403；不带头的既有请求零影响（中间件内部放行）。
+	runResource := func(c *gin.Context) string { return c.Param("id") }
+	adminRead.GET("/runs", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", nil), runHandler.List)
 	adminWrite.POST("/runs", runHandler.Create)
-	adminRead.GET("/runs/:id", runHandler.Get)
-	adminWrite.POST("/runs/:id/transitions", runHandler.Transition)
+	adminRead.GET("/runs/:id", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.Get)
+	adminWrite.POST("/runs/:id/transitions", middleware.ExtensionAuthz(extensionAuthzService, "run", "update", runResource), runHandler.Transition)
 	adminWrite.POST("/runs/:id/agents", runHandler.AddAgent)
 	adminWrite.PUT("/runs/:id/route-plan", runHandler.PutRoutePlan)
 	adminRead.GET("/runs/:id/route-plan", runHandler.GetRoutePlan)
 	adminWrite.POST("/state-schemas", runHandler.RegisterSchema)
-	adminWrite.POST("/runs/:id/states", runHandler.InitializeState)
-	adminWrite.PUT("/runs/:id/states/:stateId", runHandler.CommitState)
+	adminWrite.POST("/runs/:id/states", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.InitializeState)
+	adminWrite.PUT("/runs/:id/states/:stateId", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.CommitState)
 	adminRead.GET("/runs/:id/state-changes", runHandler.StateChanges)
 	adminRead.GET("/runs/:id/activities", runHandler.Activities)
 	adminRead.GET("/runs/:id/events", eventHandler.ListRun)
@@ -539,8 +542,8 @@ func main() {
 	adminRead.GET("/runs/:id/tool-results", toolResultHandler.List)
 	adminRead.GET("/runs/:id/agent-messages", agentMessageAdminHandler.ListRun)
 	// H6 persona admin views (read-only; same authorization as neighboring run reads)
-	adminRead.GET("/runs/:id/persona-state", personaAdminHandler.PersonaState)
-	adminRead.GET("/runs/:id/belief-disputes", personaAdminHandler.BeliefDisputes)
+	adminRead.GET("/runs/:id/persona-state", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.PersonaState)
+	adminRead.GET("/runs/:id/belief-disputes", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.BeliefDisputes)
 	adminRead.GET("/channels/:id/messages", agentMessageAdminHandler.ListChannel)
 	adminWrite.GET("/agent-message-chains", agentMessageAdminHandler.GetChain)
 	adminRead.GET("/runs/:id/tool-results/:toolResultId", toolResultHandler.Get)
@@ -605,7 +608,11 @@ func main() {
 	// ---------- H4 group and channel collaboration ----------
 	handler.RegisterCollaborationRoutes(adminWrite, adminRead, collaborationHandler)
 	// ---------- H5 reusable workflows and approvals ----------
-	handler.RegisterWorkflowRoutes(adminWrite, adminRead, workflowHandler)
+	// H7.4 扩展身份强制检查：workflow 读写按 (workflow, read/write) 判定。
+	handler.RegisterWorkflowRoutes(
+		adminWrite.Group("", middleware.ExtensionAuthz(extensionAuthzService, "workflow", "write", nil)),
+		adminRead.Group("", middleware.ExtensionAuthz(extensionAuthzService, "workflow", "read", nil)),
+		workflowHandler)
 	handler.RegisterDecisionRoutes(adminWrite, adminRead, decisionHandler)
 
 	// ---------- Agent 领域 ----------
@@ -632,7 +639,10 @@ func main() {
 	// 管理接口：写方法/敏感 GET（files/content）→ write 组；
 	// 非敏感 GET（列表、detail、tools、skills、mcps、knowledge、files 列表、deploy 状态）→ read 组（member 只读）
 	adminAgentsGroup := adminWrite.Group("/agents")
-	adminAgentsReadGroup := adminRead.Group("/agents")
+	// H7.4 扩展身份强制检查：管理端 agent 只读接口按 (agent, read) 判定。
+	adminAgentsReadGroup := adminRead.Group("/agents",
+		middleware.ExtensionAuthz(extensionAuthzService, "agent", "read",
+			func(c *gin.Context) string { return c.Param("name") }))
 	{
 		adminAgentsReadGroup.GET("", agentHandler.ListAdmin)
 		adminAgentsGroup.POST("", agentHandler.Create)
