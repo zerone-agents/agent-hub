@@ -8,6 +8,8 @@
 |---|---|---|---|
 | H7.0-H7.6 统一集成（6ea204b） | NO-GO | P1×3：迁移日志 From 污染 / inverse 跨 Schema 套用 / upstream 无 SSRF 阻断 | agent-18 |
 | P1 修复（3500163） | GO | 3 项 P1 全部修复并带回归测试（多 Schema 回滚逐字节恢复、v3→v2 不越界、私网 upstream 拒绝+转发前重解析）；P0=0 | 主 Agent 复核 |
+| 服务器端到端冒烟（部署后） | 24/25 | FAIL 1：模板安装 GroupMember.JoinedAt 零值被 MySQL NO_ZERO_DATE 拒绝（SQLite 测试环境恰好放行，环境差异 bug） | agent-20 |
+| 修复 437801f + 复测 | 25/25 PASS | 模板安装/幂等重放/同 key 异 mapping 409/冲突检测 409 全过；测试产物与临时 token 全部清理零残留 | agent-20 复测 |
 
 ## 最终页面验收（12 步，用户操作）
 
