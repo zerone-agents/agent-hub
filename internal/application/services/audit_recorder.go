@@ -172,13 +172,6 @@ func (r *AuditRecorder) RevealKeyLegacy(c *gin.Context, providerID uint64) {
 	r.persist(audit.SimpleEvent(a, audit.ActionRevealKey, audit.TargetProvider, strconv.FormatUint(providerID, 10), ""))
 }
 
-func (r *AuditRecorder) RuntimeConfigLegacy(c *gin.Context, providers int) {
-	a := r.actorFrom(c)
-	log.Printf("[AUDIT] provider runtime-config served | user_id=%s user_name=%s providers=%d remote_ip=%s time=%s",
-		escapeForStdout(a.UserID), escapeForStdout(a.UserName), providers, escapeForStdout(a.RemoteIP), time.Now().UTC().Format(time.RFC3339))
-	r.persist(audit.RuntimeConfigEvent(a, providers))
-}
-
 func (r *AuditRecorder) actorFrom(c *gin.Context) audit.Actor {
 	return audit.Actor{
 		TenantID:  tenant.GetTenantID(c),

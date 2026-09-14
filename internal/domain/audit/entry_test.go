@@ -21,7 +21,6 @@ func TestEventCategoryConsistency(t *testing.T) {
 	require.Equal(t, "auth", string(LoginEvent(Actor{}, "u", "o", StatusSuccess, "").Category))
 	require.Equal(t, "user", string(RoleChangedEvent(Actor{}, "1", "n", "a", "b", StatusSuccess).Category))
 	require.Equal(t, "invite", string(InviteCreatedEvent(Actor{}, "9", "member", 3).Category))
-	require.Equal(t, "provider", string(RuntimeConfigEvent(Actor{}, 2).Category))
 	require.Equal(t, "aigc", string(AigcSavedEvent(Actor{}, []aigc.AigcConfigField{}).Category))
 }
 
