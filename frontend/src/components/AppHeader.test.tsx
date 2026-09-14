@@ -61,6 +61,7 @@ describe('AppHeader 用户菜单', () => {
     expect(await screen.findByText('CLI Tokens')).toBeInTheDocument()
     expect(screen.getByText('AIGC 标识配置')).toBeInTheDocument()
     expect(screen.getByText('用户管理')).toBeInTheDocument()
+    expect(screen.getByText('审计日志')).toBeInTheDocument()
   })
 
   it('member: 用户菜单无 CLI Tokens / AIGC / 用户管理，保留修改密码与退出', async () => {
@@ -71,6 +72,7 @@ describe('AppHeader 用户菜单', () => {
     expect(screen.queryByText('CLI Tokens')).not.toBeInTheDocument()
     expect(screen.queryByText('AIGC 标识配置')).not.toBeInTheDocument()
     expect(screen.queryByText('用户管理')).not.toBeInTheDocument()
+    expect(screen.queryByText('审计日志')).not.toBeInTheDocument()
     expect(screen.getByText('退出登录')).toBeInTheDocument()
   })
 })

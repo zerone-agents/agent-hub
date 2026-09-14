@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -136,13 +137,18 @@ func main() {
 	var builtinAuthHandler *handler.BuiltinAuthHandler
 	var adminUserHandler *handler.AdminUserHandler
 
+	// 审计写入侧（Task 10）：auth 端点埋点在两种模式下都消费 recorder，须先于
+	// 认证装配创建；查询侧（auditQuerier）在下方 Audit 领域区复用同一 repo。
+	auditRepo := repository.NewAuditRepository(database.GetDB())
+	auditRecorder := services.NewAuditRecorder(auditRepo)
+
 	if cfg.Auth.IsBuiltin() {
 		userSvc := services.NewUserService(database.GetDB())
 		inviteSvc := services.NewInviteService(database.GetDB())
 		builtinProvider := builtin.New(database.GetDB(), cfg.Auth.JWTSecret)
 		authProvider = builtinProvider
-		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc)
-		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider)
+		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc, auditRecorder)
+		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider, auditRecorder)
 		log.Println("Auth mode: builtin")
 	} else {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
@@ -159,7 +165,7 @@ func main() {
 		}, membershipStore)
 		// 登录链接按请求租户生成 OAuth 授权 URL（各 org 解析自己的
 		// tenant_oauth_clients 凭证），这里注入生成函数。
-		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL)
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL, auditRecorder)
 		log.Println("Auth mode: casdoor")
 	}
 
@@ -176,6 +182,12 @@ func main() {
 
 	r := gin.Default()
 	r.MaxMultipartMemory = 50 << 20
+
+	// 审计 RemoteIP 信任边界（spec §5.2）：非法 CIDR 即终止启动——错误配置后的
+	// 信任状态不可保证；fatal 属内部错误，按 CONTRIBUTING 带 stack。
+	if err := middleware.ApplyTrustedProxies(r, cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("invalid server.trusted_proxies config: %v\n%s", err, debug.Stack())
+	}
 
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
@@ -221,7 +233,7 @@ func main() {
 	knowledgeService := services.NewKnowledgeService(knowledgeEngine, providerService)
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
-	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
+	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
 		Client:            deployerClient,
 		PublicHost:        cfg.Deployer.PublicHost,
@@ -239,7 +251,7 @@ func main() {
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
-	agentHandler := handler.NewAgentHandler(agentService, deployerService)
+	agentHandler := handler.NewAgentHandler(agentService, deployerService, auditRecorder)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
 	runtimeClient := runtime.NewClient()
@@ -290,7 +302,7 @@ func main() {
 		multiragSync = c
 		multiragMyLLMs = c
 	}
-	providerHandler := handler.NewProviderHandler(providerService, multiragSync)
+	providerHandler := handler.NewProviderHandler(providerService, multiragSync, auditRecorder)
 
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeService, multiragMyLLMs)
 
@@ -298,7 +310,7 @@ func main() {
 	// Backed by GORM directly (no repository layer needed) — service tests use
 	// sqlite for isolation.
 	cliTokenSvc := services.NewCLITokenService(database.GetDB())
-	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc)
+	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc, auditRecorder)
 
 	// 首次启动时插入种子数据
 	if err := providerService.SeedIfEmpty(); err != nil {
@@ -403,9 +415,11 @@ func main() {
 			authGroup.GET("/mode", rlMode, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", rl, handler.Login)
-			authGroup.GET("/callback", handler.Callback(casdoorProvider))
+			authGroup.GET("/callback", rl, handler.Callback(casdoorProvider, auditRecorder))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
-			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
+			authGroup.POST("/logout", middleware.JWTAuth(authProvider), func(c *gin.Context) {
+				handler.Logout(c, auditRecorder)
+			})
 			authGroup.POST("/refresh", rl, handler.RefreshToken)
 		}
 	}
@@ -424,6 +438,13 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
+
+	// ---------- Audit 领域 ----------
+	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。
+	// （auditRepo/auditRecorder 已在认证装配区创建——auth 埋点写入侧先于路由装配。）
+	auditQuerier := services.NewAuditQuerier(auditRepo)
+	auditHandler := handler.NewAuditHandler(auditQuerier)
+	v1group.Group("/admin", middleware.RequireAdmin()).GET("/audit-logs", auditHandler.List)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

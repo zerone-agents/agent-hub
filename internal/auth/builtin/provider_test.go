@@ -137,3 +137,21 @@ func TestRevokeMissingIsNoop(t *testing.T) {
 		t.Fatalf("revoking empty token must not error, got %v", err)
 	}
 }
+
+func TestRevokeTokenReturnsDBError(t *testing.T) {
+	// 用一个已关闭的 DB 迫使 Delete 报错（spec §3.1 配套修复）：
+	// RevokeToken 必须传播 DB 错误，而不是无条件吞掉返回 nil。
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	sqlDB.Close()
+	p := New(db, testSecret)
+	if err := p.RevokeToken("some-token"); err == nil {
+		t.Fatal("closed DB must surface the Delete error")
+	}
+	if err := p.RevokeToken(""); err != nil {
+		t.Fatalf("empty token must stay idempotent-nil, got %v", err)
+	}
+}

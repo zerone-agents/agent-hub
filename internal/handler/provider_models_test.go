@@ -52,7 +52,7 @@ func setupProviderModelsRouter(t *testing.T) *gin.Engine {
 	}).Error)
 
 	gin.SetMode(gin.TestMode)
-	h := NewProviderHandler(services.NewProviderService(providerModelsTestKey), nil)
+	h := NewProviderHandler(services.NewProviderService(providerModelsTestKey), nil, newHandlerTestAuditRecorder(t))
 	router := gin.New()
 	router.POST("/api/v1/admin/providers/:id/models", h.AddModel)
 	router.PATCH("/api/v1/admin/providers/:id/models/:selectionId", h.UpdateModel)

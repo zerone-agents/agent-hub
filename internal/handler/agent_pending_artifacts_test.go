@@ -88,6 +88,7 @@ func setupPendingArtifactRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 			Client:   deployer.NewClient(deployerSrv.URL, "unused"),
 			AuthMode: services.ModeBuiltin,
 		}),
+		newHandlerTestAuditRecorder(t),
 	)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

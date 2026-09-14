@@ -88,16 +88,22 @@ func (d *CasdoorDirectory) getTenantUser(tenantID, userID string) (*casdoorsdk.U
 // 时整体报错、本地不动——避免本地已显示 admin 而 casdoor 侧组织管理员
 // 权限未生效的不一致。pending 成员被分配角色视同审批通过（status 同步
 // 置 active），其余成员保持原状态。
-func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) error {
+//
+// 回执（spec §3.2）：远端写入前的任何失败返回 (nil, err)（规则 4）；远端
+// 成功后本地 SetRole 失败返回 rcpt(RemoteApplied=true, LocalApplied=false)
+// + err（partial 信号，规则 3）；RemoteApplied 在无需双写时同样为 true
+// （无远端变更视为已生效）。EffectiveStatus 由「casdoor is_forbidden +
+// 本地状态」合成，隐藏的 pending 审批不漏审。
+func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) (*authdom.MutationReceipt, error) {
 	if userID == actorID {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
 	if !authdom.IsValidRole(role) {
-		return ErrInvalidRole
+		return nil, ErrInvalidRole
 	}
 	rec, err := d.localTenantRecord(tenantID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// admin 任免先改 casdoor 的 is_admin。判断不能只看本地记录
 	// （rec.Role == admin）：若目标用户在 Casdoor 控制台被直接提为组织
@@ -108,48 +114,84 @@ func (d *CasdoorDirectory) UpdateRole(tenantID, userID, role, actorID string) er
 	// 本地不动。
 	u, err := d.getTenantUser(tenantID, userID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	statusAfter := rec.Status
+	if statusAfter == authdom.StatusPending {
+		statusAfter = authdom.StatusActive // 审批动作 = 分配角色
+	}
+	eff := func(forbidden bool, st string) authdom.UserStatus {
+		if forbidden {
+			return authdom.UserStatus("disabled")
+		}
+		return authdom.UserStatus(st)
+	}
+	rcpt := &authdom.MutationReceipt{
+		RoleBefore: authdom.Role(rec.Role), RoleAfter: authdom.Role(role),
+		StatusBefore: authdom.UserStatus(rec.Status), StatusAfter: authdom.UserStatus(statusAfter),
+		EffectiveStatusBefore: eff(u.IsForbidden, rec.Status),
+		EffectiveStatusAfter:  eff(u.IsForbidden, statusAfter),
 	}
 	if role == authdom.RoleAdmin || rec.Role == authdom.RoleAdmin || u.IsAdmin {
 		u.IsAdmin = role == authdom.RoleAdmin
 		ok, err := d.resolveClient(tenantID).UpdateUserForColumns(u, []string{"is_admin"})
 		if err != nil {
-			return err
+			return nil, err // 远端未生效：receipt=nil（规则 4）
 		}
 		if !ok {
-			return ErrUpdateRejected
+			return nil, ErrUpdateRejected
 		}
 	}
-	status := rec.Status
-	if status == authdom.StatusPending {
-		status = authdom.StatusActive // 审批动作 = 分配角色
+	rcpt.RemoteApplied = true
+	if err := d.store.SetRole(providerCasdoor, userID, role, statusAfter); err != nil {
+		rcpt.LocalApplied = false
+		return rcpt, err // partial：远端已生效、本地失败（规则 3）
 	}
-	return d.store.SetRole(providerCasdoor, userID, role, status)
+	rcpt.LocalApplied = true
+	return rcpt, nil
 }
 
 // SetDisabled 直通设置 casdoor 的 is_forbidden 标志（禁用状态不落本地表，
 // ListUsers 时实时合成）。本地成员记录不存在的用户不可操作；pending
 // 成员同样可禁用（无额外防护）。
-func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) error {
+//
+// 回执（spec §3.2）：远端单写、无两阶段窗口，成功即 RemoteApplied=
+// LocalApplied=true；EffectiveStatus 前后由「casdoor IsForbidden 前后值 +
+// 本地 rec.Status」合成，Role/Status 字段取本地 rec 原值不变。
+func (d *CasdoorDirectory) SetDisabled(tenantID, userID string, disabled bool, actorID string) (*authdom.MutationReceipt, error) {
 	if userID == actorID {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
-	if _, err := d.localTenantRecord(tenantID, userID); err != nil {
-		return err
+	rec, err := d.localTenantRecord(tenantID, userID)
+	if err != nil {
+		return nil, err
 	}
 	u, err := d.getTenantUser(tenantID, userID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	effBefore := authdom.UserStatus(rec.Status)
+	if u.IsForbidden {
+		effBefore = authdom.UserStatus("disabled")
 	}
 	u.IsForbidden = disabled
 	ok, err := d.resolveClient(tenantID).UpdateUserForColumns(u, []string{"is_forbidden"})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return ErrUpdateRejected
+		return nil, ErrUpdateRejected
 	}
-	return nil
+	effAfter := authdom.UserStatus(rec.Status)
+	if disabled {
+		effAfter = authdom.UserStatus("disabled")
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore: authdom.Role(rec.Role), RoleAfter: authdom.Role(rec.Role),
+		StatusBefore: authdom.UserStatus(rec.Status), StatusAfter: authdom.UserStatus(rec.Status),
+		EffectiveStatusBefore: effBefore, EffectiveStatusAfter: effAfter,
+		RemoteApplied: true, LocalApplied: true, // 远端单写，无两阶段窗口
+	}, nil
 }
 
 // ResetPassword 直通设置随机密码（casdoor 服务端哈希），明文只返回一次。

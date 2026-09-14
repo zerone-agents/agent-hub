@@ -22,9 +22,13 @@ const (
 
 // InviteResult carries the plaintext token, shown exactly once at creation.
 // The token is never retrievable afterwards (only its SHA-256 hash is stored).
+// ID 与 TtlDays 供审计/调用方使用真实值：TtlDays 是规范化后的实际有效期
+// （<=0 已被 Create 默认为 7 天，不是调用方原始入参）。
 type InviteResult struct {
+	ID        uint64    `json:"id"`
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	TtlDays   int       `json:"ttlDays"`
 }
 
 // InviteService issues, validates, consumes, lists, and revokes one-time
@@ -68,7 +72,7 @@ func (s *InviteService) Create(role, note string, createdBy uint64, ttlDays int)
 	if err := s.db.Create(inv).Error; err != nil {
 		return nil, err
 	}
-	return &InviteResult{Token: plaintext, ExpiresAt: expiresAt}, nil
+	return &InviteResult{ID: inv.ID, Token: plaintext, ExpiresAt: expiresAt, TtlDays: ttlDays}, nil
 }
 
 // Validate returns the invite if usable, else ErrInviteInvalid. Used/revoked

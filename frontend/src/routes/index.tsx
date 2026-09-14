@@ -136,6 +136,11 @@ export const router = createBrowserRouter(
         {
           path: 'settings/users',
           lazy: () => import('@/features/users/UsersPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'settings/audit-logs',
+          lazy: () =>
+            import('@/features/audit/AuditLogsPage').then((m) => ({ Component: m.default }))
         }
       ]
     },

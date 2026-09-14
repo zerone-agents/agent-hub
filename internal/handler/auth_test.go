@@ -6,11 +6,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/config"
+	"control-panel/internal/domain/audit"
+	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
@@ -32,9 +37,15 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	_, err = auth.GetLoginURL("orga", state, verifier, "") // 副作用：存 session
 	require.NoError(t, err)
 
+	// 审计（Task 10）：exchange 失败阶段 org 已知（spec §5.6 阶段表）→ 落库 failure 行
+	db, err := gorm.Open(auditTestSqlite{sqlite.Open(":memory:").(*sqlite.Dialector)}, &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&audit.Log{}))
+	ar := services.NewAuditRecorder(repository.NewAuditRepository(db))
+
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/auth/callback", Callback(nil)) // 失败路径不触达 provider，nil 安全
+	r.GET("/auth/callback", Callback(nil, ar)) // 失败路径不触达 provider，nil 安全
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/callback?code=x&state="+state, nil))
@@ -44,6 +55,11 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	// 原始错误细节（endpoint / exchange 失败原文）不得外泄给客户端。
 	require.NotContains(t, w.Body.String(), "127.0.0.1")
 	require.NotContains(t, w.Body.String(), "exchange")
+
+	rows := rowsOf(t, db, audit.ActionLogin)
+	require.Len(t, rows, 1)
+	require.Equal(t, audit.StatusFailure, rows[0].Status)
+	require.Equal(t, "orga", rows[0].TenantID) // org 已知 → 正常落库，非空租户
 }
 
 // TestBuildCallbackRedirect callback 落地 URL 构造：query 合并、hash 置尾、

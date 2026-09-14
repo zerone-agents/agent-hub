@@ -26,7 +26,7 @@ func setupAigcConfigRouter(t *testing.T) *gin.Engine {
 	require.NoError(t, db.AutoMigrate(&aigc.Config{}))
 
 	gin.SetMode(gin.TestMode)
-	h := NewAigcConfigHandler(services.NewAigcConfigService(db, aigcHandlerTestEncKey, fakeModelSource{}))
+	h := NewAigcConfigHandler(services.NewAigcConfigService(db, aigcHandlerTestEncKey, fakeModelSource{}), newHandlerTestAuditRecorder(t))
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if c.GetHeader("X-Test-Admin") == "true" {

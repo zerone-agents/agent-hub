@@ -5,15 +5,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	mrand "math/rand"
 	"regexp"
+	"runtime/debug"
 	"strings"
+	"time"
 
 	"control-panel/internal/domain/aigc"
 	providerdomain "control-panel/internal/domain/provider"
 	"control-panel/internal/infrastructure/deployer"
 	persistence "control-panel/internal/infrastructure/persistence"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AigcConfigService manages the per-tenant AIGC content-labeling config
@@ -104,34 +110,134 @@ func (s *AigcConfigService) Get(tenantID string) (*ConfigDTO, error) {
 	return &dto, nil
 }
 
+// aigcSaveBackoff 是 Save 重试的退避间隔（10–50ms 抖动）；
+// 包级变量便于测试置零（见 aigc_config_retry_test.go）。
+var aigcSaveBackoff = func() time.Duration {
+	return time.Duration(10+mrand.Intn(40)) * time.Millisecond
+}
+
+// isRetryableMySQLError：1062（唯一键冲突，重走已存在行路径）与 1213（死锁，
+// 重跑完整事务）重试；1205（锁等待超时）等快速失败（spec §3.3）。
+func isRetryableMySQLError(err error) bool {
+	var me *mysql.MySQLError
+	if errors.As(err, &me) {
+		return me.Number == 1062 || me.Number == 1213
+	}
+	return false
+}
+
+// isLockWaitTimeoutErr：1205 锁等待超时（快速失败路径，spec §3.3）。
+func isLockWaitTimeoutErr(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == 1205
+}
+
+// ErrAigcSaveConflict：并发冲突类失败（1062/1213 重试耗尽、1205 快速失败）的
+// 用户可见中文哨兵。CONTRIBUTING 要求用户可见错误一律中文——MySQL 原始英文
+// 错误（Error 1213: Deadlock…）不得直出，仅进日志。
+var ErrAigcSaveConflict = errors.New("保存冲突，请稍后重试")
+
+// saveConflictOrErr：并发冲突类错误映射为中文哨兵；其余错误原样返回
+// （供 Save 在失败路径区分「要日志+哨兵」与「直接透传」）。
+func saveConflictOrErr(err error) error {
+	if isRetryableMySQLError(err) || isLockWaitTimeoutErr(err) {
+		return ErrAigcSaveConflict
+	}
+	return err
+}
+
+// logSaveConflict：内部故障日志——英文错误 + debug.Stack()（CONTRIBUTING：
+// internal errors in English with stack；与 AuditRecorder 降级日志同款，
+// PR #150 审查 Standards#1）。
+func logSaveConflict(tenantID string, err error) {
+	log.Printf("[AIGC] save conflict (tenant=%s): %v\n%s", tenantID, err, debug.Stack())
+}
+
+// withRetry 驱动有界重试：总尝试 ≤3，重试前退避抖动；
+// attempt 必须是自包含的完整事务（saveOnce），非可重试错误立即返回。
+func withRetry(attempt func() error) error {
+	var err error
+	for i := 0; i < 3; i++ { // 总尝试上限 3
+		if i > 0 {
+			time.Sleep(aigcSaveBackoff())
+		}
+		if err = attempt(); err == nil {
+			return nil
+		}
+		if !isRetryableMySQLError(err) {
+			return err
+		}
+	}
+	return err
+}
+
 // Save creates or updates the tenant's own config row. On create it
 // generates the signing key and derives the ContentProducer; on update it
-// keeps the existing signing key.
-func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO, error) {
+// keeps the existing signing key. 成功提交的尝试返回权威变更回执
+// （create=全集；update=实际值变化字段；幂等=[]）；任何失败（含 1205
+// 快速失败）dto 与 receipt 均为 nil（spec §3.3）。
+func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO, *aigc.AigcMutationReceipt, error) {
 	if tenantID == "" {
-		return nil, persistence.ErrTenantIDRequired
+		return nil, nil, persistence.ErrTenantIDRequired
 	}
 	uscc = strings.ToUpper(strings.TrimSpace(uscc))
 	if !usccPattern.MatchString(uscc) {
-		return nil, errors.New("统一社会信用代码须为 18 位数字与大写字母（不含 I/O/S/V/Z）")
+		return nil, nil, errors.New("统一社会信用代码须为 18 位数字与大写字母（不含 I/O/S/V/Z）")
 	}
 	companyName = strings.TrimSpace(companyName)
 	if companyName == "" {
-		return nil, errors.New("公司完整名称不能为空")
+		return nil, nil, errors.New("公司完整名称不能为空")
 	}
+	var dto *ConfigDTO
+	var rcpt *aigc.AigcMutationReceipt
+	if err := withRetry(func() error {
+		d, r, e := s.saveOnce(tenantID, uscc, companyName)
+		if e == nil {
+			dto, rcpt = d, &r
+		}
+		return e
+	}); err != nil {
+		if mapped := saveConflictOrErr(err); mapped != err {
+			// 冲突类（1062/1213 重试耗尽、1205）：原始 MySQL 英文错误进日志，
+			// 用户只见中文哨兵（CONTRIBUTING 用户错误中文契约）。
+			logSaveConflict(tenantID, err)
+			return nil, nil, mapped
+		}
+		return nil, nil, err // 失败（含 1205）→ dto/rcpt 均 nil
+	}
+	return dto, rcpt, nil
+}
 
+// saveOnce：一次完整事务（SELECT [FOR UPDATE] → 比较/写入 → COMMIT）。
+// 每次重试从本函数重新开始（spec §3.3）。
+func (s *AigcConfigService) saveOnce(tenantID, uscc, companyName string) (*ConfigDTO, aigc.AigcMutationReceipt, error) {
+	var rcpt aigc.AigcMutationReceipt
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, rcpt, tx.Error
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			tx.Rollback()
+		}
+	}()
 	// 只查本租户行——upsert 永远只作用于本租户自有行。
+	q := tx.Where("tenant_id = ?", tenantID)
+	if s.db.Dialector.Name() == "mysql" { // FOR UPDATE 仅 MySQL 方言（SQLite 不支持该子句）
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
 	var rec aigc.Config
-	err := s.db.Where("tenant_id = ?", tenantID).First(&rec).Error
+	err := q.First(&rec).Error
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		key, err := generateSigningKey()
-		if err != nil {
-			return nil, err
+		key, kerr := generateSigningKey()
+		if kerr != nil {
+			return nil, rcpt, kerr
 		}
-		enc, err := providerdomain.Encrypt(key, s.encryptionKey)
-		if err != nil {
-			return nil, err
+		enc, eerr := providerdomain.Encrypt(key, s.encryptionKey)
+		if eerr != nil {
+			return nil, rcpt, eerr
 		}
 		rec = aigc.Config{
 			TenantID:            tenantID,
@@ -140,21 +246,36 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 			ContentProducer:     deriveContentProducer(uscc),
 			SigningKeyEncrypted: enc,
 		}
-		if err := s.db.Create(&rec).Error; err != nil {
-			return nil, err
+		if cerr := tx.Create(&rec).Error; cerr != nil {
+			return nil, rcpt, cerr
+		}
+		rcpt = aigc.AigcMutationReceipt{
+			Created:       true,
+			ChangedFields: []aigc.AigcConfigField{aigc.AigcFieldUSCC, aigc.AigcFieldCompanyName},
 		}
 	case err != nil:
-		return nil, err
+		return nil, rcpt, err
 	default:
+		rcpt.ChangedFields = []aigc.AigcConfigField{}
+		if rec.USCC != uscc {
+			rcpt.ChangedFields = append(rcpt.ChangedFields, aigc.AigcFieldUSCC)
+		}
+		if rec.CompanyName != companyName {
+			rcpt.ChangedFields = append(rcpt.ChangedFields, aigc.AigcFieldCompanyName)
+		}
 		rec.USCC = uscc
 		rec.CompanyName = companyName
 		rec.ContentProducer = deriveContentProducer(uscc)
-		if err := s.db.Save(&rec).Error; err != nil {
-			return nil, err
+		if uerr := tx.Save(&rec).Error; uerr != nil {
+			return nil, rcpt, uerr
 		}
 	}
+	if cerr := tx.Commit().Error; cerr != nil {
+		return nil, rcpt, cerr
+	}
+	rollback = false
 	dto := aigcToDTO(&rec)
-	return &dto, nil
+	return &dto, rcpt, nil
 }
 
 // RotateKey rotates the tenant's own row. A tenant without its own row is

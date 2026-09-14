@@ -84,6 +84,33 @@ Covers CRUD + Probe for Agent / Tool / Skill / Scene / Provider / Knowledge / Ch
 | GET×3 + DELETE | `/api/v1/admin/chat/sessions...` | adminRead | Chat history. Handler-level `chatScopeUserID` isolation: member sees/deletes only their own sessions (others → 404); admin/maintainer see all sessions of the tenant |
 | GET/PUT/DELETE | `/api/v1/admin/aigc/config` (+ `POST /config/rotate-key`) | adminWrite | Per-tenant AIGC content-labeling config (GB 45438-2025) |
 | GET/POST/DELETE | `/api/v1/admin/users`, `/admin/invites` | admin only | User management / invite links |
+| GET | `/api/v1/admin/audit-logs` | admin only | Audit log query — filters + snapshot pagination, see [Audit Logs](#audit-logs-admin-only) |
+
+### Audit Logs (admin only)
+
+`GET /api/v1/admin/audit-logs` — audit trail query, admin-only (`RequireAdmin`; maintainer/member → 403). Audit logs are read-only: there is no update/delete endpoint.
+
+Query parameters:
+
+| Param | Default | Description |
+|---|---|---|
+| `page` | `1` | Page number, ≥ 1; invalid → 400 「无效的分页参数」 |
+| `page_size` | `20` | ≥ 1, capped at 100 (values > 100 are clamped, not rejected); invalid → 400 「无效的分页参数」 |
+| `category` | — | Exact match: `auth` \| `user` \| `invite` \| `provider` \| `agent` \| `token` \| `aigc` |
+| `action` | — | Exact match, e.g. `user.update_role` |
+| `user` | — | Fuzzy match on `userName` / `userId` (LIKE `%…%`) |
+| `from`, `to` | — | RFC3339 timestamps; closed interval on `createdAt` (`from` ≤ t ≤ `to`); invalid → 400 「无效的时间范围」 |
+| `snapshotId` | — | Decimal string, optional. Snapshot-consistent pagination: omit on the first request and the server captures the tenant-wide `MAX(id)`; echo the returned `snapshotId` on subsequent requests so items and `total` share the same `id <= snapshotId` view. `"0"` is the empty-set sentinel (tenant has no logs). Invalid → 400 「无效的快照参数」 |
+
+Response (ordered `createdAt DESC, id DESC`):
+
+```json
+{"items":[{"id":"42","tenantId":"default","userId":"7","userName":"alice","category":"user","action":"user.update_role","targetType":"user","targetId":"2","targetName":"bob","status":"success","detail":{"field":"role","from":"member","to":"maintainer"},"remoteIp":"10.0.0.1","userAgent":"…","createdAt":"2026-09-10T12:00:00.123456Z"}],"total":1,"snapshotId":"42"}
+```
+
+- `id` / `snapshotId` are decimal strings: uint64 values above 2^53-1 lose precision as JS numbers — keep them as strings, never convert to number.
+- `detail` is a JSON object or `null`, shaped by a strongly-typed allowlist per `action`.
+- `status` is three-state: `success` / `failure` / `partial`.
 
 ## CLI Tokens (`/api/v1/cli/*` — admin/maintainer only)
 

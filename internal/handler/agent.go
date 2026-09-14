@@ -10,6 +10,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/deployer"
@@ -20,12 +21,14 @@ import (
 type AgentHandler struct {
 	service         *services.AgentService
 	deployerService *services.AgentDeployerService
+	audit           *services.AuditRecorder
 }
 
-func NewAgentHandler(service *services.AgentService, deployerService *services.AgentDeployerService) *AgentHandler {
+func NewAgentHandler(service *services.AgentService, deployerService *services.AgentDeployerService, ar *services.AuditRecorder) *AgentHandler {
 	return &AgentHandler{
 		service:         service,
 		deployerService: deployerService,
+		audit:           ar,
 	}
 }
 
@@ -270,6 +273,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 		respondAgentError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionDelete, audit.TargetAgent, name, name)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -371,6 +375,7 @@ func (h *AgentHandler) DeployAgent(c *gin.Context) {
 		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
+	h.audit.Simple(c, audit.ActionDeploy, audit.TargetAgent, name, name)
 	respondSuccess(c, resp)
 }
 
@@ -401,6 +406,7 @@ func (h *AgentHandler) StopDeployment(c *gin.Context) {
 		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
+	h.audit.Simple(c, audit.ActionStop, audit.TargetAgent, name, name)
 	respondMessage(c, http.StatusOK, "已停止")
 }
 
@@ -412,6 +418,7 @@ func (h *AgentHandler) StartDeployment(c *gin.Context) {
 		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
+	h.audit.Simple(c, audit.ActionStart, audit.TargetAgent, name, name)
 	respondSuccess(c, resp)
 }
 
@@ -429,6 +436,7 @@ func (h *AgentHandler) DeleteDeployment(c *gin.Context) {
 		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
 		return
 	}
+	h.audit.Simple(c, audit.ActionUndeploy, audit.TargetAgent, name, name)
 	if purge {
 		respondMessage(c, http.StatusOK, "已彻底删除")
 	} else {
