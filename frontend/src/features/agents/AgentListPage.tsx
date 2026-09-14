@@ -248,11 +248,11 @@ export default function AgentListPage() {
     })
   }, [agents, keywords])
 
-  // 按 group 分组，组内按 name 排序（group 为 nullish 或空串/空白串都归「未分组」——
+  // 按 group 分组，组内按 name 排序（group 为 nullish 或空串/空白串都归「默认分组」——
   // DB 列默认空字符串，?? 不会回退空串，必须显式判空）
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
-      const group = agent.group?.trim() ? agent.group : '未分组'
+      const group = agent.group?.trim() ? agent.group : '默认分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc
@@ -262,11 +262,11 @@ export default function AgentListPage() {
     return grouped
   }, [filteredAgents])
 
-  // 排序：未分组放最后
+  // 排序：默认分组放最后
   const sortedGroups = useMemo(() => {
     return Object.keys(groupedAgents).sort((a, b) => {
-      if (a === '未分组') return 1
-      if (b === '未分组') return -1
+      if (a === '默认分组') return 1
+      if (b === '默认分组') return -1
       return a.localeCompare(b)
     })
   }, [groupedAgents])

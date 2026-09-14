@@ -127,8 +127,8 @@ describe('AgentListPage', () => {
 
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
     expect(screen.getByText('新建代理')).toBeInTheDocument()
-    // fixture 两 agent 无 group → 「未分组」组（空串/空白 group 也归此，锁定 ?? 不回退空串的坑）
-    expect(screen.getByText('未分组')).toBeInTheDocument()
+    // fixture 两 agent 无 group → 「默认分组」组（空串/空白 group 也归此，锁定 ?? 不回退空串的坑）
+    expect(screen.getByText('默认分组')).toBeInTheDocument()
     expect(screen.getByText('通用助手')).toBeInTheDocument()
     expect(screen.getByText('编程助手')).toBeInTheDocument()
     // Stats links
@@ -315,7 +315,7 @@ describe('AgentListPage bulk operations (#141)', () => {
     await user.click(screen.getByRole('button', { name: /批量操作/ }))
     const link = screen.getAllByText('全选本组')[0]!
     await user.click(link)
-    expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 未分组 2 个 agent
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 默认分组 2 个 agent
   })
 
   it('selection persists across search filtering (review P2a)', async () => {
