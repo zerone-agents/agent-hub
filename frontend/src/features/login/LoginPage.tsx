@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { getAccessToken, parseApiError } from '@/api/client'
+import { sanitizeRedirect } from '@/lib/redirect'
 import { useUserInfo } from '@/queries/useUserInfo'
 import { useAuthStore } from '@/stores/auth'
 import LoadingState from '@/components/LoadingState'
@@ -160,6 +161,9 @@ export default function LoginPage() {
   const [orgError, setOrgError] = useState('')
   const [orgChecking, setOrgChecking] = useState(false)
   const navigate = useNavigate()
+  // 登录回源：读取即 sanitize，非法回退 '/'（协议相对/绝对 URL/反斜杠/超长）。
+  const [searchParams] = useSearchParams()
+  const redirect = sanitizeRedirect(searchParams.get('redirect'))
   const token = getAccessToken()
   const { data: user, isLoading } = useUserInfo({ enabled: !!token })
   const { data: mode, isLoading: modeLoading, isError: modeError, refetch: refetchMode } = useAuthMode()
@@ -167,9 +171,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (token && !isLoading && user) {
-      void Promise.resolve(navigate('/', { replace: true }))
+      void Promise.resolve(navigate(redirect, { replace: true }))
     }
-  }, [token, isLoading, user, navigate])
+  }, [token, isLoading, user, navigate, redirect])
 
   // builtin mode + uninitialized → force the setup flow
   useEffect(() => {
@@ -183,7 +187,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await loginWithPassword(username, password)
-      void Promise.resolve(navigate('/', { replace: true }))
+      void Promise.resolve(navigate(redirect, { replace: true }))
     } catch (err) {
       setError(parseApiError(err))
     } finally {
@@ -193,7 +197,7 @@ export default function LoginPage() {
 
   const handleCasdoorLogin = () => {
     setLoading(true)
-    authApi.login()
+    authApi.login(undefined, redirect)
   }
 
   // 多组织确认：空 → 默认组织直接跳转；非空 → 先预检，未注册就地报错不跳转。
@@ -202,14 +206,14 @@ export default function LoginPage() {
     setOrgError('')
     if (!value) {
       setLoading(true)
-      authApi.login()
+      authApi.login(undefined, redirect)
       return
     }
     setOrgChecking(true)
     try {
       await authApi.checkOrg(value)
       setLoading(true)
-      authApi.login(value)
+      authApi.login(value, redirect)
     } catch {
       setOrgError('组织不存在或未注册，请检查后重试')
     } finally {
