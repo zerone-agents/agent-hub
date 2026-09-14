@@ -155,19 +155,20 @@ export default function ChatHomePage() {
                 key={a.name}
                 type="button"
                 className={styles.card}
-                onClick={() => { void Promise.resolve(navigate(`/agents/${encodeURIComponent(a.name ?? '')}/chat`)) }}
+                onClick={() => { void Promise.resolve(navigate(`/agents/${encodeURIComponent(a.name)}/chat`)) }}
               >
                 <div
                   className={styles.cardIcon}
-                  style={{ background: a.config?.iconBgColor || t.inkLight, color: a.config?.iconColor || t.ink }}
+                  style={{ background: a.config.iconBgColor ?? t.inkLight, color: a.config.iconColor ?? t.ink }}
                 >
                   <ChatCircleDotsIcon size={20} weight="duotone" />
                 </div>
                 <div className={styles.cardTitle}>
-                  {a.config?.title?.zh ?? a.config?.title?.en ?? a.name}
+                  {a.config.title?.zh ?? a.config.title?.en ?? a.name}
                 </div>
-                {(a.config?.description?.zh ?? a.config?.description?.en) && (
-                  <div className={styles.cardDesc}>{a.config?.description?.zh ?? a.config?.description?.en}</div>
+                {(a.config.description?.zh ?? a.config.description?.en) && (
+                  /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record<string, string> index is typed string but backend may omit zh/en; the guard above narrows description so the chains read as redundant — the nullish fallback is a real runtime path */
+                  <div className={styles.cardDesc}>{a.config.description?.zh ?? a.config.description?.en}</div>
                 )}
               </button>
             ))}

@@ -214,14 +214,14 @@ describe('LoginPage 登录回源（?redirect=）', () => {
     const user = userEvent.setup()
     renderLogin('/login?redirect=/agents/chat')
     await submitBuiltinLogin(user)
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/agents/chat', { replace: true }))
+    await waitFor(() => { expect(navigateMock).toHaveBeenCalledWith('/agents/chat', { replace: true }) })
   })
 
   it('?redirect=//evil.com：sanitize 回退后 navigate("/")', async () => {
     const user = userEvent.setup()
     renderLogin('/login?redirect=//evil.com')
     await submitBuiltinLogin(user)
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }))
+    await waitFor(() => { expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }) })
   })
 
   it('casdoor 模式 + redirect：主登录按钮把 redirect 作为第二参传给 authApi.login', async () => {
@@ -234,6 +234,6 @@ describe('LoginPage 登录回源（?redirect=）', () => {
 
   it('已登录（token+user）访问 /login?redirect= 直接跳回源', async () => {
     renderLogin('/login?redirect=/agents/chat', { token: 'tok' })
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/agents/chat', { replace: true }))
+    await waitFor(() => { expect(navigateMock).toHaveBeenCalledWith('/agents/chat', { replace: true }) })
   })
 })

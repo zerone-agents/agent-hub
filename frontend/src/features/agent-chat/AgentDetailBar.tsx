@@ -48,7 +48,7 @@ export default function AgentDetailBar({ agentName }: Props) {
       <div className={styles.wrapper}>
         <AgentDetailSummary
           name={displayName}
-          model={hubAgent.config.modelId || '—'}
+          model={hubAgent.config.modelId ?? '—'}
           status="ready"
           counts={guestCounts}
           expanded={false}
