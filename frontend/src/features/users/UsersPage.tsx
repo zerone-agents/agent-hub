@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
-import { PlusIcon } from '@phosphor-icons/react'
+import { PlusIcon, ShareIcon, SignInIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
 import { authApi } from '@/api/auth'
@@ -12,6 +12,7 @@ import PrimaryButton from '@/components/PrimaryButton'
 import BorderedTable from '@/components/BorderedTable'
 import CreateInviteModal from './CreateInviteModal'
 import LoginLinkModal from './LoginLinkModal'
+import ShareChatModal from './ShareChatModal'
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
@@ -42,6 +43,7 @@ export default function UsersPage() {
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [loginLinkModalOpen, setLoginLinkModalOpen] = useState(false)
+  const [shareModalOpen, setShareModalOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<{ password: string } | null>(null)
 
   const { data: authMode } = useQuery({
@@ -245,15 +247,20 @@ export default function UsersPage() {
         title="用户管理"
         subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
         extra={
-          isCasdoor ? (
-            <PrimaryButton onClick={openLoginLinkModal}>
-              登录链接
-            </PrimaryButton>
-          ) : (
-            <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
-              创建邀请
-            </PrimaryButton>
-          )
+          <>
+            <Button icon={<ShareIcon size={16} />} onClick={() => { setShareModalOpen(true); }}>
+              分享对话页
+            </Button>
+            {isCasdoor ? (
+              <PrimaryButton icon={<SignInIcon size={16} weight="bold" />} onClick={openLoginLinkModal}>
+                登录链接
+              </PrimaryButton>
+            ) : (
+              <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
+                创建邀请
+              </PrimaryButton>
+            )}
+          </>
         }
       />
 
@@ -291,6 +298,8 @@ export default function UsersPage() {
           onClose={() => { setLoginLinkModalOpen(false); }}
         />
       )}
+
+      <ShareChatModal open={shareModalOpen} onClose={() => { setShareModalOpen(false); }} />
 
       <Modal
         title="重置密码成功"

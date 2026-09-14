@@ -60,8 +60,7 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(screen.queryByRole('button', { name: '登录链接' })).not.toBeInTheDocument()
   })
 
-  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {
-    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
     expect(await screen.findByRole('button', { name: '登录链接' })).toBeInTheDocument()
     await waitFor(() => {
@@ -77,6 +76,21 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(await screen.findByText('登录链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
     // 链接在弹窗打开后才请求（一次性链接，每次打开取新值），需异步等待。
     expect(await screen.findByDisplayValue('https://casdoor.example.com/login/oauth/authorize?client_id=acme')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
+  })
+
+  it('点击「分享对话页」弹出 Modal，展示聊天总览链接（登录链接左侧）', async () => {
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    renderUsersPage()
+    const shareBtn = await screen.findByRole('button', { name: '分享对话页' })
+    // authMode query 异步 resolve——等待 casdoor 分支渲染后再取登录链接按钮
+    const loginBtn = await screen.findByRole('button', { name: '登录链接' })
+    // 分享按钮在登录链接左侧（DOM 顺序在前）
+    expect(shareBtn.compareDocumentPosition(loginBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(shareBtn)
+    expect(await screen.findByText('分享对话页', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue(`${window.location.origin}/static/agents/chat`)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
   })
 
