@@ -23,6 +23,12 @@ func (h *AuditHandler) List(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "无效的分页参数")
 		return
 	}
+	// page 上界：防 (page-1)*pageSize 整型溢出为负 offset（GORM 忽略负 offset
+	// 会静默返回首页数据）与超大 offset 慢查询（终审 Minor#3）。
+	if page > 1_000_000 {
+		respondError(c, http.StatusBadRequest, "无效的分页参数")
+		return
+	}
 	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	if err != nil || pageSize < 1 {
 		respondError(c, http.StatusBadRequest, "无效的分页参数")

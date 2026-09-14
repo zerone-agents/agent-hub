@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	mrand "math/rand"
 	"regexp"
 	"strings"
@@ -124,6 +125,26 @@ func isRetryableMySQLError(err error) bool {
 	return false
 }
 
+// isLockWaitTimeoutErr：1205 锁等待超时（快速失败路径，spec §3.3）。
+func isLockWaitTimeoutErr(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == 1205
+}
+
+// ErrAigcSaveConflict：并发冲突类失败（1062/1213 重试耗尽、1205 快速失败）的
+// 用户可见中文哨兵。CONTRIBUTING 要求用户可见错误一律中文——MySQL 原始英文
+// 错误（Error 1213: Deadlock…）不得直出，仅进日志。
+var ErrAigcSaveConflict = errors.New("保存冲突，请稍后重试")
+
+// saveConflictOrErr：并发冲突类错误映射为中文哨兵；其余错误原样返回
+// （供 Save 在失败路径区分「要日志+哨兵」与「直接透传」）。
+func saveConflictOrErr(err error) error {
+	if isRetryableMySQLError(err) || isLockWaitTimeoutErr(err) {
+		return ErrAigcSaveConflict
+	}
+	return err
+}
+
 // withRetry 驱动有界重试：总尝试 ≤3，重试前退避抖动；
 // attempt 必须是自包含的完整事务（saveOnce），非可重试错误立即返回。
 func withRetry(attempt func() error) error {
@@ -168,6 +189,12 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 		}
 		return e
 	}); err != nil {
+		if mapped := saveConflictOrErr(err); mapped != err {
+			// 冲突类（1062/1213 重试耗尽、1205）：原始 MySQL 英文错误进日志，
+			// 用户只见中文哨兵（CONTRIBUTING 用户错误中文契约）。
+			log.Printf("[AIGC] save conflict (tenant=%s): %v", tenantID, err)
+			return nil, nil, mapped
+		}
 		return nil, nil, err // 失败（含 1205）→ dto/rcpt 均 nil
 	}
 	return dto, rcpt, nil

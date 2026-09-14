@@ -52,3 +52,20 @@ func TestWithRetryCapsAtThreeAttempts(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 3, calls) // 总尝试 ≤3
 }
+
+func TestIsLockWaitTimeoutErr(t *testing.T) {
+	require.True(t, isLockWaitTimeoutErr(mysqlErr(1205)))
+	require.False(t, isLockWaitTimeoutErr(mysqlErr(1213)))
+	require.False(t, isLockWaitTimeoutErr(errors.New("other")))
+}
+
+// 冲突类（1062/1213 重试耗尽、1205 快速失败）→ 中文哨兵，MySQL 英文原文
+// 不得直出给用户（CONTRIBUTING 用户错误中文契约，终审 Important#1）。
+func TestSaveConflictOrErr(t *testing.T) {
+	for _, code := range []uint16{1062, 1213, 1205} {
+		require.ErrorIs(t, saveConflictOrErr(mysqlErr(code)), ErrAigcSaveConflict, "code %d", code)
+	}
+	require.Equal(t, "保存冲突，请稍后重试", ErrAigcSaveConflict.Error())
+	other := errors.New("boom")
+	require.Same(t, other, saveConflictOrErr(other)) // 非冲突类原样透传（不吞错）
+}

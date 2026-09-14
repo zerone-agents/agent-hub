@@ -171,8 +171,22 @@ func TestAuditPageSizeCapAndDefaults(t *testing.T) {
 	r, _ := newAuditHandlerEnv(t)
 	require.Equal(t, 200, getAudit(t, r, "admin", "?page_size=500").Code) // 上限截断为 100，不报错
 	require.Equal(t, 400, getAudit(t, r, "admin", "?page=0").Code)        // 非法中文 400
+	// 超上界（终审 Minor#3）：防 (page-1)*pageSize 整型溢出为负 offset
+	require.Equal(t, 400, getAudit(t, r, "admin", "?page=9223372036854775807").Code)
+	require.Equal(t, 400, getAudit(t, r, "admin", "?page=1000001").Code)
 	w := getAudit(t, r, "admin", "")
 	require.NotContains(t, w.Body.String(), "无效")
+}
+
+// 空 Detail → 响应为 JSON null（spec §4：空 Detail 返回 null；终审 Minor#2 补测）。
+func TestAuditEmptyDetailNull(t *testing.T) {
+	r, db := newAuditHandlerEnv(t)
+	l := &audit.Log{TenantID: "t1", UserID: "7", UserName: "alice", Category: audit.CatAuth,
+		Action: audit.ActionLogout, TargetType: audit.TargetSystem, Status: audit.StatusSuccess}
+	require.NoError(t, db.Create(l).Error)
+	w := getAudit(t, r, "admin", "")
+	require.Equal(t, 200, w.Code)
+	require.Contains(t, w.Body.String(), `"detail":null`)
 }
 
 // TestAuditFromToRangeFilters 补 Task 2 ledgered 覆盖债：repository From/To 过滤

@@ -144,3 +144,23 @@ func TestIPLimiterSweepFreesExpired(t *testing.T) {
 	l.sweep(now)
 	require.LessOrEqual(t, l.size(), 0) // 过期 bucket 被清理，槽位释放
 }
+
+// 满载但有过期项：惰性清扫腾槽后新 key 被接纳（spec §5.1 满载「先清过期腾槽、
+// 仍满才拒新」路径；终审 Minor#5 补测——此前只测了「全活跃 → 拒新」半段）。
+func TestIPLimiterLazySweepAdmitsNewKeyAfterExpiry(t *testing.T) {
+	base := time.Now()
+	now := base
+	l := newIPLimiter(10, time.Minute, 4, func() time.Time { return now })
+	for i := 0; i < 4; i++ { // 单窗口内填满容量（bucket 全活跃）
+		ok, _ := l.allow("10.0.0." + string(rune('1'+i)))
+		require.True(t, ok)
+	}
+	ok, rejectedNew := l.allow("10.9.9.9") // 全活跃 → 拒新
+	require.False(t, ok)
+	require.True(t, rejectedNew)
+
+	now = base.Add(2 * time.Minute)       // 原 4 个 bucket 全部过期
+	ok, rejectedNew = l.allow("10.9.9.9") // 惰性清扫腾槽 → 接纳新 key
+	require.True(t, ok)
+	require.False(t, rejectedNew)
+}
