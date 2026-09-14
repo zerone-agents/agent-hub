@@ -51,6 +51,10 @@ type OrganizationMcpHandler struct {
 	memoryService      *services.MemoryService
 	relationDynService *services.RelationDynamicsService
 	personaRunResolver func(tenantID string, agentID uint64) (string, error)
+	// H7 P1 persona gate: nil keeps tools always available（测试基座可不接）；
+	// 非 nil 时每个人物工具在入口按扩展生命周期运行时查询，被管理员
+	// 停用的能力返回明确的"能力 <pack> 已被停用"错误。
+	personaGate *services.PersonaCapabilityGate
 }
 
 // SetPersonaServices injects the four H6 persona capability packs. Any nil
@@ -63,6 +67,26 @@ func (h *OrganizationMcpHandler) SetPersonaServices(emotion *services.EmotionSer
 // run) so persona tools never need a run_id argument.
 func (h *OrganizationMcpHandler) SetPersonaRunResolver(fn func(tenantID string, agentID uint64) (string, error)) {
 	h.personaRunResolver = fn
+}
+
+// SetPersonaGate 接入 H7 能力门控（main.go 接线时调用）：内置人物能力
+// 扩展被管理员停用时，对应工具返回"能力 <pack> 已被停用"。
+func (h *OrganizationMcpHandler) SetPersonaGate(g *services.PersonaCapabilityGate) {
+	h.personaGate = g
+}
+
+// personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
+// 工具恒可用（测试基座与旧接线兼容）。
+func (h *OrganizationMcpHandler) personaPackEnabled(tenantID, pack string) bool {
+	if h.personaGate == nil {
+		return true
+	}
+	return h.personaGate.Enabled(tenantID, pack)
+}
+
+// personaDisabledError 是人物工具被扩展生命周期停用时的统一错误。
+func personaDisabledError(id interface{}, pack string) jsonRPCResponse {
+	return mcpErrorResult(id, fmt.Sprintf("能力 %s 已被停用", pack))
 }
 
 func (h *OrganizationMcpHandler) SetWorkflowService(service *services.WorkflowService) {
@@ -582,6 +606,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, execution)
 	case "emotion_status":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackEmotion) {
+			return personaDisabledError(id, services.PersonaPackEmotion), nil
+		}
 		if h.emotionService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
@@ -598,6 +625,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, state)
 	case "belief_list":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackBelief) {
+			return personaDisabledError(id, services.PersonaPackBelief), nil
+		}
 		if h.beliefService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
@@ -617,6 +647,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"beliefs": beliefs})
 	case "belief_claim":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackBelief) {
+			return personaDisabledError(id, services.PersonaPackBelief), nil
+		}
 		if h.beliefService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
@@ -634,6 +667,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"factRef": factRef})
 	case "memory_record":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackMemory) {
+			return personaDisabledError(id, services.PersonaPackMemory), nil
+		}
 		if h.memoryService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
@@ -655,6 +691,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, entry)
 	case "memory_recall":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackMemory) {
+			return personaDisabledError(id, services.PersonaPackMemory), nil
+		}
 		if h.memoryService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
@@ -674,6 +713,9 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"memories": memories})
 	case "relation_view":
+		if !h.personaPackEnabled(tenantID, services.PersonaPackRelationshipDynamics) {
+			return personaDisabledError(id, services.PersonaPackRelationshipDynamics), nil
+		}
 		if h.relationDynService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}

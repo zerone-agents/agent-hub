@@ -10,6 +10,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/extension"
 	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/tenant"
 
@@ -188,4 +189,86 @@ func TestOrganizationMcpPersonaToolsEndToEndAndIsolation(t *testing.T) {
 	payload, isError = callPersonaTool(t, router, "token-a", "relation_view", fmt.Sprintf(`{"target_agent_id":%d}`, b.ID))
 	require.False(t, isError)
 	require.Equal(t, "neutral", payload["stance"])
+}
+
+// TestOrganizationMcpPersonaToolsDisabledByGate：管理员经 H7 扩展生命周期
+// 停用内置人物能力扩展后，对应 MCP 工具立即返回"能力 <pack> 已被停用"，
+// 未停用的能力不受影响；重新启用后恢复（H7 P1 门控）。
+func TestOrganizationMcpPersonaToolsDisabledByGate(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &extension.Extension{}, &extension.Version{}, &extension.Install{}))
+
+	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
+	require.NoError(t, db.Create(&a).Error)
+	started := time.Now().UTC()
+	require.NoError(t, db.Create(&rundomain.Run{ID: "run-gate", TenantID: "tenant-a", Name: "case", Status: rundomain.StatusRunning, StartedAt: &started}).Error)
+	require.NoError(t, db.Create(&rundomain.RunAgent{TenantID: "tenant-a", RunID: "run-gate", AgentID: a.ID, AgentNameSnapshot: a.Name}).Error)
+
+	runService := services.NewRunService(db)
+	lifecycle := services.NewExtensionLifecycleService(db)
+	require.NoError(t, lifecycle.EnsureBuiltinPersonaPacks())
+
+	h := NewOrganizationMcpHandler(&fakeOrganizationMessageService{})
+	h.SetPersonaServices(
+		services.NewEmotionService(runService),
+		services.NewBeliefService(runService),
+		services.NewMemoryService(runService),
+		services.NewRelationDynamicsService(runService),
+	)
+	h.SetPersonaRunResolver(runService.ActiveRunForAgent)
+	h.SetPersonaGate(services.NewPersonaCapabilityGate(db))
+
+	agents := map[string]agent.AgentConfig{"token-a": a}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/v1/organization/mcp", func(c *gin.Context) {
+		auth := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+		identity, ok := agents[auth]
+		if !ok {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		c.Set("agent", &identity)
+		tenant.SetTenantID(c, "tenant-a")
+		c.Next()
+	}, h.HandleMessage)
+
+	// 默认启用：emotion_status 正常返回。
+	_, isErr := callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
+	require.False(t, isErr)
+
+	// 停用 emotion 与 memory（default 平台级；运行时租户 tenant-a 回退命中）。
+	disable := func(name string) {
+		var ext extension.Extension
+		require.NoError(t, db.Where("tenant_id=? AND name=?", "default", name).First(&ext).Error)
+		_, err := lifecycle.Disable("default", ext.ID)
+		require.NoError(t, err)
+	}
+	disable("io.zerone.emotion")
+	disable("io.zerone.memory")
+
+	payload, isErr := callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
+	require.True(t, isErr)
+	require.Contains(t, payload["error"], "能力 emotion 已被停用")
+
+	payload, isErr = callPersonaTool(t, router, "token-a", "memory_record", `{"fact_ref":"f1","interpretation":"记忆"}`)
+	require.True(t, isErr)
+	require.Contains(t, payload["error"], "能力 memory 已被停用")
+
+	payload, isErr = callPersonaTool(t, router, "token-a", "memory_recall", `{}`)
+	require.True(t, isErr)
+	require.Contains(t, payload["error"], "能力 memory 已被停用")
+
+	// 未停用的 belief 能力不受影响。
+	_, isErr = callPersonaTool(t, router, "token-a", "belief_list", `{}`)
+	require.False(t, isErr)
+
+	// 重新启用 emotion：立即恢复。
+	var emotionExt extension.Extension
+	require.NoError(t, db.Where("tenant_id=? AND name=?", "default", "io.zerone.emotion").First(&emotionExt).Error)
+	_, err = lifecycle.Enable("default", emotionExt.ID)
+	require.NoError(t, err)
+	_, isErr = callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
+	require.False(t, isErr)
 }
