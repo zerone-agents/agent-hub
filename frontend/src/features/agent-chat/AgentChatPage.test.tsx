@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import AgentChatPage from './AgentChatPage'
+
+// 页眉壳与页面测试无关（PR review P1：真实页眉渲染是 CI 超时慢点）——薄壳透传 children。
+vi.mock('./ChatLayout', () => ({
+  default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
 
 // 可变路由状态：重挂载用例需要在本用例内改写 name 参数；useNavigate 为 inner
 // 顶部返回按钮所需（switcherBar）。
@@ -89,7 +94,7 @@ function renderPage(qc = new QueryClient({ defaultOptions: { queries: { retry: f
   return qc
 }
 
-describe('AgentChatPage stream error display', { timeout: 15000 }, () => {
+describe('AgentChatPage stream error display', { timeout: 30000 }, () => {
   beforeEach(() => {
     mockStream.reset.mockClear()
     mockStream.state = {
@@ -185,7 +190,7 @@ describe('AgentChatPage stream error display', { timeout: 15000 }, () => {
   })
 })
 
-describe('AgentChatPage session scoping', { timeout: 15000 }, () => {
+describe('AgentChatPage session scoping', { timeout: 30000 }, () => {
   beforeEach(() => {
     mockStream.state = {
       phase: 'streaming',
@@ -238,7 +243,7 @@ describe('AgentChatPage session scoping', { timeout: 15000 }, () => {
   })
 })
 
-describe('AgentChatPage per-agent remount & guest gating', { timeout: 15000 }, () => {
+describe('AgentChatPage per-agent remount & guest gating', { timeout: 30000 }, () => {
   afterEach(() => {
     // 还原可变 mock 状态，保证用例顺序无关
     router.params = { name: 'test-agent' }
