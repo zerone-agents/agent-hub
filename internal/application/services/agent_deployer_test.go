@@ -1624,3 +1624,77 @@ func TestComputePendingArtifacts_RepoErrorPropagates(t *testing.T) {
 		t.Fatalf("pending = %+v, want nil on error", got)
 	}
 }
+
+// TestGetStatus_NotFoundConvergesStaleStatus：deployer 返回 404（容器不存在）
+// 时，DB 中残留的部署状态必须收敛为 not_found——线上「爆款文案」案例：容器
+// 被外部清理后 DB 残留 running，聊天视图（deployment_status='running'）因此
+// 显示未部署 Agent。归档/空状态不重复写库。
+func TestGetStatus_NotFoundConvergesStaleStatus(t *testing.T) {
+	newNotFoundServer := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"success":false,"error":"agent not found"}`))
+		}))
+	}
+	repoWithStatus := func(initial string, persisted *string) *mockAgentRepo {
+		return &mockAgentRepo{
+			getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+				return &agent.AgentConfig{
+					ID:               1,
+					Name:             "general",
+					DeploymentStatus: initial,
+				}, nil
+			},
+			updateFunc: func(tenantID string, a *agent.AgentConfig) error {
+				*persisted = a.DeploymentStatus
+				return nil
+			},
+		}
+	}
+
+	t.Run("残留 running 收敛为 not_found", func(t *testing.T) {
+		srv := newNotFoundServer(t)
+		defer srv.Close()
+		var persisted string
+		s := newTestAgentDeployerService(t, srv.URL, repoWithStatus("running", &persisted), deployTokenProviderSvc())
+
+		dto, err := s.GetStatus("tenant-a", "general")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dto.Status != "not_found" {
+			t.Errorf("dto.Status = %q, want not_found", dto.Status)
+		}
+		if persisted != "not_found" {
+			t.Errorf("stale running must converge to not_found, DB got %q", persisted)
+		}
+	})
+	t.Run("从未部署（空状态）不写库", func(t *testing.T) {
+		srv := newNotFoundServer(t)
+		defer srv.Close()
+		var persisted string
+		s := newTestAgentDeployerService(t, srv.URL, repoWithStatus("", &persisted), deployTokenProviderSvc())
+
+		if _, err := s.GetStatus("tenant-a", "general"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if persisted != "" {
+			t.Errorf("empty initial status must not trigger update, DB got %q", persisted)
+		}
+	})
+	t.Run("已归档不重复写库", func(t *testing.T) {
+		srv := newNotFoundServer(t)
+		defer srv.Close()
+		var persisted string
+		s := newTestAgentDeployerService(t, srv.URL, repoWithStatus("archived", &persisted), deployTokenProviderSvc())
+
+		if _, err := s.GetStatus("tenant-a", "general"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if persisted != "" {
+			t.Errorf("archived status must not be overwritten, DB got %q", persisted)
+		}
+	})
+}
