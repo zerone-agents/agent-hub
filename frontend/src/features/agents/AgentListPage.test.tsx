@@ -127,6 +127,8 @@ describe('AgentListPage', () => {
 
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
     expect(screen.getByText('新建代理')).toBeInTheDocument()
+    // fixture 两 agent 无 group → 「未分组」组（空串/空白 group 也归此，锁定 ?? 不回退空串的坑）
+    expect(screen.getByText('未分组')).toBeInTheDocument()
     expect(screen.getByText('通用助手')).toBeInTheDocument()
     expect(screen.getByText('编程助手')).toBeInTheDocument()
     // Stats links

@@ -148,10 +148,11 @@ export default function ChatHomePage() {
   const { data: user } = useUserInfo()
   const guest = isGuestUser(user, mode?.mode)
 
-  // 与管理页 Agent 列表同款分组：group ?? 未分组；组内按 name 排序；未分组垫底。
+  // 与管理页 Agent 列表同款分组：group 为空（nullish 或空串/空白串——DB 列默认
+  // 空字符串，?? 不回退空串）归「未分组」；组内按 name 排序；未分组垫底。
   const groupedSections = useMemo(() => {
     const grouped = (agents ?? []).reduce<Record<string, Agent[]>>((acc, agent) => {
-      const group = agent.group ?? '未分组'
+      const group = agent.group?.trim() ? agent.group : '未分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc

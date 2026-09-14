@@ -110,7 +110,8 @@ describe('ChatHomePage', () => {
 
   it('按 group 分组展示，未分组垫底', () => {
     state.agents = [
-      { ...writerAgent, group: undefined },
+      // 空串 group（DB 列默认值）与 undefined 都必须归「未分组」——?? 不回退空串
+      { ...writerAgent, group: '' },
       { ...coderAgent, group: 'DevOps' },
       { ...coderAgent, id: 3, name: 'ops', group: 'DevOps', config: { ...coderAgent.config, title: { zh: '运维助手' } } },
     ]
