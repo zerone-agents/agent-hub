@@ -163,6 +163,20 @@ export default function ExtensionListPage() {
             width: 90
           },
           {
+            title: '安装状态',
+            key: 'installed',
+            width: 130,
+            render: (_, record) =>
+              record.installed ? (
+                <Tag color={record.installedStatus === 'enabled' ? 'green' : 'default'}>
+                  已安装 {record.installedVersion}
+                  {record.installedStatus === 'disabled' ? '（已停用）' : ''}
+                </Tag>
+              ) : (
+                <Tag>未安装</Tag>
+              )
+          },
+          {
             title: '状态',
             dataIndex: 'status',
             width: 100,

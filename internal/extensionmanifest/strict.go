@@ -63,6 +63,25 @@ type Manifest struct {
 	Tools            []ManifestDeclaration `json:"tools,omitempty"`
 	Relations        []ManifestDeclaration `json:"relations,omitempty"`
 	PromptInjections []ManifestDeclaration `json:"promptInjections,omitempty"`
+	Migrations       []ManifestMigration   `json:"migrations,omitempty"`
+}
+
+// ManifestMigration 声明一次状态 Schema 数据变换（JSON Patch 风格），
+// 如 from=1.0.0 to=2.0.0 时把 schema_json 中 /intensity/minimum 替换
+// 为 -100。ops 在升级时正向执行；rollback 可选，回滚时优先于
+// 按旧值推导的 inverse。每条 op 均为中文错误校验。
+type ManifestMigration struct {
+	From     string                `json:"from"`
+	To       string                `json:"to"`
+	Ops      []ManifestMigrationOp `json:"ops"`
+	Rollback []ManifestMigrationOp `json:"rollback,omitempty"`
+}
+
+// ManifestMigrationOp 是单条迁移操作（JSON Patch 子集：replace/add/remove）。
+type ManifestMigrationOp struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value any    `json:"value,omitempty"`
 }
 
 // ManifestDependency 声明对另一扩展的版本范围，如 ">=1.0.0 <2.0.0"。
@@ -179,6 +198,7 @@ func ValidateExtensionManifest(raw []byte) (*Manifest, []string) {
 	validateDeclarations(add, "tools", m.Tools)
 	validateDeclarations(add, "relations", m.Relations)
 	validateDeclarations(add, "promptInjections", m.PromptInjections)
+	validateMigrations(add, m.Migrations)
 
 	if len(errs) > 0 {
 		return nil, errs
@@ -238,6 +258,51 @@ func IsValidVersionRange(raw string) bool {
 		}
 	}
 	return true
+}
+
+func validateMigrationOps(add func(string, ...any), kind string, index int, ops []ManifestMigrationOp) {
+	seen := map[string]bool{}
+	for j, op := range ops {
+		switch op.Op {
+		case "replace", "add", "remove":
+		default:
+			add("migrations[%d].%s[%d].op %q 必须是 replace/add/remove 之一", index, kind, j, op.Op)
+			continue
+		}
+		if !strings.HasPrefix(op.Path, "/") || len(op.Path) == 1 {
+			add("migrations[%d].%s[%d].path %q 必须是以 / 开头的 JSON Pointer 路径", index, kind, j, op.Path)
+			continue
+		}
+		if seen[op.Op+"\x00"+op.Path] {
+			add("migrations[%d].%s 存在重复路径 %q", index, kind, op.Path)
+		}
+		seen[op.Op+"\x00"+op.Path] = true
+		if op.Op == "remove" && op.Value != nil {
+			add("migrations[%d].%s[%d] remove 操作不允许携带 value", index, kind, j)
+		}
+	}
+}
+
+func validateMigrations(add func(string, ...any), migrations []ManifestMigration) {
+	seen := map[string]bool{}
+	for i, mig := range migrations {
+		if !extension.IsValidVersion(mig.From) {
+			add("migrations[%d].from %q 不是合法的语义化版本", i, mig.From)
+		}
+		if !extension.IsValidVersion(mig.To) {
+			add("migrations[%d].to %q 不是合法的语义化版本", i, mig.To)
+		}
+		if len(mig.Ops) == 0 {
+			add("migrations[%d].ops 至少声明一条迁移操作", i)
+		}
+		key := mig.From + "->" + mig.To
+		if seen[key] {
+			add("migrations 存在重复的版本区间 %q", key)
+		}
+		seen[key] = true
+		validateMigrationOps(add, "ops", i, mig.Ops)
+		validateMigrationOps(add, "rollback", i, mig.Rollback)
+	}
 }
 
 func containsString(list []string, v string) bool {

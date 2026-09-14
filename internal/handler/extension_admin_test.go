@@ -25,7 +25,7 @@ func extensionAdminRouter(t *testing.T) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&extension.Extension{}, &extension.Version{}))
+	require.NoError(t, db.AutoMigrate(&extension.Extension{}, &extension.Version{}, &extension.Install{}))
 	h := NewExtensionAdminHandler(services.NewExtensionService(db))
 	r := gin.New()
 	r.Use(func(c *gin.Context) {

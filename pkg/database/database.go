@@ -205,6 +205,7 @@ func AutoMigrate(backfillTenant string) error {
 		&capability.ResourceProvenance{},
 		&extension.Extension{},
 		&extension.Version{},
+		&extension.Install{},
 		&workflow.Definition{},
 		&workflow.Version{},
 		&workflow.Step{},

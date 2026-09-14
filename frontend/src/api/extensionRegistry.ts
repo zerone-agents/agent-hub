@@ -19,6 +19,9 @@ export interface ExtensionListItem {
   updatedAt: string
   versionCount: number
   latestVersion: string
+  installed: boolean
+  installedVersion: string
+  installedStatus: string
 }
 
 export interface ExtensionListResult {
@@ -62,6 +65,9 @@ export interface ExtensionDetail {
   createdAt: string
   updatedAt: string
   versions: ExtensionVersionSummary[]
+  installed: boolean
+  installedVersion: string
+  installedStatus: string
 }
 
 export interface ExtensionVersionDetail {
@@ -92,6 +98,44 @@ export interface RegisterExtensionResult {
   alreadyExisted: boolean
 }
 
+// H7.1 生命周期类型
+export interface ExtensionInstallRecord {
+  id: number
+  extensionId: number
+  version: string
+  status: string
+  installedBy: string
+  migrationLog: string
+  installedAt: string
+  updatedAt: string
+}
+
+export interface ExtensionInstallResult {
+  install?: ExtensionInstallRecord
+  idempotent: boolean
+  dependentsDisabled?: string[]
+}
+
+export interface ExtensionImpactDependency {
+  name: string
+  range: string
+  optional: boolean
+  satisfied: boolean
+  actual?: string
+}
+
+export interface ExtensionImpact {
+  extensionId: number
+  name: string
+  version?: string
+  installed: boolean
+  status?: string
+  dependents: string[]
+  dependencies: ExtensionImpactDependency[]
+  newStateSchemas: string[]
+  permissions: ExtensionPermission[]
+}
+
 export const extensionRegistryApi = {
   register: (manifest: string, source?: string, changelog?: string) =>
     apiClient.post('/api/v1/admin/extensions', manifest, {
@@ -102,5 +146,17 @@ export const extensionRegistryApi = {
     apiClient.get('/api/v1/admin/extensions', { params }),
   get: (id: number) => apiClient.get(`/api/v1/admin/extensions/${id}`),
   getVersion: (id: number, version: string) =>
-    apiClient.get(`/api/v1/admin/extensions/${id}/versions/${encodeURIComponent(version)}`)
+    apiClient.get(`/api/v1/admin/extensions/${id}/versions/${encodeURIComponent(version)}`),
+  // H7.1 生命周期
+  install: (id: number, version: string) =>
+    apiClient.post(`/api/v1/admin/extensions/${id}/install`, { version }),
+  enable: (id: number) => apiClient.post(`/api/v1/admin/extensions/${id}/enable`),
+  disable: (id: number) => apiClient.post(`/api/v1/admin/extensions/${id}/disable`),
+  upgrade: (id: number, targetVersion: string) =>
+    apiClient.post(`/api/v1/admin/extensions/${id}/upgrade`, { target_version: targetVersion }),
+  rollback: (id: number, targetVersion?: string) =>
+    apiClient.post(`/api/v1/admin/extensions/${id}/rollback`, { target_version: targetVersion }),
+  uninstall: (id: number, force?: boolean, purge?: boolean) =>
+    apiClient.delete(`/api/v1/admin/extensions/${id}/uninstall`, { params: { force, purge } }),
+  impact: (id: number) => apiClient.get(`/api/v1/admin/extensions/${id}/impact`)
 }

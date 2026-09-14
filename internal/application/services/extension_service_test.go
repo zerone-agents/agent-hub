@@ -16,7 +16,7 @@ func newExtensionTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&extension.Extension{}, &extension.Version{}))
+	require.NoError(t, db.AutoMigrate(&extension.Extension{}, &extension.Version{}, &extension.Install{}))
 	return db
 }
 
@@ -129,7 +129,12 @@ func TestExtensionServiceTenantIsolation(t *testing.T) {
 	_, err = svc.GetVersion("tenant-b", pageA.Items[0].ID, "1.0.0")
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
-	// GetEnabled 语义：精确租户 + 名称 + 版本 + active
+	// GetEnabled 语义（H7.1）：注册≠启用，安装并启用后才返回记录
+	_, _, err = svc.GetEnabled(db, "tenant-a", "io.zerone.alpha", "1.0.0")
+	require.Error(t, err)
+	lifecycle := NewExtensionLifecycleService(db)
+	_, err = lifecycle.Install("tenant-a", pageA.Items[0].ID, "1.0.0", "admin-1")
+	require.NoError(t, err)
 	enabled, _, err := svc.GetEnabled(db, "tenant-a", "io.zerone.alpha", "1.0.0")
 	require.NoError(t, err)
 	require.Equal(t, "io.zerone.alpha", enabled.Name)

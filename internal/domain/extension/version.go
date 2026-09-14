@@ -136,6 +136,85 @@ func (a SemVersion) Compare(b SemVersion) int {
 	return comparePrerelease(a.Prerelease, b.Prerelease)
 }
 
+// SatisfiesRange 判断 version 是否满足 rangeExpr 版本范围。
+// 支持精确版本、"^1.2.3"（同主版本；0.x 时锁次版本）、"~1.2.3"（锁次版本）
+// 以及空格/逗号分隔的比较符组合（>=、<=、>、<、=）。非法范围返回中文错误。
+func SatisfiesRange(version, rangeExpr string) (bool, error) {
+	expr := strings.TrimSpace(rangeExpr)
+	if expr == "" {
+		return false, fmt.Errorf("版本范围不能为空")
+	}
+	v, err := ParseVersion(version)
+	if err != nil {
+		return false, fmt.Errorf("版本 %q 不合法：%v", version, err)
+	}
+	for _, field := range strings.FieldsFunc(expr, func(r rune) bool { return r == ' ' || r == ',' }) {
+		if field == "" {
+			continue
+		}
+		ok, err := satisfiesOne(v, field)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// satisfiesOne 判断 v 是否满足单段范围表达式（如 ">=1.0.0"、"^2.1.0"）。
+func satisfiesOne(v SemVersion, field string) (bool, error) {
+	switch {
+	case strings.HasPrefix(field, "^"):
+		base, err := ParseVersion(strings.TrimSpace(field[1:]))
+		if err != nil {
+			return false, fmt.Errorf("版本范围 %q 不合法：%v", field, err)
+		}
+		if v.Compare(base) < 0 {
+			return false, nil
+		}
+		// ^0.y.z 等价 ~0.y.z（锁次版本），其余锁主版本
+		if base.Major == 0 {
+			return v.Minor == base.Minor, nil
+		}
+		return v.Major == base.Major, nil
+	case strings.HasPrefix(field, "~"):
+		base, err := ParseVersion(strings.TrimSpace(field[1:]))
+		if err != nil {
+			return false, fmt.Errorf("版本范围 %q 不合法：%v", field, err)
+		}
+		return v.Compare(base) >= 0 && v.Major == base.Major && v.Minor == base.Minor, nil
+	}
+	op := "="
+	rest := field
+	for _, prefix := range []string{">=", "<=", ">", "<", "="} {
+		if strings.HasPrefix(field, prefix) {
+			op = prefix
+			rest = strings.TrimSpace(field[len(prefix):])
+			break
+		}
+	}
+	base, err := ParseVersion(rest)
+	if err != nil {
+		return false, fmt.Errorf("版本范围 %q 不合法：%v", field, err)
+	}
+	cmp := v.Compare(base)
+	switch op {
+	case "=":
+		return cmp == 0, nil
+	case ">":
+		return cmp > 0, nil
+	case "<":
+		return cmp < 0, nil
+	case ">=":
+		return cmp >= 0, nil
+	case "<=":
+		return cmp <= 0, nil
+	}
+	return false, fmt.Errorf("版本范围 %q 包含未知比较符", field)
+}
+
 func compareInt(a, b int64) int {
 	switch {
 	case a < b:

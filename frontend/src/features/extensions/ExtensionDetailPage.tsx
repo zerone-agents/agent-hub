@@ -9,6 +9,7 @@ import { createStyles } from 'antd-style'
 import { useNavigate, useParams } from 'react-router'
 import { parseApiError } from '@/api/client'
 import { useExtensionDetail, useExtensionVersion } from '@/queries/useExtensionRegistry'
+import ExtensionLifecyclePanel from './ExtensionLifecyclePanel'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -70,13 +71,16 @@ export default function ExtensionDetailPage() {
       </div>
 
       {data && (
-        <Descriptions column={2} style={{ marginBottom: 24 }}>
-          <Descriptions.Item label="显示名">{data.displayName || '—'}</Descriptions.Item>
-          <Descriptions.Item label="来源">{data.source}</Descriptions.Item>
-          <Descriptions.Item label="描述" span={2}>
-            {data.description || '—'}
-          </Descriptions.Item>
-        </Descriptions>
+        <>
+          <ExtensionLifecyclePanel id={id} data={data} />
+          <Descriptions column={2} style={{ marginBottom: 24 }}>
+            <Descriptions.Item label="显示名">{data.displayName || '—'}</Descriptions.Item>
+            <Descriptions.Item label="来源">{data.source}</Descriptions.Item>
+            <Descriptions.Item label="描述" span={2}>
+              {data.description || '—'}
+            </Descriptions.Item>
+          </Descriptions>
+        </>
       )}
 
       <Table

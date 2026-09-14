@@ -4,6 +4,8 @@ import { unwrapResponse } from '@/api/client'
 import {
   extensionRegistryApi,
   type ExtensionDetail,
+  type ExtensionImpact,
+  type ExtensionInstallResult,
   type ExtensionListResult,
   type ExtensionVersionDetail,
   type RegisterExtensionResult
@@ -54,5 +56,64 @@ export function useRegisterExtension() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['extensions', 'registry'] })
     }
+  })
+}
+
+// H7.1 生命周期 mutations：成功后统一失效注册中心缓存
+function useLifecycleMutation<TVariables>(
+  mutationFn: (vars: TVariables) => Promise<ExtensionInstallResult>
+) {
+  const queryClient = useQueryClient()
+  return useMutation<ExtensionInstallResult, Error, TVariables>({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['extensions', 'registry'] })
+    }
+  })
+}
+
+export function useInstallExtension(id: number) {
+  return useLifecycleMutation(async (version: string) =>
+    unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.install(id, version))
+  )
+}
+
+export function useEnableExtension(id: number) {
+  return useLifecycleMutation<void>(async () =>
+    unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.enable(id))
+  )
+}
+
+export function useDisableExtension(id: number) {
+  return useLifecycleMutation<void>(async () =>
+    unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.disable(id))
+  )
+}
+
+export function useUpgradeExtension(id: number) {
+  return useLifecycleMutation(async (targetVersion: string) =>
+    unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.upgrade(id, targetVersion))
+  )
+}
+
+export function useRollbackExtension(id: number) {
+  return useLifecycleMutation(async (targetVersion?: string) =>
+    unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.rollback(id, targetVersion))
+  )
+}
+
+export function useUninstallExtension(id: number) {
+  return useLifecycleMutation(
+    async ({ force, purge }: { force?: boolean; purge?: boolean }) =>
+      unwrapResponse<ExtensionInstallResult>(await extensionRegistryApi.uninstall(id, force, purge))
+  )
+}
+
+export function useExtensionImpact(id: number | undefined) {
+  return useQuery<ExtensionImpact>({
+    queryKey: ['extensions', 'registry', 'impact', id],
+    queryFn: async () =>
+      unwrapResponse<ExtensionImpact>(await extensionRegistryApi.impact(id as number)),
+    enabled: typeof id === 'number' && id > 0
   })
 }

@@ -144,6 +144,10 @@ type ExtensionListItem struct {
 	extension.Extension
 	VersionCount  int64  `json:"versionCount"`
 	LatestVersion string `json:"latestVersion"`
+	// H7.1：当前租户安装状态（installed=false 时后两者为空）
+	Installed        bool   `json:"installed"`
+	InstalledVersion string `json:"installedVersion"`
+	InstalledStatus  string `json:"installedStatus"`
 }
 
 type ExtensionListPage struct {
@@ -193,7 +197,15 @@ func (s *ExtensionService) List(tenantID string, filter ExtensionListFilter) (*E
 			return nil, err
 		}
 		_ = s.db.Where("extension_id=?", ext.ID).Order("created_at DESC").First(&latest).Error
-		items = append(items, ExtensionListItem{Extension: ext, VersionCount: count, LatestVersion: latest.Version})
+		item := ExtensionListItem{Extension: ext, VersionCount: count, LatestVersion: latest.Version}
+		// H7.1：附带当前租户安装状态
+		var inst extension.Install
+		if err := s.db.Where("tenant_id=? AND extension_id=?", tenantID, ext.ID).First(&inst).Error; err == nil {
+			item.Installed = true
+			item.InstalledVersion = inst.Version
+			item.InstalledStatus = inst.Status
+		}
+		items = append(items, item)
 	}
 	return &ExtensionListPage{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
 }
@@ -225,9 +237,13 @@ type ExtensionVersionSummary struct {
 }
 
 // ExtensionDetail 是扩展详情：扩展信息 + 全部版本摘要与权限清单。
+// H7.1：附带当前租户安装状态。
 type ExtensionDetail struct {
 	extension.Extension
-	Versions []ExtensionVersionSummary `json:"versions"`
+	Versions         []ExtensionVersionSummary `json:"versions"`
+	Installed        bool                      `json:"installed"`
+	InstalledVersion string                    `json:"installedVersion"`
+	InstalledStatus  string                    `json:"installedStatus"`
 }
 
 // Get 返回租户内扩展详情（含版本列表、各版本 manifest 摘要与权限清单）。
@@ -241,6 +257,13 @@ func (s *ExtensionService) Get(tenantID string, id uint64) (*ExtensionDetail, er
 		return nil, err
 	}
 	detail := &ExtensionDetail{Extension: ext, Versions: make([]ExtensionVersionSummary, 0, len(versions))}
+	// H7.1：附带当前租户安装状态
+	var inst extension.Install
+	if err := s.db.Where("tenant_id=? AND extension_id=?", tenantID, ext.ID).First(&inst).Error; err == nil {
+		detail.Installed = true
+		detail.InstalledVersion = inst.Version
+		detail.InstalledStatus = inst.Status
+	}
 	for _, v := range versions {
 		detail.Versions = append(detail.Versions, ExtensionVersionSummary{
 			Version:         v,
@@ -266,7 +289,10 @@ func (s *ExtensionService) GetVersion(tenantID string, id uint64, version string
 
 // GetEnabled 提供与 H6 CapabilityRegistryService.GetEnabled 等价的语义：
 // 返回租户内指定扩展（按 DNS 名）指定版本的启用状态记录；未启用或不存在报错。
-// 查询走 extensions + extension_versions 新表，H6 的 capability_packages 读取不受影响。
+// H7.1 起"启用"以 extension_installs（status=enabled 且版本匹配）为准：
+// 停用只影响新事件生效，历史 run_states 数据依旧可读。
+// 查询走 extensions + extension_versions + extension_installs 新表，
+// H6 的 capability_packages 读取不受影响。
 func (s *ExtensionService) GetEnabled(tx *gorm.DB, tenantID, name, version string) (*extension.Extension, *extension.Version, error) {
 	var ext extension.Extension
 	err := tx.Where("tenant_id=? AND name=? AND status=?", tenantID, name, extension.StatusActive).First(&ext).Error
@@ -276,8 +302,20 @@ func (s *ExtensionService) GetEnabled(tx *gorm.DB, tenantID, name, version strin
 	if err != nil {
 		return nil, nil, err
 	}
+	var inst extension.Install
+	err = tx.Where("tenant_id=? AND extension_id=? AND status=?", tenantID, ext.ID, extension.InstallStatusEnabled).
+		First(&inst).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("扩展 %s@%s 未安装或未启用", name, version)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if version != "" && inst.Version != version {
+		return nil, nil, fmt.Errorf("扩展 %s@%s 未启用（当前安装版本为 %s）", name, version, inst.Version)
+	}
 	var ver extension.Version
-	if err := tx.Where("extension_id=? AND version=?", ext.ID, version).First(&ver).Error; err != nil {
+	if err := tx.Where("extension_id=? AND version=?", ext.ID, inst.Version).First(&ver).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, fmt.Errorf("扩展 %s@%s 未注册或未启用", name, version)
 		}
