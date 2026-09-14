@@ -75,6 +75,9 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; justify-content: space-between; align-items: center;
     gap: 12px; margin-bottom: 16px;
   `,
+  toolbarActions: css`
+    display: flex; align-items: center; gap: 8px;
+  `,
 }))
 
 export default function AgentListPage() {
@@ -603,37 +606,39 @@ export default function AgentListPage() {
           onSearch={setKeywords}
           realtime
         />
-        {/* 开始对话：新页签打开聊天总览（member 只读也可聊，不受 canWrite 限制） */}
-        {!selectionMode && (
-          <Button
-            icon={<ChatCircleDotsIcon size={14} />}
-            onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
-          >
-            开始对话
-          </Button>
-        )}
-        {selectionMode && canWrite ? (
-          <BulkActionBar
-            selectedCount={selectedNames.size}
-            pendingUpdateCount={pendingUpdateCount}
-            onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
-            onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
-            onClear={() => { setRawSelectedNames(new Set()); }}
-            onOperation={(op) => { void handleBulkOperation(op); }}
-            onExit={exitSelectionMode}
-            operationsDisabled={bulkTask.phase === 'running'}
-            prechecking={precheckingOp}
-          />
-        ) : (
-          canWrite && (
+        <div className={styles.toolbarActions}>
+          {/* 开始对话：新页签打开聊天总览（member 只读也可聊，不受 canWrite 限制） */}
+          {!selectionMode && (
             <Button
-              icon={<CheckSquareIcon size={14} />}
-              onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+              icon={<ChatCircleDotsIcon size={14} />}
+              onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
             >
-              批量操作
+              开始对话
             </Button>
-          )
-        )}
+          )}
+          {selectionMode && canWrite ? (
+            <BulkActionBar
+              selectedCount={selectedNames.size}
+              pendingUpdateCount={pendingUpdateCount}
+              onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
+              onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
+              onClear={() => { setRawSelectedNames(new Set()); }}
+              onOperation={(op) => { void handleBulkOperation(op); }}
+              onExit={exitSelectionMode}
+              operationsDisabled={bulkTask.phase === 'running'}
+              prechecking={precheckingOp}
+            />
+          ) : (
+            canWrite && (
+              <Button
+                icon={<CheckSquareIcon size={14} />}
+                onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+              >
+                批量操作
+              </Button>
+            )
+          )}
+        </div>
       </div>
 
       {isLoading ? (
