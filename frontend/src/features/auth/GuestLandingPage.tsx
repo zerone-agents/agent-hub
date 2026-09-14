@@ -1,4 +1,4 @@
-import { Card, Typography } from 'antd'
+import { Button, Card, Typography } from 'antd'
 import { ChatCircleDotsIcon, SignOutIcon } from '@phosphor-icons/react'
 import { useNavigate } from 'react-router'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -26,13 +26,13 @@ export default function GuestLandingPage() {
         >
           前往 Agent 聊天
         </PrimaryButton>
-        <PrimaryButton
-          ghost
+        {/* 退出是次要动作：普通描边按钮（PrimaryButton ghost 为 accent 底色设计，浅色卡片上文字不可见） */}
+        <Button
           icon={<SignOutIcon size={16} weight="bold" />}
           onClick={() => { void logout() }}
         >
           退出登录
-        </PrimaryButton>
+        </Button>
       </Card>
     </div>
   )
