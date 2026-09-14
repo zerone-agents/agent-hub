@@ -222,3 +222,34 @@ func TestExtensionSlotProxyRejectsDisallowedUpstream(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code)
 	require.Contains(t, w.Body.String(), "拒绝")
 }
+
+// TestExtensionSlotProxyPassesThroughRedirect 回归 P0：上游返回 302 +
+// 内网 Location 时，代理不得跟随跳转（SecureHTTPClient 拒绝重定向），
+// 3xx 应原样透传给调用方。
+func TestExtensionSlotProxyPassesThroughRedirect(t *testing.T) {
+	allowLoopbackUpstreamForTest(t)
+	inner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("internal"))
+	}))
+	defer inner.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/metrics" {
+			w.Header().Set("Location", inner.URL+"/internal")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	env := extensionSlotRouter(t)
+	seedSlotExtension(t, env, slotManifestWithAPI("io.zerone.redir", upstream.URL))
+
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/extensions/io.zerone.redir/metrics", nil))
+	require.Equal(t, http.StatusFound, w.Code)
+	require.Equal(t, inner.URL+"/internal", w.Header().Get("Location"))
+	require.NotContains(t, w.Body.String(), "internal")
+}

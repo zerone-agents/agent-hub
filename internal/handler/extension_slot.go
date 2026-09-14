@@ -12,8 +12,10 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,13 +34,31 @@ const (
 type ExtensionSlotHandler struct {
 	slots  *services.ExtensionSlotService
 	client *http.Client
+	// secureClientFor 每次请求为 upstream 构造"校验 IP + 固定拨号"的
+	// HTTP 客户端（默认 SecureHTTPClientForUpstream，测试可替换）。
+	secureClientFor func(target string) (*http.Client, error)
 }
 
 func NewExtensionSlotHandler(s *services.ExtensionSlotService) *ExtensionSlotHandler {
 	return &ExtensionSlotHandler{
-		slots:  s,
-		client: &http.Client{Timeout: extensionProxyTimeout},
+		slots:           s,
+		client:          &http.Client{Timeout: extensionProxyTimeout},
+		secureClientFor: SecureHTTPClientForUpstream,
 	}
+}
+
+// SecureHTTPClientForUpstream 解析并校验 upstream 的全部 IP，返回拨号
+// 目标固定为这些 IP 的 HTTP 客户端（防 DNS rebinding TOCTOU 与跳转绕过）。
+func SecureHTTPClientForUpstream(target string) (*http.Client, error) {
+	base, err := url.Parse(strings.TrimSpace(target))
+	if err != nil || base.Hostname() == "" {
+		return nil, fmt.Errorf("upstream %q 必须是合法的 http(s) URL", target)
+	}
+	ips, err := extensionmanifest.ValidateAndResolveIPs(target)
+	if err != nil {
+		return nil, err
+	}
+	return extensionmanifest.SecureHTTPClient(ips, base.Hostname(), extensionProxyTimeout), nil
 }
 
 // ListSlots 聚合当前租户已启用扩展的插槽内容：GET /admin/extensions/slots?slot=。
@@ -97,9 +117,10 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 		return
 	}
 	target := route.Upstream
-	// 转发前重新解析并校验 upstream 地址（防 DNS rebinding），命中
-	// 环回 / RFC1918 / 链路本地段一律拒绝
-	if err := extensionmanifest.ResolveAndValidateUpstream(target); err != nil {
+	// 转发前解析并校验 upstream 全部 IP，并构造"拨号固定到已校验 IP、
+	// 拒绝跟随跳转"的安全客户端（防 DNS rebinding TOCTOU 与 302 内网绕过）
+	client, err := h.secureClientFor(target)
+	if err != nil {
 		respondError(c, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -119,7 +140,7 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 	if tid := tenant.GetTenantID(c); tid != "" {
 		req.Header.Set("X-Tenant-ID", tid)
 	}
-	resp, err := h.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "扩展服务暂时无法访问，请稍后再试")
 		return
@@ -139,6 +160,10 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 		c.Header("Content-Type", ct)
 	} else {
 		c.Header("Content-Type", "application/json; charset=utf-8")
+	}
+	// 3xx 不跟随跳转（防 Location 指向内网），原样透传含 Location
+	if loc := resp.Header.Get("Location"); loc != "" {
+		c.Header("Location", loc)
 	}
 	if truncated {
 		c.Header("X-Extension-Truncated", "true")
