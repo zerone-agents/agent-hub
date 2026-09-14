@@ -190,6 +190,10 @@ func TestTemplateServiceInstallFullAndResources(t *testing.T) {
 	var members []collaboration.GroupMember
 	require.NoError(t, db.Find(&members).Error)
 	require.Len(t, members, 2)
+	// MySQL NO_ZERO_DATE 回归：JoinedAt 必须显式赋值，零值在生产安装会直接报错
+	for _, m := range members {
+		require.False(t, m.JoinedAt.IsZero(), "GroupMember.JoinedAt 不能是零值（MySQL 严格模式会拒绝写入）")
+	}
 	var channels []collaboration.Channel
 	require.NoError(t, db.Find(&channels).Error)
 	require.Len(t, channels, 1)

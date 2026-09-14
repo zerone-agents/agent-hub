@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
@@ -509,6 +510,9 @@ func (s *TemplateService) Install(tenantID string, templateID uint64, opts Insta
 					member := collaboration.GroupMember{
 						TenantID: tenantID, GroupID: grp.ID, AgentID: id,
 						Role: collaboration.RoleMember,
+						// MySQL NO_ZERO_DATE 拒绝零值时间，SQLite 恰好放行——本地测试
+						// 全绿但生产安装必失败，必须显式赋值（参考 collaboration_service）。
+						JoinedAt: time.Now().UTC(),
 					}
 					if err := tx.Create(&member).Error; err != nil {
 						return fmt.Errorf("添加群组成员 %s 失败：%w", ref, err)
