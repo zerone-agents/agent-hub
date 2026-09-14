@@ -37,3 +37,13 @@
 - Git 提交：3500163（修复后 HEAD），分支 codex/agent-relations 已推送
 - 部署版本：zerone-agent-hub-h6:latest（镜像 9b54f1b5ab10），容器 quickstart-hub-1，AutoMigrate 建 12 张新表，存量数据核验无损（8 agents/1 群组/17 关系/7 人物状态），H6 persona MCP 回归通过
 - 已知限制：见"未实现范围"；启动日志有一条 state_schemas 重复注册 warning（H6 persona 启动幂等注册与种子模板撞名，非致命，已被错误处理吞掉）；CommitState 幂等只查 key 不查内容（H6 既有语义，P2）；用量埋点在 chat 路径暂无 model 名（runtime 不回传）
+
+## 部署后缺陷修复（2026-09-14 晚）
+
+- 问题：用户打开运行详情页白屏，`Cannot read properties of undefined (reading 'map')`。
+- 根因：`/runs/:id/belief-disputes` 接口的 `Dispute`/`DisputeEntry` Go 结构体缺 JSON tag，序列化成 PascalCase（`FactRef`/`Entries`），前端读 `dispute.entries` 得到 undefined 后 `.map` 崩溃。既有单测用 `json.Unmarshal` 反序列化断言，而 Unmarshal 匹配 key 不区分大小写，把该缺陷漏过了（H6 冒烟 therefore 未暴露）。
+- 修复（commit 5d724c1）：
+  1. 后端补 `json:"factRef"/"entries"/"agentId"/"status"/"confidence"` tag；
+  2. 单测增加原始报文大小写断言（`"factRef"` 必须存在、`"FactRef"` 必须不存在）防回归；
+  3. 前端 PersonaPanel 对无 `entries` 的争议条目做防御性过滤。
+- 验证：go test（handler + services）通过；前端 vitest 18 用例通过；生产构建通过；部署后实测接口返回 `{"factRef":...,"entries":[{"agentId":...}]}`，线上首页引用新 chunk（index-Bd1Vx_D9 / RunCenterPage-CuB6aYUJ）。
