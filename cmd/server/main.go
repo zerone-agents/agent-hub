@@ -310,6 +310,8 @@ func main() {
 	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
 	runHandler := handler.NewRunHandler(runService)
 	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
+	extensionService := services.NewExtensionService(database.GetDB())
+	extensionAdminHandler := handler.NewExtensionAdminHandler(extensionService)
 	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
 	workflowService := services.NewWorkflowService(database.GetDB())
 	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
@@ -525,6 +527,11 @@ func main() {
 	adminRead.GET("/capability-packages", capabilityRegistryHandler.List)
 	adminWrite.POST("/capability-packages", capabilityRegistryHandler.Register)
 	adminWrite.POST("/capability-packages/:id/approve", capabilityRegistryHandler.Approve)
+	// H7.0 扩展注册中心（通用扩展市场，独立于 H6 capability-packages）
+	adminWrite.POST("/extensions", extensionAdminHandler.Register)
+	adminRead.GET("/extensions", extensionAdminHandler.List)
+	adminRead.GET("/extensions/:id", extensionAdminHandler.Get)
+	adminRead.GET("/extensions/:id/versions/:version", extensionAdminHandler.GetVersion)
 	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
 	adminRead.GET("/capability-packages/:id/resources", capabilityRegistryHandler.Resources)
 

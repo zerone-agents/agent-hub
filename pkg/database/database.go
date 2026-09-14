@@ -17,6 +17,7 @@ import (
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/collaboration"
 	"control-panel/internal/domain/decision"
+	"control-panel/internal/domain/extension"
 	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
@@ -202,6 +203,8 @@ func AutoMigrate(backfillTenant string) error {
 		&eventdomain.CausalBudget{},
 		&capability.Package{},
 		&capability.ResourceProvenance{},
+		&extension.Extension{},
+		&extension.Version{},
 		&workflow.Definition{},
 		&workflow.Version{},
 		&workflow.Step{},

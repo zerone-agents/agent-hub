@@ -78,7 +78,17 @@ export const router = createBrowserRouter(
         {
           path: 'extensions',
           lazy: () =>
+            import('@/features/extensions/ExtensionListPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'extensions/acceptance',
+          lazy: () =>
             import('@/features/extensions/ExtensionAcceptancePage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'extensions/:id',
+          lazy: () =>
+            import('@/features/extensions/ExtensionDetailPage').then((m) => ({ Component: m.default }))
         },
         {
           path: 'tools',
