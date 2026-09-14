@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, DeploymentStatus } from '@/api/agents'
@@ -603,6 +603,15 @@ export default function AgentListPage() {
           onSearch={setKeywords}
           realtime
         />
+        {/* 开始对话：新页签打开聊天总览（member 只读也可聊，不受 canWrite 限制） */}
+        {!selectionMode && (
+          <Button
+            icon={<ChatCircleDotsIcon size={14} />}
+            onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
+          >
+            开始对话
+          </Button>
+        )}
         {selectionMode && canWrite ? (
           <BulkActionBar
             selectedCount={selectedNames.size}
