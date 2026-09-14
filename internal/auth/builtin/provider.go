@@ -136,13 +136,13 @@ func (p *Provider) RefreshToken(refreshToken string) (*auth.TokenPair, error) {
 	return p.IssueTokenPair(&user)
 }
 
-// RevokeToken deletes a refresh token (logout). Missing tokens are not errors.
+// RevokeToken deletes a refresh token (logout). Missing tokens are not errors
+// (0-row delete stays nil); genuine DB errors are propagated (spec §3.1 配套修复).
 func (p *Provider) RevokeToken(refreshToken string) error {
 	if refreshToken == "" {
 		return nil
 	}
-	p.db.Where("token_hash = ?", sha256Hex(refreshToken)).Delete(&authdom.RefreshToken{})
-	return nil
+	return p.db.Where("token_hash = ?", sha256Hex(refreshToken)).Delete(&authdom.RefreshToken{}).Error
 }
 
 // RevokeAllForUser deletes every refresh token of the user — used on password

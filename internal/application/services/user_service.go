@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"regexp"
 	"sync"
 	"time"
@@ -18,14 +19,15 @@ import (
 // Sentinel errors for the builtin user system. Login failures are deliberately
 // uniform (ErrInvalidCredentials) to avoid user enumeration.
 var (
-	ErrInvalidCredentials = errors.New("用户名或密码错误")
-	ErrLocked             = errors.New("尝试次数过多，请 15 分钟后再试")
-	ErrUsernameTaken      = errors.New("用户名已被占用")
-	ErrAlreadyInitialized = errors.New("系统已初始化")
-	ErrLastAdmin          = errors.New("至少保留一个可用管理员")
-	ErrWeakPassword       = errors.New("密码至少 8 位，且需包含字母和数字")
-	ErrInvalidUsername    = errors.New("用户名需为 3-32 位字母、数字、下划线或连字符")
-	ErrSelfOperation      = errors.New("不能对自己执行该操作")
+	ErrInvalidCredentials     = errors.New("用户名或密码错误")
+	ErrLocked                 = errors.New("尝试次数过多，请 15 分钟后再试")
+	ErrUsernameTaken          = errors.New("用户名已被占用")
+	ErrAlreadyInitialized     = errors.New("系统已初始化")
+	ErrLastAdmin              = errors.New("至少保留一个可用管理员")
+	ErrWeakPassword           = errors.New("密码至少 8 位，且需包含字母和数字")
+	ErrInvalidUsername        = errors.New("用户名需为 3-32 位字母、数字、下划线或连字符")
+	ErrSelfOperation          = errors.New("不能对自己执行该操作")
+	ErrConcurrentModification = errors.New("用户已被并发修改，请重试")
 )
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
@@ -191,43 +193,130 @@ func (s *UserService) Delete(id uint64) error {
 }
 
 // UpdateRole changes a user's role. Guards: no self-change, keep last admin.
-func (s *UserService) UpdateRole(id, actorID uint64, role string) error {
+// 返回权威 MutationReceipt（spec §3.2）：builtin 下 Effective==Status、
+// RemoteApplied 恒 true；任何错误路径 receipt 为 nil（未生效不记录）。
+func (s *UserService) UpdateRole(id, actorID uint64, role string) (*authdom.MutationReceipt, error) {
 	if !authdom.IsValidRole(role) {
-		return errors.New("非法角色")
+		return nil, errors.New("非法角色")
 	}
 	if id == actorID {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
 	u, err := s.GetByID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if u.Role == authdom.RoleAdmin && u.Status == authdom.StatusActive && role != authdom.RoleAdmin {
 		if err := s.ensureNotLastAdmin(id); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return s.db.Model(&authdom.User{}).Where("id = ?", id).Update("role", role).Error
+	rows, err := updateColumn(s.db, id, "role", role)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		// MySQL 默认 rowcount=实际改变行数：对 role 已是目标值的用户重复提交，
+		// RowsAffected 也是 0——不能直接判未生效。复查 GetByID 消歧（用户裁决
+		// 2026-09-11 方案②，spec §3.2）。
+		cur, getErr := s.GetByID(id)
+		return resolveZeroRows(cur, getErr, "role", role)
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore:            authdom.Role(u.Role),
+		RoleAfter:             authdom.Role(role),
+		StatusBefore:          authdom.UserStatus(u.Status),
+		StatusAfter:           authdom.UserStatus(u.Status),
+		EffectiveStatusBefore: authdom.UserStatus(u.Status),
+		EffectiveStatusAfter:  authdom.UserStatus(u.Status),
+		RemoteApplied:         true,
+		LocalApplied:          true,
+	}, nil
 }
 
 // SetStatus enables/disables a user. Guards: no self-disable, keep last admin.
-func (s *UserService) SetStatus(id, actorID uint64, status string) error {
+// 返回权威 MutationReceipt（spec §3.2）：builtin 下 Effective==Status、
+// RemoteApplied 恒 true；任何错误路径 receipt 为 nil（未生效不记录）。
+func (s *UserService) SetStatus(id, actorID uint64, status string) (*authdom.MutationReceipt, error) {
 	if status != authdom.StatusActive && status != authdom.StatusDisabled {
-		return errors.New("非法状态")
+		return nil, errors.New("非法状态")
 	}
 	if id == actorID && status == authdom.StatusDisabled {
-		return ErrSelfOperation
+		return nil, ErrSelfOperation
 	}
 	u, err := s.GetByID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if u.Role == authdom.RoleAdmin && u.Status == authdom.StatusActive && status == authdom.StatusDisabled {
 		if err := s.ensureNotLastAdmin(id); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return s.db.Model(&authdom.User{}).Where("id = ?", id).Update("status", status).Error
+	rows, err := updateColumn(s.db, id, "status", status)
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		// 同 UpdateRole：rows==0 复查 GetByID 消歧（幂等 / 已删除 / 并发写入）。
+		cur, getErr := s.GetByID(id)
+		return resolveZeroRows(cur, getErr, "status", status)
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore:            authdom.Role(u.Role),
+		RoleAfter:             authdom.Role(u.Role),
+		StatusBefore:          authdom.UserStatus(u.Status),
+		StatusAfter:           authdom.UserStatus(status),
+		EffectiveStatusBefore: authdom.UserStatus(u.Status),
+		EffectiveStatusAfter:  authdom.UserStatus(status),
+		RemoteApplied:         true,
+		LocalApplied:          true,
+	}, nil
+}
+
+// updateColumn：单列 UPDATE，返回 RowsAffected（零行≠错误）。
+func updateColumn(db *gorm.DB, id uint64, col, val string) (int64, error) {
+	res := db.Model(&authdom.User{}).Where("id = ?", id).Update(col, val)
+	return res.RowsAffected, res.Error
+}
+
+// resolveZeroRows 消歧 UPDATE RowsAffected==0 的三种结局（用户裁决 2026-09-11
+// 方案②，spec §3.2）。生产库是 MySQL 且 DSN 无 clientFoundRows=true，go-sql-driver
+// 默认 rowcount=实际改变行数：同值幂等更新 RowsAffected=0 并非未生效，不能直接判
+// gorm.ErrRecordNotFound。入参 cur/getErr 为 rows==0 之后复查 GetByID 的结果，
+// col 为本次更新的列（"role"/"status"），val 为目标值。三种结局：
+//  1. 行仍在且值已等于目标 → 幂等成功：receipt（before==after，按复查到的当前值，
+//     RemoteApplied/LocalApplied 均 true）+ nil error——重复提交不得报错；
+//  2. 行已不存在（getErr != nil）→ (nil, gorm.ErrRecordNotFound)（真正的并发删除窗口）；
+//  3. 行仍在但值不等于目标（并发写入者胜出，我方写入实为 no-op）→
+//     (nil, ErrConcurrentModification)。
+func resolveZeroRows(cur *authdom.User, getErr error, col, val string) (*authdom.MutationReceipt, error) {
+	if getErr != nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	equal := false
+	switch col {
+	case "role":
+		equal = cur.Role == val
+	case "status":
+		equal = cur.Status == val
+	default:
+		// 内部编程错误（不可达分支）：英文（CONTRIBUTING：用户可见错误才用中文）。
+		return nil, fmt.Errorf("resolveZeroRows: unknown column %q", col)
+	}
+	if !equal {
+		return nil, ErrConcurrentModification
+	}
+	return &authdom.MutationReceipt{
+		RoleBefore:            authdom.Role(cur.Role),
+		RoleAfter:             authdom.Role(cur.Role),
+		StatusBefore:          authdom.UserStatus(cur.Status),
+		StatusAfter:           authdom.UserStatus(cur.Status),
+		EffectiveStatusBefore: authdom.UserStatus(cur.Status),
+		EffectiveStatusAfter:  authdom.UserStatus(cur.Status),
+		RemoteApplied:         true,
+		LocalApplied:          true,
+	}, nil
 }
 
 // ResetPassword sets a random password and returns the plaintext once.

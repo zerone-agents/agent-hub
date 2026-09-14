@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuthConfigDefaults(t *testing.T) {
@@ -101,4 +103,26 @@ func TestDeprecatedRoleMappingEnvWarns(t *testing.T) {
 			t.Fatalf("未记录 %s 的废弃警告，日志输出: %q", name, out)
 		}
 	}
+}
+
+func TestTrustedProxiesEnvParsing(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want []string
+	}{
+		{"10.0.0.0/8, 172.16.0.0/12", []string{"10.0.0.0/8", "172.16.0.0/12"}},
+		{"", []string{}},       // 空串 → 空列表（不信任代理，非错误）
+		{"  ,  ,", []string{}}, // 纯空白/尾逗号 → 清洗后为空
+		{"10.0.0.0/8,", []string{"10.0.0.0/8"}},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, parseProxyCIDRList(tc.raw), tc.raw)
+	}
+}
+
+func TestApplyTrustedProxiesEnvOverride(t *testing.T) {
+	t.Setenv("SERVER_TRUSTED_PROXIES", "10.0.0.0/8")
+	cfg := &Config{}
+	applyTrustedProxiesEnv(cfg)
+	require.Equal(t, []string{"10.0.0.0/8"}, cfg.Server.TrustedProxies)
 }

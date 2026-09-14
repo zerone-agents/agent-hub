@@ -11,6 +11,7 @@ import (
 	"control-panel/internal/config"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/aigc"
+	"control-panel/internal/domain/audit"
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/mcp"
@@ -142,6 +143,7 @@ func AutoMigrate(backfillTenant string) error {
 		&authdomain.RefreshToken{},
 		&authdomain.UserIdentity{},
 		&authdomain.TenantOAuthClient{},
+		&audit.Log{},
 		&systemsetting.SystemSetting{},
 	)
 	if err != nil {

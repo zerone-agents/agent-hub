@@ -46,6 +46,7 @@ func setupDeleteRouter(t *testing.T, deployerHandler http.HandlerFunc) (*gin.Eng
 			Client:   deployer.NewClient(deployerSrv.URL, "unused"),
 			AuthMode: services.ModeBuiltin,
 		}),
+		newHandlerTestAuditRecorder(t),
 	)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

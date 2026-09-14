@@ -76,7 +76,7 @@ func seedAgentRow(t *testing.T, db *gorm.DB, name string) agent.AgentConfig {
 // 且 gorm 英文诊断 "record not found" 不得泄漏到响应体）。
 func TestAgentHandler_Get_NotFound404(t *testing.T) {
 	setupAgentErrorTestDB(t)
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/nonexistent", nil)
@@ -108,7 +108,7 @@ func TestAgentHandler_Create_InternalError500Neutral(t *testing.T) {
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(oldOut) })
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"name":"builder-a","config":{"systemPrompt":"hello"}}`
@@ -131,7 +131,7 @@ func TestAgentHandler_Create_InternalError500Neutral(t *testing.T) {
 // （非法标识：大写字母+下划线）。
 func TestAgentHandler_Create_Validation400(t *testing.T) {
 	setupAgentErrorTestDB(t)
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"name":"Bad_Name","config":{"systemPrompt":"hello"}}`
@@ -156,7 +156,7 @@ func TestAgentHandler_List_InternalError500Neutral(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sqlDB.Close())
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -178,7 +178,7 @@ func TestAgentHandler_Create_NameConflict400(t *testing.T) {
 	db := setupAgentErrorTestDB(t)
 	seedAgentRow(t, db, "builder-a")
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"name":"builder-a","config":{"systemPrompt":"hello"}}`
@@ -198,7 +198,7 @@ func TestAgentHandler_Create_NameConflict400(t *testing.T) {
 // ValidationError → 400 原文，而非 500 中性文案。
 func TestAgentHandler_UpdateSubagents_MainAgentNotFound400(t *testing.T) {
 	setupAgentErrorTestDB(t)
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"subagents":["stray-sub"]}`
@@ -225,7 +225,7 @@ func TestAgentHandler_UpdateSubagents_ParentMounted400(t *testing.T) {
 	seedAgentRow(t, db, "cand-c")
 	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: worker.ID}).Error)
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"subagents":["cand-c"]}`
@@ -252,7 +252,7 @@ func TestAgentHandler_UpdateSubagents_SubagentMounted400(t *testing.T) {
 	child := seedAgentRow(t, db, "child-z")
 	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: worker.ID, SubagentID: child.ID}).Error)
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"subagents":["worker-y"]}`
@@ -284,7 +284,7 @@ func TestAgentHandler_UpdateAgentKnowledge_MissingBuiltinMcp500Neutral(t *testin
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(oldOut) })
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"dataset_ids":[]}`
@@ -307,7 +307,7 @@ func TestAgentHandler_UpdateAgentKnowledge_MissingBuiltinMcp500Neutral(t *testin
 // 已按 ErrAgentNotFound 包装，handler 认 sentinel 即可——不应落 500）。
 func TestAgentHandler_UpdateAgentKnowledge_AgentNotFound404(t *testing.T) {
 	setupAgentErrorTestDB(t)
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"dataset_ids":[]}`
@@ -333,7 +333,7 @@ func TestAgentHandler_GetDeployment_AgentNotFound404(t *testing.T) {
 	// deployer client 可置空：GetStatus 在 GetByName not-found 时提前返回，
 	// 不会触达 client。
 	deployerSvc := services.NewAgentDeployerService(services.AgentDeployerConfig{})
-	h := NewAgentHandler(services.NewAgentService("", ""), deployerSvc)
+	h := NewAgentHandler(services.NewAgentService("", ""), deployerSvc, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/ghost-agent/deploy", nil)
@@ -357,7 +357,7 @@ func TestAgentHandler_ProbeAgent_ProviderNotFound404(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}))
 	seedAgentRow(t, db, "probe-me")
 
-	h := NewAgentHandler(services.NewAgentService("", ""), nil)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
 	r := newAgentErrorRouter(h)
 
 	body := `{"providerId":999999}`
