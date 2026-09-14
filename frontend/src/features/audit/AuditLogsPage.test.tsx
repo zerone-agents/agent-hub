@@ -6,7 +6,7 @@ import { ConfigProvider } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { antdTheme } from '@/lib/antd-theme'
 import AuditLogsPage from './AuditLogsPage'
-import { auditApi } from '@/api/audit'
+import { auditApi, type AuditLog, type AuditLogQuery } from '@/api/audit'
 
 vi.mock('@/api/audit', () => ({
   auditApi: { listLogs: vi.fn() }
@@ -14,7 +14,7 @@ vi.mock('@/api/audit', () => ({
 
 const mocked = vi.mocked(auditApi.listLogs)
 
-function mkItem(id: string, action: string, status: 'success' | 'failure' | 'partial') {
+function mkItem(id: string, action: string, status: 'success' | 'failure' | 'partial'): AuditLog {
   return {
     id, tenantId: 'default', userId: '7', userName: 'alice', category: 'user',
     action, targetType: 'user', targetId: '2', targetName: 'bob', status,
@@ -90,5 +90,51 @@ describe('AuditLogsPage', () => {
     const expandBtn = document.querySelector('.ant-table-row-expand-icon') as HTMLElement
     await userEvent.setup().click(expandBtn)
     await waitFor(() => expect(screen.getByText(/"field"/)).toBeInTheDocument())
+  })
+
+  // PR #150 二轮审查 P2：刷新必须真正重开快照——旧缓存回放旧 snapshotId 会使
+  // 刷新沦为空转、新记录不可见。
+  it('刷新重开快照：无 snapshotId 重新请求、捕获新快照、新记录可见', async () => {
+    const user = userEvent.setup()
+    let reopenCalls = 0 // 不带 snapshotId 的首屏/重开请求计数
+    mocked.mockImplementation(async (params: AuditLogQuery) => {
+      if (params.snapshotId === undefined) {
+        reopenCalls++
+        if (reopenCalls === 1) {
+          // 初始快照 5：只有旧记录
+          return { items: [mkItem('1', 'user.update_role', 'success')], total: 1, snapshotId: '5' }
+        }
+        // 刷新后的重开请求：服务端已写入新记录，快照推进到 6
+        return {
+          items: [mkItem('1', 'user.update_role', 'success'), mkItem('2', 'agent.deploy', 'success')],
+          total: 2, snapshotId: '6'
+        }
+      }
+      // 会话内续传：echo 当前快照内容
+      const items = params.snapshotId === '6'
+        ? [mkItem('1', 'user.update_role', 'success'), mkItem('2', 'agent.deploy', 'success')]
+        : [mkItem('1', 'user.update_role', 'success')]
+      return { items, total: items.length, snapshotId: params.snapshotId ?? '5' }
+    })
+
+    renderPage()
+    expect(await screen.findByText('user.update_role')).toBeInTheDocument()
+    expect(screen.queryByText('agent.deploy')).not.toBeInTheDocument() // 旧快照内无新记录
+
+    const undefinedBefore = mocked.mock.calls.filter(([p]) => p.snapshotId === undefined).length
+    await user.click(screen.getByRole('button', { name: /刷新/ }))
+
+    // 1) 刷新后必须发起一次不带 snapshotId 的重开请求
+    await waitFor(() => {
+      expect(mocked.mock.calls.filter(([p]) => p.snapshotId === undefined).length)
+        .toBeGreaterThan(undefinedBefore)
+    })
+    // 2) 新记录最终可见（缺陷情形：旧快照 5 被缓存回放写回，新记录永不出现）
+    expect(await screen.findByText('agent.deploy')).toBeInTheDocument()
+    // 3) 会话最终携带新快照 6（重开捕获后的续传请求）
+    await waitFor(() => {
+      const last = mocked.mock.calls[mocked.mock.calls.length - 1][0]
+      expect(last.snapshotId).toBe('6')
+    })
   })
 })
