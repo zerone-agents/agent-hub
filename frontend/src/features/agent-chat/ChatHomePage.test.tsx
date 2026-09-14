@@ -107,4 +107,23 @@ describe('ChatHomePage', () => {
       screen.getByText('暂无可体验的 Agent，请联系管理员开放')
     ).toBeInTheDocument()
   })
+
+  it('按 group 分组展示，默认分组垫底', () => {
+    state.agents = [
+      { ...writerAgent, group: undefined },
+      { ...coderAgent, group: 'DevOps' },
+      { ...coderAgent, id: 3, name: 'ops', group: 'DevOps', config: { ...coderAgent.config, title: { zh: '运维助手' } } },
+    ]
+    renderPage()
+    const devops = screen.getByText('DevOps')
+    const fallback = screen.getByText('默认分组')
+    // 命名组在前，默认分组垫底
+    expect(devops.compareDocumentPosition(fallback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 组内计数徽章：DevOps 2 / 默认分组 1
+    expect(devops.parentElement?.textContent).toContain('2')
+    expect(fallback.parentElement?.textContent).toContain('1')
+    expect(screen.getByText('编码助手')).toBeInTheDocument()
+    expect(screen.getByText('运维助手')).toBeInTheDocument()
+    expect(screen.getByText('写作助手')).toBeInTheDocument()
+  })
 })

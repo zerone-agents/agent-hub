@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router'
+import { useMemo } from 'react'
 import { createStyles } from 'antd-style'
 import { Empty } from 'antd'
 import { ChatCircleDotsIcon } from '@phosphor-icons/react'
+import type { Agent } from '@/api/agents'
 import { usePublicAgents } from '@/queries/useAgents'
 import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
@@ -71,6 +73,31 @@ const useStyles = createStyles(({ css }) => ({
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 16px;
   `,
+  section: css`
+    margin-bottom: 24px;
+  `,
+  sectionTitle: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: ${t.text};
+    font-size: ${t.textBase};
+    font-weight: 600;
+    margin-bottom: 12px;
+  `,
+  sectionCount: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: ${t.inkSubtle};
+    color: ${t.ink};
+    font-size: 12px;
+    font-weight: 600;
+  `,
   card: css`
     all: unset;
     box-sizing: border-box;
@@ -121,6 +148,26 @@ export default function ChatHomePage() {
   const { data: user } = useUserInfo()
   const guest = isGuestUser(user, mode?.mode)
 
+  // 与管理页 Agent 列表同款分组：group ?? 默认分组；组内按 name 排序；默认分组垫底。
+  const groupedSections = useMemo(() => {
+    const grouped = (agents ?? []).reduce<Record<string, Agent[]>>((acc, agent) => {
+      const group = agent.group ?? '默认分组'
+      acc[group] ??= []
+      acc[group].push(agent)
+      return acc
+    }, {})
+    const sections = Object.entries(grouped).map(([name, list]) => ({
+      name,
+      agents: list.sort((a, b) => a.name.localeCompare(b.name))
+    }))
+    sections.sort((a, b) => {
+      if (a.name === '默认分组') return 1
+      if (b.name === '默认分组') return -1
+      return a.name.localeCompare(b.name)
+    })
+    return sections
+  }, [agents])
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -142,30 +189,38 @@ export default function ChatHomePage() {
         {!isLoading && (agents ?? []).length === 0 ? (
           <Empty description={guest ? '暂无可体验的 Agent，请联系管理员开放' : '暂无 Agent'} />
         ) : (
-          <div className={styles.grid}>
-            {(agents ?? []).map((a) => (
-              <button
-                key={a.name}
-                type="button"
-                className={styles.card}
-                onClick={() => { void Promise.resolve(navigate(`/agents/${encodeURIComponent(a.name)}/chat`)) }}
-              >
-                <div
-                  className={styles.cardIcon}
-                  style={{ background: a.config.iconBgColor ?? t.inkLight, color: a.config.iconColor ?? t.ink }}
-                >
-                  <ChatCircleDotsIcon size={20} weight="duotone" />
-                </div>
-                <div className={styles.cardTitle}>
-                  {a.config.title?.zh ?? a.config.title?.en ?? a.name}
-                </div>
-                {(a.config.description?.zh ?? a.config.description?.en) && (
-                  /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record<string, string> index is typed string but backend may omit zh/en; the guard above narrows description so the chains read as redundant — the nullish fallback is a real runtime path */
-                  <div className={styles.cardDesc}>{a.config.description?.zh ?? a.config.description?.en}</div>
-                )}
-              </button>
-            ))}
-          </div>
+          groupedSections.map((section) => (
+            <section key={section.name} className={styles.section}>
+              <div className={styles.sectionTitle}>
+                <span>{section.name}</span>
+                <span className={styles.sectionCount}>{section.agents.length}</span>
+              </div>
+              <div className={styles.grid}>
+                {section.agents.map((a) => (
+                  <button
+                    key={a.name}
+                    type="button"
+                    className={styles.card}
+                    onClick={() => { void Promise.resolve(navigate(`/agents/${encodeURIComponent(a.name)}/chat`)) }}
+                  >
+                    <div
+                      className={styles.cardIcon}
+                      style={{ background: a.config.iconBgColor ?? t.inkLight, color: a.config.iconColor ?? t.ink }}
+                    >
+                      <ChatCircleDotsIcon size={20} weight="duotone" />
+                    </div>
+                    <div className={styles.cardTitle}>
+                      {a.config.title?.zh ?? a.config.title?.en ?? a.name}
+                    </div>
+                    {(a.config.description?.zh ?? a.config.description?.en) && (
+                      /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record<string, string> index is typed string but backend may omit zh/en; the guard above narrows description so the chains read as redundant — the nullish fallback is a real runtime path */
+                      <div className={styles.cardDesc}>{a.config.description?.zh ?? a.config.description?.en}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))
         )}
       </main>
     </div>
