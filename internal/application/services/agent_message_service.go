@@ -57,6 +57,9 @@ type AgentMessageService struct {
 	// H6 persona hooks (WS6): nil packs leave Core behavior unchanged.
 	personaBelief *BeliefService
 	personaRelDyn *RelationDynamicsService
+	// H7 P1 persona gate: nil leaves hooks always on（测试基座可不接）；
+	// 非 nil 时投递/关系钩子生效前按扩展生命周期运行时查询，停用立即生效。
+	personaGate *PersonaCapabilityGate
 	// H7.5 usage hook: nil leaves behavior unchanged; Record never blocks.
 	usage *UsageService
 }
@@ -71,11 +74,24 @@ func (s *AgentMessageService) SetPersonaHooks(belief *BeliefService, reldyn *Rel
 	s.personaBelief, s.personaRelDyn = belief, reldyn
 }
 
+// SetPersonaCapabilityGate 接入 H7 能力门控（main.go 接线时调用）：
+// 对应内置扩展被管理员停用后，投递/关系钩子不再生效。
+func (s *AgentMessageService) SetPersonaCapabilityGate(g *PersonaCapabilityGate) { s.personaGate = g }
+
+// personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
+// 原有"恒生效"行为（测试基座与旧接线兼容）。
+func (s *AgentMessageService) personaPackEnabled(tenantID, pack string) bool {
+	if s.personaGate == nil {
+		return true
+	}
+	return s.personaGate.Enabled(tenantID, pack)
+}
+
 // recordBeliefDelivery is the H6 delivery hook: a durably delivered message
 // becomes a fact the target agent holds a belief about. Idempotency key is
 // deterministic per (message, agent) so replays are no-ops.
 func (s *AgentMessageService) recordBeliefDelivery(tenantID string, message *agentrelation.AgentMessage) {
-	if s.personaBelief == nil || message == nil || message.RunID == "" {
+	if s.personaBelief == nil || !s.personaPackEnabled(tenantID, PersonaPackBelief) || message == nil || message.RunID == "" {
 		return
 	}
 	err := s.personaBelief.RecordDelivery(tenantID, message.RunID, message.TargetAgentID, message.ID, message.CreatedAt, fmt.Sprintf("belief-delivery:%s:%d", message.ID, message.TargetAgentID))
@@ -724,7 +740,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	// actions; inform/report are unaffected. This never rewrites the relation
 	// AllowedActions authorization above — it only records and surfaces.
 	relationGate := ""
-	if s.personaRelDyn != nil && runID != "" {
+	if s.personaRelDyn != nil && runID != "" && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics) {
 		allowed, needConfirm, gateErr := s.personaRelDyn.Gate(tenantID, runID, target.ID, source.ID, input.Action)
 		switch {
 		case gateErr != nil:

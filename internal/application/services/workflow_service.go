@@ -47,6 +47,9 @@ type WorkflowService struct {
 	// H6 persona hooks (WS6): nil packs leave workflow behavior unchanged.
 	personaEmotion *EmotionService
 	personaRelDyn  *RelationDynamicsService
+	// H7 P1 persona gate: nil leaves hooks always on (测试基座可不接)；
+	// 非 nil 时钩子生效前按扩展生命周期运行时查询，停用立即生效。
+	personaGate *PersonaCapabilityGate
 	// H7.5 usage hook: nil leaves behavior unchanged; Record never blocks.
 	usage *UsageService
 }
@@ -63,6 +66,19 @@ func (s *WorkflowService) SetUsageService(u *UsageService) { s.usage = u }
 // idempotent; failures are logged and never break step completion.
 func (s *WorkflowService) SetPersonaHooks(emotion *EmotionService, reldyn *RelationDynamicsService) {
 	s.personaEmotion, s.personaRelDyn = emotion, reldyn
+}
+
+// SetPersonaCapabilityGate 接入 H7 能力门控（main.go 接线时调用）：
+// 对应内置扩展被管理员停用后，情绪/动态关系钩子不再生效。
+func (s *WorkflowService) SetPersonaCapabilityGate(g *PersonaCapabilityGate) { s.personaGate = g }
+
+// personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
+// 原有"恒生效"行为（测试基座与旧接线兼容）。
+func (s *WorkflowService) personaPackEnabled(tenantID, pack string) bool {
+	if s.personaGate == nil {
+		return true
+	}
+	return s.personaGate.Enabled(tenantID, pack)
 }
 
 type WorkflowStepInput struct {
@@ -680,9 +696,12 @@ func (s *WorkflowService) finishStep(tenantID, id string, output map[string]any,
 // when both the task source and the completer are agents, a task_completed
 // relation event is settled from completer toward source. Keys are
 // deterministic (`h6:<flow>:<id>`) so replays are no-ops. All failures are
-// log-and-continue.
-func (s *WorkflowService) emitStepPersonaEvents(tenantID, executionID, stepRunID, actor string, success bool, idem string) {
-	if s.personaEmotion == nil && s.personaRelDyn == nil {
+// log-and-continue. H7 P1: each pack only fires while its builtin extension
+// stays enabled (runtime gate check, disable takes effect immediately).
+func (s *WorkflowService) emitStepPersonaEvents(tenantID string, executionID, stepRunID, actor string, success bool, idem string) {
+	emotionOn := s.personaEmotion != nil && s.personaPackEnabled(tenantID, PersonaPackEmotion)
+	reldynOn := s.personaRelDyn != nil && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics)
+	if !emotionOn && !reldynOn {
 		return
 	}
 	var ex workflow.Execution
@@ -703,12 +722,12 @@ func (s *WorkflowService) emitStepPersonaEvents(tenantID, executionID, stepRunID
 		eventType = "task_completed"
 	}
 	at := time.Now().UTC()
-	if s.personaEmotion != nil {
+	if emotionOn {
 		if err := s.personaEmotion.OnEvent(tenantID, ex.RunID, completer.ID, eventType, 1, at, fmt.Sprintf("h6:step-emotion:%s:%s", stepRunID, idem)); err != nil {
 			log.Printf("[h6] emotion step event failed: step=%s agent=%d: %v", stepRunID, completer.ID, err)
 		}
 	}
-	if s.personaRelDyn != nil && ex.StartedBy != "" && ex.StartedBy != actor {
+	if reldynOn && ex.StartedBy != "" && ex.StartedBy != actor {
 		var starter agent.AgentConfig
 		if err := s.db.Where("tenant_id=? AND name=?", tenantID, ex.StartedBy).First(&starter).Error; err != nil {
 			log.Printf("[h6] reldyn step event skipped: starter %q not an agent: %v", ex.StartedBy, err)

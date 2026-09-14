@@ -253,8 +253,17 @@ func main() {
 		cfg.Deployer.DeployerURLHost,
 	)
 	runService := services.NewRunService(database.GetDB())
+	// H7 P1：四个人物能力注册为 default 租户的内置扩展（默认已安装+启用），
+	// 之后所有生效路径经 PersonaCapabilityGate 运行时查询，管理员停用立即
+	// 生效且无需重启。种子幂等；失败必须中断启动（否则能力被静默关闭）。
+	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
+	if err := extensionLifecycleService.EnsureBuiltinPersonaPacks(); err != nil {
+		log.Fatalf("Failed to ensure builtin persona packs: %v", err)
+	}
+	personaGate := services.NewPersonaCapabilityGate(database.GetDB())
 	// H6 persona capability packs (WS6 wiring): all state lives in RunState;
 	// EnsureSchemas is idempotent and failures are non-fatal (log warning).
+	// 状态 Schema 只在对应内置扩展仍启用时确保；四个全停则整段跳过。
 	emotionService := services.NewEmotionService(runService)
 	beliefService := services.NewBeliefService(runService)
 	memoryService := services.NewMemoryService(runService)
@@ -265,6 +274,10 @@ func main() {
 		"memory":                memoryService.EnsureSchemas,
 		"relationship-dynamics": relationDynamicsService.EnsureSchemas,
 	} {
+		if !personaGate.Enabled("default", name) {
+			log.Printf("H6 %s capability disabled via extension lifecycle; skipping schema ensure", name)
+			continue
+		}
 		if err := svc(); err != nil {
 			log.Printf("Warning: H6 %s schema ensure failed: %v", name, err)
 		}
@@ -273,7 +286,9 @@ func main() {
 	promptComposerService := services.NewPromptComposerService(database.GetDB())
 	// H6 WS5/WS6: recent_memory 阶段从主观记忆包检索该 Agent 的前 5 条记忆。
 	// Provider 出错时合成器会跳过该阶段，这里再包一层防御。
-	promptComposerService.SetRecentMemoryProvider(func(tenantID, runID string, agentID uint64) ([]services.RecentMemoryItem, error) {
+	// H7 P1：经 PersonaCapabilityGate 包装，主观记忆扩展被停用时闭包返回
+	// 空结果，合成器跳过该阶段；gate 在闭包内运行时查询，停用立即生效。
+	promptComposerService.SetRecentMemoryProvider(personaGate.GateRecentMemoryProvider(func(tenantID, runID string, agentID uint64) ([]services.RecentMemoryItem, error) {
 		entries, err := memoryService.Recall(tenantID, runID, agentID, "", 5, time.Now().UTC())
 		if err != nil {
 			return nil, err
@@ -286,7 +301,7 @@ func main() {
 			})
 		}
 		return items, nil
-	})
+	}))
 	promptComposerHandler := handler.NewPromptComposerHandler(promptComposerService)
 	toolResultHandler := handler.NewToolResultHandler(services.NewToolResultService(database.GetDB()))
 	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, runService)
@@ -311,7 +326,6 @@ func main() {
 	runHandler := handler.NewRunHandler(runService)
 	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
 	extensionService := services.NewExtensionService(database.GetDB())
-	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
 	extensionAdminHandler := handler.NewExtensionAdminHandlerWithLifecycle(extensionService, extensionLifecycleService)
 	// H7.2 UI 插槽 / H7.4 权限 / H7.5 用量
 	extensionSlotService := services.NewExtensionSlotService(database.GetDB())
@@ -334,6 +348,7 @@ func main() {
 	workflowService := services.NewWorkflowService(database.GetDB())
 	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
 	workflowService.SetPersonaHooks(emotionService, relationDynamicsService)
+	workflowService.SetPersonaCapabilityGate(personaGate)
 	workflowService.SetUsageService(usageService)
 	workflowHandler := handler.NewWorkflowHandler(workflowService)
 	decisionService := services.NewDecisionService(database.GetDB())
@@ -401,11 +416,13 @@ func main() {
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
 	organizationMessageService.SetPersonaHooks(beliefService, relationDynamicsService)
+	organizationMessageService.SetPersonaCapabilityGate(personaGate)
 	organizationMessageService.SetUsageService(usageService)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
 	organizationMcpHandler.SetWorkflowService(workflowService)
 	organizationMcpHandler.SetDecisionService(decisionService)
 	organizationMcpHandler.SetPersonaServices(emotionService, beliefService, memoryService, relationDynamicsService)
+	organizationMcpHandler.SetPersonaGate(personaGate)
 	organizationMcpHandler.SetPersonaRunResolver(runService.ActiveRunForAgent)
 	agentMessageAdminHandler := handler.NewAgentMessageAdminHandler(organizationMessageService)
 	personaAdminHandler := handler.NewPersonaAdminHandler(runService, beliefService)
