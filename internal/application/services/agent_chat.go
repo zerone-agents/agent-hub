@@ -178,9 +178,18 @@ type filePart struct {
 }
 
 // GetMessages returns messages for a session owned by userID.
-func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
-	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+func (s *AgentChatService) GetMessages(tenantID, userID, agentName, sessionID string, page, pageSize int) ([]*chat.Message, int64, error) {
+	sess, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID)
+	if err != nil {
 		return nil, 0, fmt.Errorf("session not found: %w", err)
+	}
+	// 绑定校验（PR #151 review P1）：URL :name 必须与会话真实归属 Agent 一致，
+	// 不一致按 not-found 同形处理——杜绝经开放 Agent 的 URL 越权读写自己名下
+	// 其他 Agent 的会话（guest 场景即绕过可见性过滤）。与 SendMessage /
+	// Uploads / AttachmentContent 的既有 handler 级防线同语义，此处下沉
+	// service 层并在同一次查询内完成。
+	if sess.AgentID != agentName {
+		return nil, 0, fmt.Errorf("session not found: %w", gorm.ErrRecordNotFound)
 	}
 	return s.chatRepo.ListMessages(tenantID, sessionID, page, pageSize)
 }
@@ -190,9 +199,15 @@ func (s *AgentChatService) GetMessages(tenantID, userID, sessionID string, page,
 // they must not outlive the session). The records are removed inside the
 // repository's DeleteSession transaction (issue #94 review R2 F3), so a
 // partial failure can never leave records behind for a deleted session.
-func (s *AgentChatService) DeleteSession(tenantID, userID, sessionID string) error {
-	if _, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID); err != nil {
+func (s *AgentChatService) DeleteSession(tenantID, userID, agentName, sessionID string) error {
+	sess, err := s.chatRepo.GetSessionForUser(tenantID, sessionID, userID)
+	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
+	}
+	// 绑定校验同 GetMessages（PR #151 review P1）：跨 Agent URL 删除自己名下
+	// 其他 Agent 的会话 → not-found 同形，会话不被删除。
+	if sess.AgentID != agentName {
+		return fmt.Errorf("session not found: %w", gorm.ErrRecordNotFound)
 	}
 	return s.chatRepo.DeleteSession(tenantID, sessionID)
 }

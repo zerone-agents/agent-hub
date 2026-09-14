@@ -109,7 +109,7 @@ func (h *AgentChatHandler) ListMessages(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 
 	page, pageSize := parsePagination(c, 1, 50)
-	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, sessionID, page, pageSize)
+	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, agentName, sessionID, page, pageSize)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -128,7 +128,7 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 
-	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, sessionID); err != nil {
+	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, agentName, sessionID); err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}

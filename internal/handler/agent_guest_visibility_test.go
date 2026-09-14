@@ -133,7 +133,7 @@ func setupGuestVisibilityTestDB(t *testing.T) *gorm.DB {
 	} {
 		require.NoError(t, db.Exec(stmt).Error)
 	}
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &scene.Scene{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}, &scene.Scene{}))
 
 	previousDB := database.DB
 	database.DB = db
@@ -146,6 +146,7 @@ func setupGuestVisibilityTestDB(t *testing.T) *gorm.DB {
 // 认证中间件落下的身份；user_id 供 chat handler MustGet。
 type guestVisEnv struct {
 	r                              *gin.Engine
+	db                             *gorm.DB
 	agentA, agentB, agentC, agentD agent.AgentConfig
 }
 
@@ -166,6 +167,7 @@ func newGuestVisEnv(t *testing.T, guest bool) *guestVisEnv {
 		return row
 	}
 	env := &guestVisEnv{
+		db:     db,
 		agentA: seedAgent("agent-a", true, true, "running"),
 		agentB: seedAgent("agent-b", true, false, "running"),
 		agentC: seedAgent("agent-c", false, true, "running"),
@@ -210,6 +212,8 @@ func newGuestVisEnv(t *testing.T, guest bool) *guestVisEnv {
 	r.GET("/api/v1/agents", agentH.List)
 	r.GET("/api/v1/agents/:name", agentH.Get)
 	r.POST("/api/v1/agents/:name/chat/sessions", chatH.CreateSession)
+	r.GET("/api/v1/agents/:name/chat/sessions/:id/messages", chatH.ListMessages)
+	r.DELETE("/api/v1/agents/:name/chat/sessions/:id", chatH.DeleteSession)
 	r.GET("/api/v1/scenes", sceneH.List)
 
 	env.r = r
@@ -336,6 +340,73 @@ func TestAgentChat_GuestPrecheck(t *testing.T) {
 		w := postSession(t, env.r, "agent-c")
 		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 		require.Contains(t, w.Body.String(), `"success":true`, "formal 请求不得被 guest 前置校验拦截")
+	})
+}
+
+// TestAgentChat_SessionAgentBinding（PR #151 review P1 回归探针）：URL :name 必须
+// 与会话真实归属 Agent 一致——用户（含 guest）经开放 Agent 的 URL 读取/删除自己
+// 名下属于其他 Agent 的会话 → 404 且会话不被删除；正确的 :name 下 owner 正常
+// 读写删（guest 访问未开放 Agent 仍被前置 guest 校验拦截）。
+func TestAgentChat_SessionAgentBinding(t *testing.T) {
+	seedSession := func(t *testing.T, env *guestVisEnv, agentName, sessionID string) {
+		t.Helper()
+		require.NoError(t, env.db.Create(&chat.Session{
+			UserID:   "u-guest-vis",
+			TenantID: chatTestTenant,
+			ID:       sessionID,
+			AgentID:  agentName,
+			Title:    "sess",
+		}).Error)
+	}
+
+	t.Run("guest 经开放 Agent URL 读未开放 Agent 会话 → 404", func(t *testing.T) {
+		env := newGuestVisEnv(t, true)
+		seedSession(t, env, "agent-c", "sess-x")
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-a/chat/sessions/sess-x/messages", nil)
+		w := httptest.NewRecorder()
+		env.r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	})
+	t.Run("guest 经开放 Agent URL 删未开放 Agent 会话 → 404 且不删除", func(t *testing.T) {
+		env := newGuestVisEnv(t, true)
+		seedSession(t, env, "agent-c", "sess-x")
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/agents/agent-a/chat/sessions/sess-x", nil)
+		w := httptest.NewRecorder()
+		env.r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+
+		var count int64
+		require.NoError(t, env.db.Model(&chat.Session{}).Where("id = ?", "sess-x").Count(&count).Error)
+		require.Equal(t, int64(1), count, "跨 Agent 删除必须被拒绝，会话保留")
+	})
+	t.Run("formal 跨 Agent URL 同样 404（绑定校验对所有用户生效）", func(t *testing.T) {
+		env := newGuestVisEnv(t, false)
+		seedSession(t, env, "agent-c", "sess-x")
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-a/chat/sessions/sess-x/messages", nil)
+		w := httptest.NewRecorder()
+		env.r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	})
+	t.Run("正确 :name 下 owner 读写删正常（回归）", func(t *testing.T) {
+		env := newGuestVisEnv(t, false)
+		seedSession(t, env, "agent-c", "sess-x")
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/agent-c/chat/sessions/sess-x/messages", nil)
+		w := httptest.NewRecorder()
+		env.r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		req = httptest.NewRequest(http.MethodDelete, "/api/v1/agents/agent-c/chat/sessions/sess-x", nil)
+		w = httptest.NewRecorder()
+		env.r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		var count int64
+		require.NoError(t, env.db.Model(&chat.Session{}).Where("id = ?", "sess-x").Count(&count).Error)
+		require.Equal(t, int64(0), count)
 	})
 }
 
