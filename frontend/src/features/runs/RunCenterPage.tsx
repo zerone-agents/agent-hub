@@ -22,6 +22,7 @@ import { useNavigate, useParams } from 'react-router'
 import type { AgentMessage, PromptSnapshot, Run, RunActivity, RunEventItem, RunRouteMode, RunRouteStep, RunState, RunStateChange, RunStatus, ToolResultRecord } from '@/api/runs'
 import { parseApiError } from '@/api/client'
 import PrimaryButton from '@/components/PrimaryButton'
+import { PersonaPanel } from './PersonaPanel'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { useAgents } from '@/queries/useAgents'
 import { useAddRunAgent, useComposeRunPrompt, useCreateRun, useEnabledCapabilityPackages, usePutRunRoutePlan, useRun, useRunActivities, useRunAgentMessages, useRunEvents, useRunRoutePlan, useRuns, useRunStateChanges, useRunToolResults, useTransitionRun } from '@/queries/useRuns'
@@ -430,6 +431,7 @@ function RunDetailPanel({ id }: { id: string }) {
       </section>
       <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
     </div>
+    <PersonaPanel runId={id} agents={run.agents ?? []} states={states ?? []} changes={history.data ?? []} />
     <TaskRoutePlan run={run} canWrite={canWrite} />
     <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><PlayCircleIcon size={17} />执行过程</h3>
       {activities.isError ? <Alert type="error" showIcon title="执行过程加载失败" description={parseApiError(activities.error)} /> : activities.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ActivityTimeline activities={activities.data ?? []} />}

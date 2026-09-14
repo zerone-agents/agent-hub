@@ -85,6 +85,8 @@ vi.mock('@/queries/useRuns', () => ({
   useTransitionRun: () => ({ mutate: transitionMutate, isPending: false }),
   useAddRunAgent: () => ({ mutate: addAgentMutate, isPending: false }),
   useComposeRunPrompt: () => ({ mutate: composePromptMutate, isPending: false }),
+  useRunPersonaState: () => ({ data: null, isLoading: false, isError: false }),
+  useRunBeliefDisputes: () => ({ data: [], isLoading: false, isError: false }),
 }))
 
 function renderPage(path = '/runs/run-market') {

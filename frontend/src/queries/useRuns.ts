@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { parseApiError, unwrapResponse } from '@/api/client'
-import { runApi, type AgentMessage, type CapabilityPackage, type CreateRunInput, type PromptSnapshot, type PutRunRoutePlanInput, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunRoutePlan, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
+import { runApi, type AgentMessage, type BeliefDispute, type CapabilityPackage, type CreateRunInput, type PersonaState, type PromptSnapshot, type PutRunRoutePlanInput, type Run, type RunActivity, type RunDetail, type RunEventItem, type RunRoutePlan, type RunStateChange, type RunStatus, type ToolResultRecord } from '@/api/runs'
 
 export function useRuns() {
   return useQuery<Run[]>({
@@ -29,6 +29,22 @@ export function useRunStateChanges(id?: string) {
   return useQuery<RunStateChange[]>({
     queryKey: ['runs', id, 'state-changes'],
     queryFn: async () => unwrapResponse<RunStateChange[]>(await runApi.listStateChanges(id as string)),
+    enabled: id !== undefined,
+  })
+}
+
+export function useRunPersonaState(id?: string) {
+  return useQuery<PersonaState>({
+    queryKey: ['runs', id, 'persona-state'],
+    queryFn: async () => unwrapResponse<PersonaState>(await runApi.getPersonaState(id as string)),
+    enabled: id !== undefined,
+  })
+}
+
+export function useRunBeliefDisputes(id?: string) {
+  return useQuery<BeliefDispute[]>({
+    queryKey: ['runs', id, 'belief-disputes'],
+    queryFn: async () => unwrapResponse<BeliefDispute[]>(await runApi.listBeliefDisputes(id as string)),
     enabled: id !== undefined,
   })
 }

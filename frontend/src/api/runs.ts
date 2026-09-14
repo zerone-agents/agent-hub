@@ -62,6 +62,35 @@ export interface RunStateChange {
   createdAt: string
 }
 
+export interface PersonaStateEntry {
+  namespace: string
+  schemaName: string
+  subjectType: string
+  subjectId: string
+  revision: number
+  data: Record<string, unknown>
+  updatedAt: string
+}
+
+export interface PersonaState {
+  runId: string
+  emotion: PersonaStateEntry[]
+  belief: PersonaStateEntry[]
+  memory: PersonaStateEntry[]
+  relationDynamics: PersonaStateEntry[]
+}
+
+export interface BeliefDisputeEntry {
+  agentId: number
+  status: string
+  confidence: number
+}
+
+export interface BeliefDispute {
+  factRef: string
+  entries: BeliefDisputeEntry[]
+}
+
 export interface RunActivity {
   id: string
   kind: 'participant' | 'started' | 'tool_started' | 'tool_finished' | 'completed' | 'failed' | string
@@ -228,4 +257,6 @@ export const runApi = {
     apiClient.put(`/api/v1/admin/runs/${id}/route-plan`, input),
   listCapabilityPackages: () =>
     apiClient.get('/api/v1/admin/capability-packages', { params: { enabled: 'true' } }),
+  getPersonaState: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/persona-state`),
+  listBeliefDisputes: (id: string) => apiClient.get(`/api/v1/admin/runs/${id}/belief-disputes`),
 }
