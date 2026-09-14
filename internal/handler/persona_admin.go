@@ -39,7 +39,7 @@ type personaStateEntry struct {
 // grouped per pack. States of other namespaces (generic run state) are not
 // included to keep the view minimal.
 func (h *PersonaAdminHandler) PersonaState(c *gin.Context) {
-	tenantID, runID := tenant.GetTenantID(c), c.Param("runId")
+	tenantID, runID := tenant.GetTenantID(c), c.Param("id")
 	states, err := h.runService.States(tenantID, runID)
 	if err != nil {
 		writeRunError(c, err)
@@ -83,7 +83,7 @@ func (h *PersonaAdminHandler) BeliefDisputes(c *gin.Context) {
 		respondError(c, 501, "belief 能力尚未启用")
 		return
 	}
-	disputes, err := h.belief.Disputes(tenant.GetTenantID(c), c.Param("runId"))
+	disputes, err := h.belief.Disputes(tenant.GetTenantID(c), c.Param("id"))
 	if err != nil {
 		writeRunError(c, err)
 		return

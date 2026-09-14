@@ -52,7 +52,7 @@ func personaAdminContext(t *testing.T, path string) (*gin.Context, *httptest.Res
 func TestPersonaAdminStateGroupsByPack(t *testing.T) {
 	h, _ := setupPersonaAdmin(t)
 	c, rec := personaAdminContext(t, "/api/v1/admin/runs/run-1/persona-state")
-	c.Params = gin.Params{{Key: "runId", Value: "run-1"}}
+	c.Params = gin.Params{{Key: "id", Value: "run-1"}}
 	h.PersonaState(c)
 	require.Equal(t, 200, rec.Code)
 	var body struct {
@@ -79,7 +79,7 @@ func TestPersonaAdminStateGroupsByPack(t *testing.T) {
 func TestPersonaAdminBeliefDisputes(t *testing.T) {
 	h, _ := setupPersonaAdmin(t)
 	c, rec := personaAdminContext(t, "/api/v1/admin/runs/run-1/belief-disputes")
-	c.Params = gin.Params{{Key: "runId", Value: "run-1"}}
+	c.Params = gin.Params{{Key: "id", Value: "run-1"}}
 	h.BeliefDisputes(c)
 	require.Equal(t, 200, rec.Code)
 	var body struct {
@@ -103,7 +103,7 @@ func TestPersonaAdminBeliefDisputesDisabledWithoutService(t *testing.T) {
 	runService, _ := newPersonaAdminRunService(t)
 	h := NewPersonaAdminHandler(runService, nil)
 	c, rec := personaAdminContext(t, "/api/v1/admin/runs/run-1/belief-disputes")
-	c.Params = gin.Params{{Key: "runId", Value: "run-1"}}
+	c.Params = gin.Params{{Key: "id", Value: "run-1"}}
 	h.BeliefDisputes(c)
 	require.Equal(t, 501, rec.Code)
 	require.Contains(t, rec.Body.String(), "能力尚未启用")
