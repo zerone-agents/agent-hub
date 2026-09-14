@@ -87,17 +87,16 @@ describe('ChatHomePage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/agents/coder/chat')
   })
 
-  it('guest 显示体验模式徽标且无返回管理入口', () => {
+  it('guest 显示体验模式徽标，formal 不显示', () => {
     state.user = { id: 'u2', name: 'guest', email: 'g@zerone.run', role: undefined }
     renderPage()
     expect(screen.getByText('体验模式')).toBeInTheDocument()
-    expect(screen.queryByText('返回管理')).not.toBeInTheDocument()
   })
 
-  it('正式用户显示返回管理并跳转 dashboard', () => {
+  it('正式用户无返回管理入口（新页签打开，无管理上下文）', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: '返回管理' }))
-    expect(navigateMock).toHaveBeenCalledWith('/dashboard')
+    expect(screen.queryByText('返回管理')).not.toBeInTheDocument()
+    expect(screen.queryByText('体验模式')).not.toBeInTheDocument()
   })
 
   it('guest 空列表显示体验专属空态', () => {

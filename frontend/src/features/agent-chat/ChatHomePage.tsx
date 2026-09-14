@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router'
 import { createStyles } from 'antd-style'
 import { Empty } from 'antd'
-import { ArrowLeftIcon, ChatCircleDotsIcon, SignOutIcon } from '@phosphor-icons/react'
+import { ChatCircleDotsIcon, SignOutIcon } from '@phosphor-icons/react'
 import { usePublicAgents } from '@/queries/useAgents'
 import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
@@ -132,13 +132,7 @@ export default function ChatHomePage() {
           Agent 聊天
         </div>
         <div className={styles.spacer} />
-        {guest ? (
-          <span className={styles.badge}>体验模式</span>
-        ) : (
-          <button type="button" className={styles.headerBtn} onClick={() => { void Promise.resolve(navigate('/dashboard')) }}>
-            <ArrowLeftIcon size={14} /> 返回管理
-          </button>
-        )}
+        {guest && <span className={styles.badge}>体验模式</span>}
         <span className={styles.username}>{user?.name}</span>
         <button type="button" className={styles.headerBtn} onClick={() => { void logout() }}>
           <SignOutIcon size={14} /> 退出
