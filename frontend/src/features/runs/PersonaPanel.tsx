@@ -119,7 +119,7 @@ export function PersonaPanel({ runId, agents, states, changes }: { runId: string
   }
 
   const hasState = emotion.length > 0 || belief.length > 0 || memory.length > 0 || relationDynamics.length > 0
-  const disputeList = disputes.data ?? []
+  const disputeList = (disputes.data ?? []).filter((dispute) => Array.isArray(dispute.entries))
 
   return <section className={styles.persona} aria-label="人物状态">
     <div className={styles.personaHead}>

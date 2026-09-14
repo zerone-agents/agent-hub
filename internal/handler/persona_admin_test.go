@@ -97,6 +97,13 @@ func TestPersonaAdminBeliefDisputes(t *testing.T) {
 	require.Len(t, body.Data, 1)
 	require.Equal(t, "fact:scandal", body.Data[0].FactRef)
 	require.Len(t, body.Data[0].Entries, 2)
+	// json.Unmarshal matches keys case-insensitively, which hid a regression
+	// where these structs serialized as PascalCase and crashed the admin UI
+	// (undefined.entries.map). Pin the exact wire casing.
+	require.Contains(t, rec.Body.String(), `"factRef"`)
+	require.Contains(t, rec.Body.String(), `"entries"`)
+	require.Contains(t, rec.Body.String(), `"agentId"`)
+	require.NotContains(t, rec.Body.String(), `"FactRef"`)
 }
 
 func TestPersonaAdminBeliefDisputesDisabledWithoutService(t *testing.T) {

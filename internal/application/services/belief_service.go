@@ -50,15 +50,15 @@ type Belief struct {
 
 // DisputeEntry is one holder's stance within a disputed factRef.
 type DisputeEntry struct {
-	AgentID    uint64
-	Status     string
-	Confidence int
+	AgentID    uint64 `json:"agentId"`
+	Status     string `json:"status"`
+	Confidence int    `json:"confidence"`
 }
 
 // Dispute is a factRef held with materially different stances by ≥2 agents.
 type Dispute struct {
-	FactRef string
-	Entries []DisputeEntry
+	FactRef string         `json:"factRef"`
+	Entries []DisputeEntry `json:"entries"`
 }
 
 // beliefStateSchema is the locked v1 JSON Schema for the belief-state rows.
