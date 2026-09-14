@@ -30,13 +30,6 @@ vi.mock('@/queries/useUserInfo', () => ({
   useUserInfo: () => ({ data: authState.user }),
 }))
 
-// 切换器只断言透传的 current（导航行为在 AgentSwitcher.test.tsx 覆盖）
-vi.mock('./AgentSwitcher', () => ({
-  default: ({ current }: { current: string }) => (
-    <div data-testid="agent-switcher" data-current={current} />
-  ),
-}))
-
 vi.mock('@/queries/useAgentChat', () => ({
   useAgentChatMessages: vi.fn(() => ({ data: { items: [], total: 0 } })),
   // 页面新增 capabilities 消费点（issue #94）；既有断言不依赖附件，保持关闭态
@@ -263,7 +256,6 @@ describe('AgentChatPage per-agent remount & guest gating', { timeout: 15000 }, (
       </QueryClientProvider>
     )
     expect(sessionList.mounts).toEqual(['agent-a'])
-    expect(screen.getByTestId('agent-switcher')).toHaveAttribute('data-current', 'agent-a')
 
     router.params = { name: 'agent-b' }
     view.rerender(
@@ -273,7 +265,6 @@ describe('AgentChatPage per-agent remount & guest gating', { timeout: 15000 }, (
     )
     // key={name} 重挂载：内层以全新状态再次挂载，会话选择/输入不跨 Agent 残留
     expect(sessionList.mounts).toEqual(['agent-a', 'agent-b'])
-    expect(screen.getByTestId('agent-switcher')).toHaveAttribute('data-current', 'agent-b')
   })
 
   it('renders CwdFilePanel for non-guest users', () => {

@@ -17,7 +17,6 @@ import ChatInput, { type ChatInputHandle } from './ChatInput'
 import SceneWelcome from './SceneWelcome'
 import StreamingMessage from './StreamingMessage'
 import AgentDetailBar from './AgentDetailBar'
-import AgentSwitcher from './AgentSwitcher'
 import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
 import { useAttachments } from './useAttachments'
@@ -381,7 +380,6 @@ function AgentChatInner({ name }: { name: string }) {
           >
             <ArrowLeftIcon size={16} />
           </button>
-          <AgentSwitcher current={name} />
           {/* Agent 概要内嵌页眉，点击向下浮层展开详情 */}
           <AgentDetailBar agentName={name} />
         </>
