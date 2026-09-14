@@ -712,6 +712,16 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 		// deployer 故障时会误删仍有容器在跑的 Agent 配置（孤儿容器）。
 		var httpErr *deployer.HTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			// 容器已不存在：把 DB 中残留的部署状态收敛（线上案例：Agent 部署
+			// 成功后容器被外部清理，DB 残留 "running"——聊天视图按
+			// deployment_status='running' 过滤，未部署 Agent 因此出现在聊天页）。
+			// 仅当 DB 残留非空且非 archived（归档容器本就该显示 not_found）
+			// 时写回，避免每次查询重复写库。
+			if agentCfg.DeploymentStatus != "" && agentCfg.DeploymentStatus != "archived" {
+				if err := s.updateStatus(tenantID, agentCfg, "not_found", 0, agentCfg.DeployedAt); err != nil {
+					log.Printf("GetStatus: failed to converge deployment status for agent %s: %v", name, err)
+				}
+			}
 			return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
 		}
 		return nil, fmt.Errorf("get agent status: %w", err)
