@@ -10,4 +10,7 @@ var (
 	ErrStateNotFound     = errors.New("run state not found")
 	ErrSchemaNotFound    = errors.New("state schema not found")
 	ErrDuplicate         = errors.New("resource already exists")
+	// ErrNoActiveRun marks callers that are not bound to a running Run session
+	// (H6 persona tools are only meaningful inside run context).
+	ErrNoActiveRun = errors.New("仅运行会话可用")
 )

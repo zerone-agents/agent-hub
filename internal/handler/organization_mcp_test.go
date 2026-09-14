@@ -124,7 +124,7 @@ func TestOrganizationMcpListsRuntimeTools(t *testing.T) {
 	for _, tool := range response.Result.Tools {
 		names = append(names, tool.Name)
 	}
-	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox", "agent_message_chain", "group_send", "channel_publish", "group_message_status", "session_start", "session_end", "workflow_start", "approval_vote", "decision_vote", "workflow_step_complete", "workflow_step_fail"}, names)
+	require.Equal(t, []string{"agent_relations", "agent_send", "agent_message_status", "agent_inbox", "agent_message_chain", "group_send", "channel_publish", "group_message_status", "session_start", "session_end", "workflow_start", "approval_vote", "decision_vote", "workflow_step_complete", "workflow_step_fail", "emotion_status", "belief_list", "belief_claim", "memory_record", "memory_recall", "relation_view"}, names)
 }
 
 func TestOrganizationMcpMessageChainUsesRuntimeIdentity(t *testing.T) {

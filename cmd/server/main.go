@@ -253,8 +253,40 @@ func main() {
 		cfg.Deployer.DeployerURLHost,
 	)
 	runService := services.NewRunService(database.GetDB())
+	// H6 persona capability packs (WS6 wiring): all state lives in RunState;
+	// EnsureSchemas is idempotent and failures are non-fatal (log warning).
+	emotionService := services.NewEmotionService(runService)
+	beliefService := services.NewBeliefService(runService)
+	memoryService := services.NewMemoryService(runService)
+	relationDynamicsService := services.NewRelationDynamicsService(runService)
+	for name, svc := range map[string]func() error{
+		"emotion":               emotionService.EnsureSchemas,
+		"belief":                beliefService.EnsureSchemas,
+		"memory":                memoryService.EnsureSchemas,
+		"relationship-dynamics": relationDynamicsService.EnsureSchemas,
+	} {
+		if err := svc(); err != nil {
+			log.Printf("Warning: H6 %s schema ensure failed: %v", name, err)
+		}
+	}
 	eventHandler := handler.NewEventHandler(services.NewEventService(database.GetDB()))
 	promptComposerService := services.NewPromptComposerService(database.GetDB())
+	// H6 WS5/WS6: recent_memory 阶段从主观记忆包检索该 Agent 的前 5 条记忆。
+	// Provider 出错时合成器会跳过该阶段，这里再包一层防御。
+	promptComposerService.SetRecentMemoryProvider(func(tenantID, runID string, agentID uint64) ([]services.RecentMemoryItem, error) {
+		entries, err := memoryService.Recall(tenantID, runID, agentID, "", 5, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		items := make([]services.RecentMemoryItem, 0, len(entries))
+		for i := range entries {
+			items = append(items, services.RecentMemoryItem{
+				Label: entries[i].FactRef,
+				Text:  entries[i].Interpretation,
+			})
+		}
+		return items, nil
+	})
 	promptComposerHandler := handler.NewPromptComposerHandler(promptComposerService)
 	toolResultHandler := handler.NewToolResultHandler(services.NewToolResultService(database.GetDB()))
 	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, runService)
@@ -281,6 +313,7 @@ func main() {
 	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
 	workflowService := services.NewWorkflowService(database.GetDB())
 	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
+	workflowService.SetPersonaHooks(emotionService, relationDynamicsService)
 	workflowHandler := handler.NewWorkflowHandler(workflowService)
 	decisionService := services.NewDecisionService(database.GetDB())
 	decisionService.SetWorkflowService(workflowService)
@@ -346,10 +379,14 @@ func main() {
 
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
+	organizationMessageService.SetPersonaHooks(beliefService, relationDynamicsService)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
 	organizationMcpHandler.SetWorkflowService(workflowService)
 	organizationMcpHandler.SetDecisionService(decisionService)
+	organizationMcpHandler.SetPersonaServices(emotionService, beliefService, memoryService, relationDynamicsService)
+	organizationMcpHandler.SetPersonaRunResolver(runService.ActiveRunForAgent)
 	agentMessageAdminHandler := handler.NewAgentMessageAdminHandler(organizationMessageService)
+	personaAdminHandler := handler.NewPersonaAdminHandler(runService, beliefService)
 
 	// ==================== 路由管理 ====================
 
@@ -474,6 +511,9 @@ func main() {
 	adminWrite.POST("/runs/:id/activities", runHandler.AppendActivity)
 	adminRead.GET("/runs/:id/tool-results", toolResultHandler.List)
 	adminRead.GET("/runs/:id/agent-messages", agentMessageAdminHandler.ListRun)
+	// H6 persona admin views (read-only; same authorization as neighboring run reads)
+	adminRead.GET("/runs/:runId/persona-state", personaAdminHandler.PersonaState)
+	adminRead.GET("/runs/:runId/belief-disputes", personaAdminHandler.BeliefDisputes)
 	adminRead.GET("/channels/:id/messages", agentMessageAdminHandler.ListChannel)
 	adminWrite.GET("/agent-message-chains", agentMessageAdminHandler.GetChain)
 	adminRead.GET("/runs/:id/tool-results/:toolResultId", toolResultHandler.Get)

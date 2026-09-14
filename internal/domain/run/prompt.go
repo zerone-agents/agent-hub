@@ -13,6 +13,9 @@ type PromptFragmentProvenance struct {
 	SourceVersion string `json:"sourceVersion"`
 	ContentHash   string `json:"contentHash"`
 	TokenEstimate int    `json:"tokenEstimate"`
+	// Note carries renderer remarks such as maxTokens truncation, so audits
+	// can distinguish a package's authored text from what was actually cut.
+	Note string `json:"note,omitempty"`
 }
 
 // PromptSnapshot is the audit record produced by the H2 Prompt Composer.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -42,10 +43,20 @@ func (d *WorkflowAgentDispatcher) Dispatch(ctx context.Context, tenantID, agentN
 type WorkflowService struct {
 	db         *gorm.DB
 	dispatcher WorkflowStepDispatcher
+	// H6 persona hooks (WS6): nil packs leave workflow behavior unchanged.
+	personaEmotion *EmotionService
+	personaRelDyn  *RelationDynamicsService
 }
 
 func NewWorkflowService(db *gorm.DB) *WorkflowService             { return &WorkflowService{db: db} }
 func (s *WorkflowService) SetDispatcher(d WorkflowStepDispatcher) { s.dispatcher = d }
+
+// SetPersonaHooks injects the H6 emotion and relation-dynamics packs for the
+// step-completion influence hook. Emitted events are deterministic and
+// idempotent; failures are logged and never break step completion.
+func (s *WorkflowService) SetPersonaHooks(emotion *EmotionService, reldyn *RelationDynamicsService) {
+	s.personaEmotion, s.personaRelDyn = emotion, reldyn
+}
 
 type WorkflowStepInput struct {
 	Key                 string         `json:"key"`
@@ -639,11 +650,57 @@ func (s *WorkflowService) finishStep(tenantID, id string, output map[string]any,
 	if err != nil {
 		return nil, err
 	}
+	s.emitStepPersonaEvents(tenantID, executionID, id, actor, success, idem)
 	ex, err := s.Execution(tenantID, executionID)
 	if err == nil {
 		s.dispatchActive(ex)
 	}
 	return ex, err
+}
+
+// emitStepPersonaEvents is the H6 WS6 task-completion hook: the completing
+// agent receives a deterministic mood event (task_completed/task_failed), and
+// when both the task source and the completer are agents, a task_completed
+// relation event is settled from completer toward source. Keys are
+// deterministic (`h6:<flow>:<id>`) so replays are no-ops. All failures are
+// log-and-continue.
+func (s *WorkflowService) emitStepPersonaEvents(tenantID, executionID, stepRunID, actor string, success bool, idem string) {
+	if s.personaEmotion == nil && s.personaRelDyn == nil {
+		return
+	}
+	var ex workflow.Execution
+	if err := s.db.Where("tenant_id=? AND id=?", tenantID, executionID).First(&ex).Error; err != nil {
+		log.Printf("[h6] step persona hook: execution %s lookup failed: %v", executionID, err)
+		return
+	}
+	if ex.RunID == "" {
+		return
+	}
+	var completer agent.AgentConfig
+	if err := s.db.Where("tenant_id=? AND name=?", tenantID, actor).First(&completer).Error; err != nil {
+		log.Printf("[h6] step persona hook: completer %q not an agent: %v", actor, err)
+		return
+	}
+	eventType := "task_failed"
+	if success {
+		eventType = "task_completed"
+	}
+	at := time.Now().UTC()
+	if s.personaEmotion != nil {
+		if err := s.personaEmotion.OnEvent(tenantID, ex.RunID, completer.ID, eventType, 1, at, fmt.Sprintf("h6:step-emotion:%s:%s", stepRunID, idem)); err != nil {
+			log.Printf("[h6] emotion step event failed: step=%s agent=%d: %v", stepRunID, completer.ID, err)
+		}
+	}
+	if s.personaRelDyn != nil && ex.StartedBy != "" && ex.StartedBy != actor {
+		var starter agent.AgentConfig
+		if err := s.db.Where("tenant_id=? AND name=?", tenantID, ex.StartedBy).First(&starter).Error; err != nil {
+			log.Printf("[h6] reldyn step event skipped: starter %q not an agent: %v", ex.StartedBy, err)
+			return
+		}
+		if err := s.personaRelDyn.OnEvent(tenantID, ex.RunID, completer.ID, starter.ID, "task_completed", 1, at, fmt.Sprintf("h6:step-reldyn:%s:%s", stepRunID, idem)); err != nil {
+			log.Printf("[h6] reldyn step event failed: step=%s pair=%d->%d: %v", stepRunID, completer.ID, starter.ID, err)
+		}
+	}
 }
 
 func forceActivateStep(tx *gorm.DB, tenantID, executionID, key string) error {

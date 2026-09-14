@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +53,29 @@ type AgentMessageService struct {
 	collaboration    *CollaborationService
 	targetQueues     sync.Map // tenantID + NUL + agent id -> *agentMessageTargetQueue
 	roundRobinMu     sync.Mutex
+	// H6 persona hooks (WS6): nil packs leave Core behavior unchanged.
+	personaBelief *BeliefService
+	personaRelDyn *RelationDynamicsService
+}
+
+// SetPersonaHooks injects the H6 belief and relation-dynamics packs into the
+// message dispatch path. Both hooks are advisory: failures are logged and
+// never break message delivery or authorization.
+func (s *AgentMessageService) SetPersonaHooks(belief *BeliefService, reldyn *RelationDynamicsService) {
+	s.personaBelief, s.personaRelDyn = belief, reldyn
+}
+
+// recordBeliefDelivery is the H6 delivery hook: a durably delivered message
+// becomes a fact the target agent holds a belief about. Idempotency key is
+// deterministic per (message, agent) so replays are no-ops.
+func (s *AgentMessageService) recordBeliefDelivery(tenantID string, message *agentrelation.AgentMessage) {
+	if s.personaBelief == nil || message == nil || message.RunID == "" {
+		return
+	}
+	err := s.personaBelief.RecordDelivery(tenantID, message.RunID, message.TargetAgentID, message.ID, message.CreatedAt, fmt.Sprintf("belief-delivery:%s:%d", message.ID, message.TargetAgentID))
+	if err != nil {
+		log.Printf("[h6] belief delivery record failed: message=%s agent=%d: %v", message.ID, message.TargetAgentID, err)
+	}
 }
 
 type agentMessageTargetQueue struct {
@@ -318,6 +342,7 @@ func (s *AgentMessageService) GroupSend(tenantID string, source *agent.AgentConf
 		if !created {
 			return nil, fmt.Errorf("群消息收件人投递幂等键冲突")
 		}
+		s.recordBeliefDelivery(tenantID, persisted)
 		relation := &agentrelation.AgentRelation{Scope: message.Scope, RelationType: "group_member", DeliveryPolicy: "async", ContextPolicy: "none"}
 		envelope := buildAgentMessageEnvelope(source, &target, relation, persisted)
 		deliveries = append(deliveries, agentMessageToDTO(persisted))
@@ -688,6 +713,22 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			return persistAuthorizationGuard("route_deviation_reason_required", agentrelation.ErrRouteReasonRequired)
 		}
 	}
+	// H6 WS6 relation-dynamics influence hook: the attitude the TARGET holds
+	// toward the source may require the target's confirmation for assign-like
+	// actions; inform/report are unaffected. This never rewrites the relation
+	// AllowedActions authorization above — it only records and surfaces.
+	relationGate := ""
+	if s.personaRelDyn != nil && runID != "" {
+		allowed, needConfirm, gateErr := s.personaRelDyn.Gate(tenantID, runID, target.ID, source.ID, input.Action)
+		switch {
+		case gateErr != nil:
+			log.Printf("[h6] relation gate evaluation failed: run=%s pair=%d->%d: %v", runID, source.ID, target.ID, gateErr)
+		case !allowed:
+			return persistAuthorizationGuard("relation_gate_denied", fmt.Errorf("对方当前态度拒绝 %s 请求", input.Action))
+		case needConfirm:
+			relationGate = "relation_gate_need_confirm"
+		}
+	}
 	sharedContext := relationContext(relation.ContextPolicy, input.ContextSummary, input.SharedContext)
 	tokensUsed += estimateMessageTokens(sharedContext)
 	guardReason := chainGuardReason(time.Now().UTC(), hop, maxHops, &deadline, eventCount, eventBudget, tokensUsed, tokenBudget)
@@ -735,6 +776,16 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			return agentMessageToDTO(message), agentrelation.ErrSyncDeadlock
 		}
 		return agentMessageToDTO(message), agentrelation.ErrChainGuarded
+	}
+	// H6: the message is durably delivered from here on — record the belief
+	// delivery fact for the target, and persist the gate verdict when the
+	// relation-dynamics hook demanded the target's confirmation.
+	s.recordBeliefDelivery(tenantID, message)
+	if relationGate != "" {
+		message.GuardReason = relationGate
+		if saveErr := s.saveStatusWithEvent(tenantID, message); saveErr != nil {
+			log.Printf("[h6] relation gate audit persist failed: message=%s: %v", message.ID, saveErr)
+		}
 	}
 
 	envelope := buildAgentMessageEnvelope(source, target, relation, message)

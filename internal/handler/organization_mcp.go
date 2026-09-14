@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/collaboration"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/middleware"
 
@@ -39,6 +43,26 @@ type OrganizationMcpHandler struct {
 	service         OrganizationMessageService
 	workflowService *services.WorkflowService
 	decisionService *services.DecisionService
+
+	// H6 persona capability packs (WS6 wiring). nil pack → its tools answer
+	// "能力尚未启用"; personaRunResolver nil → "仅运行会话可用".
+	emotionService     *services.EmotionService
+	beliefService      *services.BeliefService
+	memoryService      *services.MemoryService
+	relationDynService *services.RelationDynamicsService
+	personaRunResolver func(tenantID string, agentID uint64) (string, error)
+}
+
+// SetPersonaServices injects the four H6 persona capability packs. Any nil
+// pack disables its tools with the standard "能力尚未启用" response.
+func (h *OrganizationMcpHandler) SetPersonaServices(emotion *services.EmotionService, belief *services.BeliefService, memory *services.MemoryService, reldyn *services.RelationDynamicsService) {
+	h.emotionService, h.beliefService, h.memoryService, h.relationDynService = emotion, belief, memory, reldyn
+}
+
+// SetPersonaRunResolver binds run-session resolution (runtime token → active
+// run) so persona tools never need a run_id argument.
+func (h *OrganizationMcpHandler) SetPersonaRunResolver(fn func(tenantID string, agentID uint64) (string, error)) {
+	h.personaRunResolver = fn
 }
 
 func (h *OrganizationMcpHandler) SetWorkflowService(service *services.WorkflowService) {
@@ -175,6 +199,36 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 		},
 		{"name": "workflow_step_complete", "description": "回执当前 Agent 被分配的普通工作流步骤，并推进后续步骤。", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"step_run_id": map[string]interface{}{"type": "string"}, "output": map[string]interface{}{"type": "object"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"step_run_id", "idempotency_key"}}},
 		{"name": "workflow_step_fail", "description": "报告当前 Agent 被分配的工作流步骤失败，触发重试、补偿或确定性失败收敛。", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"step_run_id": map[string]interface{}{"type": "string"}, "error": map[string]interface{}{"type": "string"}, "idempotency_key": map[string]interface{}{"type": "string"}}, "required": []string{"step_run_id", "error", "idempotency_key"}}},
+		{
+			"name":        "emotion_status",
+			"description": "读取自己当前的心情状态与确定性叙述。身份来自运行时令牌；仅运行会话可用。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		},
+		{
+			"name":        "belief_list",
+			"description": "查看自己在当前 Run 中的看法列表，可按 factRef 过滤。只能读到送达过自己的事实。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"fact_ref": map[string]interface{}{"type": "string"}}},
+		},
+		{
+			"name":        "belief_claim",
+			"description": "提交一条“我声称…”的看法声明，生成 claim 类事实引用进入事件链，不直接改写他人看法。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"fact_ref": map[string]interface{}{"type": "string"}, "statement": map[string]interface{}{"type": "string"}}, "required": []string{"fact_ref", "statement"}},
+		},
+		{
+			"name":        "memory_record",
+			"description": "用自己的话记录一条主观记忆（关联事实、解释、可选重要度 0-100）。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"fact_ref": map[string]interface{}{"type": "string"}, "interpretation": map[string]interface{}{"type": "string"}, "importance": map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 100}}, "required": []string{"fact_ref", "interpretation"}},
+		},
+		{
+			"name":        "memory_recall",
+			"description": "按检索评分取回自己的 top-N 记忆（默认 5 条），可选 query 与 limit。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string"}, "limit": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 50}}},
+		},
+		{
+			"name":        "relation_view",
+			"description": "查看自己对目标 Agent 的定向态度（分数、立场、叙述）。只能看自己的态度。",
+			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"target_agent_id": map[string]interface{}{"type": "integer"}}, "required": []string{"target_agent_id"}},
+		},
 	}
 	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": tools}}
 }
@@ -269,6 +323,47 @@ type decisionVoteArgs struct {
 	DecisionID string `json:"decision_id"`
 	Choice     string `json:"choice"`
 	Reason     string `json:"reason"`
+}
+
+type beliefListArgs struct {
+	FactRef string `json:"fact_ref"`
+}
+type beliefClaimArgs struct {
+	FactRef   string `json:"fact_ref"`
+	Statement string `json:"statement"`
+}
+type memoryRecordArgs struct {
+	FactRef        string `json:"fact_ref"`
+	Interpretation string `json:"interpretation"`
+	Importance     *int   `json:"importance"`
+}
+type memoryRecallArgs struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit"`
+}
+type relationViewArgs struct {
+	TargetAgentID uint64 `json:"target_agent_id"`
+}
+
+// personaDisabled mirrors the existing disabled-capability responses.
+const personaDisabled = "能力尚未启用"
+
+// resolvePersonaRun binds the caller runtime identity to its active run
+// session. Identity never comes from tool arguments.
+func (h *OrganizationMcpHandler) resolvePersonaRun(tenantID string, source *agent.AgentConfig, id interface{}) (string, jsonRPCResponse, bool) {
+	if h.personaRunResolver == nil {
+		return "", mcpErrorResult(id, "仅运行会话可用"), false
+	}
+	runID, err := h.personaRunResolver(tenantID, source.ID)
+	if err != nil || strings.TrimSpace(runID) == "" {
+		return "", mcpErrorResult(id, "仅运行会话可用"), false
+	}
+	return runID, jsonRPCResponse{}, true
+}
+
+func personaDeterministicKey(tool string, agentID uint64, parts ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+	return fmt.Sprintf("h6:mcp:%s:%d:%s", tool, agentID, hex.EncodeToString(sum[:])[:16])
 }
 
 func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, raw json.RawMessage) (jsonRPCResponse, error) {
@@ -486,6 +581,118 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			return mcpErrorResult(id, err.Error()), nil
 		}
 		return mcpJSONResult(id, execution)
+	case "emotion_status":
+		if h.emotionService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		state, err := h.emotionService.Status(tenantID, runID, source.ID)
+		if err != nil {
+			if errors.Is(err, rundomain.ErrNoActiveRun) {
+				return mcpErrorResult(id, "仅运行会话可用"), nil
+			}
+			return mcpErrorResult(id, "心情状态读取失败"), nil
+		}
+		return mcpJSONResult(id, state)
+	case "belief_list":
+		if h.beliefService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		var args beliefListArgs
+		if len(call.Arguments) > 0 {
+			if err := json.Unmarshal(call.Arguments, &args); err != nil {
+				return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+			}
+		}
+		beliefs, err := h.beliefService.List(tenantID, runID, source.ID, strings.TrimSpace(args.FactRef))
+		if err != nil {
+			return mcpErrorResult(id, "看法列表读取失败"), nil
+		}
+		return mcpJSONResult(id, map[string]interface{}{"beliefs": beliefs})
+	case "belief_claim":
+		if h.beliefService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		var args beliefClaimArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		factRef, err := h.beliefService.Claim(tenantID, runID, source.ID, strings.TrimSpace(args.FactRef), args.Statement, time.Now().UTC(), personaDeterministicKey("belief_claim", source.ID, args.FactRef, args.Statement))
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, map[string]interface{}{"factRef": factRef})
+	case "memory_record":
+		if h.memoryService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		var args memoryRecordArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		importance := 50
+		if args.Importance != nil {
+			importance = *args.Importance
+		}
+		entry, err := h.memoryService.Record(tenantID, runID, source.ID, args.FactRef, args.Interpretation, importance, time.Now().UTC(), personaDeterministicKey("memory_record", source.ID, args.FactRef, args.Interpretation))
+		if err != nil {
+			return mcpErrorResult(id, err.Error()), nil
+		}
+		return mcpJSONResult(id, entry)
+	case "memory_recall":
+		if h.memoryService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		var args memoryRecallArgs
+		if len(call.Arguments) > 0 {
+			if err := json.Unmarshal(call.Arguments, &args); err != nil {
+				return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+			}
+		}
+		memories, err := h.memoryService.Recall(tenantID, runID, source.ID, strings.TrimSpace(args.Query), args.Limit, time.Now().UTC())
+		if err != nil {
+			return mcpErrorResult(id, "记忆检索失败"), nil
+		}
+		return mcpJSONResult(id, map[string]interface{}{"memories": memories})
+	case "relation_view":
+		if h.relationDynService == nil {
+			return mcpErrorResult(id, personaDisabled), nil
+		}
+		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
+		if !ok {
+			return failure, nil
+		}
+		var args relationViewArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if args.TargetAgentID == 0 {
+			return mcpErrorResult(id, "target_agent_id 不能为空"), nil
+		}
+		attitude, err := h.relationDynService.View(tenantID, runID, source.ID, args.TargetAgentID)
+		if err != nil {
+			return mcpErrorResult(id, "关系态度读取失败"), nil
+		}
+		return mcpJSONResult(id, attitude)
 	default:
 		return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", call.Name)
 	}

@@ -437,7 +437,32 @@ func (s *RunService) CommitState(tenantID, runID string, stateID uint64, input C
 	return &result, nil
 }
 
+// ActiveRunForAgent resolves the run session the agent currently belongs to:
+// the most recently started running Run containing the agent. H6 persona MCP
+// tools carry no run argument; identity comes from the runtime token, and the
+// run context comes from this session binding. Non-run sessions yield
+// rundomain.ErrNoActiveRun ("仅运行会话可用").
+func (s *RunService) ActiveRunForAgent(tenantID string, agentID uint64) (string, error) {
+	var runIDs []string
+	if err := s.db.Model(&rundomain.RunAgent{}).Where("tenant_id = ? AND agent_id = ?", tenantID, agentID).Pluck("run_id", &runIDs).Error; err != nil {
+		return "", err
+	}
+	if len(runIDs) == 0 {
+		return "", rundomain.ErrNoActiveRun
+	}
+	var r rundomain.Run
+	err := s.db.Where("id IN ? AND status = ?", runIDs, rundomain.StatusRunning).Order("started_at DESC").First(&r).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", rundomain.ErrNoActiveRun
+	}
+	if err != nil {
+		return "", err
+	}
+	return r.ID, nil
+}
+
 func (s *RunService) States(tenantID, runID string) ([]rundomain.RunState, error) {
+
 	var rows []rundomain.RunState
 	err := s.db.Where("tenant_id = ? AND run_id = ?", tenantID, runID).Order("id").Find(&rows).Error
 	return rows, err
