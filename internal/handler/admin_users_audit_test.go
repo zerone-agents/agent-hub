@@ -215,6 +215,19 @@ func TestAuditResetPasswordAndInvitesAndLoginURL(t *testing.T) {
 	require.Equal(t, "1", revRows[0].TargetID)
 	require.Empty(t, revRows[0].Detail)
 
+	// 默认有效期路径（PR #150 审查 P2）：省略 expiresInDays（service 规范化为
+	// 7 天），审计必须记录实际生效的 7 而非原始 0
+	body, err = json.Marshal(map[string]any{"role": "member"})
+	require.NoError(t, err)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/invites", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	invRows = rowsOf(t, db, audit.ActionInviteCreate)
+	require.Len(t, invRows, 2)
+	require.Contains(t, invRows[1].Detail, `"expiresInDays":7`, "默认有效期审计记录规范化结果（7 天），非原始 0")
+
 	// ---- casdoor：login_url → TargetType=system、TargetID=租户 ----
 	cr, cdb := setupCasdoorUserRouter(&fakeUserDirectory{}, trivialLoginURLFn)
 	cw := casdoorDo(cr, "GET", "/admin/users/login-url", nil)

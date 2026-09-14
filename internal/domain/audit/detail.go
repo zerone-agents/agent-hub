@@ -13,6 +13,9 @@ type ChangeDetail struct {
 const (
 	ReasonInvalidCredentials  = "invalid_credentials"
 	ReasonTokenIssuanceFailed = "token_issuance_failed"
+	// ReasonInvalidRequest：casdoor callback 前期失败（参数缺失 / state 无效）——
+	// 既非凭校验失败也非签发失败的第三类（PR #150 审查 P2，spec §5.6 阶段表）。
+	ReasonInvalidRequest = "invalid_request"
 )
 
 type LoginDetail struct {

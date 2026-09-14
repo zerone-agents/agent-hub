@@ -165,6 +165,11 @@ func TestAuditBigIDStringRoundTrip(t *testing.T) {
 	require.Contains(t, w.Body.String(), fmt.Sprintf(`"snapshotId":"%d"`, big))
 	w2 := getAudit(t, r, "admin", fmt.Sprintf("?snapshotId=%d", big)) // 回传解析成功
 	require.Equal(t, 200, w2.Code)
+	// 首屏捕获（不带 snapshotId）：服务端经 MaxID 无损捕获并随响应回传
+	// （PR #150 审查 P1——既有用例手工传入 snapshot，未覆盖捕获路径）
+	w0 := getAudit(t, r, "admin", "")
+	require.Equal(t, 200, w0.Code)
+	require.Contains(t, w0.Body.String(), fmt.Sprintf(`"snapshotId":"%d"`, big))
 }
 
 func TestAuditPageSizeCapAndDefaults(t *testing.T) {

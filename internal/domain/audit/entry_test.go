@@ -28,6 +28,9 @@ func TestEventCategoryConsistency(t *testing.T) {
 func TestLoginDetailReasonConstants(t *testing.T) {
 	require.Equal(t, "invalid_credentials", ReasonInvalidCredentials)
 	require.Equal(t, "token_issuance_failed", ReasonTokenIssuanceFailed)
+	require.Equal(t, "invalid_request", ReasonInvalidRequest) // casdoor callback 前期失败（PR #150 审查 P2）
 	b, _ := json.Marshal(LoginDetail{Reason: ReasonTokenIssuanceFailed})
 	require.Contains(t, string(b), `"reason":"token_issuance_failed"`)
+	b, _ = json.Marshal(LoginDetail{Reason: ReasonInvalidRequest})
+	require.Contains(t, string(b), `"reason":"invalid_request"`)
 }

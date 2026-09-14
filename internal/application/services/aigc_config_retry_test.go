@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bytes"
 	"errors"
+	"log"
 	"testing"
 	"time"
 
@@ -68,4 +70,20 @@ func TestSaveConflictOrErr(t *testing.T) {
 	require.Equal(t, "保存冲突，请稍后重试", ErrAigcSaveConflict.Error())
 	other := errors.New("boom")
 	require.Same(t, other, saveConflictOrErr(other)) // 非冲突类原样透传（不吞错）
+}
+
+// 内部故障日志带 stack（CONTRIBUTING：internal errors in English with stack；
+// PR #150 审查 Standards#1）。
+func TestLogSaveConflictIncludesStack(t *testing.T) {
+	var buf bytes.Buffer
+	// 保存/恢复前一个 writer：SetOutput(nil) 是「丢弃态」，会让后续任何
+	// 全局 log.Printf（如 chat_repository）在 output() 内空指针崩溃。
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	logSaveConflict("acme", mysqlErr(1213))
+	out := buf.String()
+	require.Contains(t, out, "[AIGC] save conflict (tenant=acme)")
+	require.Contains(t, out, "Error 1213")
+	require.Contains(t, out, "goroutine") // debug.Stack() 堆栈标记
 }

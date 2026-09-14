@@ -184,6 +184,17 @@ func TestRecorderLoginDetailSerialized(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(row.Detail), &d))
 	require.Equal(t, "invalid_credentials", d["reason"])
 	require.Equal(t, "alice", d["username"])
+
+	// 失败 reason 全词表落库断言（PR #150 审查 P2：casdoor 失败 reason 不得为空）——
+	// Callback 三阶段的接线使用同一 Recorder 管线，此处覆盖 reason 端到端落库。
+	for _, reason := range []string{audit.ReasonTokenIssuanceFailed, audit.ReasonInvalidRequest} {
+		rec.Login(c, "", "", "t1", audit.StatusFailure, reason)
+	}
+	var rows []audit.Log
+	require.NoError(t, db.Where("action = ?", audit.ActionLogin).Order("id DESC").Limit(2).Find(&rows).Error)
+	require.Len(t, rows, 2)
+	require.Contains(t, rows[1].Detail, `"reason":"token_issuance_failed"`)
+	require.Contains(t, rows[0].Detail, `"reason":"invalid_request"`)
 }
 
 func TestRecorderAigcSaved(t *testing.T) {

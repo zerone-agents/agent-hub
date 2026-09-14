@@ -150,3 +150,18 @@ func TestAuditMaxIDEmptyTenant(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 0, max)
 }
+
+// MaxID 捕获路径（PR #150 审查 P1）：大 id 无损返回。SQLite INTEGER 为有符号
+// int64，上界内可表达的最大测试值为 1<<62；> MaxInt64 的用例见
+// audit_repository_mysql_test.go（真 MySQL 门控）。
+func TestAuditMaxIDBigCapture(t *testing.T) {
+	db := newAuditTestDB(t)
+	repo := NewAuditRepository(db)
+	l := &audit.Log{TenantID: "t1", Category: audit.CatAuth, Action: audit.ActionLogin,
+		TargetType: audit.TargetSystem, Status: audit.StatusSuccess}
+	l.ID = 1 << 62
+	require.NoError(t, db.Create(l).Error)
+	max, err := repo.MaxID("t1")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1)<<62, max)
+}

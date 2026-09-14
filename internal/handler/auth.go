@@ -59,7 +59,7 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 		state := c.Query("state")
 
 		if code == "" || state == "" {
-			ar.Login(c, "", "", "", audit.StatusFailure, "") // org 未知 → stdout-only
+			ar.Login(c, "", "", "", audit.StatusFailure, audit.ReasonInvalidRequest) // org 未知 → stdout-only
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
 				"error":   "code 和 state 参数必填",
@@ -69,7 +69,7 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 
 		session := auth.GetSession(state)
 		if session == nil {
-			ar.Login(c, "", "", "", audit.StatusFailure, "") // org 未知 → stdout-only
+			ar.Login(c, "", "", "", audit.StatusFailure, audit.ReasonInvalidRequest) // org 未知 → stdout-only
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
 				"error":   "无效的 state 参数或会话已过期",
@@ -83,7 +83,7 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 		if err != nil {
 			// 细节进日志（可能含 casdoor 原始响应/内部地址），客户端只见中性文案。
 			log.Printf("[Callback] token exchange failed (org=%s): %v", session.Org, err)
-			ar.Login(c, "", "", session.Org, audit.StatusFailure, "") // org 已知 → 落库
+			ar.Login(c, "", "", session.Org, audit.StatusFailure, audit.ReasonTokenIssuanceFailed) // org 已知 → 落库（签发失败，spec §3.1）
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"error":   "登录回调处理失败，请重试",

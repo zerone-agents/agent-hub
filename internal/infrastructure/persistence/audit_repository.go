@@ -27,13 +27,15 @@ func NewAuditRepository(db *gorm.DB) *AuditRepository { return &AuditRepository{
 func (r *AuditRepository) Create(e *audit.Log) error { return r.db.Create(e).Error }
 
 // MaxID 返回租户全集 MAX(id)（不受 category/action/user 筛选影响，spec §5.3）；空表 0。
+// 直接扫描 uint64：audit_logs.id 为无符号主键，经 int64 中转会在 > MaxInt64 时
+// 扫描失败/溢出，使首屏请求 500，破坏无损 uint64 快照契约（PR #150 审查 P1）。
 func (r *AuditRepository) MaxID(tenantID string) (uint64, error) {
-	var max struct{ Max int64 }
+	var max struct{ Max uint64 }
 	if err := r.db.Model(&audit.Log{}).Where("tenant_id = ?", tenantID).
 		Select("COALESCE(MAX(id), 0) AS max").Scan(&max).Error; err != nil {
 		return 0, err
 	}
-	return uint64(max.Max), nil
+	return max.Max, nil
 }
 
 func (r *AuditRepository) applyFilter(q *gorm.DB, f AuditListFilter) *gorm.DB {

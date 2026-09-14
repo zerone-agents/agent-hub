@@ -301,7 +301,8 @@ func resolveZeroRows(cur *authdom.User, getErr error, col, val string) (*authdom
 	case "status":
 		equal = cur.Status == val
 	default:
-		return nil, fmt.Errorf("resolveZeroRows: 未知列 %q", col)
+		// 内部编程错误（不可达分支）：英文（CONTRIBUTING：用户可见错误才用中文）。
+		return nil, fmt.Errorf("resolveZeroRows: unknown column %q", col)
 	}
 	if !equal {
 		return nil, ErrConcurrentModification

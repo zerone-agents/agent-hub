@@ -161,13 +161,10 @@ func (h *AdminUserHandler) CreateInvite(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	// InviteResult 只携带 token/有效期（token 仅此一次返回，不入审计）：
-	// 数字邀请 ID 经唯一 token_hash 反查（best-effort，失败仅 TargetID 为空）。
-	var inviteID string
-	if inv, verr := h.invites.Validate(res.Token); verr == nil {
-		inviteID = strconv.FormatUint(inv.ID, 10)
-	}
-	h.audit.InviteCreated(c, inviteID, req.Role, req.ExpiresInDays)
+	// 审计使用真实值（PR #150 审查 P2）：res.ID（携带于结果，无需反查）与
+	// 规范化后的实际 TTL——service 已把 <=0 默认为 7 天，原始 req.ExpiresInDays
+	// 可能为 0/负数，直接记录会失真。
+	h.audit.InviteCreated(c, strconv.FormatUint(res.ID, 10), req.Role, res.TtlDays)
 	respondSuccess(c, res)
 }
 

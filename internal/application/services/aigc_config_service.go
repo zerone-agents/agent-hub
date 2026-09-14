@@ -8,6 +8,7 @@ import (
 	"log"
 	mrand "math/rand"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -145,6 +146,13 @@ func saveConflictOrErr(err error) error {
 	return err
 }
 
+// logSaveConflict：内部故障日志——英文错误 + debug.Stack()（CONTRIBUTING：
+// internal errors in English with stack；与 AuditRecorder 降级日志同款，
+// PR #150 审查 Standards#1）。
+func logSaveConflict(tenantID string, err error) {
+	log.Printf("[AIGC] save conflict (tenant=%s): %v\n%s", tenantID, err, debug.Stack())
+}
+
 // withRetry 驱动有界重试：总尝试 ≤3，重试前退避抖动；
 // attempt 必须是自包含的完整事务（saveOnce），非可重试错误立即返回。
 func withRetry(attempt func() error) error {
@@ -192,7 +200,7 @@ func (s *AigcConfigService) Save(tenantID, uscc, companyName string) (*ConfigDTO
 		if mapped := saveConflictOrErr(err); mapped != err {
 			// 冲突类（1062/1213 重试耗尽、1205）：原始 MySQL 英文错误进日志，
 			// 用户只见中文哨兵（CONTRIBUTING 用户错误中文契约）。
-			log.Printf("[AIGC] save conflict (tenant=%s): %v", tenantID, err)
+			logSaveConflict(tenantID, err)
 			return nil, nil, mapped
 		}
 		return nil, nil, err // 失败（含 1205）→ dto/rcpt 均 nil
