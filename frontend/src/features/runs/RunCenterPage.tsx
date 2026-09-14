@@ -382,7 +382,7 @@ function PromptExplanation({ snapshot }: { snapshot: PromptSnapshot }) {
   const totalTokens = snapshot.provenance.reduce((sum, item) => sum + item.tokenEstimate, 0)
   const deliveryLabel = snapshot.deliveryStatus === 'delivered' ? '本次对话实际使用' : snapshot.deliveryStatus === 'failed' ? '发送失败，未被 Agent 使用' : '预览，尚未用于对话'
   return <>
-    <p className={styles.promptIntro}>这是平台按本次运行档案生成的判断背景。内容按固定顺序合并，并保留每一部分的来源；人格和上下文不会赋予额外权限。</p>
+    <p className={styles.promptIntro}>这是平台根据本次任务档案整理出的判断依据。内容按固定顺序合并，并保留每一部分的来源；人格和上下文不会赋予额外权限。</p>
     <div className={styles.promptSummary}><span>{deliveryLabel}</span><span>{snapshot.provenance.length} 个判断依据</span><span>约 {totalTokens} tokens</span><span>版本指纹 {snapshot.renderedHash.slice(0, 10)}</span></div>
     <div>{snapshot.provenance.map((item) => <div className={styles.promptSource} key={`${item.stage}-${item.sourceId}-${item.contentHash}`}>
       <div className={styles.promptSourceTop}><span className={styles.promptSourceName}>{PROMPT_STAGE_LABEL[item.stage] ?? item.label}</span><Tag variant="filled">约 {item.tokenEstimate} tokens</Tag></div>
@@ -421,34 +421,36 @@ function RunDetailPanel({ id }: { id: string }) {
       <div className={styles.fact}><div className={styles.factLabel}>发起人</div><div className={styles.factValue}>{run.createdBy || '系统'}</div></div>
       <div className={styles.fact}><div className={styles.factLabel}>参与者</div><div className={styles.factValue}>{run.agents?.length ?? 0} 个 Agent</div></div>
       <div className={styles.fact}><div className={styles.factLabel}>创建时间</div><div className={styles.factValue}>{formatTime(run.createdAt)}</div></div>
-      <div className={styles.fact}><div className={styles.factLabel}>能力版本锁定</div><div className={styles.factValue}>{run.capabilityBindings?.length ?? 0} 项</div></div>
+      <div className={styles.fact}><div className={styles.factLabel}>本场固定规则</div><div className={styles.factValue}>{run.capabilityBindings?.length ?? 0} 项</div></div>
     </div>
-    {(run.capabilityBindings?.length ?? 0) > 0 && <div className={styles.bindings} aria-label="已锁定能力包">{run.capabilityBindings?.map((binding) => <div className={styles.binding} key={`${binding.namespace}-${binding.version}`}><strong>{binding.packageName}</strong><span>{binding.version}</span><Tag color="success" variant="filled">本次固定</Tag></div>)}</div>}
-    <div className={styles.grid}>
-      <section className={styles.participantSection}><h3 className={styles.sectionTitle}><RobotIcon size={17} />谁在参与</h3>
+    {(run.capabilityBindings?.length ?? 0) > 0 && <div className={styles.bindings} aria-label="已锁定能力包">{run.capabilityBindings?.map((binding) => <div className={styles.binding} key={`${binding.namespace}-${binding.version}`}><strong>{binding.packageName}</strong><span>{binding.version}</span><Tag color="success" variant="filled">已固定</Tag></div>)}</div>}
+    <section className={styles.participantSection}><h3 className={styles.sectionTitle}><RobotIcon size={17} />参与者</h3>
         {canWrite && run.status === 'draft' && <div className={styles.addAgent}><Select aria-label="选择 Agent" value={agentId} onChange={setAgentId} options={agentOptions} placeholder="选择 Agent" showSearch optionFilterProp="label" /><Input aria-label="参与角色" value={role} onChange={(event) => setRole(event.target.value)} placeholder="参与角色" /><PrimaryButton icon={<PlusIcon size={15} />} disabled={!agentId} loading={addAgent.isPending} onClick={() => agentId && addAgent.mutate({ id, agentId, role: role.trim() || '参与者' }, { onSuccess: () => setAgentId(undefined) })}>添加</PrimaryButton></div>}
-        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><span className={styles.personActions}>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断背景</Button></span></div>)}</div>}
+        {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><span className={styles.personActions}>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断依据</Button></span></div>)}</div>}
       </section>
-      <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
-    </div>
     <PersonaPanel runId={id} agents={run.agents ?? []} states={states ?? []} changes={history.data ?? []} />
-    <TaskRoutePlan run={run} canWrite={canWrite} />
-    <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><PlayCircleIcon size={17} />执行过程</h3>
-      {activities.isError ? <Alert type="error" showIcon title="执行过程加载失败" description={parseApiError(activities.error)} /> : activities.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ActivityTimeline activities={activities.data ?? []} />}
-    </section>
-    <section className={styles.collaboration}>
-      <div className={styles.collaborationHead}><div><h3 className={styles.sectionTitle}><ArrowsLeftRightIcon size={17} />Agent 协作链</h3><p className={styles.collaborationHelp}>展示实际发生的 A→B→C、回报和越级尝试。每一跳都单独经过关系、动作权限和运行预算检查。</p></div>{(agentMessages.data?.length ?? 0) > 0 && <div className={styles.detailActions}><Button onClick={() => void navigate('/relations')}>查看关系配置</Button><PrimaryButton onClick={() => { const first = agentMessages.data?.[0]; if (first) void navigate(`/collaboration-audit?conversation_id=${encodeURIComponent(first.conversationId)}`) }}>核验完整链路</PrimaryButton></div>}</div>
-      {agentMessages.isError ? <Alert type="error" showIcon title="协作记录加载失败" description={`${parseApiError(agentMessages.error)}。确认后端已升级到 H3 版本后重试。`} /> : agentMessages.isLoading ? <Skeleton active paragraph={{ rows: 4 }} /> : (agentMessages.data?.length ?? 0) > 0 ? <CollaborationTimeline items={agentMessages.data ?? []} /> : <CollaborationGuide run={run} onConfigure={() => void navigate('/relations')} />}
-    </section>
-    <section className={styles.timelineSection}><h3 className={styles.sectionTitle}><ClockCounterClockwiseIcon size={17} />状态变化</h3>
-      {history.isError ? <Alert type="error" showIcon title="变化记录加载失败" description={parseApiError(history.error)} /> : history.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ChangeTimeline changes={history.data ?? []} />}
-    </section>
-    <div className={styles.grid} style={{ marginTop: 22 }}>
-      <section className={styles.section}><h3 className={styles.sectionTitle}>工具提出的变化是否生效</h3>{toolResults.isError ? <Alert type="error" showIcon title="工具结果加载失败" description={parseApiError(toolResults.error)} /> : toolResults.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ToolDecisionList items={toolResults.data ?? []} />}</section>
-      <section className={styles.section}><h3 className={styles.sectionTitle}>事情为什么会接着发生</h3>{events.isError ? <Alert type="error" showIcon title="因果记录加载失败" description={parseApiError(events.error)} /> : events.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <EventTimeline items={events.data ?? []} />}</section>
+    <div className={styles.collaboration}>
+      <Collapse items={[{ key: 'advanced', label: '协作细节（高级）', forceRender: true, children: <div style={{ display: 'grid', gap: 22 }}>
+        <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>
+        <TaskRoutePlan run={run} canWrite={canWrite} />
+        <section className={styles.section}><h3 className={styles.sectionTitle}><PlayCircleIcon size={17} />执行过程</h3>
+          {activities.isError ? <Alert type="error" showIcon title="执行过程加载失败" description={parseApiError(activities.error)} /> : activities.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ActivityTimeline activities={activities.data ?? []} />}
+        </section>
+        <section className={styles.section}>
+          <div className={styles.collaborationHead}><div><h3 className={styles.sectionTitle}><ArrowsLeftRightIcon size={17} />Agent 协作链</h3><p className={styles.collaborationHelp}>展示实际发生的 A→B→C、回报和越级尝试。每一跳都单独经过关系、动作权限和运行预算检查。</p></div>{(agentMessages.data?.length ?? 0) > 0 && <div className={styles.detailActions}><Button onClick={() => void navigate('/relations')}>查看关系配置</Button><PrimaryButton onClick={() => { const first = agentMessages.data?.[0]; if (first) void navigate(`/collaboration-audit?conversation_id=${encodeURIComponent(first.conversationId)}`) }}>核验完整链路</PrimaryButton></div>}</div>
+          {agentMessages.isError ? <Alert type="error" showIcon title="协作记录加载失败" description={`${parseApiError(agentMessages.error)}。确认后端已升级到 H3 版本后重试。`} /> : agentMessages.isLoading ? <Skeleton active paragraph={{ rows: 4 }} /> : (agentMessages.data?.length ?? 0) > 0 ? <CollaborationTimeline items={agentMessages.data ?? []} /> : <CollaborationGuide run={run} onConfigure={() => void navigate('/relations')} />}
+        </section>
+        <section className={styles.section}><h3 className={styles.sectionTitle}><ClockCounterClockwiseIcon size={17} />状态变化</h3>
+          {history.isError ? <Alert type="error" showIcon title="变化记录加载失败" description={parseApiError(history.error)} /> : history.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ChangeTimeline changes={history.data ?? []} />}
+        </section>
+        <div className={styles.grid}>
+          <section className={styles.section}><h3 className={styles.sectionTitle}>工具改动的结果</h3>{toolResults.isError ? <Alert type="error" showIcon title="工具结果加载失败" description={parseApiError(toolResults.error)} /> : toolResults.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <ToolDecisionList items={toolResults.data ?? []} />}</section>
+          <section className={styles.section}><h3 className={styles.sectionTitle}>事情为什么会接着发生</h3>{events.isError ? <Alert type="error" showIcon title="因果记录加载失败" description={parseApiError(events.error)} /> : events.isLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : <EventTimeline items={events.data ?? []} />}</section>
+        </div>
+        <div className={styles.future}>H3 在原有运行档案上增加了可控多跳协作：关系决定能不能传，预算决定什么时候停，每一跳都可以复盘。</div>
+      </div> }]} />
     </div>
-    <div className={styles.future}>H3 在原有运行档案上增加了可控多跳协作：关系决定能不能传，预算决定什么时候停，每一跳都可以复盘。</div>
-    <Modal title={`${promptAgentName || 'Agent'} 的判断背景`} open={promptSnapshot !== null} onCancel={() => setPromptSnapshot(null)} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
+    <Modal title={`${promptAgentName || 'Agent'} 的判断依据`} open={promptSnapshot !== null} onCancel={() => setPromptSnapshot(null)} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
   </article>
 }
 
@@ -468,7 +470,7 @@ export default function RunCenterPage() {
   useEffect(() => { if (!selectedId && runs[0]) void navigate(`/runs/${runs[0].id}`, { replace: true }) }, [navigate, runs, selectedId])
 
   return <main className={styles.page}>
-    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每次任务都有独立档案。在这里查看谁把任务交给谁、为什么继续传递，以及系统在哪一跳阻止了风险。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />H3 · 多跳协作可控、可复盘</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setCreateOpen(true)}>新建运行</PrimaryButton>}</div></header>
+    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每一次任务都有独立档案：谁参与了、他们的心境和关系发生了什么变化。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />每次任务 · 独立档案</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setCreateOpen(true)}>新建运行</PrimaryButton>}</div></header>
     <div className={styles.shell}>
       <aside className={styles.rail}><div className={styles.railHead}><div className={styles.railTitle}>运行档案</div><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索任务" /></div>
         {list.isError ? <div className={styles.center}><Alert type="error" showIcon title="无法加载运行" description={parseApiError(list.error)} /></div> : list.isLoading ? <div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 7 }} /></div> : runs.length === 0 ? <div className={styles.center}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search ? '没有匹配的运行' : '还没有运行记录'} /></div> : <div className={styles.runList}>{runs.map((run: Run) => <button type="button" className={cx(styles.runButton, run.id === selectedId && styles.runButtonActive)} key={run.id} onClick={() => void navigate(`/runs/${run.id}`)}><div className={styles.runTop}><span className={styles.runName}>{run.name}</span><RunStatusLabel status={run.status} /></div><p className={styles.runDesc}>{run.description || '未填写运行说明'}</p><div className={styles.runMeta}><span>{run.agents?.length ?? 0} 个 Agent</span><ArrowRightIcon size={12} /><time>{formatTime(run.updatedAt)}</time></div></button>)}</div>}
@@ -481,9 +483,9 @@ export default function RunCenterPage() {
         const capabilityBindings = (packages.data ?? []).filter((item) => selected.has(item.id)).map((item) => ({ namespace: item.namespace, packageName: item.name, version: item.version }))
         createRun.mutate({ ...values, ...(capabilityBindings.length > 0 ? { capabilityBindings } : {}) }, { onSuccess: (run) => { setCreateOpen(false); createForm.resetFields(); void navigate(`/runs/${run.id}`) } })
       }}>
-        <Form.Item name="name" label="运行名称" rules={[{ required: true, whitespace: true, message: '请输入运行名称' }]}><Input maxLength={160} placeholder="例如：新市场研究" /></Form.Item>
+        <Form.Item name="name" label="运行名称" extra="给这次任务起个名字，比如「三季度预算讨论」" rules={[{ required: true, whitespace: true, message: '请输入运行名称' }]}><Input maxLength={160} placeholder="例如：新市场研究" /></Form.Item>
         <Form.Item name="description" label="运行说明"><Input.TextArea rows={3} placeholder="这次运行要完成什么？" /></Form.Item>
-        <Form.Item name="capabilityPackageIds" label="本次使用的能力" extra="创建后会固定当前版本，以后升级不会改变这次运行的复盘结果。"><Select mode="multiple" allowClear loading={packages.isLoading} optionFilterProp="label" placeholder={packages.data?.length ? '可选，可多选' : '暂无已启用的能力包'} options={(packages.data ?? []).map((item) => ({ value: item.id, label: `${item.displayName || item.name} · ${item.version}` }))} /></Form.Item>
+        <Form.Item name="capabilityPackageIds" label="本次使用的能力" extra="不选也能创建，选了就会在整场任务中固定使用这些能力。创建后会固定当前版本，以后升级不会改变这次运行的复盘结果。"><Select mode="multiple" allowClear loading={packages.isLoading} optionFilterProp="label" placeholder={packages.data?.length ? '可选，可多选' : '暂无已启用的能力包'} options={(packages.data ?? []).map((item) => ({ value: item.id, label: `${item.displayName || item.name} · ${item.version}` }))} /></Form.Item>
         <div className={styles.detailActions}><Button onClick={() => setCreateOpen(false)}>取消</Button><PrimaryButton htmlType="submit" loading={createRun.isPending}>创建运行</PrimaryButton></div>
       </Form>
     </Modal>

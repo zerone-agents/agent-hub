@@ -86,9 +86,11 @@ describe('PersonaPanel', () => {
     expect(screen.getByText(/法务顾问 · 怀疑（置信 30）/)).toBeInTheDocument()
   })
 
-  it('renders directed relation rows as A 对 B from the subjectId pair', () => {
+  it('renders directed relation rows as A → B with stance and score', () => {
     renderPanel()
-    expect(screen.getByText(/研究分析师 对 法务顾问/)).toBeInTheDocument()
+    expect(screen.getByText('研究分析师 → 法务顾问')).toBeInTheDocument()
+    expect(screen.getByText('警惕（-40）')).toBeInTheDocument()
+    expect(screen.getByText(/关系是单向的：A 对 B 的态度不一定等于 B 对 A/)).toBeInTheDocument()
   })
 
   it('filters the change timeline to the four persona namespaces', () => {

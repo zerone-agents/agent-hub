@@ -31,6 +31,15 @@ const STANCE_LABEL: Record<string, string> = {
   hostile: '敌对', wary: '警惕', neutral: '中立', friendly: '友好', allied: '同盟',
 }
 
+const MOOD_COLOR: Record<string, string> = {
+  calm: '#22c55e',
+  elated: '#14b8a6',
+  wary: '#eab308',
+  tense: '#f97316',
+  angry: '#ef4444',
+  grieving: '#a855f7',
+}
+
 const useStyles = createStyles(({ css }) => ({
   persona: css`margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border);`,
   personaHead: css`margin-bottom: 12px;`,
@@ -51,6 +60,7 @@ const useStyles = createStyles(({ css }) => ({
   rowTop: css`display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;`,
   rowName: css`color: ${t.text}; font-size: ${t.textSm}; font-weight: 630; overflow-wrap: anywhere;`,
   rowMeta: css`display: flex; align-items: center; flex-wrap: wrap; gap: 6px;`,
+  moodDot: css`display: inline-block; width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%;`,
   rowBody: css`margin-top: 6px; color: ${t.textTertiary}; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere;`,
   rowTime: css`margin-top: 5px; color: ${t.textMuted}; font-size: 11px;`,
   intensity: css`display: inline-flex; align-items: center; gap: 7px; color: ${t.textSecondary}; font-size: 12px;`,
@@ -131,7 +141,7 @@ export function PersonaPanel({ runId, agents, states, changes }: { runId: string
             const mood = str(entry.data.mood)
             const intensity = num(entry.data.intensity)
             return <div className={styles.row} key={`${entry.namespace}-${entry.subjectId}`}>
-              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, entry.subjectId)}</span><span className={styles.rowMeta}><Tag color="processing" variant="filled">{MOOD_LABEL[mood] ?? mood}</Tag>{intensity !== undefined && <span className={styles.intensity}><span className={styles.bar}><span className={styles.barFill} style={{ width: `${intensity}%` }} /></span>{intensity}/100</span>}</span></div>
+              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, entry.subjectId)}</span><span className={styles.rowMeta}><span className={styles.moodDot} style={{ background: MOOD_COLOR[mood] ?? 'var(--text-muted)' }} aria-hidden="true" /><Tag color="processing" variant="filled">{MOOD_LABEL[mood] ?? mood}</Tag>{intensity !== undefined && <span className={styles.intensity}><span className={styles.bar}><span className={styles.barFill} style={{ width: `${intensity}%` }} /></span>{intensity}/100</span>}</span></div>
               <div className={styles.rowBody}>{str(entry.data.narration) || '暂无叙述'}</div>
               <div className={styles.rowTime}>最近变化 {formatTime(str(entry.data.updatedAt) || entry.updatedAt)}</div>
             </div>
@@ -143,7 +153,7 @@ export function PersonaPanel({ runId, agents, states, changes }: { runId: string
             const status = BELIEF_STATUS[str(entry.data.status)] ?? { label: str(entry.data.status) || '未知', color: 'default' }
             const source = sourceBadge(str(entry.data.source))
             return <div className={styles.row} key={`${entry.namespace}-${entry.subjectId}`}>
-              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, entry.subjectId)} · <span>{str(entry.data.factRef)}</span></span><span className={styles.rowMeta}><Tag color={status.color} variant="filled">{status.label}</Tag>{num(entry.data.confidence) !== undefined && <Tag variant="filled">置信 {num(entry.data.confidence)}</Tag>}<Tag color={source.subjective ? 'warning' : 'success'} variant="filled">{source.label}</Tag></span></div>
+              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, entry.subjectId)} · <span>{str(entry.data.factRef)}</span></span><span className={styles.rowMeta}><Tag color={status.color} variant="filled">{status.label}</Tag>{num(entry.data.confidence) !== undefined && <span className={styles.intensity}><span className={styles.bar}><span className={styles.barFill} style={{ width: `${num(entry.data.confidence)}%` }} /></span>置信 {num(entry.data.confidence)}</span>}<Tag color={source.subjective ? 'warning' : 'success'} variant="filled">{source.label}</Tag></span></div>
               {str(entry.data.statement) && <div className={styles.rowBody}>{str(entry.data.statement)}</div>}
               <div className={styles.rowTime}>最近事件 {formatTime(str(entry.data.lastEventAt) || entry.updatedAt)}</div>
             </div>
@@ -159,15 +169,15 @@ export function PersonaPanel({ runId, agents, states, changes }: { runId: string
         </div>
         <div className={styles.block}>
           <h4 className={styles.blockTitle}><UsersIcon size={15} />动态关系</h4>
-          {relationDynamics.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="关系态度尚未发生变化" /> : <div className={styles.quietList}>{relationDynamics.map((entry) => {
+          {relationDynamics.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="关系态度尚未发生变化" /> : <><p className={styles.personaHelp} style={{ marginBottom: 8 }}>关系是单向的：A 对 B 的态度不一定等于 B 对 A。</p><div className={styles.quietList}>{relationDynamics.map((entry) => {
             const [fromId, toId] = entry.subjectId.split(':')
             const score = num(entry.data.score)
             return <div className={styles.row} key={`${entry.namespace}-${entry.subjectId}`}>
-              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, fromId)} 对 {agentName(agents, toId)}</span><span className={styles.rowMeta}><Tag color={score !== undefined && score < -20 ? 'error' : score !== undefined && score > 20 ? 'success' : 'default'} variant="filled">{STANCE_LABEL[str(entry.data.stance)] ?? str(entry.data.stance) ?? '中立'}</Tag>{score !== undefined && <Tag variant="filled">{score}</Tag>}</span></div>
+              <div className={styles.rowTop}><span className={styles.rowName}>{agentName(agents, fromId)} → {agentName(agents, toId)}</span><span className={styles.rowMeta}><Tag color={score !== undefined && score < -20 ? 'error' : score !== undefined && score > 20 ? 'success' : 'default'} variant="filled">{STANCE_LABEL[str(entry.data.stance)] ?? str(entry.data.stance) ?? '中立'}{score !== undefined ? `（${score}）` : ''}</Tag></span></div>
               <div className={styles.rowBody}>{str(entry.data.narration) || '暂无叙述'}</div>
               <div className={styles.rowTime}>最近变化 {formatTime(entry.updatedAt)}</div>
             </div>
-          })}</div>}
+          })}</div></>}
         </div>
       </div>
       <div className={styles.block} style={{ marginTop: 16 }}>

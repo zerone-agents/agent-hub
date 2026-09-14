@@ -130,8 +130,8 @@ describe('RunCenterPage', () => {
 
   it('explains an Agent judgment context in product language', () => {
     renderPage()
-    fireEvent.click(screen.getAllByRole('button', { name: /查看判断背景/ })[0])
-    expect(screen.getByText('研究分析师 的判断背景')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /查看判断依据/ })[0])
+    expect(screen.getByText('研究分析师 的判断依据')).toBeInTheDocument()
     expect(screen.getByText(/2 个判断依据/)).toBeInTheDocument()
     expect(screen.getByText(/人格和上下文不会赋予额外权限/)).toBeInTheDocument()
     expect(screen.getByText('职责')).toBeInTheDocument()
@@ -139,6 +139,7 @@ describe('RunCenterPage', () => {
 
   it('guides a product manager through a real multi-hop acceptance test without JSON', () => {
     renderPage()
+    fireEvent.click(screen.getByText('协作细节（高级）'))
     expect(screen.getByRole('heading', { name: 'Agent 协作链' })).toBeInTheDocument()
     expect(screen.getByText('1. 配置传递方向')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /从 研究分析师 发起测试/ })).toBeInTheDocument()
@@ -208,6 +209,7 @@ describe('RunCenterPage', () => {
   it('explains and saves a strict task route separately from long-lived connections', () => {
     detailStatus = 'draft'
     renderPage()
+    fireEvent.click(screen.getByText('协作细节（高级）'))
     expect(screen.getByRole('heading', { name: '任务路径' })).toBeInTheDocument()
     expect(screen.getByText(/连接表示 Agent 长期可以联系谁/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '添加一步' }))
