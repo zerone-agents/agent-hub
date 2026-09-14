@@ -16,13 +16,15 @@ import LoginLinkModal from './LoginLinkModal'
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
   { value: 'maintainer', label: 'maintainer' },
-  { value: 'admin', label: 'admin' }
+  { value: 'admin', label: 'admin' },
+  { value: 'guest', label: 'guest（体验用户）' }
 ]
 
 function roleColor(role: string): string {
   switch (role) {
     case 'admin': return 'red'
     case 'maintainer': return 'blue'
+    case 'guest': return 'gold'
     default: return 'default'
   }
 }
