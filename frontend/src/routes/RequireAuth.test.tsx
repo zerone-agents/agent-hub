@@ -74,6 +74,14 @@ describe('RequireAuth', () => {
     )
   })
 
+  it('无 token 的 redirect 参数编码 pathname+search+hash', () => {
+    state.token = null
+    renderGuarded('/dashboard#frag')
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/login?redirect=%2Fdashboard%23frag'
+    )
+  })
+
   it('guest × allowGuest 渲染 children', () => {
     state.user = { id: '2', name: 'guest', email: 'g@zerone.run', role: 'guest' }
     state.mode = 'builtin'

@@ -109,6 +109,11 @@ func buildCallbackRedirect(redirectPath, accessToken, refreshToken string) strin
 		u = &url.URL{Path: "/static/"}
 	}
 	q := u.Query()
+	// redirect 自带的认证参数必须先剥离：token 会被下方 Set 覆盖，但
+	// refreshToken 仅在服务端签发时写回——不 Del 会让 crafted 链接的伪造
+	// refreshToken 存活到落地 URL（会话固定边缘，final review Important）。
+	q.Del("token")
+	q.Del("refreshToken")
 	q.Set("token", accessToken)
 	if refreshToken != "" {
 		q.Set("refreshToken", refreshToken)

@@ -31,11 +31,11 @@ export default function RequireAuth({
 
   if (BYPASS_AUTH) return <>{children}</>
   if (!token) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />
   }
   if (isLoading || modeLoading) return <LoadingState />
   if (isError || !user) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />
   }
   if (isGuestUser(user, authMode?.mode)) {
     if (allowGuest) return <>{children}</>

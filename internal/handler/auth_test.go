@@ -55,6 +55,7 @@ func TestBuildCallbackRedirect(t *testing.T) {
 		{"带 query", "/agents/chat?x=1", "/static/agents/chat?token=t1&x=1"},
 		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?token=t1&x=1#f"},
 		{"仅 hash", "/agents/chat#f", "/static/agents/chat?token=t1#f"},
+		{"剥离 redirect 自带的认证参数", "/agents/chat?refreshToken=evil&token=evil", "/static/agents/chat?token=t1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
