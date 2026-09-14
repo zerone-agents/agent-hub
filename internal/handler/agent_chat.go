@@ -25,6 +25,7 @@ type AgentChatHandler struct {
 	svc            *services.AgentChatService
 	runTrace       runTraceService
 	promptComposer promptDeliveryService
+	usage          *services.UsageService // H7.5 advisory usage hook; nil = off
 }
 
 type runTraceService interface {
@@ -49,6 +50,23 @@ func NewAgentChatHandler(svc *services.AgentChatService, runTrace ...runTraceSer
 // legacy chat constructor used by integrations that do not support Runs.
 func (h *AgentChatHandler) SetPromptComposer(service promptDeliveryService) {
 	h.promptComposer = service
+}
+
+// SetUsageService 注入 H7.5 用量采集（advisory：Record 永不阻塞、永不
+// panic，聊天路径不因埋点失败而受影响）。
+func (h *AgentChatHandler) SetUsageService(u *services.UsageService) { h.usage = u }
+
+// recordModelCall 是聊天路径的 model_call 埋点（nil-safe + Record 自身
+// recover，调用处零心智负担）。
+func (h *AgentChatHandler) recordModelCall(tenantID, runID string, latency time.Duration, runErr string) {
+	if h.usage == nil {
+		return
+	}
+	latencyMs := latency.Milliseconds()
+	h.usage.Record(services.UsageRecordInput{
+		Kind: "model_call", TenantID: tenantID, RunID: runID,
+		LatencyMs: &latencyMs, Error: runErr,
+	})
 }
 
 func (h *AgentChatHandler) ListSessions(c *gin.Context) {
@@ -315,6 +333,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 
 	// 6. Open runtime stream
 	ctx := c.Request.Context()
+	runStart := time.Now()
 	// runtime 注册名为裸 Agent ID（issue #114）；scoped deployment key 仅是
 	// deployer 资源标识，不参与 runtime 寻址。
 	// 带附件的 run 携带 X-Expected-Container-Id（runtime v2.7.0 原子代次校验
@@ -371,6 +390,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
+		h.recordModelCall(tenantID, req.RunID, time.Since(runStart), "runtime_connect_failed")
 		respondError(c, http.StatusBadGateway, "Runtime 连接失败，请稍后重试")
 		return
 	}
@@ -496,6 +516,14 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		aigcLabel := extractAigcLabel(aggregateStr)
 		_, _ = h.svc.SaveAssistantMessage(tenantID, userID, sessionID, contentJSON, aigcLabel)
 	}
+	// H7.5 埋点：model_call（错误取自流内 result error / 流中断）。
+	usageErr := extractRuntimeError(aggregateStr)
+	if usageErr == "" {
+		if scanErr := scanner.Err(); scanErr != nil {
+			usageErr = "runtime_stream_interrupted"
+		}
+	}
+	h.recordModelCall(tenantID, req.RunID, time.Since(runStart), usageErr)
 }
 
 func (h *AgentChatHandler) validateRunParticipant(tenantID, runID, agentName string) (*rundomain.RunAgent, error) {

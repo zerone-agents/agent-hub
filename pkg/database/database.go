@@ -18,6 +18,7 @@ import (
 	"control-panel/internal/domain/collaboration"
 	"control-panel/internal/domain/decision"
 	"control-panel/internal/domain/extension"
+	"control-panel/internal/domain/extensionslot"
 	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
@@ -26,6 +27,8 @@ import (
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/systemsetting"
+	"control-panel/internal/domain/template"
+	"control-panel/internal/domain/usage"
 	"control-panel/internal/domain/workflow"
 
 	"github.com/glebarez/sqlite"
@@ -206,6 +209,16 @@ func AutoMigrate(backfillTenant string) error {
 		&extension.Extension{},
 		&extension.Version{},
 		&extension.Install{},
+		&extension.Grant{},
+		&extension.AccessAudit{},
+		&extensionslot.Override{},
+		&template.TemplateDefinition{},
+		&template.TemplateVersion{},
+		&template.TemplateInstall{},
+		&usage.UsageRecord{},
+		&usage.UsageBudget{},
+		&usage.UsageAlert{},
+		&usage.UsageAlertEvent{},
 		&workflow.Definition{},
 		&workflow.Version{},
 		&workflow.Step{},

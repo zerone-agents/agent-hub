@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -64,6 +65,7 @@ type Manifest struct {
 	Relations        []ManifestDeclaration `json:"relations,omitempty"`
 	PromptInjections []ManifestDeclaration `json:"promptInjections,omitempty"`
 	Migrations       []ManifestMigration   `json:"migrations,omitempty"`
+	APIRoutes        []ManifestAPIRoute    `json:"apiRoutes,omitempty"` // H7.2 授权 API 代理
 }
 
 // ManifestMigration 声明一次状态 Schema 数据变换（JSON Patch 风格），
@@ -99,9 +101,86 @@ type ManifestPermission struct {
 	Actions    []string `json:"actions"`
 }
 
-// ManifestUI 声明 UI 贡献插槽（H7.0 仅校验白名单，H7.2 消费）。
+// ManifestUI 声明 UI 贡献插槽（H7.0 校验白名单；H7.2 起支持富声明）。
+//
+// Slots 的每个元素兼容两种形态：
+//   - 字符串（H7.0 形态）：仅声明占用某个插槽；
+//   - 对象（H7.2 形态）：声明式组件挂载 {slot, component, title, order,
+//     visible, data, dataSource}。两种形态可在同一 manifest 混用。
 type ManifestUI struct {
-	Slots []string `json:"slots,omitempty"`
+	Slots []ManifestUISlot `json:"slots,omitempty"`
+}
+
+// UIComponentTypes 是声明式渲染协议允许的组件类型枚举（H7.2 安全边界：
+// 扩展不执行任意代码，前端只实现这四种静态组件）。
+var UIComponentTypes = []string{"stat-card", "link-list", "key-value", "markdown"}
+
+// ManifestUISlot 是一条插槽挂载声明。
+type ManifestUISlot struct {
+	Slot     string                 `json:"slot"`           // 插槽名，必须在 UISlots 白名单内
+	Component string                `json:"component"`      // 组件类型，必须在 UIComponentTypes 内
+	Title    string                 `json:"title,omitempty"`
+	Order    int                    `json:"order,omitempty"`  // 同插槽内排序，小的在前
+	Visible  *bool                  `json:"visible,omitempty"` // 默认 true；false 即默认隐藏
+	Data     map[string]any         `json:"data,omitempty"`    // 组件静态数据
+	// DataSource 声明动态数据：只允许 GET 扩展自己的 admin 授权 API 端点。
+	DataSource *ManifestUIDataSource `json:"dataSource,omitempty"`
+}
+
+// ManifestUIDataSource 声明组件的数据来源。
+type ManifestUIDataSource struct {
+	Path string `json:"path"` // 必须是 manifest apiRoutes 中声明过的路径
+}
+
+// UnmarshalJSON 兼容字符串形态（H7.0）与对象形态（H7.2）。
+func (s *ManifestUISlot) UnmarshalJSON(raw []byte) error {
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var slot string
+		if err := json.Unmarshal(raw, &slot); err != nil {
+			return err
+		}
+		*s = ManifestUISlot{Slot: slot}
+		return nil
+	}
+	type alias ManifestUISlot
+	var a alias
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return err
+	}
+	*s = ManifestUISlot(a)
+	return nil
+}
+
+// MarshalJSON 保持序列化兼容（字符串形态输出字符串）。
+func (s ManifestUISlot) MarshalJSON() ([]byte, error) {
+	if s.Component == "" && s.Title == "" && s.Data == nil && s.DataSource == nil && s.Order == 0 && s.Visible == nil {
+		return json.Marshal(s.Slot)
+	}
+	type alias ManifestUISlot
+	return json.Marshal(alias(s))
+}
+
+// SlotNames 提取纯插槽名列表（H7.0 摘要展示兼容）。
+func (ui *ManifestUI) SlotNames() []string {
+	if ui == nil {
+		return nil
+	}
+	names := make([]string, 0, len(ui.Slots))
+	for _, s := range ui.Slots {
+		names = append(names, s.Slot)
+	}
+	return names
+}
+
+// ManifestAPIRoute 声明扩展的一条授权 API 端点（H7.2 代理目标）。
+// method 仅允许 GET；path 必须以 /api/v1/extensions/{扩展名}/ 开头；
+// upstream 仅允许 http(s) 且在声明时完成连通性校验（接线时由主 Agent
+// 在注册流程中调用 ValidateAPIRouteUpstream）。
+type ManifestAPIRoute struct {
+	Method   string `json:"method"`
+	Path     string `json:"path"`
+	Upstream string `json:"upstream"`
 }
 
 // ManifestDeclaration 是声明类贡献条目的通用结构（stateSchemas 等五类）。
@@ -183,13 +262,49 @@ func ValidateExtensionManifest(raw []byte) (*Manifest, []string) {
 	if m.UI != nil {
 		seen := map[string]bool{}
 		for i, slot := range m.UI.Slots {
-			if !containsString(UISlots, slot) {
-				add("ui.slots[%d] %q 不是合法插槽（允许：%s）", i, slot, strings.Join(UISlots, "/"))
+			if !containsString(UISlots, slot.Slot) {
+				add("ui.slots[%d].slot %q 不是合法插槽（允许：%s）", i, slot.Slot, strings.Join(UISlots, "/"))
 			}
-			if seen[slot] {
-				add("ui.slots 存在重复插槽 %q", slot)
+			if slot.Slot != "" && seen[slot.Slot+"\x00"+slot.Component+"\x00"+slot.Title] {
+				if slot.Component == "" {
+					add("ui.slots 存在重复插槽 %q", slot.Slot)
+				} else {
+					add("ui.slots 存在重复挂载声明（slot=%q component=%q title=%q）", slot.Slot, slot.Component, slot.Title)
+				}
 			}
-			seen[slot] = true
+			seen[slot.Slot+"\x00"+slot.Component+"\x00"+slot.Title] = true
+			if slot.Component == "" {
+				continue // 纯字符串形态：只声明占用插槽
+			}
+			// ---- H7.2 富声明校验 ----
+			if !containsString(UIComponentTypes, slot.Component) {
+				add("ui.slots[%d].component %q 不是合法组件类型（允许：%s）", i, slot.Component, strings.Join(UIComponentTypes, "/"))
+			}
+			if strings.TrimSpace(slot.Title) == "" || len(slot.Title) > 160 {
+				add("ui.slots[%d].title 必填且不超过 160 字符", i)
+			}
+			if slot.Data != nil && slot.DataSource != nil {
+				add("ui.slots[%d] data 与 dataSource 只能二选一", i)
+			}
+			if slot.DataSource != nil {
+				dsPath := strings.TrimSpace(slot.DataSource.Path)
+				if !m.apiRouteDeclared(dsPath) {
+					add("ui.slots[%d].dataSource.path %q 必须在 manifest apiRoutes 中声明", i, dsPath)
+				}
+			}
+		}
+	}
+
+	for i, route := range m.APIRoutes {
+		if strings.ToUpper(strings.TrimSpace(route.Method)) != "GET" {
+			add("apiRoutes[%d].method %q 不合法：扩展授权 API 仅允许 GET", i, route.Method)
+		}
+		if !strings.HasPrefix(route.Path, "/api/v1/extensions/"+m.Name+"/") {
+			add("apiRoutes[%d].path %q 必须以 /api/v1/extensions/%s/ 开头", i, route.Path, m.Name)
+		}
+		up, err := url.ParseRequestURI(strings.TrimSpace(route.Upstream))
+		if err != nil || (up.Scheme != "http" && up.Scheme != "https") || up.Host == "" {
+			add("apiRoutes[%d].upstream %q 必须是合法的 http(s) URL", i, route.Upstream)
 		}
 	}
 
@@ -308,6 +423,16 @@ func validateMigrations(add func(string, ...any), migrations []ManifestMigration
 func containsString(list []string, v string) bool {
 	for _, item := range list {
 		if item == v {
+			return true
+		}
+	}
+	return false
+}
+
+// apiRouteDeclared 报告 path 是否已在本 manifest 的 apiRoutes 中声明（GET）。
+func (m *Manifest) apiRouteDeclared(path string) bool {
+	for _, r := range m.APIRoutes {
+		if r.Path == path && strings.ToUpper(strings.TrimSpace(r.Method)) == "GET" {
 			return true
 		}
 	}

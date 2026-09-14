@@ -14,6 +14,7 @@ import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate } from 'react-router'
 import { useDashboardStats } from '@/queries/useDashboardStats'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
 import type {
@@ -856,6 +857,7 @@ export default function DashboardPage() {
           </section>
         </div>
       </div>
+      <ExtensionSlotRenderer slot="dashboard.card" />
     </div>
   )
 }

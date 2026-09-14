@@ -8,6 +8,7 @@ import { useAgents } from '@/queries/useAgents'
 import { groupApi, type ConversationSession, type GroupMemberRole, type SubscriptionMode } from '@/api/groups'
 import { useChannelMessages, useChannelSessions, useChannelSubscriptions, useGroup, useGroupAction, useGroupAudit, useGroupChannels, useGroupMembers, useGroups } from '@/queries/useGroups'
 import { tokens as t } from '@/styles/tokens'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`animation: pageIn .3s ease; @keyframes pageIn { from { opacity: 0; transform: translateY(5px) } }`,
@@ -138,6 +139,7 @@ export default function GroupWorkspacePage() {
         {dialog === 'session' && <><Form.Item label="议题" name="agenda" rules={[{required:true,message:'请输入本次讨论的议题'}]}><Input placeholder="例如：是否暂停资产出售计划" /></Form.Item><Form.Item label="主持人（可选）" name="hostAgentId"><Select allowClear options={memberOptions}/></Form.Item><Form.Item label="参会者" name="participantAgentIds" extra="不选择时，将使用频道当前接收者并保存为参会快照。"><Select mode="multiple" allowClear options={memberOptions}/></Form.Item></>}
       </Form>
     </Modal>
+    <ExtensionSlotRenderer slot="group.detail.tab" />
     <Modal title="结束会话" open={Boolean(summarySession)} onCancel={() => setSummarySession(undefined)} okText="结束并保存" cancelText="取消" okButtonProps={{className:primaryClass.root}} onOk={() => void summaryForm.validateFields().then(({summary}:{summary:string}) => completeSession.mutate({id:summarySession?.id as string,summary}, {onSuccess:()=>{ summaryForm.resetFields(); setSummarySession(undefined) }}))}><p className={styles.muted}>请留下本次讨论的结论，方便其他 Agent 和管理员复盘。</p><Form form={summaryForm}><Form.Item name="summary" rules={[{required:true,message:'请输入会话总结'}]}><Input.TextArea rows={5} placeholder="本次讨论达成了什么结论？下一步是什么？" /></Form.Item></Form></Modal>
   </div>
 }

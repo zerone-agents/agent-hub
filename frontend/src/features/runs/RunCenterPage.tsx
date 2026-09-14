@@ -28,6 +28,7 @@ import { useAgents } from '@/queries/useAgents'
 import { useAddRunAgent, useComposeRunPrompt, useCreateRun, useEnabledCapabilityPackages, usePutRunRoutePlan, useRun, useRunActivities, useRunAgentMessages, useRunEvents, useRunRoutePlan, useRuns, useRunStateChanges, useRunToolResults, useTransitionRun } from '@/queries/useRuns'
 import { formatTime } from '@/utils/time'
 import { tokens as t } from '@/styles/tokens'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 
 const STATUS: Record<RunStatus, { label: string; tone: string; Icon: typeof PlayCircleIcon }> = {
   draft: { label: '待开始', tone: 'var(--text-muted)', Icon: ClockCounterClockwiseIcon },
@@ -449,6 +450,7 @@ function RunDetailPanel({ id }: { id: string }) {
         </div>
         <div className={styles.future}>H3 在原有运行档案上增加了可控多跳协作：关系决定能不能传，预算决定什么时候停，每一跳都可以复盘。</div>
       </div> }]} />
+      <ExtensionSlotRenderer slot="run.detail.tab" context={{ runId: id }} />
     </div>
     <Modal title={`${promptAgentName || 'Agent'} 的判断依据`} open={promptSnapshot !== null} onCancel={() => setPromptSnapshot(null)} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
   </article>

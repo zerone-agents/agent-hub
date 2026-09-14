@@ -91,6 +91,24 @@ export const router = createBrowserRouter(
             import('@/features/extensions/ExtensionDetailPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'templates',
+          lazy: () =>
+            import('@/features/templates/TemplateListPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'templates/:id',
+          lazy: () =>
+            import('@/features/templates/TemplateDetailPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'usage',
+          lazy: () => import('@/features/usage/UsageOverviewPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'usage/budgets',
+          lazy: () => import('@/features/usage/UsageBudgetsPage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'tools',
           lazy: () => import('@/features/tools/ToolListPage').then((m) => ({ Component: m.default }))
         },

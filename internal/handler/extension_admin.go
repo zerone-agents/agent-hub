@@ -6,6 +6,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -40,24 +42,81 @@ func respondLifecycleError(c *gin.Context, err error) {
 	respondError(c, http.StatusInternalServerError, err.Error())
 }
 
-// Register 注册扩展 + 版本：body 为严格模式 manifest JSON。
+// Register 注册扩展 + 版本：请求体支持两种形态——
+//
+//  1. 裸 manifest JSON（兼容既有调用）；
+//  2. 签名信封：{"manifest": <manifest JSON 或字符串>, "signature": "base64",
+//     "public_key": "base64", "source": "...", "changelog": "..."}（H7.6，
+//     signature/public_key 成对提供时验签通过才注册，指纹记入 signed_by）。
+//
+// manifest 严格校验，中文错误；重复内容哈希幂等返回既有版本。
 func (h *ExtensionAdminHandler) Register(c *gin.Context) {
 	raw, err := io.ReadAll(c.Request.Body)
 	if err != nil || len(strings.TrimSpace(string(raw))) == 0 {
 		respondError(c, http.StatusBadRequest, "请求体必须是扩展 manifest JSON")
 		return
 	}
+	input, err := parseRegisterEnvelope(raw)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Source == "" {
+		input.Source = c.Query("source")
+	}
+	if input.Changelog == "" {
+		input.Changelog = c.Query("changelog")
+	}
 	result, err := h.service.Register(tenant.GetTenantID(c), services.RegisterExtensionInput{
-		Manifest:  raw,
-		Source:    c.Query("source"),
-		Changelog: c.Query("changelog"),
+		Manifest:  input.Manifest,
+		Source:    input.Source,
+		Changelog: input.Changelog,
 		CreatedBy: actorID(c),
+		Signature: input.Signature,
+		PublicKey: input.PublicKey,
 	})
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	respondCreated(c, result)
+}
+
+// registerEnvelope 是 POST /extensions 的签名信封形态。
+type registerEnvelope struct {
+	Manifest  json.RawMessage `json:"manifest"`
+	Signature string          `json:"signature"`
+	PublicKey string          `json:"public_key"`
+	Source    string          `json:"source"`
+	Changelog string          `json:"changelog"`
+}
+
+// parseRegisterEnvelope 判定请求体是裸 manifest 还是签名信封：
+// 能解析出非空 "manifest" 字段即按信封处理，否则整体视为裸 manifest。
+// 签名与公钥必须成对出现，否则拒绝。
+func parseRegisterEnvelope(raw []byte) (registerEnvelope, error) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		// 非法 JSON 交给注册服务校验，保持「扩展 manifest 校验失败」的错误形态
+		return registerEnvelope{Manifest: raw}, nil
+	}
+	if m, ok := probe["manifest"]; ok && len(strings.TrimSpace(string(m))) > 0 && string(m) != "null" {
+		var env registerEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return registerEnvelope{}, fmt.Errorf("签名信封解析失败：%v", err)
+		}
+		if len(env.Manifest) == 0 {
+			return registerEnvelope{}, fmt.Errorf("信封缺少 manifest 字段")
+		}
+		if (env.Signature == "") != (env.PublicKey == "") {
+			return registerEnvelope{}, fmt.Errorf("signature 与 public_key 必须同时提供或同时省略")
+		}
+		return env, nil
+	}
+	if _, ok := probe["signature"]; ok {
+		return registerEnvelope{}, fmt.Errorf("缺少 manifest 字段：签名信封应包含 manifest、signature、public_key")
+	}
+	return registerEnvelope{Manifest: raw}, nil
 }
 
 // List 扩展列表：tenant/status/source 过滤 + 分页。

@@ -10,6 +10,7 @@ import { useNavigate, useParams } from 'react-router'
 import { parseApiError } from '@/api/client'
 import { useExtensionDetail, useExtensionVersion } from '@/queries/useExtensionRegistry'
 import ExtensionLifecyclePanel from './ExtensionLifecyclePanel'
+import ExtensionGrantsPanel from './ExtensionGrantsPanel'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -73,6 +74,8 @@ export default function ExtensionDetailPage() {
       {data && (
         <>
           <ExtensionLifecyclePanel id={id} data={data} />
+          {/* H7.4 权限与隔离：授权列表 / 撤销 / 调用审计 */}
+          <ExtensionGrantsPanel extensionId={id} />
           <Descriptions column={2} style={{ marginBottom: 24 }}>
             <Descriptions.Item label="显示名">{data.displayName || '—'}</Descriptions.Item>
             <Descriptions.Item label="来源">{data.source}</Descriptions.Item>

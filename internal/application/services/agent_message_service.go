@@ -18,6 +18,7 @@ import (
 	"control-panel/internal/domain/collaboration"
 	eventdomain "control-panel/internal/domain/event"
 	rundomain "control-panel/internal/domain/run"
+	"control-panel/internal/domain/usage"
 	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/google/uuid"
@@ -56,7 +57,12 @@ type AgentMessageService struct {
 	// H6 persona hooks (WS6): nil packs leave Core behavior unchanged.
 	personaBelief *BeliefService
 	personaRelDyn *RelationDynamicsService
+	// H7.5 usage hook: nil leaves behavior unchanged; Record never blocks.
+	usage *UsageService
 }
+
+// SetUsageService 注入 H7.5 用量采集（advisory）。
+func (s *AgentMessageService) SetUsageService(u *UsageService) { s.usage = u }
 
 // SetPersonaHooks injects the H6 belief and relation-dynamics packs into the
 // message dispatch path. Both hooks are advisory: failures are logged and
@@ -1045,6 +1051,28 @@ func (s *AgentMessageService) execute(ctx context.Context, tenantID string, targ
 		}
 	}
 	_ = s.saveStatusWithEvent(tenantID, message)
+	// H7.5 埋点：message + model_call（tokens 为估算值；advisory）。
+	if s.usage != nil {
+		latencyMs := completed.Sub(started).Milliseconds()
+		tokens := message.TokensUsed
+		var msgErr string
+		if err != nil {
+			msgErr = "agent_run_failed"
+		}
+		var targetID uint64
+		if message.TargetAgentID != 0 {
+			targetID = message.TargetAgentID
+		}
+		s.usage.Record(UsageRecordInput{
+			Kind: usage.KindMessage, TenantID: tenantID, AgentID: &targetID,
+			RunID: message.ConversationID, LatencyMs: &latencyMs, Error: msgErr,
+		})
+		s.usage.Record(UsageRecordInput{
+			Kind: usage.KindModelCall, TenantID: tenantID, AgentID: &targetID,
+			RunID: message.ConversationID,
+			TokensIn: &tokens, LatencyMs: &latencyMs, Error: msgErr,
+		})
+	}
 }
 
 func containsRelationAction(actions []string, action string) bool {

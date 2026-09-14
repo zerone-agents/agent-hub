@@ -18,6 +18,7 @@ import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
 import type { ApiEnvelope } from '@/api/client'
 import { tokens as t } from '@/styles/tokens'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
 import { buildToolOptions } from './toolOptions'
@@ -894,6 +895,7 @@ export default function AgentListPage() {
           </>
         )}
       </Modal>
+      <ExtensionSlotRenderer slot="agent.detail.tab" />
     </div>
   )
 }

@@ -61,10 +61,31 @@ func IsLifecycleError(err error) (int, bool) {
 	return 0, false
 }
 
-type ExtensionLifecycleService struct{ db *gorm.DB }
+type ExtensionLifecycleService struct {
+	db *gorm.DB
+	// authz 为 H7.4 授权同步钩子：非 nil 时安装/升级/回滚后同步
+	// manifest 权限声明为授权行，启停联动 is_active，卸载保留审计
+	// （purge 才删除）。nil 时行为与 H7.1 完全一致（测试基座可不接）。
+	authz *ExtensionAuthzService
+}
 
 func NewExtensionLifecycleService(db *gorm.DB) *ExtensionLifecycleService {
 	return &ExtensionLifecycleService{db: db}
+}
+
+// SetAuthzService 接入 H7.4 授权服务（由 cmd/server/main.go 接线时调用）。
+func (s *ExtensionLifecycleService) SetAuthzService(authz *ExtensionAuthzService) {
+	s.authz = authz
+}
+
+// syncGrants 把指定版本 manifest 的权限声明同步为授权行（best-effort
+// 返回错误，由调用方决定失败策略；生命周期主体已提交，授权同步失败
+// 不影响安装结果，但会在返回值中暴露）。
+func (s *ExtensionLifecycleService) syncGrants(tenantID string, ext *extension.Extension, ver *extension.Version, grantedBy string) error {
+	if s.authz == nil {
+		return nil
+	}
+	return s.authz.SyncGrantsFromManifest(tenantID, ext.Name, ver.Manifest, ver.Version, grantedBy)
 }
 
 // InstallResult 是安装/升级/回滚的统一结果。
@@ -290,6 +311,9 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 	if err != nil {
 		return nil, err
 	}
+	if err := s.syncGrants(tenantID, ext, ver, existing.InstalledBy); err != nil {
+		return nil, err
+	}
 	return &InstallResult{Install: existing, Idempotent: !created}, nil
 }
 
@@ -317,6 +341,12 @@ func (s *ExtensionLifecycleService) setInstallStatus(tenantID string, extID uint
 	inst.Status = status
 	if err := s.db.Save(inst).Error; err != nil {
 		return nil, err
+	}
+	// H7.4：启停联动授权生效状态（停用保留行与审计）
+	if s.authz != nil {
+		if err := s.authz.SetGrantsActive(tenantID, ext.Name, status == extension.InstallStatusEnabled); err != nil {
+			return nil, err
+		}
 	}
 	return inst, nil
 }
@@ -401,6 +431,9 @@ func (s *ExtensionLifecycleService) Upgrade(tenantID string, extID uint64, targe
 		return tx.Save(inst).Error
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := s.syncGrants(tenantID, ext, target, inst.InstalledBy); err != nil {
 		return nil, err
 	}
 	return &InstallResult{Install: inst}, nil
@@ -491,6 +524,9 @@ func (s *ExtensionLifecycleService) Rollback(tenantID string, extID uint64, targ
 		return tx.Save(inst).Error
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := s.syncGrants(tenantID, ext, target, inst.InstalledBy); err != nil {
 		return nil, err
 	}
 	return &InstallResult{Install: inst}, nil
@@ -625,6 +661,18 @@ func (s *ExtensionLifecycleService) Uninstall(tenantID string, extID uint64, for
 	})
 	if err != nil {
 		return nil, err
+	}
+	// H7.4：卸载（非 purge）保留授权行与审计，仅置失效；purge 才物理删除。
+	if s.authz != nil {
+		if purge {
+			if err := s.authz.DeleteGrantsForExtension(tenantID, ext.Name); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := s.authz.SetGrantsActive(tenantID, ext.Name, false); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return result, nil
 }

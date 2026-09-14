@@ -11,6 +11,7 @@ import {
   useClearAigcConfig
 } from '@/queries/useAigcConfig'
 import { tokens as t } from '@/styles/tokens'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 
 const USCC_PATTERN = /^[0-9A-HJ-NPQRTUWXY]{18}$/
 
@@ -175,6 +176,7 @@ export default function AigcConfigPage() {
           </div>
         </div>
       )}
+      <ExtensionSlotRenderer slot="settings.section" />
     </div>
   )
 }

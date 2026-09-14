@@ -26,6 +26,11 @@ type RegisterExtensionInput struct {
 	Source    string          // seed/registry/upload，默认 upload
 	Changelog string
 	CreatedBy string
+	// Signature/PublicKey 可选：两者同时提供时走 ed25519 验签（H7.6），
+	// 验签通过才把版本注册进 registry 并把公钥指纹记入 signed_by；
+	// 任一缺失且另一非空则拒绝。均为 base64（或 hex）编码。
+	Signature string
+	PublicKey string
 }
 
 // RegisterResult 携带注册结果；AlreadyExisted 为 true 表示命中幂等
@@ -46,6 +51,15 @@ func (s *ExtensionService) Register(tenantID string, in RegisterExtensionInput) 
 	manifest, errs := extensionmanifest.ValidateExtensionManifest(in.Manifest)
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("扩展 manifest 校验失败：%s", strings.Join(errs, "；"))
+	}
+	// H7.6 验签：signature/public_key 成对出现才校验；验签失败直接拒绝。
+	var signedBy string
+	if strings.TrimSpace(in.Signature) != "" || strings.TrimSpace(in.PublicKey) != "" {
+		fingerprint, err := extension.VerifyExtension(string(in.Manifest), in.Signature, in.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+		signedBy = fingerprint
 	}
 	hash, err := extensionmanifest.CanonicalManifestHash(in.Manifest)
 	if err != nil {
@@ -107,6 +121,13 @@ func (s *ExtensionService) Register(tenantID string, in RegisterExtensionInput) 
 				return fmt.Errorf("扩展 %s 的版本 %s 已存在且内容不一致（内容寻址冲突）", manifest.Name, manifest.Version)
 			}
 			result.AlreadyExisted = true
+			// 幂等路径补记签名指纹（历史未签名版本升级签名时生效）
+			if signedBy != "" && ver.SignedBy == "" {
+				if err := tx.Model(&extension.Version{}).Where("id=?", ver.ID).Update("signed_by", signedBy).Error; err != nil {
+					return err
+				}
+				ver.SignedBy = signedBy
+			}
 			result.Version = &ver
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			ver = extension.Version{
@@ -116,6 +137,7 @@ func (s *ExtensionService) Register(tenantID string, in RegisterExtensionInput) 
 				ContentHash: hash,
 				Changelog:   strings.TrimSpace(in.Changelog),
 				CreatedBy:   strings.TrimSpace(in.CreatedBy),
+				SignedBy:    signedBy,
 			}
 			if err := tx.Create(&ver).Error; err != nil {
 				return err
@@ -339,7 +361,7 @@ func summarizeManifest(raw string) VersionManifestSummary {
 		PromptInjectionCount: len(manifest.PromptInjections),
 	}
 	if manifest.UI != nil {
-		summary.Slots = manifest.UI.Slots
+		summary.Slots = manifest.UI.SlotNames()
 	}
 	return summary
 }

@@ -1,0 +1,107 @@
+apiVersion: agenthub.extension/v1alpha1
+name: io.zerone.emotion
+version: 1.0.0
+displayName: 情绪状态（H6 参考实现）
+description: >-
+  把 H6 动态人物「心情包」形式化为 H7 扩展声明：emotion-state v1 状态 Schema、
+  心情事件词表与确定性叙述规则、emotion_status 工具（audience=agent:self）。
+  纯声明、不含 Go 代码，演示"如何用扩展机制实现 H6"（见 docs/h6-dynamic-persona.md）。
+publisher: zerone
+icon: ""
+dependencies: []
+permissions:
+  - permission: state
+    scope: io.zerone.emotion/*
+    actions: [read, write]
+  - permission: event
+    scope: io.zerone.emotion/*
+    actions: [consume, emit]
+  - permission: ui
+    scope: io.zerone.emotion/*
+    actions: [read]
+ui:
+  slots: [agent.detail.tab]
+stateSchemas:
+  - name: emotion-state
+    description: >-
+      心情状态 v1（scope=run，subject=agent）。存放于 run_states，
+      状态转移是 (上一状态, 事件, 事件时间) 的纯函数；衰减在读取时按
+      记录的事件时间惰性结算。字段与规则见 internal/domain/emotion/schema.go。
+    payload:
+      type: object
+      additionalProperties: false
+      properties:
+        mood:
+          type: string
+          enum: [calm, wary, tense, angry, elated, grieving]
+        intensity:
+          type: integer
+          minimum: -100
+          maximum: 100
+        baseline:
+          type: string
+          enum: [calm, wary, tense, angry, elated, grieving]
+        updatedAt:
+          type: string
+          format: date-time
+        decayPerDay:
+          type: integer
+          minimum: 1
+        narration:
+          type: string
+      required: [mood, intensity, baseline, updatedAt, decayPerDay, narration]
+# 心情事件词表（包私有，v1 锁定）：每个词表项带 delta 与严重度系数
+# （1 / 1.5 / 2），单事件上限 +30 / -40，分数钳制 0–100。
+events:
+  - name: betrayed
+    description: 背叛，delta=-35，严重度系数 2
+    payload: { delta: -35, severityScale: 2 }
+  - name: trusted
+    description: 信任，delta=+15，严重度系数 1
+    payload: { delta: 15, severityScale: 1 }
+  - name: threatened
+    description: 受威胁，delta=-20，严重度系数 1.5
+    payload: { delta: -20, severityScale: 1.5 }
+  - name: comforted
+    description: 受安抚，delta=+10，严重度系数 1
+    payload: { delta: 10, severityScale: 1 }
+  - name: task_failed
+    description: 任务失败，delta=-10，严重度系数 1
+    payload: { delta: -10, severityScale: 1 }
+  - name: task_completed
+    description: 任务完成，delta=+10，严重度系数 1
+    payload: { delta: 10, severityScale: 1 }
+  - name: insulted
+    description: 受侮辱，delta=-20，严重度系数 1.5
+    payload: { delta: -20, severityScale: 1.5 }
+  - name: praised
+    description: 受表扬，delta=+15，严重度系数 1
+    payload: { delta: 15, severityScale: 1 }
+tools:
+  - name: emotion_status
+    description: >-
+      返回调用 Agent 自己的当前心情与叙述（audience=agent:self）。
+      Agent 不能给自己写心情——模型不直接结算，保持"模型与结算分离"。
+    payload:
+      method: MCP
+      auth:
+        subject: caller_agent
+      effects: read
+# 强度分档 → 确定性叙述句式（0–20 平静 / 21–40 波动 / 41–60 显著 /
+# 61–80 强烈 / 81–100 主导行为），由确定性规则生成，模型不可自由发挥。
+promptInjections:
+  - name: current-emotion
+    description: >-
+      dynamic_state 阶段注入当前心情叙述；audience=agent:self（敏感字段只进
+      持有者本人的提示词），onMissing=omit，maxTokens=120。
+    payload:
+      stage: dynamic_state
+      audience: agent:self
+      onMissing: omit
+      maxTokens: 120
+      template: "你的心情：{{narration}}（{{mood}}，强度 {{intensity}}）"
+      data:
+        - stateRef: emotion-state
+          required: false
+relations: []
+migrations: []

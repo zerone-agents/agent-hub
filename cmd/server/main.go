@@ -313,10 +313,28 @@ func main() {
 	extensionService := services.NewExtensionService(database.GetDB())
 	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
 	extensionAdminHandler := handler.NewExtensionAdminHandlerWithLifecycle(extensionService, extensionLifecycleService)
+	// H7.2 UI 插槽 / H7.4 权限 / H7.5 用量
+	extensionSlotService := services.NewExtensionSlotService(database.GetDB())
+	extensionSlotHandler := handler.NewExtensionSlotHandler(extensionSlotService)
+	extensionAuthzService := services.NewExtensionAuthzService(database.GetDB())
+	extensionLifecycleService.SetAuthzService(extensionAuthzService)
+	extensionAuthzHandler := handler.NewExtensionAuthzHandler(extensionAuthzService)
+	usageService := services.NewUsageService(database.GetDB())
+	usageAdminHandler := handler.NewUsageAdminHandler(usageService)
+	// H7.5 用量埋点注入（nil 安全）
+	agentChatHandler.SetUsageService(usageService)
+	// H7.3 模板库
+	templateService := services.NewTemplateService(database.GetDB())
+	templateService.SetRunService(runService)
+	if err := templateService.EnsureSeedTemplates(); err != nil {
+		log.Printf("ensure seed templates failed: %v", err)
+	}
+	templateAdminHandler := handler.NewTemplateAdminHandler(templateService)
 	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
 	workflowService := services.NewWorkflowService(database.GetDB())
 	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
 	workflowService.SetPersonaHooks(emotionService, relationDynamicsService)
+	workflowService.SetUsageService(usageService)
 	workflowHandler := handler.NewWorkflowHandler(workflowService)
 	decisionService := services.NewDecisionService(database.GetDB())
 	decisionService.SetWorkflowService(workflowService)
@@ -383,6 +401,7 @@ func main() {
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
 	organizationMessageService.SetPersonaHooks(beliefService, relationDynamicsService)
+	organizationMessageService.SetUsageService(usageService)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
 	organizationMcpHandler.SetWorkflowService(workflowService)
 	organizationMcpHandler.SetDecisionService(decisionService)
@@ -486,6 +505,11 @@ func main() {
 	// builtin 用户必有角色，guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
+	// H7.2 扩展数据代理：登录用户可访问已启用扩展声明的 GET 端点（限流 60/min）
+	extProxyGroup := v1group.Group("/extensions/:name",
+		middleware.ExtensionRateLimitByParam(middleware.ExtensionRateLimitConfig{RequestsPerMinute: 60},
+			func(c *gin.Context) string { return c.Param("name") }))
+	extProxyGroup.GET("/*wildcard", extensionSlotHandler.Proxy)
 	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
@@ -540,6 +564,41 @@ func main() {
 	adminWrite.DELETE("/extensions/:id/uninstall", extensionAdminHandler.Uninstall)
 	adminRead.GET("/extensions/:id/impact", extensionAdminHandler.Impact)
 	adminRead.GET("/extensions/:id/versions/:version", extensionAdminHandler.GetVersion)
+	// H7.2 UI 插槽
+	adminRead.GET("/extensions/slots", extensionSlotHandler.ListSlots)
+	adminWrite.POST("/extensions/:id/slots/:slot/visible", extensionSlotHandler.SetSlotVisible)
+	// H7.4 扩展权限与审计
+	adminRead.GET("/extensions/:id/grants", extensionAuthzHandler.ListGrants)
+	adminRead.GET("/extensions/:id/audit", extensionAuthzHandler.ListAudit)
+	adminWrite.POST("/extensions/:id/grants/:grantId/approve", extensionAuthzHandler.ApproveGrant)
+	adminWrite.DELETE("/extensions/:id/grants/:grantId", extensionAuthzHandler.RevokeGrant)
+	// H7.3 模板库
+	adminWrite.POST("/templates", templateAdminHandler.Register)
+	adminRead.GET("/templates", templateAdminHandler.List)
+	adminRead.GET("/templates/:id", templateAdminHandler.Get)
+	adminRead.GET("/templates/:id/versions/:version", templateAdminHandler.GetVersion)
+	adminWrite.POST("/templates/:id/preview", templateAdminHandler.Preview)
+	adminWrite.POST("/templates/:id/install", templateAdminHandler.Install)
+	adminWrite.POST("/templates/:id/export", templateAdminHandler.Export)
+	// H7.5 用量与运维
+	adminRead.GET("/usage/summary", usageAdminHandler.Summary)
+	adminRead.GET("/usage/by-extension", usageAdminHandler.ByExtension)
+	adminRead.GET("/usage/by-agent", usageAdminHandler.ByAgent)
+	adminRead.GET("/usage/by-run", usageAdminHandler.ByRun)
+	adminRead.GET("/usage/by-model", usageAdminHandler.ByModel)
+	adminRead.GET("/usage/errors", usageAdminHandler.Errors)
+	adminRead.GET("/usage/storage", usageAdminHandler.Storage)
+	adminRead.GET("/usage/health", usageAdminHandler.Health)
+	adminRead.GET("/usage/export", usageAdminHandler.Export)
+	adminRead.GET("/usage/budgets", usageAdminHandler.ListBudgets)
+	adminWrite.PUT("/usage/budgets", usageAdminHandler.UpsertBudget)
+	adminWrite.DELETE("/usage/budgets/:id", usageAdminHandler.DeleteBudget)
+	adminRead.GET("/usage/alerts", usageAdminHandler.ListAlerts)
+	adminWrite.PUT("/usage/alerts", usageAdminHandler.UpsertAlert)
+	adminWrite.DELETE("/usage/alerts/:id", usageAdminHandler.DeleteAlert)
+	adminRead.GET("/usage/alerts/events", usageAdminHandler.AlertEvents)
+	adminRead.GET("/usage/pricing", usageAdminHandler.GetPricing)
+	adminWrite.PUT("/usage/pricing", usageAdminHandler.PutPricing)
 	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
 	adminRead.GET("/capability-packages/:id/resources", capabilityRegistryHandler.Resources)
 

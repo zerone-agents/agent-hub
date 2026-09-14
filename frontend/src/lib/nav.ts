@@ -15,7 +15,9 @@ import {
   PulseIcon,
   ShieldCheckIcon,
   UsersThreeIcon,
-  GitBranchIcon
+  GitBranchIcon,
+  SquaresFourIcon,
+  ChartPieIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -38,6 +40,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'governance', label: '流程与决策', path: '/governance', icon: GitBranchIcon },
   { id: 'collaboration-audit', label: '协作审计', path: '/collaboration-audit', icon: ShieldCheckIcon },
   { id: 'extensions', label: '扩展能力', path: '/extensions', icon: PackageIcon },
+  { id: 'templates', label: '模板库', path: '/templates', icon: SquaresFourIcon },
+  { id: 'usage', label: '用量运维', path: '/usage', icon: ChartPieIcon },
   { id: 'tools', label: '工具管理', path: '/tools', icon: WrenchIcon },
   { id: 'mcps', label: 'MCP配置', path: '/mcps', icon: PlugsConnectedIcon },
   { id: 'skills', label: '技能管理', path: '/skills', icon: SparkleIcon },

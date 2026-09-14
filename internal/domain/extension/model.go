@@ -48,6 +48,9 @@ type Version struct {
 	Manifest    string    `gorm:"type:longtext;not null" json:"manifest"`
 	ContentHash string    `gorm:"type:char(64);not null;index" json:"contentHash"`
 	Changelog   string    `gorm:"type:text;not null" json:"changelog"`
+	// SignedBy 是验签通过后的发布者公钥指纹（sha256 前 16 字节 hex）；
+	// 未签名的历史版本为空串（H7.6）。
+	SignedBy string `gorm:"type:char(32);not null;default:''" json:"signedBy"`
 	CreatedBy   string    `gorm:"type:varchar(160);not null;default:''" json:"createdBy"`
 	CreatedAt   time.Time `json:"createdAt"`
 }

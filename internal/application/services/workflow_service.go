@@ -15,6 +15,7 @@ import (
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/decision"
 	"control-panel/internal/domain/run"
+	"control-panel/internal/domain/usage"
 	"control-panel/internal/domain/workflow"
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -46,10 +47,16 @@ type WorkflowService struct {
 	// H6 persona hooks (WS6): nil packs leave workflow behavior unchanged.
 	personaEmotion *EmotionService
 	personaRelDyn  *RelationDynamicsService
+	// H7.5 usage hook: nil leaves behavior unchanged; Record never blocks.
+	usage *UsageService
 }
 
 func NewWorkflowService(db *gorm.DB) *WorkflowService             { return &WorkflowService{db: db} }
 func (s *WorkflowService) SetDispatcher(d WorkflowStepDispatcher) { s.dispatcher = d }
+
+// SetUsageService 注入 H7.5 用量采集。advisory：Record 永不阻塞、永不
+// panic，步骤完成路径不因埋点失败而受影响。
+func (s *WorkflowService) SetUsageService(u *UsageService) { s.usage = u }
 
 // SetPersonaHooks injects the H6 emotion and relation-dynamics packs for the
 // step-completion influence hook. Emitted events are deterministic and
@@ -649,6 +656,16 @@ func (s *WorkflowService) finishStep(tenantID, id string, output map[string]any,
 	})
 	if err != nil {
 		return nil, err
+	}
+	// H7.5 埋点：workflow_step（advisory，Record 内部 recover + 异步落库）。
+	if s.usage != nil {
+		stepErr := ""
+		if !success {
+			stepErr = errorText
+		}
+		s.usage.Record(UsageRecordInput{
+			Kind: usage.KindWorkflowStep, TenantID: tenantID, RunID: executionID, Error: stepErr,
+		})
 	}
 	s.emitStepPersonaEvents(tenantID, executionID, id, actor, success, idem)
 	ex, err := s.Execution(tenantID, executionID)

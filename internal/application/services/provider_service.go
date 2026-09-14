@@ -627,7 +627,11 @@ func (s *ProviderService) Update(tenantID string, id uint64, input *UpdateProvid
 	p.Base().SetDefaultModels(provider.EnsureSelectionIDs(toCatalogModels(rows)))
 
 	if input.Attributes != nil {
-		if err := s.repo.SetAttributes(tenantID, p.ID(), input.Attributes); err != nil {
+		attrs, err := s.preserveMaskedSecretAttributes(tenantID, p.ID(), input.Attributes, p.Fields())
+		if err != nil {
+			return nil, fmt.Errorf("read provider fields failed: %w", err)
+		}
+		if err := s.repo.SetAttributes(tenantID, p.ID(), attrs); err != nil {
 			return nil, fmt.Errorf("update provider fields failed: %w", err)
 		}
 	}
@@ -774,6 +778,14 @@ func (s *ProviderService) ToDTO(tenantID string, p provider.Provider) (*Provider
 	if attributes == nil {
 		attributes = map[string]provider.AttrValue{}
 	}
+	// H7.4 敏感字段过滤：属性键若命中 secret 形态（preset Secret 标记或
+	// 键名模式），DTO 一律返回掩码值，绝不返回明文（即便历史/异常数据
+	// 把密钥写进了 attributes）。
+	for key, attr := range attributes {
+		if isSensitiveProviderAttrKey(key, fields) && attr.Value != "" {
+			attributes[key] = provider.AttrValue{Type: attr.Type, Value: maskSecret(attr.Value)}
+		}
+	}
 
 	// Return masked API key (never expose plaintext)
 	var maskedKey string
@@ -887,6 +899,44 @@ func maskSecret(s string) string {
 		return "****"
 	}
 	return string(runes[:4]) + "****" + string(runes[len(runes)-4:])
+}
+
+// isSensitiveProviderAttrKey 判断属性键是否属于敏感形态：provider preset
+// 字段标记 Secret:true，或键名包含 secret/token/api_key/apikey/password。
+func isSensitiveProviderAttrKey(key string, fields []provider.PresetField) bool {
+	for _, f := range fields {
+		if f.Key == key && f.Secret {
+			return true
+		}
+	}
+	k := strings.ToLower(key)
+	return strings.Contains(k, "secret") ||
+		strings.Contains(k, "token") ||
+		strings.Contains(k, "api_key") ||
+		strings.Contains(k, "apikey") ||
+		strings.Contains(k, "password")
+}
+
+// preserveMaskedSecretAttributes 处理更新回传：敏感属性若以掩码形式回传
+// （前端原样带回 ToDTO 的掩码值），保留库存明文，避免把掩码写回数据库。
+func (s *ProviderService) preserveMaskedSecretAttributes(tenantID string, providerID uint64, attrs map[string]provider.AttrValue, fields []provider.PresetField) (map[string]provider.AttrValue, error) {
+	if len(attrs) == 0 {
+		return attrs, nil
+	}
+	stored, err := s.repo.GetAttributes(tenantID, providerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]provider.AttrValue, len(attrs))
+	for key, attr := range attrs {
+		if isSensitiveProviderAttrKey(key, fields) && attr.Value != "" {
+			if old, ok := stored[key]; ok && attr.Value == maskSecret(old.Value) {
+				attr.Value = old.Value
+			}
+		}
+		out[key] = attr
+	}
+	return out, nil
 }
 
 // GetRawAPIKey returns the decrypted API key for a provider (internal use only).
