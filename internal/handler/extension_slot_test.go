@@ -15,6 +15,7 @@ import (
 	"control-panel/internal/domain/extension"
 	"control-panel/internal/domain/extensionslot"
 	"control-panel/internal/domain/tenant"
+	"control-panel/internal/extensionmanifest"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -78,7 +79,16 @@ func slotManifestWithAPI(name, upstream string) string {
 	}`, name, upstream+"/v1/metrics", upstream+"/v1/huge", upstream+"/v1/slow")
 }
 
+// allowLoopbackUpstreamForTest 临时关闭 upstream 私网地址阻断：
+// httptest.NewServer 绑定 127.0.0.1，生产阻断逻辑下无法作为测试上游。
+func allowLoopbackUpstreamForTest(t *testing.T) {
+	t.Helper()
+	extensionmanifest.UpstreamGuardDisabled = true
+	t.Cleanup(func() { extensionmanifest.UpstreamGuardDisabled = false })
+}
+
 func TestExtensionSlotHandlerListAndVisibleOverride(t *testing.T) {
+	allowLoopbackUpstreamForTest(t)
 	env := extensionSlotRouter(t)
 	extID := seedSlotExtension(t, env, slotManifestWithAPI("io.zerone.slotty", "http://127.0.0.1:1"))
 
@@ -146,6 +156,7 @@ func TestExtensionSlotHandlerListAndVisibleOverride(t *testing.T) {
 }
 
 func TestExtensionSlotProxy(t *testing.T) {
+	allowLoopbackUpstreamForTest(t)
 	var gotExt, gotTenant string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotExt = r.Header.Get("X-Extension-Name")
@@ -197,4 +208,17 @@ func TestExtensionSlotProxy(t *testing.T) {
 	w = httptest.NewRecorder()
 	env.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/extensions/io.zerone.ghost/x", nil))
 	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestExtensionSlotProxyRejectsDisallowedUpstream 回归 P1-3 代理层：
+// 域名 upstream 通过注册校验后，若解析到环回/内网地址（DNS rebinding），
+// 代理转发前必须拒绝。localhost 稳定解析到 127.0.0.1/::1，无需外网。
+func TestExtensionSlotProxyRejectsDisallowedUpstream(t *testing.T) {
+	env := extensionSlotRouter(t)
+	seedSlotExtension(t, env, slotManifestWithAPI("io.zerone.ssrf", "http://localhost:1"))
+
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/extensions/io.zerone.ssrf/metrics", nil))
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Contains(t, w.Body.String(), "拒绝")
 }

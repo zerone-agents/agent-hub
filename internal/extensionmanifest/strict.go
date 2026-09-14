@@ -305,6 +305,9 @@ func ValidateExtensionManifest(raw []byte) (*Manifest, []string) {
 		up, err := url.ParseRequestURI(strings.TrimSpace(route.Upstream))
 		if err != nil || (up.Scheme != "http" && up.Scheme != "https") || up.Host == "" {
 			add("apiRoutes[%d].upstream %q 必须是合法的 http(s) URL", i, route.Upstream)
+		} else if err := ValidateUpstreamIPLiteral(up.Hostname()); err != nil {
+			// IP 字面量当场拒绝内网/环回/链路本地；域名在代理转发前重新解析校验
+			add("apiRoutes[%d].upstream %q 被拒绝：%v", i, route.Upstream, err)
 		}
 	}
 

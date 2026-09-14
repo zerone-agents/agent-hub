@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,7 +25,11 @@ import (
 )
 
 // migrationLogEntry 是 migration_log 中单条 op 的执行记录。
+// SchemaID 绑定该 op 实际作用的状态 Schema 行：正向迁移逐 schema 记录，
+// 回滚时按 schema 各恢复各的旧值，而不是把 inverse 套到 namespace 下
+// 全部 Schema（多 Schema 扩展会导致 schema_json/content_hash 损坏）。
 type migrationLogEntry struct {
+	SchemaID uint64 `json:"schemaId,omitempty"`
 	Path     string `json:"path"`
 	Op       string `json:"op"`
 	OldValue any    `json:"oldValue,omitempty"`
@@ -118,34 +123,66 @@ func applyMigration(tx *gorm.DB, tenantID, namespace string, mig extensionmanife
 
 // applyMigrationOps 把一组 op 应用到 tenant+namespace 下的全部状态 Schema。
 // 逐行、逐 op 执行；任何一行执行失败即返回中文错误（外层事务回滚）。
+// 每条记录都带 SchemaID，供回滚时按 schema 精确恢复。
 func applyMigrationOps(tx *gorm.DB, tenantID, namespace string, ops []extensionmanifest.ManifestMigrationOp) ([]migrationLogEntry, error) {
 	var schemas []rundomain.StateSchema
 	if err := tx.Where("tenant_id=? AND namespace=?", tenantID, namespace).Find(&schemas).Error; err != nil {
 		return nil, err
 	}
 	var entries []migrationLogEntry
+	hit := make([]int, len(ops))
 	for i := range schemas {
-		changed := false
-		for _, op := range ops {
-			oldValue, err := applySchemaOp(schemas[i].Schema, op)
-			if err != nil {
-				return nil, fmt.Errorf("状态 Schema %s@%s 应用 %s %s 失败：%v",
-					schemas[i].Name, schemas[i].Version, op.Op, op.Path, err)
-			}
-			changed = true
-			entries = append(entries, migrationLogEntry{Path: op.Path, Op: op.Op, OldValue: oldValue, NewValue: op.Value})
+		applied, err := applyOpsToSchema(tx, &schemas[i], ops)
+		if err != nil {
+			return nil, fmt.Errorf("状态 Schema %s@%s 应用 op 失败：%v",
+				schemas[i].Name, schemas[i].Version, err)
 		}
-		if changed {
-			raw, err := json.Marshal(schemas[i].Schema)
-			if err != nil {
-				return nil, err
+		for _, e := range applied {
+			e.SchemaID = schemas[i].ID
+			entries = append(entries, e)
+			for k := range ops {
+				if ops[k].Op == e.Op && ops[k].Path == e.Path {
+					hit[k]++
+				}
 			}
-			sum := sha256.Sum256(raw)
-			// 直接以 JSON 文本更新（与 StateSchema 的 serializer:json 落库格式一致）
-			if err := tx.Model(&rundomain.StateSchema{}).Where("id=?", schemas[i].ID).
-				Updates(map[string]any{"schema_json": string(raw), "content_hash": hex.EncodeToString(sum[:])}).Error; err != nil {
-				return nil, err
-			}
+		}
+	}
+	for k := range ops {
+		if hit[k] == 0 {
+			return nil, fmt.Errorf("迁移 op %s %s 未命中 namespace %s 下任何状态 Schema，请检查路径是否拼写正确",
+				ops[k].Op, ops[k].Path, namespace)
+		}
+	}
+	return entries, nil
+}
+
+// applyOpsToSchema 把一组 op 应用到单个状态 Schema 行（schema_json 原地
+// 修改并更新 content_hash），返回逐 op 的旧值记录（不含 SchemaID）。
+func applyOpsToSchema(tx *gorm.DB, schema *rundomain.StateSchema, ops []extensionmanifest.ManifestMigrationOp) ([]migrationLogEntry, error) {
+	var entries []migrationLogEntry
+	changed := false
+	for _, op := range ops {
+		oldValue, err := applySchemaOp(schema.Schema, op)
+		if errors.Is(err, errOpNotApplicable) {
+			// 多 Schema 扩展：该 op 的目标路径不在本 schema 中，跳过
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		changed = true
+		entries = append(entries, migrationLogEntry{Path: op.Path, Op: op.Op, OldValue: oldValue, NewValue: op.Value})
+	}
+	if changed {
+		raw, err := json.Marshal(schema.Schema)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(raw)
+		// 直接以 JSON 文本更新（与 StateSchema 的 serializer:json 落库格式一致）
+		if err := tx.Model(&rundomain.StateSchema{}).Where("id=?", schema.ID).
+			Updates(map[string]any{"schema_json": string(raw), "content_hash": hex.EncodeToString(sum[:])}).Error; err != nil {
+			return nil, err
 		}
 	}
 	return entries, nil
@@ -154,6 +191,9 @@ func applyMigrationOps(tx *gorm.DB, tenantID, namespace string, ops []extensionm
 // applyInverseFromLog 按 migration_log 推导 inverse：筛选 from/to 版本区间
 // 内的 upgrade 批次，逆序、逐 op 以 OldValue 执行 replace 恢复 schema_json；
 // remove 的逆操作是 add 回旧值，add 的逆操作是 remove。
+// inverse 严格按日志条目的 SchemaID 绑定到具体 schema 行逐行恢复，保证
+// 多 Schema 扩展回滚后每个 schema_json 与 content_hash 一致；历史日志
+// 条目缺 SchemaID 时退化为按 namespace 全量套用（旧行为，仅兼容存量数据）。
 func applyInverseFromLog(tx *gorm.DB, tenantID, namespace, migrationLog, targetVersion, currentVersion string) ([]migrationLogEntry, error) {
 	var records []migrationLogRecord
 	if err := json.Unmarshal([]byte(migrationLog), &records); err != nil {
@@ -175,25 +215,52 @@ func applyInverseFromLog(tx *gorm.DB, tenantID, namespace, migrationLog, targetV
 		}
 	}
 	var entries []migrationLogEntry
+	// schemaID → 该行的 inverse op 序列（批次逆序 × op 逆序，顺序即恢复顺序）
+	perSchema := map[uint64][]extensionmanifest.ManifestMigrationOp{}
+	var order []uint64
 	for i := len(selected) - 1; i >= 0; i-- {
-		var inverse []extensionmanifest.ManifestMigrationOp
 		rec := selected[i]
 		for j := len(rec.Ops) - 1; j >= 0; j-- {
 			e := rec.Ops[j]
+			var inv extensionmanifest.ManifestMigrationOp
 			switch e.Op {
 			case "replace":
-				inverse = append(inverse, extensionmanifest.ManifestMigrationOp{Op: "replace", Path: e.Path, Value: e.OldValue})
+				inv = extensionmanifest.ManifestMigrationOp{Op: "replace", Path: e.Path, Value: e.OldValue}
 			case "add":
-				inverse = append(inverse, extensionmanifest.ManifestMigrationOp{Op: "remove", Path: e.Path})
+				inv = extensionmanifest.ManifestMigrationOp{Op: "remove", Path: e.Path}
 			case "remove":
-				inverse = append(inverse, extensionmanifest.ManifestMigrationOp{Op: "add", Path: e.Path, Value: e.OldValue})
+				inv = extensionmanifest.ManifestMigrationOp{Op: "add", Path: e.Path, Value: e.OldValue}
+			default:
+				continue
 			}
+			if e.SchemaID == 0 {
+				// 存量日志缺 schema 绑定：维持旧的按 namespace 全量套用行为
+				applied, err := applyMigrationOps(tx, tenantID, namespace, []extensionmanifest.ManifestMigrationOp{inv})
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, applied...)
+				continue
+			}
+			if _, ok := perSchema[e.SchemaID]; !ok {
+				order = append(order, e.SchemaID)
+			}
+			perSchema[e.SchemaID] = append(perSchema[e.SchemaID], inv)
 		}
-		applied, err := applyMigrationOps(tx, tenantID, namespace, inverse)
+	}
+	for _, schemaID := range order {
+		var schema rundomain.StateSchema
+		if err := tx.Where("id=?", schemaID).First(&schema).Error; err != nil {
+			return nil, fmt.Errorf("回滚找不到迁移记录绑定的状态 Schema（id=%d）：%v", schemaID, err)
+		}
+		applied, err := applyOpsToSchema(tx, &schema, perSchema[schemaID])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("状态 Schema %s@%s 回滚失败：%v", schema.Name, schema.Version, err)
 		}
-		entries = append(entries, applied...)
+		for _, e := range applied {
+			e.SchemaID = schemaID
+			entries = append(entries, e)
+		}
 	}
 	return entries, nil
 }
@@ -208,9 +275,14 @@ func reverseOps(ops []extensionmanifest.ManifestMigrationOp) []extensionmanifest
 	return out
 }
 
+// errOpNotApplicable 表示该 op 的目标路径在本 schema 中不存在：
+// 多 Schema 扩展的迁移通常只作用于部分 schema，命不中即跳过（不记日志）。
+var errOpNotApplicable = errors.New("op 不适用于该 schema")
+
 // applySchemaOp 把单条 JSON Patch 子集 op 应用到 schema（原地修改）。
 // 返回 replace/remove 命中位置的旧值（add 返回 nil）。路径段不支持
-// 数组下标与 ~ / 转义——扩展 Schema 均为对象树。
+// 数组下标与 ~ / 转义——扩展 Schema 均为对象树。目标路径在本 schema
+// 不存在时返回 errOpNotApplicable，由调用方跳过该行。
 func applySchemaOp(schema map[string]any, op extensionmanifest.ManifestMigrationOp) (any, error) {
 	if op.Path == "" || op.Path[0] != '/' {
 		return nil, fmt.Errorf("路径 %q 必须是以 / 开头", op.Path)
@@ -223,7 +295,7 @@ func applySchemaOp(schema map[string]any, op extensionmanifest.ManifestMigration
 	for _, seg := range segments[:len(segments)-1] {
 		next, ok := parent[seg].(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("路径 %q 的中间段 %q 不存在或不是对象", op.Path, seg)
+			return nil, fmt.Errorf("%w：路径 %q 的中间段 %q 不存在或不是对象", errOpNotApplicable, op.Path, seg)
 		}
 		parent = next
 	}
@@ -232,7 +304,7 @@ func applySchemaOp(schema map[string]any, op extensionmanifest.ManifestMigration
 	case "replace":
 		old, ok := parent[last]
 		if !ok {
-			return nil, fmt.Errorf("路径 %q 不存在，无法 replace", op.Path)
+			return nil, fmt.Errorf("%w：路径 %q 不存在，无法 replace", errOpNotApplicable, op.Path)
 		}
 		parent[last] = op.Value
 		return old, nil
@@ -242,7 +314,7 @@ func applySchemaOp(schema map[string]any, op extensionmanifest.ManifestMigration
 	case "remove":
 		old, ok := parent[last]
 		if !ok {
-			return nil, fmt.Errorf("路径 %q 不存在，无法 remove", op.Path)
+			return nil, fmt.Errorf("%w：路径 %q 不存在，无法 remove", errOpNotApplicable, op.Path)
 		}
 		delete(parent, last)
 		return old, nil

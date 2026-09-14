@@ -424,8 +424,11 @@ func (s *ExtensionLifecycleService) Upgrade(tenantID string, extID uint64, targe
 			}
 			entries = append(entries, applied...)
 		}
+		// 先记录真实 from 版本再改写 inst.Version，否则迁移日志 From==To，
+		// 后续回滚按版本区间筛选时会越界、把不该逆序的迁移一并回滚。
+		oldVersion := inst.Version
 		inst.Version = targetVersion
-		if err := appendMigrationLog(inst, "upgrade", inst.Version, targetVersion, entries); err != nil {
+		if err := appendMigrationLog(inst, "upgrade", oldVersion, targetVersion, entries); err != nil {
 			return err
 		}
 		return tx.Save(inst).Error

@@ -394,7 +394,8 @@ func TestLifecycleUpgradeFailureRollsBack(t *testing.T) {
 	_, err := f.lifecycle.Install("tenant-a", res.Extension.ID, "1.0.0", "admin-1")
 	require.NoError(t, err)
 
-	// v2 的迁移路径不存在（from=1.0.0 to=2.0.0 但 op 指向不存在的字段）
+	// v2 的迁移路径不存在（from=1.0.0 to=2.0.0 但 op 指向不存在的字段），
+	// 迁移执行时必须因未命中任何状态 Schema 而失败
 	v2 := lifecycleManifest("io.zerone.life", "2.0.0", 0, `[
 	  {"from":"1.0.0","to":"2.0.0","ops":[{"op":"replace","path":"/properties/nonexistent/minimum","value":-100}]}
 	]`, "")

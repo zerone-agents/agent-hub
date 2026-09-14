@@ -19,6 +19,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/tenant"
+	"control-panel/internal/extensionmanifest"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,6 +97,12 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 		return
 	}
 	target := route.Upstream
+	// 转发前重新解析并校验 upstream 地址（防 DNS rebinding），命中
+	// 环回 / RFC1918 / 链路本地段一律拒绝
+	if err := extensionmanifest.ResolveAndValidateUpstream(target); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
 	if c.Request.URL.RawQuery != "" {
 		sep := "?"
 		if strings.Contains(target, "?") {
