@@ -15,7 +15,7 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 8px;
-    background: ${t.surface};
+    background: ${t.paper};
     transition: border-color 0.15s;
     &.dragover {
       border-top-color: ${t.ink};

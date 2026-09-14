@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/provider"
@@ -67,7 +68,7 @@ func respondAgentError(c *gin.Context, err error) {
 }
 
 func (h *AgentHandler) Manifest(c *gin.Context) {
-	resp, err := h.service.GetManifest(tenant.GetTenantID(c), c.Query("platform"))
+	resp, err := h.service.GetManifest(tenant.GetTenantID(c), c.Query("platform"), jwtutil.IsGuest(c))
 	if err != nil {
 		respondAgentError(c, err)
 		return
@@ -79,8 +80,18 @@ func (h *AgentHandler) Manifest(c *gin.Context) {
 	})
 }
 
+// List 返回公开 Agent 列表。view=chat（query 参数，guard 白名单按 URL.Path
+// 匹配故不涉及 guard）走聊天主页/切换器视图：无 platform 过滤，guest 只见
+// guest-enabled；缺省视图维持 desktop 语义，guest 同样叠加 guest 过滤。
 func (h *AgentHandler) List(c *gin.Context) {
-	resp, err := h.service.GetDesktopAgents(tenant.GetTenantID(c))
+	guest := jwtutil.IsGuest(c)
+	var resp *services.AgentsDTO
+	var err error
+	if c.Query("view") == "chat" {
+		resp, err = h.service.GetChatAgents(tenant.GetTenantID(c), guest)
+	} else {
+		resp, err = h.service.GetDesktopAgents(tenant.GetTenantID(c), guest)
+	}
 	if err != nil {
 		respondAgentError(c, err)
 		return
@@ -119,6 +130,22 @@ func (h *AgentHandler) ListAdmin(c *gin.Context) {
 func (h *AgentHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 
+	// guest 访问未开放 Agent 时与真不存在同形（spec 7 防枚举）：
+	// AgentGuestVisible 对 not-found 返回 (false, nil)，此处统一走
+	// ErrAgentNotFound sentinel → respondAgentError 渲染的字节与
+	// GetAgent 的真实 not-found 路径完全一致；infra 故障仍落入 500。
+	if jwtutil.IsGuest(c) {
+		visible, err := h.service.AgentGuestVisible(tenant.GetTenantID(c), name)
+		if err != nil {
+			respondAgentError(c, err)
+			return
+		}
+		if !visible {
+			respondAgentError(c, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name))
+			return
+		}
+	}
+
 	resp, err := h.service.GetAgent(tenant.GetTenantID(c), name)
 	if err != nil {
 		// 行为修正（原「所有错误一律 404」）：not-found 走 404，
@@ -146,6 +173,7 @@ type createAgentReq struct {
 	Config         map[string]interface{} `json:"config" binding:"required"`
 	DesktopEnabled *bool                  `json:"desktopEnabled"`
 	MobileEnabled  *bool                  `json:"mobileEnabled"`
+	GuestEnabled   *bool                  `json:"guestEnabled"`
 	IsDefault      *bool                  `json:"isDefault"`
 }
 
@@ -164,6 +192,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
 		MobileEnabled:  req.MobileEnabled,
+		GuestEnabled:   req.GuestEnabled,
 		IsDefault:      req.IsDefault,
 	})
 	if err != nil {
@@ -181,6 +210,7 @@ type updateAgentReq struct {
 	Config         *map[string]interface{} `json:"config"`
 	DesktopEnabled *bool                   `json:"desktopEnabled"`
 	MobileEnabled  *bool                   `json:"mobileEnabled"`
+	GuestEnabled   *bool                   `json:"guestEnabled"`
 	IsDefault      *bool                   `json:"isDefault"`
 	Source         string                  `json:"source"`
 }
@@ -201,6 +231,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		Config:         req.Config,
 		DesktopEnabled: req.DesktopEnabled,
 		MobileEnabled:  req.MobileEnabled,
+		GuestEnabled:   req.GuestEnabled,
 		IsDefault:      req.IsDefault,
 		Source:         req.Source,
 	})

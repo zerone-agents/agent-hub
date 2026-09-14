@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"sort"
 	"strings"
 	"testing"
 
@@ -203,6 +204,7 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			source VARCHAR(16) NOT NULL DEFAULT 'remote',
 			desktop_enabled INTEGER NOT NULL DEFAULT 0,
 			mobile_enabled INTEGER NOT NULL DEFAULT 0,
+			guest_enabled INTEGER NOT NULL DEFAULT 0,
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
@@ -425,5 +427,135 @@ func TestGetAgentKnowledgeDatasetsForRequest(t *testing.T) {
 		_, _, err := svc.GetAgentKnowledgeDatasetsForRequest("default", "no-such-agent", issueCap("no-such-agent", runtimeToken), runtimeToken)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "不存在")
+	})
+}
+
+// TestAgentGuestEnabledRoundTrip create/update 全链路落库 guest_enabled。
+// 复用 tool_service_tenant_test.go 的 setupToolTenantServiceTestDB（包内可见，
+// 已补齐 CreateAgent 末尾 GetAgent 链路所需的全部关联表）；服务构造与
+// TestAgentService_CreateAgent_DoesNotBindOtherTenantDefaultTools 同款。
+func TestAgentGuestEnabledRoundTrip(t *testing.T) {
+	setupToolTenantServiceTestDB(t)
+	svc := NewAgentService("test-encryption-key", "")
+
+	on := true
+	created, err := svc.CreateAgent("default", &CreateAgentInput{
+		Name: "guest-agent", Config: map[string]interface{}{"systemPrompt": "x"},
+		GuestEnabled: &on,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !created.GuestEnabled {
+		t.Fatal("created agent should be guest-enabled")
+	}
+
+	off := false
+	updated, err := svc.UpdateAgent("default", "guest-agent", &UpdateAgentInput{GuestEnabled: &off})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.GuestEnabled {
+		t.Fatal("updated agent should be guest-disabled")
+	}
+}
+
+// TestAgentVisibilityMatrix 组合矩阵：guestEnabled × desktop/mobile × 部署状态 × 角色 × 视图。
+// 场景铺设（sqlite，复用 setupToolTenantServiceTestDB，buildAgentsDTO 触碰的
+// 全部关联表齐备）：五个 agent——
+//
+//	A: guest=true,  desktop=true,  mobile=false, running
+//	B: guest=true,  desktop=false, mobile=false, running
+//	C: guest=false, desktop=true,  mobile=false, running
+//	D: guest=false, desktop=false, mobile=false, stopped
+//	E: guest=true,  desktop=false, mobile=true,  未部署   ← manifest mobile 锚点 + chat 视图部署过滤锚点
+func TestAgentVisibilityMatrix(t *testing.T) {
+	const tenant = "t-visibility"
+	db := setupToolTenantServiceTestDB(t)
+	seed := func(name string, guest, desktop, mobile bool, deployStatus string) {
+		t.Helper()
+		require.NoError(t, db.Create(&agent.AgentConfig{
+			Name:             name,
+			TenantID:         tenant,
+			GuestEnabled:     guest,
+			DesktopEnabled:   desktop,
+			MobileEnabled:    mobile,
+			DeploymentStatus: deployStatus,
+		}).Error)
+	}
+	seed("agent-a", true, true, false, "running")
+	seed("agent-b", true, false, false, "running")
+	seed("agent-c", false, true, false, "running")
+	seed("agent-d", false, false, false, "stopped")
+	seed("agent-e", true, false, true, "")
+
+	svc := NewAgentService("test-encryption-key", "")
+
+	listNames := func(t *testing.T, dto *AgentsDTO, err error) []string {
+		t.Helper()
+		require.NoError(t, err)
+		names := make([]string, 0, len(dto.Agents))
+		for _, a := range dto.Agents {
+			names = append(names, a.Name)
+		}
+		sort.Strings(names)
+		return names
+	}
+	manifestNames := func(t *testing.T, m *ManifestDTO, err error) []string {
+		t.Helper()
+		require.NoError(t, err)
+		names := make([]string, 0, len(m.Agents))
+		for _, a := range m.Agents {
+			names = append(names, a.Name)
+		}
+		sort.Strings(names)
+		return names
+	}
+
+	t.Run("GetChatAgents guest=true → running ∧ guest（E 未部署被滤掉）", func(t *testing.T) {
+		dto, err := svc.GetChatAgents(tenant, true)
+		assert.Equal(t, []string{"agent-a", "agent-b"}, listNames(t, dto, err))
+	})
+	t.Run("GetChatAgents guest=false → running（D stopped / E 未部署被滤掉）", func(t *testing.T) {
+		dto, err := svc.GetChatAgents(tenant, false)
+		assert.Equal(t, []string{"agent-a", "agent-b", "agent-c"}, listNames(t, dto, err))
+	})
+	t.Run("GetDesktopAgents guest=true → desktop ∧ guest", func(t *testing.T) {
+		dto, err := svc.GetDesktopAgents(tenant, true)
+		assert.Equal(t, []string{"agent-a"}, listNames(t, dto, err))
+	})
+	t.Run("GetDesktopAgents guest=false desktop 语义回归不变", func(t *testing.T) {
+		dto, err := svc.GetDesktopAgents(tenant, false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, listNames(t, dto, err))
+	})
+	t.Run("GetManifest desktop × guest 矩阵", func(t *testing.T) {
+		mGuest, err := svc.GetManifest(tenant, agent.PlatformDesktop, true)
+		assert.Equal(t, []string{"agent-a"}, manifestNames(t, mGuest, err))
+		mFormal, err := svc.GetManifest(tenant, agent.PlatformDesktop, false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, manifestNames(t, mFormal, err))
+	})
+	t.Run("GetManifest mobile × guest 矩阵（防误写成固定 desktop 过滤）", func(t *testing.T) {
+		mGuest, err := svc.GetManifest(tenant, agent.PlatformMobile, true)
+		assert.Equal(t, []string{"agent-e"}, manifestNames(t, mGuest, err))
+		mFormal, err := svc.GetManifest(tenant, agent.PlatformMobile, false)
+		assert.Equal(t, []string{"agent-e"}, manifestNames(t, mFormal, err))
+	})
+	t.Run("GetManifest 空 platform 缺省 desktop 回归", func(t *testing.T) {
+		m, err := svc.GetManifest(tenant, "", false)
+		assert.Equal(t, []string{"agent-a", "agent-c"}, manifestNames(t, m, err))
+	})
+	t.Run("AgentGuestVisible 三态", func(t *testing.T) {
+		visible, err := svc.AgentGuestVisible(tenant, "agent-b")
+		require.NoError(t, err)
+		assert.True(t, visible)
+
+		visible, err = svc.AgentGuestVisible(tenant, "agent-c")
+		require.NoError(t, err)
+		assert.False(t, visible)
+
+		// 不存在的 agent 报 (false, nil)：调用方渲染与真不存在同形的中性 404。
+		visible, err = svc.AgentGuestVisible(tenant, "missing-agent")
+		require.NoError(t, err)
+		assert.False(t, visible)
 	})
 }

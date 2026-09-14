@@ -2,10 +2,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import AgentChatPage from './AgentChatPage'
+
+// 页眉壳与本测试无关（PR review P1：真实页眉渲染是 CI 超时慢点，且其内部
+// 真实 auth hooks 会发注定失败的 jsdom XHR 产生 stderr 噪音）——薄壳透传 children。
+vi.mock('./ChatLayout', () => ({
+  default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
 
 vi.mock('react-router', async () => ({
   ...(await vi.importActual<object>('react-router')),
@@ -97,7 +103,7 @@ beforeEach(() => {
 // 全量并发跑 64 个测试文件时机器负载放大 3-5x，本用例（upload+type+SSE 三段
 // waitFor）在默认 5s 下两度确定性超时（单独跑仅 1.4s）；沿用同页
 // AgentChatPage.test.tsx 的 describe 级 15s 惯例。
-describe('AgentChatPage attachments flow', { timeout: 15000 }, () => {
+describe('AgentChatPage attachments flow', { timeout: 30000 }, () => {
   it('uploads then sends, optimistic message carries file parts', async () => {
     uploadFiles.mockResolvedValue([
       { id: 'r1', name: 'a.txt', mime: 'text/plain', size: 3, path: '.zerone-uploads/a.txt' },

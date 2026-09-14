@@ -127,6 +127,8 @@ describe('AgentListPage', () => {
 
     expect(screen.getByText('Agent 管理')).toBeInTheDocument()
     expect(screen.getByText('新建代理')).toBeInTheDocument()
+    // fixture 两 agent 无 group → 「默认分组」组（空串/空白 group 也归此，锁定 ?? 不回退空串的坑）
+    expect(screen.getByText('默认分组')).toBeInTheDocument()
     expect(screen.getByText('通用助手')).toBeInTheDocument()
     expect(screen.getByText('编程助手')).toBeInTheDocument()
     // Stats links
@@ -136,6 +138,29 @@ describe('AgentListPage', () => {
     expect(screen.getByText('GLM-5-Turbo')).toBeInTheDocument()
     // Model stat link — unselected state shows "未选模型"
     expect(screen.getByText('未选模型')).toBeInTheDocument()
+  })
+
+  it('开始对话：批量操作左侧、新页签打开聊天总览', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const user = userEvent.setup()
+    renderPage()
+
+    const chatBtn = screen.getByRole('button', { name: '开始对话' })
+    const bulkBtn = screen.getByRole('button', { name: '批量操作' })
+    // 「开始对话」在「批量操作」左侧（DOM 顺序在前）
+    expect(chatBtn.compareDocumentPosition(bulkBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await user.click(chatBtn)
+    expect(openSpy).toHaveBeenCalledWith('/static/agents/chat', '_blank', 'noopener,noreferrer')
+    openSpy.mockRestore()
+  })
+
+  it('member：开始对话可见（聊天不受写权限限制），批量操作不可见', () => {
+    setAuthRole('member')
+    renderPage()
+
+    expect(screen.getByRole('button', { name: '开始对话' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '批量操作' })).not.toBeInTheDocument()
   })
 
   it('shows model modal with test and confirm buttons', async () => {

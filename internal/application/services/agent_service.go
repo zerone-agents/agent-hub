@@ -55,6 +55,7 @@ type CreateAgentInput struct {
 	Config         map[string]interface{}
 	DesktopEnabled *bool
 	MobileEnabled  *bool
+	GuestEnabled   *bool
 	IsDefault      *bool
 }
 
@@ -63,6 +64,7 @@ type UpdateAgentInput struct {
 	Config         *map[string]interface{}
 	DesktopEnabled *bool
 	MobileEnabled  *bool
+	GuestEnabled   *bool
 	IsDefault      *bool
 	Source         string
 }
@@ -98,6 +100,7 @@ type AgentDTO struct {
 	Datasets       []string               `json:"datasets"`
 	DesktopEnabled bool                   `json:"desktopEnabled"`
 	MobileEnabled  bool                   `json:"mobileEnabled"`
+	GuestEnabled   bool                   `json:"guestEnabled"`
 	IsDefault      bool                   `json:"isDefault"`
 	Group          string                 `json:"group"`
 	CreatedAt      string                 `json:"createdAt"`
@@ -112,7 +115,8 @@ type AgentDTO struct {
 // GetManifest returns the agent manifest for the given client platform
 // (agent.PlatformDesktop / agent.PlatformMobile; empty defaults to desktop),
 // containing the agents enabled for that platform and their content hashes.
-func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, error) {
+// guest callers additionally see only guest-enabled agents (spec 4.3).
+func (s *AgentService) GetManifest(tenantID, platform string, guest bool) (*ManifestDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, platform)
 	if err != nil {
 		return nil, fmt.Errorf("list agents failed: %w", err)
@@ -121,6 +125,9 @@ func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, err
 	var maxUpdatedAt time.Time
 	agents := make([]ManifestAgentDTO, 0, len(configs))
 	for _, cfg := range configs {
+		if guest && !cfg.GuestEnabled {
+			continue
+		}
 		agents = append(agents, ManifestAgentDTO{
 			ID:          cfg.ID,
 			Name:        cfg.Name,
@@ -139,14 +146,49 @@ func (s *AgentService) GetManifest(tenantID, platform string) (*ManifestDTO, err
 	return &ManifestDTO{Agents: agents, UpdatedAt: updatedAt}, nil
 }
 
+// GetChatAgents returns agents for the chat home/switcher: only agents with
+// a live deployment (deployment_status='running'——线上完成部署才可聊);
+// guest callers additionally only see guest-enabled agents (spec 4.3 view=chat).
+func (s *AgentService) GetChatAgents(tenantID string, guest bool) (*AgentsDTO, error) {
+	configs, err := s.repo.ListChatAgents(tenantID, guest)
+	if err != nil {
+		return nil, fmt.Errorf("list agents failed: %w", err)
+	}
+	return s.buildAgentsDTO(tenantID, configs)
+}
+
 // GetDesktopAgents returns all desktop-enabled agents with their full details.
-func (s *AgentService) GetDesktopAgents(tenantID string) (*AgentsDTO, error) {
+// guest callers additionally see only guest-enabled agents (spec 4.3).
+func (s *AgentService) GetDesktopAgents(tenantID string, guest bool) (*AgentsDTO, error) {
 	configs, err := s.repo.ListForPlatform(tenantID, agent.PlatformDesktop)
 	if err != nil {
 		return nil, fmt.Errorf("list agents failed: %w", err)
 	}
+	if guest {
+		kept := make([]*agent.AgentConfig, 0, len(configs))
+		for _, cfg := range configs {
+			if cfg.GuestEnabled {
+				kept = append(kept, cfg)
+			}
+		}
+		configs = kept
+	}
 
 	return s.buildAgentsDTO(tenantID, configs)
+}
+
+// AgentGuestVisible reports whether the named agent is visible to guests.
+// Not-found agents report (false, nil) so callers render a neutral 404
+// identical to a missing agent (anti-enumeration, spec 7).
+func (s *AgentService) AgentGuestVisible(tenantID, name string) (bool, error) {
+	cfg, err := s.repo.GetByName(tenantID, name)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get agent %s failed: %w", name, err)
+	}
+	return cfg.GuestEnabled, nil
 }
 
 // GetAllAgentsAdmin returns all agents (including disabled) with their full details.
@@ -353,6 +395,7 @@ func (s *AgentService) buildAgentDTO(cfg *agent.AgentConfig, subs, tools, skills
 		Datasets:       datasets,
 		DesktopEnabled: cfg.DesktopEnabled,
 		MobileEnabled:  cfg.MobileEnabled,
+		GuestEnabled:   cfg.GuestEnabled,
 		IsDefault:      cfg.IsDefault,
 		Group:          cfg.Group,
 		CreatedAt:      cfg.CreatedAt.UTC().Format(time.RFC3339),
@@ -418,6 +461,10 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.Agen
 	if input.MobileEnabled != nil {
 		mobile = *input.MobileEnabled
 	}
+	guest := false
+	if input.GuestEnabled != nil {
+		guest = *input.GuestEnabled
+	}
 	isDefault := false
 	if input.IsDefault != nil {
 		isDefault = *input.IsDefault
@@ -428,6 +475,7 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.Agen
 		Source:         "remote",
 		DesktopEnabled: desktop,
 		MobileEnabled:  mobile,
+		GuestEnabled:   guest,
 		IsDefault:      isDefault,
 	}
 	if err := unpackConfigToModel(input.Config, cfg, s.encryptionKey); err != nil {
@@ -489,6 +537,9 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 	}
 	if input.MobileEnabled != nil {
 		cfg.MobileEnabled = *input.MobileEnabled
+	}
+	if input.GuestEnabled != nil {
+		cfg.GuestEnabled = *input.GuestEnabled
 	}
 	if input.IsDefault != nil {
 		if err := s.handleDefaultUpdate(tenantID, cfg.ID, *input.IsDefault); err != nil {

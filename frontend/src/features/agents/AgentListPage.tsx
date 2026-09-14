@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, DeploymentStatus } from '@/api/agents'
@@ -74,6 +74,9 @@ const useStyles = createStyles(({ css }) => ({
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
     gap: 12px; margin-bottom: 16px;
+  `,
+  toolbarActions: css`
+    display: flex; align-items: center; gap: 8px;
   `,
 }))
 
@@ -245,10 +248,11 @@ export default function AgentListPage() {
     })
   }, [agents, keywords])
 
-  // 按 group 分组，组内按 name 排序
+  // 按 group 分组，组内按 name 排序（group 为 nullish 或空串/空白串都归「默认分组」——
+  // DB 列默认空字符串，?? 不会回退空串，必须显式判空）
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
-      const group = agent.group ?? '默认分组'
+      const group = agent.group?.trim() ? agent.group : '默认分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc
@@ -603,28 +607,39 @@ export default function AgentListPage() {
           onSearch={setKeywords}
           realtime
         />
-        {selectionMode && canWrite ? (
-          <BulkActionBar
-            selectedCount={selectedNames.size}
-            pendingUpdateCount={pendingUpdateCount}
-            onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
-            onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
-            onClear={() => { setRawSelectedNames(new Set()); }}
-            onOperation={(op) => { void handleBulkOperation(op); }}
-            onExit={exitSelectionMode}
-            operationsDisabled={bulkTask.phase === 'running'}
-            prechecking={precheckingOp}
-          />
-        ) : (
-          canWrite && (
+        <div className={styles.toolbarActions}>
+          {/* 开始对话：新页签打开聊天总览（member 只读也可聊，不受 canWrite 限制） */}
+          {!selectionMode && (
             <Button
-              icon={<CheckSquareIcon size={14} />}
-              onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+              icon={<ChatCircleDotsIcon size={14} />}
+              onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
             >
-              批量操作
+              开始对话
             </Button>
-          )
-        )}
+          )}
+          {selectionMode && canWrite ? (
+            <BulkActionBar
+              selectedCount={selectedNames.size}
+              pendingUpdateCount={pendingUpdateCount}
+              onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
+              onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
+              onClear={() => { setRawSelectedNames(new Set()); }}
+              onOperation={(op) => { void handleBulkOperation(op); }}
+              onExit={exitSelectionMode}
+              operationsDisabled={bulkTask.phase === 'running'}
+              prechecking={precheckingOp}
+            />
+          ) : (
+            canWrite && (
+              <Button
+                icon={<CheckSquareIcon size={14} />}
+                onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+              >
+                批量操作
+              </Button>
+            )
+          )}
+        </div>
       </div>
 
       {isLoading ? (

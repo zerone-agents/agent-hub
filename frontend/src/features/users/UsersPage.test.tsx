@@ -60,8 +60,7 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(screen.queryByRole('button', { name: '登录链接' })).not.toBeInTheDocument()
   })
 
-  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {
-    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
     expect(await screen.findByRole('button', { name: '登录链接' })).toBeInTheDocument()
     await waitFor(() => {
@@ -77,6 +76,21 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(await screen.findByText('登录链接', { selector: '.ant-modal-title' })).toBeInTheDocument()
     // 链接在弹窗打开后才请求（一次性链接，每次打开取新值），需异步等待。
     expect(await screen.findByDisplayValue('https://casdoor.example.com/login/oauth/authorize?client_id=acme')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
+  })
+
+  it('点击「分享对话页」弹出 Modal，展示聊天总览链接（登录链接左侧）', async () => {
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+    renderUsersPage()
+    const shareBtn = await screen.findByRole('button', { name: '分享对话页' })
+    // authMode query 异步 resolve——等待 casdoor 分支渲染后再取登录链接按钮
+    const loginBtn = await screen.findByRole('button', { name: '登录链接' })
+    // 分享按钮在登录链接左侧（DOM 顺序在前）
+    expect(shareBtn.compareDocumentPosition(loginBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(shareBtn)
+    expect(await screen.findByText('分享对话页', { selector: '.ant-modal-title' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue(`${window.location.origin}/static/agents/chat`)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
   })
 
@@ -162,5 +176,37 @@ describe('UsersPage casdoor 待审批用户展示', () => {
     expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '启用' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重置密码' })).not.toBeInTheDocument()
+  })
+})
+
+describe('UsersPage guest 角色选项', () => {
+  const memberUser = {
+    id: 'u-guest-target',
+    username: 'visitor',
+    displayName: '访客同学',
+    email: 'visitor@example.com',
+    role: 'member' as const,
+    status: 'active' as const,
+    createdAt: '2026-09-13T10:00:00Z'
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'builtin', initialized: true })
+    vi.mocked(usersApi.listUsers).mockResolvedValue([memberUser])
+    vi.mocked(usersApi.listInvites).mockResolvedValue([])
+    vi.mocked(usersApi.getLoginUrl).mockResolvedValue({ loginUrl: 'https://casdoor.example.com/login/oauth/authorize?client_id=acme' })
+  })
+
+  it('角色下拉包含「guest」选项，选择后经 updateUser 分配 guest', async () => {
+    vi.mocked(usersApi.updateUser).mockResolvedValue(undefined as never)
+    renderUsersPage()
+    const combobox = await screen.findByRole('combobox')
+    fireEvent.mouseDown(combobox)
+    const option = await screen.findByText('guest', { selector: '.ant-select-item-option-content' })
+    fireEvent.click(option)
+    await waitFor(() => {
+      expect(usersApi.updateUser).toHaveBeenCalledWith('u-guest-target', { role: 'guest' })
+    })
   })
 })

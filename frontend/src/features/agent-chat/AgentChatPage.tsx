@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
+import { useAuthMode } from '@/features/login/useAuthMode'
+import { useUserInfo } from '@/queries/useUserInfo'
+import { isGuestUser } from '@/lib/auth-guest'
 import { attachmentContentUrl, type AgentChatSession, type AttachmentDesc } from '@/api/agent-chat'
 import type { ChatMessage } from '@/api/chat'
 import { useAgentChatCapabilities, useAgentChatMessages } from '@/queries/useAgentChat'
@@ -18,14 +21,9 @@ import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
 import { useAttachments } from './useAttachments'
 import CwdFilePanel from './CwdFilePanel'
+import ChatLayout from './ChatLayout'
 
 const useStyles = createStyles(({ css }) => ({
-  page: css`
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: ${t.surface};
-  `,
   body: css`
     flex: 1;
     display: flex;
@@ -134,9 +132,12 @@ function sendErrorMessage(errorCode: string | undefined, fallback: string | null
   }
 }
 
-export default function AgentChatPage() {
+function AgentChatInner({ name }: { name: string }) {
   const { styles } = useStyles()
-  const { name = '' } = useParams<{ name: string }>()
+  const navigate = useNavigate()
+  const { data: mode } = useAuthMode()
+  const { data: user } = useUserInfo()
+  const guest = isGuestUser(user, mode?.mode)
   const [selected, setSelected] = useState<AgentChatSession | null>(null)
   const { data: msgData } = useAgentChatMessages(name, selected?.id ?? null)
   const stream = useChatStream()
@@ -367,9 +368,23 @@ export default function AgentChatPage() {
   }
 
   return (
-    <div className={styles.page}>
-      <AgentDetailBar agentName={name} />
-
+    <ChatLayout
+      fill
+      left={
+        <>
+          <button
+            type="button"
+            onClick={() => { void Promise.resolve(navigate('/agents/chat')) }}
+            aria-label="返回 Agent 列表"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <ArrowLeftIcon size={16} />
+          </button>
+          {/* Agent 概要内嵌页眉，点击向下浮层展开详情 */}
+          <AgentDetailBar agentName={name} />
+        </>
+      }
+    >
       <div className={styles.body}>
         <ChatSessionList
           agentName={name}
@@ -462,8 +477,14 @@ export default function AgentChatPage() {
           )}
         </div>
 
-        <CwdFilePanel agentName={name} />
+        {!guest && <CwdFilePanel agentName={name} />}
       </div>
-    </div>
+    </ChatLayout>
   )
+}
+
+/** URL name 段变化 → key 重挂载：切换 Agent 即全新状态（中断流、清空会话/输入）。 */
+export default function AgentChatPage() {
+  const { name = '' } = useParams<{ name: string }>()
+  return <AgentChatInner key={name} name={name} />
 }

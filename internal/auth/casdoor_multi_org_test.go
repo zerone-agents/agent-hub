@@ -104,11 +104,23 @@ func TestTokenOwner(t *testing.T) {
 	}
 }
 
+func TestSanitizeRedirect(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"", "/"}, {"/agents/chat", "/agents/chat"}, {"/a?x=1#f", "/a?x=1#f"},
+		{"//evil.com", "/"}, {"https://evil.com", "/"}, {`/a\b`, "/"},
+		{strings.Repeat("/a", 400), "/"}, // >512
+	} {
+		if got := SanitizeRedirect(c.in); got != c.want {
+			t.Fatalf("SanitizeRedirect(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestOAuthSessionStoresOrg(t *testing.T) {
 	initTestCasdoor(t)
 	setFakeLookup(t, map[string]*TenantClientCreds{"acme": {ClientID: "acme-id"}}, nil)
 
-	url, err := GetLoginURL("acme", "st1", "cv1")
+	url, err := GetLoginURL("acme", "st1", "cv1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

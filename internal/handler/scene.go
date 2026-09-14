@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/tenant"
 
@@ -43,6 +44,18 @@ func respondSceneError(c *gin.Context, err error) {
 }
 
 func (h *SceneHandler) List(c *gin.Context) {
+	// guest 分支（spec 4.3）：公开场景列表只保留 guest-enabled agent 的
+	// 场景（防经场景名探测未开放 Agent）；agentId 过滤对 guest 不适用，
+	// 提前返回。非 guest 路径语义不变。
+	if jwtutil.IsGuest(c) {
+		scenes, err := h.service.ListGuestVisible(tenant.GetTenantID(c))
+		if err != nil {
+			respondSceneError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": scenes})
+		return
+	}
 	agentIDStr := c.Query("agentId")
 	var agentID uint64
 	if agentIDStr != "" {

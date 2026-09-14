@@ -61,6 +61,20 @@ func (r *AgentRepository) ListForPlatform(tenantID, platform string) ([]*agent.A
 	return agents, err
 }
 
+// ListChatAgents returns the chat-view agents: only those with a live
+// deployment (deployment_status='running'——与 runtime_proxy/kong_gateway 的
+// 可聊判定同源）；guestOnly additionally requires guest_enabled. Platform
+// toggles (desktop/mobile) do not participate (spec 4.3 view=chat).
+func (r *AgentRepository) ListChatAgents(tenantID string, guestOnly bool) ([]*agent.AgentConfig, error) {
+	var agents []*agent.AgentConfig
+	q := TenantOwned(r.db, tenantID).Where("deployment_status = ?", "running")
+	if guestOnly {
+		q = q.Where("guest_enabled = ?", true)
+	}
+	err := q.Order("id ASC").Find(&agents).Error
+	return agents, err
+}
+
 func (r *AgentRepository) GetByID(tenantID string, id uint64) (*agent.AgentConfig, error) {
 	var a agent.AgentConfig
 	err := TenantOwned(r.db, tenantID).Where("id = ?", id).First(&a).Error

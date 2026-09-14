@@ -12,6 +12,20 @@ export function useAgents() {
   })
 }
 
+/**
+ * 聊天视图公开 Agent 列表（/api/v1/agents?view=chat）。
+ * 独立 query key 与管理端 ['agents'] 隔离，避免 admin/public 缓存互串。
+ * guest 用户拿到的即服务端 guestEnabled 过滤后列表；不能复用 useAgents()
+ * （admin 端点，guest 必 403，spec 6.1）。
+ */
+export function usePublicAgents() {
+  return useQuery<Agent[]>({
+    queryKey: ['agents', 'public'],
+    queryFn: async () =>
+      unwrapResponse<{ agents?: Agent[] }>(await agentApi.publicList()).agents ?? []
+  })
+}
+
 export function useCreateAgent() {
   const qc = useQueryClient()
   return useMutation({

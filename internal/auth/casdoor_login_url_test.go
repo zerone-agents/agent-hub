@@ -105,7 +105,7 @@ func TestGenerateLoginURLSemanticsMatchLoginFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loginURL, err := GetLoginURL("acme", state, verifier)
+	loginURL, err := GetLoginURL("acme", state, verifier, "")
 	if err != nil {
 		t.Fatalf("GetLoginURL: %v", err)
 	}

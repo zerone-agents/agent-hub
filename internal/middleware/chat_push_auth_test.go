@@ -126,3 +126,28 @@ func TestChatPushAuth_BothHeaders_PushKeyWins(t *testing.T) {
 	require.Contains(t, w.Body.String(), "chat_push_key")
 	require.Contains(t, w.Body.String(), `"has_user_id":false`)
 }
+
+// TestChatPushAuth_ExplicitGuest_Blocked 显式 guest 角色（builtin 模式）经
+// JWT 通道调 /chat/push 仍被 GuestGuard 403（/chat/push 不在 guest 白名单），
+// 锁定「显式 guest 不限 auth_method」语义（spec 3.2）。
+func TestChatPushAuth_ExplicitGuest_Blocked(t *testing.T) {
+	handlerCalled := false
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/push", ChatPushAuth("secret", nil, &stubProvider{
+		user: &auth.AuthUser{ID: "8", Username: "guest-user", Roles: []string{"guest"}, TenantID: "default"},
+		mode: "builtin",
+	}), func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/push", nil)
+	req.Header.Set("Authorization", "Bearer guest")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.False(t, handlerCalled)
+	require.Contains(t, w.Body.String(), "PENDING_APPROVAL")
+}

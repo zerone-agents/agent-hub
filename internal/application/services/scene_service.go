@@ -86,6 +86,32 @@ func (s *SceneService) ListAll(tenantID string) ([]*SceneDTO, error) {
 	return s.List(tenantID, 0)
 }
 
+// ListGuestVisible returns only scenes whose agent is guest-enabled
+// (spec 4.3；防 guest 经公开场景列表探测未开放 Agent 的场景名).
+func (s *SceneService) ListGuestVisible(tenantID string) ([]*SceneDTO, error) {
+	agents, err := s.agentRepo.ListAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents for guest scene filter failed: %w", err)
+	}
+	visible := make(map[uint64]struct{}, len(agents))
+	for _, a := range agents {
+		if a.GuestEnabled {
+			visible[a.ID] = struct{}{}
+		}
+	}
+	scenes, err := s.repo.ListAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list scenes failed: %w", err)
+	}
+	result := make([]*SceneDTO, 0, len(scenes))
+	for _, sc := range scenes {
+		if _, ok := visible[sc.AgentID]; ok {
+			result = append(result, s.sceneToDTO(tenantID, sc))
+		}
+	}
+	return result, nil
+}
+
 // GetScene returns a single scene by name.
 func (s *SceneService) GetScene(tenantID, name string) (*SceneDTO, error) {
 	sc, err := s.repo.GetByName(tenantID, name)

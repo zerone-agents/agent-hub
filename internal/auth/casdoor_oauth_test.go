@@ -36,7 +36,7 @@ func TestGetLoginURL_Params(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := GenerateCodeVerifier()
 	require.NoError(t, err)
-	raw, err := GetLoginURL("orga", state, verifier)
+	raw, err := GetLoginURL("orga", state, verifier, "")
 	require.NoError(t, err)
 
 	u, err := url.Parse(raw)

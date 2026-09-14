@@ -37,11 +37,20 @@ export interface AuthMode {
   multiOrg?: boolean
 }
 
+/** 组装 casdoor 登录端点 URL（org/redirect 可选；redirect='/' 视为无回源）。 */
+export function buildLoginUrl(org: string, redirect: string): string {
+  const params = new URLSearchParams()
+  if (org) params.set('org', org)
+  if (redirect && redirect !== '/') params.set('redirect', redirect)
+  const qs = params.toString()
+  return `/auth/login${qs ? `?${qs}` : ''}`
+}
+
 export const authApi = {
   /** Casdoor SSO redirect entry. Only used when auth.mode = casdoor. */
-  login: (org?: string) => {
+  login: (org?: string, redirect?: string) => {
     const target = org ?? new URLSearchParams(window.location.search).get('org') ?? ''
-    window.location.href = target ? `/auth/login?org=${encodeURIComponent(target)}` : '/auth/login'
+    window.location.href = buildLoginUrl(target, redirect ?? '')
   },
   /** 组织预检：登录跳转前确认组织已注册（不存在就地报错，不整页跳 404）。 */
   checkOrg: (org: string) =>

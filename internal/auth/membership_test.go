@@ -35,3 +35,13 @@ func TestSynthesizeMembership(t *testing.T) {
 		})
 	}
 }
+
+// TestSynthesizeMembership_ExplicitGuest 显式 guest 角色是合法角色：非 org-admin
+// 用户携带 guest 角色时原样保留（OpNone），不被当作"未分配"清洗成 pending。
+func TestSynthesizeMembership_ExplicitGuest(t *testing.T) {
+	rec := &authdom.UserIdentity{Role: authdom.RoleGuest, Status: authdom.StatusActive}
+	got := SynthesizeMembership(false, rec)
+	if got.Role != authdom.RoleGuest || got.Status != authdom.StatusActive || got.Op != OpNone {
+		t.Fatalf("explicit guest should persist unchanged, got %+v", got)
+	}
+}
