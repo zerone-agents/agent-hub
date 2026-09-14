@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,7 +22,7 @@ const runtimeConfigTestEncryptionKey = "0123456789abcdef0123456789abcdef01234567
 // corrupted key) and wires the runtime-config endpoint behind a stub auth
 // middleware: requests with X-Test-User pass as an authenticated non-admin
 // user, others are rejected with 401.
-func setupRuntimeConfigRouter(t *testing.T) (*gin.Engine, *bytes.Buffer, string) {
+func setupRuntimeConfigRouter(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -64,19 +62,6 @@ func setupRuntimeConfigRouter(t *testing.T) (*gin.Engine, *bytes.Buffer, string)
 		LockedAPIKey: "enc:zz-not-valid-hex",
 	}).Error)
 
-	auditLog := &bytes.Buffer{}
-	previousWriter := log.Writer()
-	previousFlags := log.Flags()
-	previousPrefix := log.Prefix()
-	log.SetOutput(auditLog)
-	log.SetFlags(0)
-	log.SetPrefix("")
-	t.Cleanup(func() {
-		log.SetOutput(previousWriter)
-		log.SetFlags(previousFlags)
-		log.SetPrefix(previousPrefix)
-	})
-
 	gin.SetMode(gin.TestMode)
 	h := NewProviderHandler(services.NewProviderService(runtimeConfigTestEncryptionKey), nil, newHandlerTestAuditRecorder(t))
 	router := gin.New()
@@ -89,7 +74,7 @@ func setupRuntimeConfigRouter(t *testing.T) (*gin.Engine, *bytes.Buffer, string)
 		c.Set("user_name", "DesktopUser")
 	})
 	router.GET("/api/v1/providers/runtime-config", h.ListRuntimeConfig)
-	return router, auditLog, plainKey
+	return router, plainKey
 }
 
 type runtimeConfigItem struct {
@@ -112,7 +97,7 @@ func fetchRuntimeConfig(t *testing.T, router *gin.Engine, authenticated bool) *h
 }
 
 func TestListRuntimeConfig_ReturnsKeysAndDistinguishesStatuses(t *testing.T) {
-	router, auditLog, plainKey := setupRuntimeConfigRouter(t)
+	router, plainKey := setupRuntimeConfigRouter(t)
 
 	rec := fetchRuntimeConfig(t, router, true)
 
@@ -141,15 +126,11 @@ func TestListRuntimeConfig_ReturnsKeysAndDistinguishesStatuses(t *testing.T) {
 
 	require.Empty(t, byKey["broken-key"].APIKey)
 	require.Equal(t, "unavailable", byKey["broken-key"].APIKeyStatus)
-
-	require.Contains(t, auditLog.String(), "[AUDIT] provider runtime-config served")
-	require.Contains(t, auditLog.String(), "user_id=user-7")
-	require.Contains(t, auditLog.String(), "user_name=DesktopUser")
-	require.NotContains(t, auditLog.String(), plainKey)
+	// 注：本端点为客户端例行读取，不再落审计（范围定稿 2026-09-14）。
 }
 
 func TestListRuntimeConfig_RejectsUnauthenticated(t *testing.T) {
-	router, _, _ := setupRuntimeConfigRouter(t)
+	router, _ := setupRuntimeConfigRouter(t)
 
 	rec := fetchRuntimeConfig(t, router, false)
 

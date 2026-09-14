@@ -300,8 +300,9 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 
 // ListRuntimeConfig serves every provider's runtime configuration (including
 // plaintext API keys) to any authenticated user, so Zerone Desktop can make
-// local model calls. The response is marked no-store and the audit log never
-// contains plaintext keys.
+// local model calls. The response is marked no-store.
+// 这是客户端例行读取（非管理类敏感操作），按审计范围定稿不落审计
+// （2026-09-14 用户确认移除；凭证敏感面由 provider.reveal_key（admin）覆盖）。
 func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	configs, err := h.service.ListRuntimeConfigs(tenant.GetTenantID(c))
 	if err != nil {
@@ -310,7 +311,6 @@ func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	}
 
 	c.Header("Cache-Control", "no-store")
-	h.audit.RuntimeConfigLegacy(c, len(configs))
 	respondSuccess(c, configs)
 }
 

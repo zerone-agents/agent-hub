@@ -29,10 +29,6 @@ type InviteDetail struct {
 	ExpiresInDays int    `json:"expiresInDays"`
 }
 
-type CountDetail struct {
-	Count int `json:"count"`
-}
-
 type AigcConfigDetail struct {
 	ChangedFields []aigc.AigcConfigField `json:"changedFields"`
 }

@@ -20,7 +20,6 @@ func TestDetailWireKeys(t *testing.T) {
 		{"LoginDetail", LoginDetail{Username: "u1", Org: "org1", Reason: ReasonInvalidCredentials}, `{"username":"u1","org":"org1","reason":"invalid_credentials"}`},
 		{"LoginDetailEmptyReason", LoginDetail{Username: "u1"}, `{"username":"u1","org":"","reason":""}`},
 		{"InviteDetail", InviteDetail{Role: "maintainer", ExpiresInDays: 7}, `{"role":"maintainer","expiresInDays":7}`},
-		{"CountDetail", CountDetail{Count: 3}, `{"count":3}`},
 		{"AigcConfigDetail", AigcConfigDetail{ChangedFields: []aigc.AigcConfigField{aigc.AigcFieldUSCC}}, `{"changedFields":["uscc"]}`},
 		{"AigcConfigDetailEmpty", AigcConfigDetail{ChangedFields: []aigc.AigcConfigField{}}, `{"changedFields":[]}`},
 	}

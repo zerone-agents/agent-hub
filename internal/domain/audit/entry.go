@@ -39,7 +39,7 @@ func categoryOf(action Action) Category {
 		return CatUser
 	case ActionInviteCreate, ActionInviteRevoke:
 		return CatInvite
-	case ActionRevealKey, ActionRuntimeConfig, ActionSyncMultirag:
+	case ActionRevealKey, ActionSyncMultirag:
 		return CatProvider
 	case ActionDeploy, ActionStop, ActionStart, ActionUndeploy, ActionDelete:
 		return CatAgent
@@ -84,13 +84,6 @@ func InviteCreatedEvent(a Actor, inviteID, role string, expiresInDays int) Entry
 		Actor: a, Category: CatInvite, Action: ActionInviteCreate, TargetType: TargetInvite,
 		TargetID: inviteID, Status: StatusSuccess,
 		Detail: InviteDetail{Role: role, ExpiresInDays: expiresInDays},
-	}
-}
-
-func RuntimeConfigEvent(a Actor, count int) Entry {
-	return Entry{
-		Actor: a, Category: CatProvider, Action: ActionRuntimeConfig, TargetType: TargetSystem,
-		Status: StatusSuccess, Detail: CountDetail{Count: count},
 	}
 }
 

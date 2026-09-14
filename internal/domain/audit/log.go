@@ -31,9 +31,8 @@ const (
 	ActionInviteCreate Action = "invite.create"
 	ActionInviteRevoke Action = "invite.revoke"
 
-	ActionRevealKey     Action = "provider.reveal_key"
-	ActionRuntimeConfig Action = "provider.runtime_config"
-	ActionSyncMultirag  Action = "provider.sync_multirag"
+	ActionRevealKey    Action = "provider.reveal_key"
+	ActionSyncMultirag Action = "provider.sync_multirag"
 
 	ActionDeploy   Action = "agent.deploy"
 	ActionStop     Action = "agent.stop"

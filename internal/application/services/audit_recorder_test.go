@@ -166,12 +166,9 @@ func TestRecorderLegacyFormattersVerbatim(t *testing.T) {
 	rec.RevealKeyLegacy(c, 42)
 	require.Contains(t, buf.String(), "[AUDIT] provider API key revealed | user_id=7 user_name=alice provider_id=42")
 	require.Contains(t, buf.String(), "method=POST")
-	buf.Reset()
-	rec.RuntimeConfigLegacy(c, 3)
-	require.Contains(t, buf.String(), "[AUDIT] provider runtime-config served | user_id=7 user_name=alice providers=3")
 	var n int64
 	require.NoError(t, db.Model(&audit.Log{}).Count(&n).Error)
-	require.EqualValues(t, 2, n) // legacy 事件同样落库
+	require.EqualValues(t, 1, n) // legacy 事件同样落库
 }
 
 func TestRecorderLoginDetailSerialized(t *testing.T) {
