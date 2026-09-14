@@ -4,23 +4,24 @@ import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
+  // 内嵌页眉的紧凑形态（原整行 bar 改为页眉内联胶囊）：宽度自适应、无底边框、
+  // 透明背景 + hover 提示可点；详情面板由 AgentDetailBar 以页眉下缘浮层展开。
   bar: css`
     all: unset;
-    width: 100%;
-    min-height: 48px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 20px;
+    gap: 10px;
+    padding: 6px 10px;
     box-sizing: border-box;
     text-align: left;
     font-family: inherit;
     font-size: inherit;
-    border-bottom: 1px solid ${t.inkLighter};
-    background: ${t.surface};
+    border-radius: var(--radius);
     cursor: pointer;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-width: 0;
     user-select: none;
+    transition: background 0.15s;
     &:hover {
       background: ${t.surfaceHover};
     }
@@ -29,12 +30,9 @@ const useStyles = createStyles(({ css }) => ({
       outline-offset: -2px;
     }
     @media (max-width: 768px) {
-      gap: 8px;
-      padding: 10px 16px;
+      gap: 6px;
+      padding: 6px 8px;
     }
-  `,
-  barExpanded: css`
-    border-bottom: none;
   `,
   name: css`
     font-size: 15px;
@@ -85,7 +83,7 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   chevron: css`
-    margin-left: auto;
+    margin-left: 4px;
     color: ${t.textTertiary};
     display: inline-flex;
     align-items: center;
@@ -117,7 +115,7 @@ export default function AgentDetailSummary({
   expanded,
   onToggle,
 }: Props) {
-  const { styles, cx } = useStyles()
+  const { styles } = useStyles()
   const Chevron = expanded ? CaretUpIcon : CaretDownIcon
 
   const countEntries: [string, number][] = [
@@ -131,7 +129,7 @@ export default function AgentDetailSummary({
   return (
     <button
       type="button"
-      className={cx(styles.bar, expanded && styles.barExpanded)}
+      className={styles.bar}
       onClick={onToggle}
       aria-expanded={expanded}
     >

@@ -382,11 +382,11 @@ function AgentChatInner({ name }: { name: string }) {
             <ArrowLeftIcon size={16} />
           </button>
           <AgentSwitcher current={name} />
+          {/* Agent 概要内嵌页眉，点击向下浮层展开详情 */}
+          <AgentDetailBar agentName={name} />
         </>
       }
     >
-      <AgentDetailBar agentName={name} />
-
       <div className={styles.body}>
         <ChatSessionList
           agentName={name}

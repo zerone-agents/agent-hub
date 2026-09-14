@@ -10,7 +10,6 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 12px;
-    border-bottom: 1px solid ${t.inkLighter};
   `,
   row: css`
     display: flex;
