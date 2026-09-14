@@ -58,15 +58,14 @@ export default function AuditLogsPage() {
     }
   }, [data, snapshotId])
 
-  const handleRefresh = async () => {
+  const handleRefresh = () => {
     // 用户主动刷新 → 重开快照。必须 removeQueries 而非 invalidateQueries：
     // snapshotId=null 对应的 query key 若留有首屏旧缓存，useQuery 会在重置后
     // 立即回放旧 data，effect 又把旧 snapshotId 写回——刷新沦为空转、新记录
-    // 不可见（PR #150 二轮审查 P2）。移除整个前缀缓存，重开请求走网络、
-    // 原子捕获新快照。
+    // 不可见（PR #150 二轮审查 P2）。removeQueries 返回 void（v5）同步清缓存。
     setSnapshotId(null)
     setPage(1)
-    await qc.removeQueries({ queryKey: ['admin', 'audit-logs'] })
+    qc.removeQueries({ queryKey: ['admin', 'audit-logs'] })
   }
 
   const columns: ColumnsType<AuditLog> = [
@@ -103,7 +102,7 @@ export default function AuditLogsPage() {
             setPage(1)
           }}
         />
-        <Button icon={<ArrowsClockwiseIcon size={14} />} onClick={() => { void handleRefresh() }}>
+        <Button icon={<ArrowsClockwiseIcon size={14} />} onClick={handleRefresh}>
           刷新
         </Button>
       </div>
