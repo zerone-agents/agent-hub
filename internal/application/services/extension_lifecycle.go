@@ -66,7 +66,12 @@ type ExtensionLifecycleService struct {
 	// authz 为 H7.4 授权同步钩子：非 nil 时安装/升级/回滚后同步
 	// manifest 权限声明为授权行，启停联动 is_active，卸载保留审计
 	// （purge 才删除）。nil 时行为与 H7.1 完全一致（测试基座可不接）。
+	// 授权同步始终与生命周期主状态写在同一事务内（P1：syncGrants 失败
+	// 整体回滚，杜绝"接口报失败但安装已生效"的半完成状态）。
 	authz *ExtensionAuthzService
+	// syncGrantsHook 是可注入的失败点，仅测试使用（生产恒为 nil）：
+	// 在事务内、授权同步完成后调用，返回错误即回滚整个事务。
+	syncGrantsHook func() error
 }
 
 func NewExtensionLifecycleService(db *gorm.DB) *ExtensionLifecycleService {
@@ -78,14 +83,20 @@ func (s *ExtensionLifecycleService) SetAuthzService(authz *ExtensionAuthzService
 	s.authz = authz
 }
 
-// syncGrants 把指定版本 manifest 的权限声明同步为授权行（best-effort
-// 返回错误，由调用方决定失败策略；生命周期主体已提交，授权同步失败
-// 不影响安装结果，但会在返回值中暴露）。
-func (s *ExtensionLifecycleService) syncGrants(tenantID string, ext *extension.Extension, ver *extension.Version, grantedBy string) error {
+// syncGrantsWithTx 在事务内把指定版本 manifest 的权限声明同步为授权行
+// （P1：授权同步失败 → 返回错误 → 整个事务回滚，主状态不落库，接口
+// 报失败且状态未变，原子语义）。hook 为测试注入的失败点（生产 nil）。
+func (s *ExtensionLifecycleService) syncGrantsWithTx(tx *gorm.DB, tenantID string, ext *extension.Extension, ver *extension.Version, grantedBy string) error {
 	if s.authz == nil {
 		return nil
 	}
-	return s.authz.SyncGrantsFromManifest(tenantID, ext.Name, ver.Manifest, ver.Version, grantedBy)
+	if err := s.authz.syncGrantsWithDB(tx, tenantID, ext.Name, ver.Manifest, ver.Version, grantedBy); err != nil {
+		return err
+	}
+	if s.syncGrantsHook != nil {
+		return s.syncGrantsHook()
+	}
+	return nil
 }
 
 // InstallResult 是安装/升级/回滚的统一结果。
@@ -306,12 +317,10 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 		}
 		existing = &inst
 		created = true
-		return nil
+		// H7.4：授权同步与安装同事务，失败整体回滚（无半完成状态）。
+		return s.syncGrantsWithTx(tx, tenantID, ext, ver, installedBy)
 	})
 	if err != nil {
-		return nil, err
-	}
-	if err := s.syncGrants(tenantID, ext, ver, existing.InstalledBy); err != nil {
 		return nil, err
 	}
 	return &InstallResult{Install: existing, Idempotent: !created}, nil
@@ -339,14 +348,23 @@ func (s *ExtensionLifecycleService) setInstallStatus(tenantID string, extID uint
 		return inst, nil // 幂等：状态未变化
 	}
 	inst.Status = status
-	if err := s.db.Save(inst).Error; err != nil {
-		return nil, err
-	}
-	// H7.4：启停联动授权生效状态（停用保留行与审计）
-	if s.authz != nil {
-		if err := s.authz.SetGrantsActive(tenantID, ext.Name, status == extension.InstallStatusEnabled); err != nil {
-			return nil, err
+	// H7.4：状态改写与授权联动同一事务，失败整体回滚（无半完成状态）。
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(inst).Error; err != nil {
+			return err
 		}
+		if s.authz != nil {
+			if err := s.authz.setGrantsActiveWithDB(tx, tenantID, ext.Name, status == extension.InstallStatusEnabled); err != nil {
+				return err
+			}
+			if s.syncGrantsHook != nil {
+				return s.syncGrantsHook()
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return inst, nil
 }
@@ -431,12 +449,13 @@ func (s *ExtensionLifecycleService) Upgrade(tenantID string, extID uint64, targe
 		if err := appendMigrationLog(inst, "upgrade", oldVersion, targetVersion, entries); err != nil {
 			return err
 		}
+		// H7.4：授权同步（含权限集合变化）与升级同事务，失败整体回滚。
+		if err := s.syncGrantsWithTx(tx, tenantID, ext, target, inst.InstalledBy); err != nil {
+			return err
+		}
 		return tx.Save(inst).Error
 	})
 	if err != nil {
-		return nil, err
-	}
-	if err := s.syncGrants(tenantID, ext, target, inst.InstalledBy); err != nil {
 		return nil, err
 	}
 	return &InstallResult{Install: inst}, nil
@@ -524,12 +543,13 @@ func (s *ExtensionLifecycleService) Rollback(tenantID string, extID uint64, targ
 		if err := appendMigrationLog(inst, "rollback", oldVersion, targetVersion, entries); err != nil {
 			return err
 		}
+		// H7.4：授权同步与回滚同事务，失败整体回滚。
+		if err := s.syncGrantsWithTx(tx, tenantID, ext, target, inst.InstalledBy); err != nil {
+			return err
+		}
 		return tx.Save(inst).Error
 	})
 	if err != nil {
-		return nil, err
-	}
-	if err := s.syncGrants(tenantID, ext, target, inst.InstalledBy); err != nil {
 		return nil, err
 	}
 	return &InstallResult{Install: inst}, nil
@@ -660,22 +680,26 @@ func (s *ExtensionLifecycleService) Uninstall(tenantID string, extID uint64, for
 				return err
 			}
 		}
+		// H7.4：授权联动与卸载同一事务（非 purge 保留行与审计仅置失效；
+		// purge 物理删除），失败整体回滚，无半完成状态。
+		if s.authz != nil {
+			if purge {
+				if err := s.authz.deleteGrantsWithDB(tx, tenantID, ext.Name); err != nil {
+					return err
+				}
+			} else {
+				if err := s.authz.setGrantsActiveWithDB(tx, tenantID, ext.Name, false); err != nil {
+					return err
+				}
+			}
+			if s.syncGrantsHook != nil {
+				return s.syncGrantsHook()
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
-	}
-	// H7.4：卸载（非 purge）保留授权行与审计，仅置失效；purge 才物理删除。
-	if s.authz != nil {
-		if purge {
-			if err := s.authz.DeleteGrantsForExtension(tenantID, ext.Name); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := s.authz.SetGrantsActive(tenantID, ext.Name, false); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return result, nil
 }

@@ -71,6 +71,12 @@ func grantKey(permission, scope, resource string) string {
 // 的授权行做软撤销（revoked_at 置位、is_active=false），保留审计。
 // 幂等：重复同步同版本不会产生重复行。
 func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, manifestRaw, version, grantedBy string) error {
+	return s.syncGrantsWithDB(s.db, tenantID, extensionName, manifestRaw, version, grantedBy)
+}
+
+// syncGrantsWithDB 是 SyncGrantsFromManifest 的注入句柄变体：生命周期服务
+// 在事务内传入 tx，保证授权行与安装状态同生共死（P1：不再半完成）。
+func (s *ExtensionAuthzService) syncGrantsWithDB(db *gorm.DB, tenantID, extensionName, manifestRaw, version, grantedBy string) error {
 	tenantID = normalizedTenant(tenantID)
 	extensionName = strings.TrimSpace(extensionName)
 	decls, err := parsePermissionDecls(manifestRaw)
@@ -78,7 +84,7 @@ func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, 
 		return err
 	}
 	var existing []extension.Grant
-	if err := s.db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Find(&existing).Error; err != nil {
+	if err := db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Find(&existing).Error; err != nil {
 		return err
 	}
 	byKey := map[string]*extension.Grant{}
@@ -116,7 +122,7 @@ func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, 
 			if g.Status != extension.GrantStatusPending {
 				updates["status"] = status
 			}
-			if err := s.db.Model(&extension.Grant{}).Where("id=?", g.ID).Updates(updates).Error; err != nil {
+			if err := db.Model(&extension.Grant{}).Where("id=?", g.ID).Updates(updates).Error; err != nil {
 				return err
 			}
 			continue
@@ -136,7 +142,7 @@ func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, 
 			GrantedAt:     now,
 			LastSyncAt:    now,
 		}
-		if err := s.db.Create(&grant).Error; err != nil {
+		if err := db.Create(&grant).Error; err != nil {
 			return fmt.Errorf("写入扩展授权失败: %w", err)
 		}
 	}
@@ -145,7 +151,7 @@ func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, 
 		if seen[key] {
 			continue
 		}
-		if err := s.db.Model(&extension.Grant{}).Where("id=?", g.ID).Updates(map[string]any{
+		if err := db.Model(&extension.Grant{}).Where("id=?", g.ID).Updates(map[string]any{
 			"is_active":  false,
 			"revoked_at": now,
 		}).Error; err != nil {
@@ -157,19 +163,29 @@ func (s *ExtensionAuthzService) SyncGrantsFromManifest(tenantID, extensionName, 
 
 // SetGrantsActive 启用/停用扩展时联动授权生效状态（停用不删行，审计保留）。
 func (s *ExtensionAuthzService) SetGrantsActive(tenantID, extensionName string, active bool) error {
+	return s.setGrantsActiveWithDB(s.db, tenantID, extensionName, active)
+}
+
+// setGrantsActiveWithDB 是 SetGrantsActive 的注入句柄变体（事务内调用）。
+func (s *ExtensionAuthzService) setGrantsActiveWithDB(db *gorm.DB, tenantID, extensionName string, active bool) error {
 	tenantID = normalizedTenant(tenantID)
-	return s.db.Model(&extension.Grant{}).
+	return db.Model(&extension.Grant{}).
 		Where("tenant_id=? AND extension_name=? AND revoked_at IS NULL", tenantID, extensionName).
 		Update("is_active", active).Error
 }
 
 // DeleteGrantsForExtension 仅 purge 卸载时调用：物理删除授权与审计行。
 func (s *ExtensionAuthzService) DeleteGrantsForExtension(tenantID, extensionName string) error {
+	return s.deleteGrantsWithDB(s.db, tenantID, extensionName)
+}
+
+// deleteGrantsWithDB 是 DeleteGrantsForExtension 的注入句柄变体（事务内调用）。
+func (s *ExtensionAuthzService) deleteGrantsWithDB(db *gorm.DB, tenantID, extensionName string) error {
 	tenantID = normalizedTenant(tenantID)
-	if err := s.db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Delete(&extension.Grant{}).Error; err != nil {
+	if err := db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Delete(&extension.Grant{}).Error; err != nil {
 		return err
 	}
-	return s.db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Delete(&extension.AccessAudit{}).Error
+	return db.Where("tenant_id=? AND extension_name=?", tenantID, extensionName).Delete(&extension.AccessAudit{}).Error
 }
 
 // Enforce 判定扩展在某权限类/动作/资源上是否有有效授权，并写审计行。

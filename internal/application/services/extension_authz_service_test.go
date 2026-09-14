@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"control-panel/internal/domain/extension"
+	rundomain "control-panel/internal/domain/run"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -26,6 +27,7 @@ func newAuthzFixture(t *testing.T) *authzFixture {
 	require.NoError(t, db.AutoMigrate(
 		&extension.Extension{}, &extension.Version{}, &extension.Install{},
 		&extension.Grant{}, &extension.AccessAudit{},
+		&rundomain.StateSchema{},
 	))
 	f := &authzFixture{
 		db:        db,
