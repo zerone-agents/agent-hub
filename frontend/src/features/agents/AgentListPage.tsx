@@ -251,7 +251,7 @@ export default function AgentListPage() {
   // 按 group 分组，组内按 name 排序
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
-      const group = agent.group ?? '默认分组'
+      const group = agent.group ?? '未分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc
@@ -261,11 +261,11 @@ export default function AgentListPage() {
     return grouped
   }, [filteredAgents])
 
-  // 排序：默认分组放最后
+  // 排序：未分组放最后
   const sortedGroups = useMemo(() => {
     return Object.keys(groupedAgents).sort((a, b) => {
-      if (a === '默认分组') return 1
-      if (b === '默认分组') return -1
+      if (a === '未分组') return 1
+      if (b === '未分组') return -1
       return a.localeCompare(b)
     })
   }, [groupedAgents])

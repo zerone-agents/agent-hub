@@ -313,7 +313,7 @@ describe('AgentListPage bulk operations (#141)', () => {
     await user.click(screen.getByRole('button', { name: /批量操作/ }))
     const link = screen.getAllByText('全选本组')[0]!
     await user.click(link)
-    expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 默认分组 2 个 agent
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument() // 未分组 2 个 agent
   })
 
   it('selection persists across search filtering (review P2a)', async () => {

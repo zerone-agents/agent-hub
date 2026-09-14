@@ -148,10 +148,10 @@ export default function ChatHomePage() {
   const { data: user } = useUserInfo()
   const guest = isGuestUser(user, mode?.mode)
 
-  // 与管理页 Agent 列表同款分组：group ?? 默认分组；组内按 name 排序；默认分组垫底。
+  // 与管理页 Agent 列表同款分组：group ?? 未分组；组内按 name 排序；未分组垫底。
   const groupedSections = useMemo(() => {
     const grouped = (agents ?? []).reduce<Record<string, Agent[]>>((acc, agent) => {
-      const group = agent.group ?? '默认分组'
+      const group = agent.group ?? '未分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc
@@ -161,8 +161,8 @@ export default function ChatHomePage() {
       agents: list.sort((a, b) => a.name.localeCompare(b.name))
     }))
     sections.sort((a, b) => {
-      if (a.name === '默认分组') return 1
-      if (b.name === '默认分组') return -1
+      if (a.name === '未分组') return 1
+      if (b.name === '未分组') return -1
       return a.name.localeCompare(b.name)
     })
     return sections

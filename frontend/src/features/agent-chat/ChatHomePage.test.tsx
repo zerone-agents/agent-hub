@@ -108,7 +108,7 @@ describe('ChatHomePage', () => {
     ).toBeInTheDocument()
   })
 
-  it('按 group 分组展示，默认分组垫底', () => {
+  it('按 group 分组展示，未分组垫底', () => {
     state.agents = [
       { ...writerAgent, group: undefined },
       { ...coderAgent, group: 'DevOps' },
@@ -116,10 +116,10 @@ describe('ChatHomePage', () => {
     ]
     renderPage()
     const devops = screen.getByText('DevOps')
-    const fallback = screen.getByText('默认分组')
-    // 命名组在前，默认分组垫底
+    const fallback = screen.getByText('未分组')
+    // 命名组在前，未分组垫底
     expect(devops.compareDocumentPosition(fallback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // 组内计数徽章：DevOps 2 / 默认分组 1
+    // 组内计数徽章：DevOps 2 / 未分组 1
     expect(devops.parentElement?.textContent).toContain('2')
     expect(fallback.parentElement?.textContent).toContain('1')
     expect(screen.getByText('编码助手')).toBeInTheDocument()
