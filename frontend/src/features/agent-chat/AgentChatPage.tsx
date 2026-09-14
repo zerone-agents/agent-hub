@@ -22,22 +22,9 @@ import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
 import { useAttachments } from './useAttachments'
 import CwdFilePanel from './CwdFilePanel'
+import ChatLayout from './ChatLayout'
 
 const useStyles = createStyles(({ css }) => ({
-  page: css`
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: ${t.surface};
-  `,
-  switcherBar: css`
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    flex-shrink: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
-  `,
   body: css`
     flex: 1;
     display: flex;
@@ -382,18 +369,22 @@ function AgentChatInner({ name }: { name: string }) {
   }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.switcherBar}>
-        <button
-          type="button"
-          onClick={() => { void Promise.resolve(navigate('/agents/chat')) }}
-          aria-label="返回 Agent 列表"
-          style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          <ArrowLeftIcon size={16} />
-        </button>
-        <AgentSwitcher current={name} />
-      </div>
+    <ChatLayout
+      fill
+      left={
+        <>
+          <button
+            type="button"
+            onClick={() => { void Promise.resolve(navigate('/agents/chat')) }}
+            aria-label="返回 Agent 列表"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <ArrowLeftIcon size={16} />
+          </button>
+          <AgentSwitcher current={name} />
+        </>
+      }
+    >
       <AgentDetailBar agentName={name} />
 
       <div className={styles.body}>
@@ -490,7 +481,7 @@ function AgentChatInner({ name }: { name: string }) {
 
         {!guest && <CwdFilePanel agentName={name} />}
       </div>
-    </div>
+    </ChatLayout>
   )
 }
 

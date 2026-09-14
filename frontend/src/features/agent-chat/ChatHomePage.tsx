@@ -8,51 +8,10 @@ import { usePublicAgents } from '@/queries/useAgents'
 import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
 import { isGuestUser } from '@/lib/auth-guest'
-import BrandMark from '@/components/BrandMark'
-import ThemeControls from '@/components/ThemeControls'
-import HeaderLinks from '@/components/HeaderLinks'
-import UserDropdown from '@/components/UserDropdown'
+import ChatLayout from './ChatLayout'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
-  page: css`
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    background: ${t.paper};
-  `,
-  header: css`
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: color-mix(in srgb, var(--card) 92%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 1px 0 var(--border);
-  `,
-  inner: css`
-    padding: 0 32px;
-    height: 52px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    @media (max-width: 768px) {
-      padding: 0 16px;
-    }
-  `,
-  brand: css`
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 16px;
-    font-weight: 700;
-    color: ${t.ink};
-  `,
-  actions: css`
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `,
   badge: css`
     padding: 2px 10px;
     border-radius: 999px;
@@ -61,7 +20,6 @@ const useStyles = createStyles(({ css }) => ({
     color: ${t.ink};
   `,
   main: css`
-    flex: 1;
     padding: 32px 24px;
     max-width: 1080px;
     width: 100%;
@@ -170,23 +128,8 @@ export default function ChatHomePage() {
   }, [agents])
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.inner}>
-          <div className={styles.brand}>
-            <BrandMark size={28} />
-            Agent 聊天
-          </div>
-          <div className={styles.actions}>
-            {guest && <span className={styles.badge}>体验模式</span>}
-            <HeaderLinks />
-            <ThemeControls />
-            {/* 用户下拉与管理页同款，菜单仅保留修改密码与退出 */}
-            <UserDropdown />
-          </div>
-        </div>
-      </header>
-      <main className={styles.main}>
+    <ChatLayout badge={guest ? <span className={styles.badge}>体验模式</span> : undefined}>
+      <div className={styles.main}>
         {!isLoading && (agents ?? []).length === 0 ? (
           <Empty description={guest ? '暂无可体验的 Agent，请联系管理员开放' : '暂无 Agent'} />
         ) : (
@@ -223,7 +166,7 @@ export default function ChatHomePage() {
             </section>
           ))
         )}
-      </main>
-    </div>
+      </div>
+    </ChatLayout>
   )
 }
