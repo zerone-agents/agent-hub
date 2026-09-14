@@ -17,7 +17,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
   { value: 'maintainer', label: 'maintainer' },
   { value: 'admin', label: 'admin' },
-  { value: 'guest', label: 'guest 体验用户' }
+  { value: 'guest', label: 'guest' }
 ]
 
 function roleColor(role: string): string {

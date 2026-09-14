@@ -184,12 +184,12 @@ describe('UsersPage guest 角色选项', () => {
     vi.mocked(usersApi.getLoginUrl).mockResolvedValue({ loginUrl: 'https://casdoor.example.com/login/oauth/authorize?client_id=acme' })
   })
 
-  it('角色下拉包含「guest 体验用户」选项，选择后经 updateUser 分配 guest', async () => {
+  it('角色下拉包含「guest」选项，选择后经 updateUser 分配 guest', async () => {
     vi.mocked(usersApi.updateUser).mockResolvedValue(undefined as never)
     renderUsersPage()
     const combobox = await screen.findByRole('combobox')
     fireEvent.mouseDown(combobox)
-    const option = await screen.findByText('guest 体验用户', { selector: '.ant-select-item-option-content' })
+    const option = await screen.findByText('guest', { selector: '.ant-select-item-option-content' })
     fireEvent.click(option)
     await waitFor(() => {
       expect(usersApi.updateUser).toHaveBeenCalledWith('u-guest-target', { role: 'guest' })
