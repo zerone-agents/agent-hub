@@ -153,22 +153,23 @@ func newGuestVisEnv(t *testing.T, guest bool) *guestVisEnv {
 	t.Helper()
 	db := setupGuestVisibilityTestDB(t)
 
-	seedAgent := func(name string, guestEnabled, desktop bool) agent.AgentConfig {
+	seedAgent := func(name string, guestEnabled, desktop bool, deployStatus string) agent.AgentConfig {
 		t.Helper()
 		row := agent.AgentConfig{
-			Name:           name,
-			TenantID:       chatTestTenant,
-			GuestEnabled:   guestEnabled,
-			DesktopEnabled: desktop,
+			Name:             name,
+			TenantID:         chatTestTenant,
+			GuestEnabled:     guestEnabled,
+			DesktopEnabled:   desktop,
+			DeploymentStatus: deployStatus,
 		}
 		require.NoError(t, db.Create(&row).Error)
 		return row
 	}
 	env := &guestVisEnv{
-		agentA: seedAgent("agent-a", true, true),
-		agentB: seedAgent("agent-b", true, false),
-		agentC: seedAgent("agent-c", false, true),
-		agentD: seedAgent("agent-d", false, false),
+		agentA: seedAgent("agent-a", true, true, "running"),
+		agentB: seedAgent("agent-b", true, false, "running"),
+		agentC: seedAgent("agent-c", false, true, "running"),
+		agentD: seedAgent("agent-d", false, false, "stopped"),
 	}
 	require.NoError(t, db.Create(&scene.Scene{
 		Name: "scene-a", TenantID: chatTestTenant, AgentID: env.agentA.ID,
@@ -257,7 +258,8 @@ func doGet(t *testing.T, r *gin.Engine, path string) *httptest.ResponseRecorder 
 }
 
 // TestAgentList_GuestViews：view=chat + guest → [A,B]；默认 + guest → [A]
-// （desktop ∧ guest）；view=chat + formal → 全量（chat 视图不看 platform）。
+// （desktop ∧ guest）；view=chat + formal → running 的 [A,B,C]（D stopped
+// 被部署过滤滤掉——chat 视图只显示线上完成部署的，不看 platform）。
 func TestAgentList_GuestViews(t *testing.T) {
 	t.Run("guest view=chat 只看 guest-enabled", func(t *testing.T) {
 		env := newGuestVisEnv(t, true)
@@ -271,11 +273,11 @@ func TestAgentList_GuestViews(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 		require.Equal(t, []string{"agent-a"}, agentListNames(t, w))
 	})
-	t.Run("formal view=chat 全量", func(t *testing.T) {
+	t.Run("formal view=chat 只含已完成部署", func(t *testing.T) {
 		env := newGuestVisEnv(t, false)
 		w := doGet(t, env.r, "/api/v1/agents?view=chat")
 		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
-		require.Equal(t, []string{"agent-a", "agent-b", "agent-c", "agent-d"}, agentListNames(t, w))
+		require.Equal(t, []string{"agent-a", "agent-b", "agent-c"}, agentListNames(t, w))
 	})
 }
 

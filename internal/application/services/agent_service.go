@@ -146,21 +146,13 @@ func (s *AgentService) GetManifest(tenantID, platform string, guest bool) (*Mani
 	return &ManifestDTO{Agents: agents, UpdatedAt: updatedAt}, nil
 }
 
-// GetChatAgents returns agents for the chat home/switcher: no platform
-// filter; guest callers only see guest-enabled agents (spec 4.3 view=chat).
+// GetChatAgents returns agents for the chat home/switcher: only agents with
+// a live deployment (deployment_status='running'——线上完成部署才可聊);
+// guest callers additionally only see guest-enabled agents (spec 4.3 view=chat).
 func (s *AgentService) GetChatAgents(tenantID string, guest bool) (*AgentsDTO, error) {
-	configs, err := s.repo.ListAll(tenantID)
+	configs, err := s.repo.ListChatAgents(tenantID, guest)
 	if err != nil {
 		return nil, fmt.Errorf("list agents failed: %w", err)
-	}
-	if guest {
-		kept := make([]*agent.AgentConfig, 0, len(configs))
-		for _, cfg := range configs {
-			if cfg.GuestEnabled {
-				kept = append(kept, cfg)
-			}
-		}
-		configs = kept
 	}
 	return s.buildAgentsDTO(tenantID, configs)
 }

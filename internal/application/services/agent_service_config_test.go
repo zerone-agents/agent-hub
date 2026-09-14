@@ -460,33 +460,34 @@ func TestAgentGuestEnabledRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAgentVisibilityMatrix 组合矩阵：guestEnabled × desktop/mobile × 角色 × 视图。
+// TestAgentVisibilityMatrix 组合矩阵：guestEnabled × desktop/mobile × 部署状态 × 角色 × 视图。
 // 场景铺设（sqlite，复用 setupToolTenantServiceTestDB，buildAgentsDTO 触碰的
 // 全部关联表齐备）：五个 agent——
 //
-//	A: guest=true,  desktop=true,  mobile=false
-//	B: guest=true,  desktop=false, mobile=false
-//	C: guest=false, desktop=true,  mobile=false
-//	D: guest=false, desktop=false, mobile=false
-//	E: guest=true,  desktop=false, mobile=true   ← manifest mobile 回归锚点
+//	A: guest=true,  desktop=true,  mobile=false, running
+//	B: guest=true,  desktop=false, mobile=false, running
+//	C: guest=false, desktop=true,  mobile=false, running
+//	D: guest=false, desktop=false, mobile=false, stopped
+//	E: guest=true,  desktop=false, mobile=true,  未部署   ← manifest mobile 锚点 + chat 视图部署过滤锚点
 func TestAgentVisibilityMatrix(t *testing.T) {
 	const tenant = "t-visibility"
 	db := setupToolTenantServiceTestDB(t)
-	seed := func(name string, guest, desktop, mobile bool) {
+	seed := func(name string, guest, desktop, mobile bool, deployStatus string) {
 		t.Helper()
 		require.NoError(t, db.Create(&agent.AgentConfig{
-			Name:           name,
-			TenantID:       tenant,
-			GuestEnabled:   guest,
-			DesktopEnabled: desktop,
-			MobileEnabled:  mobile,
+			Name:             name,
+			TenantID:         tenant,
+			GuestEnabled:     guest,
+			DesktopEnabled:   desktop,
+			MobileEnabled:    mobile,
+			DeploymentStatus: deployStatus,
 		}).Error)
 	}
-	seed("agent-a", true, true, false)
-	seed("agent-b", true, false, false)
-	seed("agent-c", false, true, false)
-	seed("agent-d", false, false, false)
-	seed("agent-e", true, false, true)
+	seed("agent-a", true, true, false, "running")
+	seed("agent-b", true, false, false, "running")
+	seed("agent-c", false, true, false, "running")
+	seed("agent-d", false, false, false, "stopped")
+	seed("agent-e", true, false, true, "")
 
 	svc := NewAgentService("test-encryption-key", "")
 
@@ -511,13 +512,13 @@ func TestAgentVisibilityMatrix(t *testing.T) {
 		return names
 	}
 
-	t.Run("GetChatAgents guest=true 只看 guest-enabled（不看 platform）", func(t *testing.T) {
+	t.Run("GetChatAgents guest=true → running ∧ guest（E 未部署被滤掉）", func(t *testing.T) {
 		dto, err := svc.GetChatAgents(tenant, true)
-		assert.Equal(t, []string{"agent-a", "agent-b", "agent-e"}, listNames(t, dto, err))
+		assert.Equal(t, []string{"agent-a", "agent-b"}, listNames(t, dto, err))
 	})
-	t.Run("GetChatAgents guest=false 全量", func(t *testing.T) {
+	t.Run("GetChatAgents guest=false → running（D stopped / E 未部署被滤掉）", func(t *testing.T) {
 		dto, err := svc.GetChatAgents(tenant, false)
-		assert.Equal(t, []string{"agent-a", "agent-b", "agent-c", "agent-d", "agent-e"}, listNames(t, dto, err))
+		assert.Equal(t, []string{"agent-a", "agent-b", "agent-c"}, listNames(t, dto, err))
 	})
 	t.Run("GetDesktopAgents guest=true → desktop ∧ guest", func(t *testing.T) {
 		dto, err := svc.GetDesktopAgents(tenant, true)
