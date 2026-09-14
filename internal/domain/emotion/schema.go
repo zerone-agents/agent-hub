@@ -14,7 +14,7 @@ func SchemaDocument() map[string]any {
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"mood":        map[string]any{"type": "string", "enum": moodEnum},
-			"intensity":   map[string]any{"type": "integer", "minimum": 0.0, "maximum": 100.0},
+			"intensity":   map[string]any{"type": "integer", "minimum": -100.0, "maximum": 100.0},
 			"baseline":    map[string]any{"type": "string", "enum": moodEnum},
 			"updatedAt":   map[string]any{"type": "string", "format": "date-time"},
 			"decayPerDay": map[string]any{"type": "integer", "minimum": 1.0},
@@ -52,6 +52,8 @@ func StateFromData(data map[string]any) (*State, error) {
 	}
 	if v, ok := data["intensity"].(float64); ok {
 		s.Intensity = ClampIntensity(int(v))
+	} else if v, ok := data["intensity"].(int); ok {
+		s.Intensity = ClampIntensity(v)
 	}
 	if v, ok := data["decayPerDay"].(float64); ok && v >= 1 {
 		s.DecayPerDay = int(v)

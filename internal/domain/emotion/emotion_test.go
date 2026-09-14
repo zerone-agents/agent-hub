@@ -114,3 +114,31 @@ func TestDefaultStateBaselineFallback(t *testing.T) {
 	custom := DefaultState(MoodWary)
 	require.Equal(t, MoodWary, custom.Baseline)
 }
+
+func TestNegativeEventsMoveMoodBelowBaseline(t *testing.T) {
+	now := time.Now()
+	s := DefaultState(MoodCalm)
+
+	// 一次 severity 3 背叛：-30 × 2 = -60，受单事件 -40 上限约束 → -40，投影到 grieving。
+	next, err := ApplyEvent(s, "betrayed", 3, now)
+	require.NoError(t, err)
+	require.Equal(t, -40, next.Intensity)
+	require.Equal(t, MoodGrieving, next.Mood)
+	require.Contains(t, next.Narration, "悲伤")
+
+	// 再来一次：-80。
+	next, err = ApplyEvent(next, "betrayed", 3, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, -80, next.Intensity)
+
+	// 负向衰减：向 0 回落，越过 -20 后回到基线心情。
+	settled := SettleDecay(next, now, now.Add(5*24*time.Hour))
+	require.Equal(t, 0, settled.Intensity)
+	require.Equal(t, MoodCalm, settled.Mood)
+
+	// 混合符号：悲伤 -80 后被表扬 +12 → -68，心情沿用悲伤侧而非"振奋(-68)"。
+	mixed, err := ApplyEvent(next, "praised", 1, now)
+	require.NoError(t, err)
+	require.Equal(t, -68, mixed.Intensity)
+	require.Equal(t, MoodGrieving, mixed.Mood)
+}

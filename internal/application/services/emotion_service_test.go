@@ -64,10 +64,12 @@ func TestEmotionServiceOnEventAppliesVocabularyAndIsIdempotent(t *testing.T) {
 	require.Equal(t, 24, status.Intensity)
 
 	// 新事件正常叠加
-	require.NoError(t, es.OnEvent("t1", r.ID, 7, "insulted", 2, at.Add(time.Hour), "evt-2")) // -30 → 0
+	require.NoError(t, es.OnEvent("t1", r.ID, 7, "insulted", 2, at.Add(time.Hour), "evt-2")) // -30 → -6
 	status, err = es.Status("t1", r.ID, 7)
 	require.NoError(t, err)
-	require.Equal(t, 0, status.Intensity)
+	require.Equal(t, -6, status.Intensity)
+	// |−6| ≤ 20 属平静档，叙述保持"情绪平稳"，但强度已为负向
+	require.Equal(t, emotion.MoodCalm, status.Mood)
 }
 
 func TestEmotionServiceOnEventRejectsUnknownVocabulary(t *testing.T) {
@@ -82,15 +84,16 @@ func TestEmotionServiceDecaySettlesByEventTime(t *testing.T) {
 	es, rs := newEmotionTestService(t)
 	r, err := rs.Create("t1", CreateRunInput{Name: "scene"})
 	require.NoError(t, err)
-	base := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
-
-	require.NoError(t, es.OnEvent("t1", r.ID, 7, "betrayed", 3, base, "evt-b")) // -40
-	require.NoError(t, es.OnEvent("t1", r.ID, 7, "threatened", 3, base.Add(48*time.Hour), "evt-t"))
-	// 48h × 20/day = 40 衰减后剩 0，再 -40 仍为 0（钳制）
+	// 注意：Status 读取时按真实当前时间结算衰减，因此事件时间必须以
+	// now 为锚，不能用写死的过去日期。
+	now := time.Now().UTC()
+	require.NoError(t, es.OnEvent("t1", r.ID, 7, "betrayed", 3, now.Add(-48*time.Hour), "evt-b")) // -40
+	require.NoError(t, es.OnEvent("t1", r.ID, 7, "threatened", 3, now, "evt-t"))
+	// 48h × 20/day = 40 衰减后回到 0，再 -40 → 负面情绪重新生效
 	status, err := es.Status("t1", r.ID, 7)
 	require.NoError(t, err)
-	require.Equal(t, 0, status.Intensity)
-	require.Equal(t, emotion.MoodCalm, status.Mood)
+	require.Equal(t, -40, status.Intensity)
+	require.Equal(t, emotion.MoodTense, status.Mood)
 }
 
 func TestEmotionServiceDecayTowardBaselineAcrossReads(t *testing.T) {
