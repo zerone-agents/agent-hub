@@ -199,7 +199,10 @@ func newGuestVisEnv(t *testing.T, guest bool) *guestVisEnv {
 	// ComputePendingArtifacts（快照表缺失 → fail-open 记日志不阻塞，200）；
 	// 传 nil 会在该分支 nil 解引用（agent_error_test.go 的 nil 约定只适用
 	// 于错误先行的路径）。
-	agentH := NewAgentHandler(services.NewAgentService("", ""), services.NewAgentDeployerService(services.AgentDeployerConfig{}))
+	// audit recorder 用包内共享的测试 helper（独立 sqlite，main #150 起
+	// NewAgentHandler 必传；本测试的读路径不产生审计，但保持真实 recorder
+	// 让未来扩展写路径时同样安全）。
+	agentH := NewAgentHandler(services.NewAgentService("", ""), services.NewAgentDeployerService(services.AgentDeployerConfig{}), newHandlerTestAuditRecorder(t))
 	chatH := NewAgentChatHandler(services.NewAgentChatService(
 		repository.NewChatRepository(),
 		repository.NewAgentRepository(),
