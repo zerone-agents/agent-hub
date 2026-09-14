@@ -1,0 +1,8 @@
+{
+  "name": "zerone-agent-hub",
+  "private": true,
+  "description": "Agent Hub backend + embedded frontend. `npm run dev` starts the local dev server (SQLite mode, port 7100). Frontend lives in frontend/.",
+  "scripts": {
+    "dev": "bash scripts/dev-local.sh"
+  }
+}

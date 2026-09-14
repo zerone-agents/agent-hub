@@ -27,6 +27,7 @@ import (
 	"control-panel/internal/domain/systemsetting"
 	"control-panel/internal/domain/workflow"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -37,7 +38,16 @@ var DB *gorm.DB
 func InitDatabase(cfg *config.DatabaseConfig) error {
 	var err error
 
-	DB, err = gorm.Open(mysql.Open(cfg.URL), &gorm.Config{
+	// Local dev convenience: a DATABASE_URL of the form "sqlite:<path>" uses an
+	// embedded SQLite database instead of MySQL (e.g. when Docker is not
+	// available). Production MySQL DSNs are unaffected. SQLite semantics are
+	// already exercised by the migration tests in this package.
+	dialector := gorm.Dialector(mysql.Open(cfg.URL))
+	if strings.HasPrefix(cfg.URL, "sqlite:") {
+		dialector = sqlite.Open(strings.TrimPrefix(cfg.URL, "sqlite:"))
+	}
+
+	DB, err = gorm.Open(dialector, &gorm.Config{
 		// Warn: only slow SQL and errors. Info would log every statement with
 		// full parameter values, leaking chat message contents into stdout.
 		Logger: logger.Default.LogMode(logger.Warn),
