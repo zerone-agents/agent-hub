@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Avatar, Breadcrumb, Dropdown } from 'antd'
+import { Breadcrumb } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router'
-import { SignOutIcon, KeyIcon, ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, LockIcon } from '@phosphor-icons/react'
+import { ListIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon, KeyIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import type { MenuProps } from 'antd'
 import { useAuthStore } from '@/stores/auth'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
@@ -10,7 +11,7 @@ import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
 import HeaderLinks from '@/components/HeaderLinks'
-import ChangePasswordModal from '@/features/users/ChangePasswordModal'
+import UserDropdown from '@/components/UserDropdown'
 
 const useStyles = createStyles(({ css }) => ({
   header: css`
@@ -129,34 +130,10 @@ const useStyles = createStyles(({ css }) => ({
     font-weight: 600;
     background: ${t.inkSubtle};
   `,
-  userArea: css`
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 12px 4px 16px;
-    border-radius: 20px;
-    cursor: pointer;
-    transition: background 0.15s;
-    &:hover {
-      background: ${t.surfaceHover};
-    }
-  `,
   actions: css`
     display: flex;
     align-items: center;
     gap: 8px;
-  `,
-  userName: css`
-    font-size: ${t.textSm};
-    font-weight: 500;
-    color: ${t.textSecondary};
-    @media (max-width: 768px) {
-      display: none;
-    }
-  `,
-  avatar: css`
-    background: var(--primary);
-    color: var(--primary-foreground);
   `
 }))
 
@@ -164,21 +141,14 @@ interface AppHeaderProps {
   onToggleSidebar: () => void
 }
 
-function getAvatarInitial(name?: string) {
-  const firstCharacter = Array.from(name?.trim() ?? '')[0]
-  return firstCharacter ? firstCharacter.toLocaleUpperCase() : 'U'
-}
-
 export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const { styles, cx } = useStyles()
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
-  const logout = useAuthStore((s) => s.logout)
   const canWrite = useCanWrite()
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [pwdModalOpen, setPwdModalOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // 知识库详情页面包屑显示具体库名
@@ -198,17 +168,13 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
     return () => { document.removeEventListener('mousedown', handleClick); }
   }, [mobileMenuOpen])
 
-  const handleLogout = async () => {
-    await logout()
-    await navigate('/login')
-  }
-
   const handleNavClick = async (path: string) => {
     await navigate(path)
     setMobileMenuOpen(false)
   }
 
-  const dropdownItems = [
+  // 管理页专属菜单项（注入 UserDropdown，排在「修改密码」之前）。
+  const userMenuExtraItems: MenuProps['items'] = [
     ...(user?.role === 'admin'
       ? [{
           key: 'users',
@@ -217,12 +183,6 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           onClick: async () => { await navigate('/settings/users'); }
         }]
       : []),
-    {
-      key: 'change-password',
-      icon: <LockIcon size={14} />,
-      label: '修改密码',
-      onClick: () => { setPwdModalOpen(true) }
-    },
     ...(canWrite
       ? [{
           key: 'cli-tokens',
@@ -238,13 +198,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           label: 'AIGC 标识配置',
           onClick: async () => { await navigate('/settings/aigc'); }
         }]
-      : []),
-    {
-      key: 'logout',
-      icon: <SignOutIcon size={14} />,
-      label: '退出登录',
-      onClick: handleLogout
-    }
+      : [])
   ]
 
   return (
@@ -283,14 +237,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
         <div className={styles.actions}>
           <HeaderLinks />
           <ThemeControls />
-          <Dropdown menu={{ items: dropdownItems }} trigger={['click']}>
-            <div className={styles.userArea}>
-              <span className={styles.userName}>{user?.name ?? 'Admin'}</span>
-              <Avatar className={styles.avatar} size={28}>
-                {getAvatarInitial(user?.name)}
-              </Avatar>
-            </div>
-          </Dropdown>
+          <UserDropdown extraItems={userMenuExtraItems} />
         </div>
       </div>
 
@@ -314,8 +261,6 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           })}
         </div>
       )}
-
-      <ChangePasswordModal open={pwdModalOpen} onClose={() => { setPwdModalOpen(false); }} />
     </header>
   )
 }

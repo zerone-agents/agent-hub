@@ -1,14 +1,15 @@
 import { useNavigate } from 'react-router'
 import { createStyles } from 'antd-style'
 import { Empty } from 'antd'
-import { ChatCircleDotsIcon, SignOutIcon } from '@phosphor-icons/react'
+import { ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { usePublicAgents } from '@/queries/useAgents'
 import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
 import { isGuestUser } from '@/lib/auth-guest'
-import { useAuthStore } from '@/stores/auth'
 import BrandMark from '@/components/BrandMark'
 import ThemeControls from '@/components/ThemeControls'
+import HeaderLinks from '@/components/HeaderLinks'
+import UserDropdown from '@/components/UserDropdown'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -19,11 +20,23 @@ const useStyles = createStyles(({ css }) => ({
     background: ${t.paper};
   `,
   header: css`
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 1px 0 var(--border);
+  `,
+  inner: css`
+    padding: 0 32px;
+    height: 52px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
+    justify-content: space-between;
+    @media (max-width: 768px) {
+      padding: 0 16px;
+    }
   `,
   brand: css`
     display: flex;
@@ -33,8 +46,10 @@ const useStyles = createStyles(({ css }) => ({
     font-weight: 700;
     color: ${t.ink};
   `,
-  spacer: css`
-    flex: 1;
+  actions: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
   `,
   badge: css`
     padding: 2px 10px;
@@ -42,23 +57,6 @@ const useStyles = createStyles(({ css }) => ({
     font-size: 12px;
     background: color-mix(in srgb, ${t.softAccent} 18%, transparent);
     color: ${t.ink};
-  `,
-  headerBtn: css`
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--card);
-    color: ${t.text};
-    padding: 6px 12px;
-    font-size: 13px;
-    cursor: pointer;
-    &:hover { background: color-mix(in srgb, ${t.ink} 6%, transparent); }
-  `,
-  username: css`
-    font-size: 13px;
-    color: ${t.textMuted};
   `,
   main: css`
     flex: 1;
@@ -121,23 +119,24 @@ export default function ChatHomePage() {
   const { data: agents, isLoading } = usePublicAgents()
   const { data: mode } = useAuthMode()
   const { data: user } = useUserInfo()
-  const logout = useAuthStore((s) => s.logout)
   const guest = isGuestUser(user, mode?.mode)
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <div className={styles.brand}>
-          <BrandMark size={28} />
-          Agent 聊天
+        <div className={styles.inner}>
+          <div className={styles.brand}>
+            <BrandMark size={28} />
+            Agent 聊天
+          </div>
+          <div className={styles.actions}>
+            {guest && <span className={styles.badge}>体验模式</span>}
+            <HeaderLinks />
+            <ThemeControls />
+            {/* 用户下拉与管理页同款，菜单仅保留修改密码与退出 */}
+            <UserDropdown />
+          </div>
         </div>
-        <div className={styles.spacer} />
-        {guest && <span className={styles.badge}>体验模式</span>}
-        <span className={styles.username}>{user?.name}</span>
-        <button type="button" className={styles.headerBtn} onClick={() => { void logout() }}>
-          <SignOutIcon size={14} /> 退出
-        </button>
-        <ThemeControls />
       </header>
       <main className={styles.main}>
         {!isLoading && (agents ?? []).length === 0 ? (
