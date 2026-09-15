@@ -10,12 +10,12 @@
     stroke="#B9573B"
     stroke-width="1.5"
   />
-  <polygon points="14,30 18,26 31,39 27,43" fill="#FFF9F5"/>
-  <polygon points="27,39 31,43 51,23 47,19" fill="#FFF9F5"/>
-  <circle cx="16" cy="28" r="5" fill="#FFF9F5"/>
-  <circle cx="29" cy="41" r="5" fill="#FFF9F5"/>
-  <circle cx="49" cy="21" r="5" fill="#FFF9F5"/>
-  <circle cx="16" cy="28" r="2" fill="#D96F4F"/>
-  <circle cx="29" cy="41" r="2" fill="#D96F4F"/>
-  <circle cx="49" cy="21" r="2" fill="#D96F4F"/>
+  <polygon points="14,31 18,27 31,40 27,44" fill="#FFF9F5"/>
+  <polygon points="27,40 31,44 51,24 47,20" fill="#FFF9F5"/>
+  <circle cx="16" cy="29" r="5" fill="#FFF9F5"/>
+  <circle cx="29" cy="42" r="5" fill="#FFF9F5"/>
+  <circle cx="49" cy="22" r="5" fill="#FFF9F5"/>
+  <circle cx="16" cy="29" r="2" fill="#D96F4F"/>
+  <circle cx="29" cy="42" r="2" fill="#D96F4F"/>
+  <circle cx="49" cy="22" r="2" fill="#D96F4F"/>
 </svg>
