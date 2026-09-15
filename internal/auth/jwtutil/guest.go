@@ -48,7 +48,8 @@ type pathPattern struct {
 //
 // 显式排除：mcps、admin/*、providers/:id 及一切非 GET；chat 端点树不在本表，
 // 由 matchesGuestChatPath 前缀放行（见 spec；与 cmd/server/main.go 实际注册
-// 路由逐条对应）。
+// 路由逐条对应）。POST /api/v1/chat/push 为唯一 guest 写操作放行，由
+// matchesChatPushPath 独立处理（归属安全由 service/repo 强制覆写保证，issue #155）。
 // 新增放行端点时必须新增对应回归用例。
 var pendingConfigPatterns = []pathPattern{
 	{http.MethodGet, []string{"", "api", "v1", "providers"}},
@@ -125,6 +126,30 @@ func matchesGuestChatPath(path string) bool {
 	return true
 }
 
+// matchesChatPushPath 报告 method+path 是否命中桌面会话上传端点
+// POST /api/v1/chat/push（issue #155：guest 体验账号允许同步自己的会话）。
+// 写操作必须 method 校验：仅 POST 放行；path 做段级精确匹配
+// ["", "api", "v1", "chat", "push"]——段数严格相等，尾斜杠尾段为空串
+// 按失配处理（fail-closed 403），不做前缀模糊放行
+// （/api/v1/chat/anything、/api/v1/chat/pushx 均 403）。
+// 与 cmd/server/main.go 实际注册路由（chatPushGroup.POST("/push")）逐段对应。
+func matchesChatPushPath(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	want := []string{"", "api", "v1", "chat", "push"}
+	seg := strings.Split(path, "/")
+	if len(seg) != len(want) {
+		return false
+	}
+	for i := range seg {
+		if seg[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // IsGuest reports whether the caller is an "effective guest": an explicit
 // guest role (any auth method) or empty roles with casdoor/cli auth.
 // 正式角色（admin/maintainer/member）、builtin 空 roles（防御放行）、
@@ -149,7 +174,7 @@ func IsGuest(c *gin.Context) bool {
 // guest 语义重构，spec 3.2）。行为矩阵：
 //   - 非 guest（正式角色 / builtin 空 roles / keys 未注入）→ 放行；
 //   - guest + 白名单（原有精确路径、health、GET 配置端点、GET scenes、
-//     聊天端点树）→ 放行；
+//     聊天端点树、POST /api/v1/chat/push 自身会话上传 #155）→ 放行；
 //   - guest + 其他路径 → 403，error 以 PENDING_APPROVAL 开头（wire 契约保留）。
 func GuestGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -161,7 +186,8 @@ func GuestGuard() gin.HandlerFunc {
 		if _, ok := pendingWhitelistExact[path]; ok ||
 			strings.HasPrefix(path, healthPathPrefix) ||
 			matchesPendingConfig(c.Request.Method, path) ||
-			matchesGuestChatPath(path) {
+			matchesGuestChatPath(path) ||
+			matchesChatPushPath(c.Request.Method, path) {
 			c.Next()
 			return
 		}
