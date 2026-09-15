@@ -230,7 +230,12 @@ func TestGuestGuardConfigWhitelist(t *testing.T) {
 		{name: "chat uploads POST 放行", method: http.MethodPost, path: "/api/v1/agents/my-agent/chat/sessions/abc/uploads", wantStatus: http.StatusOK},
 		{name: "chat attachments content GET 放行", method: http.MethodGet, path: "/api/v1/agents/my-agent/chat/sessions/abc/attachments/content", wantStatus: http.StatusOK},
 		// ---- chat 树防御：非 /api/v1/agents/{}/chat 前缀不放行 ----
-		{name: "顶层 chat/push 拦截", method: http.MethodPost, path: "/api/v1/chat/push", wantStatus: http.StatusForbidden},
+		// ---- chat/push 上传端点（#155）：仅 POST 精确路径放行 ----
+		{name: "chat/push 上传放行（#155）", method: http.MethodPost, path: "/api/v1/chat/push", wantStatus: http.StatusOK},
+		{name: "chat/push GET 拦截（method 校验）", method: http.MethodGet, path: "/api/v1/chat/push", wantStatus: http.StatusForbidden},
+		{name: "chat/push 尾斜杠拦截（段失配）", method: http.MethodPost, path: "/api/v1/chat/push/", wantStatus: http.StatusForbidden},
+		{name: "chat/pushx 拦截（精确段不模糊）", method: http.MethodPost, path: "/api/v1/chat/pushx", wantStatus: http.StatusForbidden},
+		{name: "chat/anything 拦截（前缀不模糊）", method: http.MethodPost, path: "/api/v1/chat/anything", wantStatus: http.StatusForbidden},
 		{name: "agents 直下非 chat 子路径拦截", method: http.MethodGet, path: "/api/v1/agents/my-agent/deploy", wantStatus: http.StatusForbidden},
 		// ---- 仍 403 ----
 		{name: "admin 拦截", method: http.MethodGet, path: "/api/v1/admin/agents", wantStatus: http.StatusForbidden},
