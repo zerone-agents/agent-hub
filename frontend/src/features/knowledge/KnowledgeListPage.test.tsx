@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
@@ -19,7 +19,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/queries/useKnowledge', () => ({
   useKnowledgeList: () => ({ data: { datasets: h.datasets, total: h.total }, isLoading: false }),
-  useDeleteKnowledge: () => ({ mutate: h.deleteMock }),
+  useDeleteKnowledge: () => ({ mutateAsync: h.deleteMock, isPending: false }),
   useCreateKnowledge: () => ({ mutateAsync: h.createMock, isPending: false }),
   useUpdateKnowledge: () => ({ mutateAsync: vi.fn(), isPending: false })
 }))
@@ -98,6 +98,34 @@ describe('KnowledgeListPage', () => {
     h.total = 0
     renderPage()
     expect(screen.getByText('还没有知识库，点击右上角新建')).toBeInTheDocument()
+  })
+
+  it('keeps the delete confirmation pending until the request finishes', async () => {
+    const user = userEvent.setup()
+    let finishDelete!: () => void
+    h.deleteMock.mockImplementation(() => new Promise<void>((resolve) => {
+      finishDelete = resolve
+    }))
+    h.datasets = [sampleDatasets[0]]
+    h.total = 1
+    renderPage()
+
+    await user.click(screen.getByTitle('删除'))
+    const confirmation = await screen.findByText('确认删除？')
+    const popconfirm = confirmation.closest('.ant-popconfirm')
+    expect(popconfirm).not.toBeNull()
+    const confirmButton = within(popconfirm as HTMLElement).getByRole('button', { name: /删\s*除/ })
+
+    await user.click(confirmButton)
+
+    expect(h.deleteMock).toHaveBeenCalledTimes(1)
+    expect(h.deleteMock).toHaveBeenCalledWith('kb1')
+    await waitFor(() => { expect(confirmButton).toHaveClass('ant-btn-loading') })
+    await user.click(confirmButton)
+    expect(h.deleteMock).toHaveBeenCalledTimes(1)
+
+    finishDelete()
+    await waitFor(() => { expect(screen.getByText('确认删除？')).not.toBeVisible() })
   })
 
   it('submits a new dataset through the create modal', async () => {
