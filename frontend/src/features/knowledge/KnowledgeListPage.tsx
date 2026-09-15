@@ -140,7 +140,7 @@ export default function KnowledgeListPage() {
                 okText="删除"
                 okButtonProps={{ danger: true }}
                 cancelText="取消"
-                onConfirm={() => { deleteKnowledge.mutate(record.id); }}
+                onConfirm={() => deleteKnowledge.mutateAsync(record.id)}
               >
                 <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
                   <TrashIcon size={14} />
