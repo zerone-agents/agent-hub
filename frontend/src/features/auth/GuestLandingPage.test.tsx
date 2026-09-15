@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import { MemoryRouter } from 'react-router'
 import { antdTheme } from '@/lib/antd-theme'
@@ -47,9 +47,11 @@ describe('GuestLandingPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/agents/chat')
   })
 
-  it('「退出登录」按钮调用 store logout', () => {
+  it('「退出登录」调用 store logout 后显式跳转登录页', async () => {
     renderPage()
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
     expect(logoutMock).toHaveBeenCalledTimes(1)
+    // 隐式依赖 RequireAuth 重渲染会卡在落地页（需二次点击/手动刷新）——必须显式 navigate
+    await waitFor(() => { expect(navigateMock).toHaveBeenCalledWith('/login') })
   })
 })
