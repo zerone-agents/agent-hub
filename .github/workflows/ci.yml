@@ -136,6 +136,33 @@ jobs:
       - name: Run ESLint
         run: npx eslint .
 
+  # h5 移动端 SPA 门禁：type check + 生产构建（与 Dockerfile h5-builder
+  # 同路径，vite build base=/static/h5/）。h5 无 eslint 配置与测试，
+  # lint 脚本即 tsc --noEmit。
+  h5-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: h5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: h5/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: |
+          npx tsc --noEmit
+          npx vite build
+
   # Full test suite (including slow component tests excluded from PR runs).
   # Replaces frontend-test on main push. PR 触发时此 job skip。
   frontend-test-full:
