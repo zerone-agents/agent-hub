@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { Alert, Input, Modal, Select, Table, Tag, Space, message } from 'antd'
 import { PackageIcon, PlusIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import { parseApiError } from '@/api/client'
 import { useExtensionList, useRegisterExtension } from '@/queries/useExtensionRegistry'
 import PrimaryButton from '@/components/PrimaryButton'
@@ -57,7 +57,6 @@ const useStyles = createStyles(({ css }) => ({
 
 export default function ExtensionListPage() {
   const { styles } = useStyles()
-  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [status, setStatus] = useState<string>()
@@ -144,7 +143,9 @@ export default function ExtensionListPage() {
             dataIndex: 'name',
             render: (_, record) => (
               <Space direction="vertical" size={0}>
-                <a onClick={() => navigate(`/extensions/${record.id}`)}>{record.name}</a>
+                {/* 用 Link 而不是 <a onClick>：后者没有 href，无法键盘聚焦、
+                    无法 cmd+点击新标签打开，也无右键「复制链接地址」（P2-22）。 */}
+                <Link to={`/extensions/${record.id}`}>{record.name}</Link>
                 <span style={{ color: t.textTertiary, fontSize: 12 }}>
                   {record.displayName || '—'}
                 </span>

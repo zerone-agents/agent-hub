@@ -104,6 +104,13 @@ type InstallResult struct {
 	Install            *extension.Install `json:"install"`
 	Idempotent         bool               `json:"idempotent"`                   // 同版本重复安装时置 true
 	DependentsDisabled []string           `json:"dependentsDisabled,omitempty"` // force 卸载时级联停用的依赖方
+	// BuiltinDisableOnly 表示这是内置（source=seed）扩展的"卸载"请求：
+	// 实际执行的是停用而非物理卸载，调用方应据此提示用户。
+	BuiltinDisableOnly bool `json:"builtinDisableOnly,omitempty"`
+	// ExtensionToken 是首次安装时签发的扩展身份凭据明文（P0）。
+	// 只在此处出现一次，Hub 只存摘要；幂等重复安装、升级/回滚不重新签发
+	// （不会重复暴露），需要新凭据请调用轮换接口。
+	ExtensionToken string `json:"extensionToken,omitempty"`
 }
 
 // normalizedTenant 与 ExtensionService 的空租户归一规则保持一致。
@@ -281,6 +288,7 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 	defer unlock()
 	created := false
 	var existing *extension.Install
+	var issuedToken string
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var err error
 		existing, err = findInstall(tx, tenantID, ext.ID)
@@ -305,7 +313,7 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 			Version:     ver.Version,
 			Status:      extension.InstallStatusEnabled,
 			InstalledBy: strings.TrimSpace(installedBy),
-			InstalledAt: time.Now(),
+			InstalledAt: time.Now().UTC(),
 		}
 		if err := tx.Create(&inst).Error; err != nil {
 			if isDuplicate(err) {
@@ -315,6 +323,13 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 			}
 			return fmt.Errorf("写入安装记录失败：%w", err)
 		}
+		// H7.4（P0）：安装即签发扩展身份凭据。明文只在本次响应里返回一次，
+		// 库内只留摘要；后续调用 Hub API 需要它来证明自己是哪个扩展。
+		token, err := issueCredentialTx(tx, &inst)
+		if err != nil {
+			return err
+		}
+		issuedToken = token
 		existing = &inst
 		created = true
 		// H7.4：授权同步与安装同事务，失败整体回滚（无半完成状态）。
@@ -323,7 +338,7 @@ func (s *ExtensionLifecycleService) Install(tenantID string, extID uint64, versi
 	if err != nil {
 		return nil, err
 	}
-	return &InstallResult{Install: existing, Idempotent: !created}, nil
+	return &InstallResult{Install: existing, Idempotent: !created, ExtensionToken: issuedToken}, nil
 }
 
 // setInstallStatus 是启停的公共实现：只改 installs.status，
@@ -630,6 +645,23 @@ func (s *ExtensionLifecycleService) Uninstall(tenantID string, extID uint64, for
 	if inst == nil {
 		return nil, lifecycleErrorf(404, "扩展 %s 尚未安装，无需卸载", ext.Name)
 	}
+	// 内置（source=seed）扩展是平台自带能力：启动期种子会重新确保它们
+	// "已安装 + 已启用"。若此处物理删除安装行，下次启动就会把管理员的卸载
+	// 动作悄悄撤销（页面显示已卸载、重启后又变回启用态）。因此内置扩展只支持
+	// 停用，不支持真正卸载；purge（彻底清除）同样拒绝。
+	if ext.Source == extension.SourceSeed {
+		if purge {
+			return nil, lifecycleErrorf(400, "内置扩展 %s 属于平台自带能力，不支持彻底卸载；请改用停用", ext.Name)
+		}
+		if _, err := s.setInstallStatus(tenantID, extID, extension.InstallStatusDisabled); err != nil {
+			return nil, err
+		}
+		disabled, err := findInstall(s.db, tenantID, ext.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &InstallResult{Install: disabled, BuiltinDisableOnly: true}, nil
+	}
 	dependents, err := s.dependentsOf(tenantID, ext.Name)
 	if err != nil {
 		return nil, err
@@ -794,6 +826,11 @@ func (s *ExtensionLifecycleService) Impact(tenantID string, extID uint64) (*Exte
 	}
 	if impact.NewStateSchemas == nil {
 		impact.NewStateSchemas = []string{}
+	}
+	// 未安装（version 为空）时走不到上面的赋值分支，Permissions 会是 nil →
+	// 序列化成 `"permissions": null`，前端 `.length` 直接崩。
+	if impact.Permissions == nil {
+		impact.Permissions = []PermissionSummary{}
 	}
 	return impact, nil
 }

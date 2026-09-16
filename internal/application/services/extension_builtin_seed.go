@@ -23,6 +23,9 @@ import (
 // builtinPersonaPackExtensionVersion 是内置人物能力扩展的初始版本。
 const builtinPersonaPackExtensionVersion = "1.0.0"
 
+// BuiltinPersonaPackTenant 是内置人物能力扩展所属的平台级租户。
+const BuiltinPersonaPackTenant = "default"
+
 // builtinPersonaPack 描述一个待种子的内置人物能力扩展。
 type builtinPersonaPack struct {
 	Pack        string // 能力包标识（PersonaCapabilityGate 的 pack 参数）
@@ -32,11 +35,28 @@ type builtinPersonaPack struct {
 }
 
 // builtinPersonaPacks 是四个人物能力的内置扩展清单（顺序稳定，便于测试）。
+//
+// 命名一致性提醒（P2）：这三个包的"扩展名"与"RunState 状态命名空间"同名，
+// 唯独主观记忆不同名 —— 扩展名是 io.zerone.memory，状态命名空间是
+// io.zerone.subjective-memory（见 internal/domain/subjectivememory）。
+// 状态命名空间沿用早期 H6 设计不能改（改了旧 run_states 数据就找不回来），
+// 因此运维在扩展列表里找不到 io.zerone.subjective-memory 是正常的：
+// 想停用主观记忆请停用 io.zerone.memory。
 var builtinPersonaPacks = []builtinPersonaPack{
 	{PersonaPackEmotion, "io.zerone.emotion", "情绪状态", "内置人物能力：记录并叙述 Agent 的情绪状态，供提示词与工作流钩子使用。"},
 	{PersonaPackBelief, "io.zerone.belief", "认知立场", "内置人物能力：管理 Agent 对事实的认知立场与看法声明。"},
-	{PersonaPackMemory, "io.zerone.memory", "主观记忆", "内置人物能力：按 Agent 主观解释记录与检索近期记忆，注入提示词。"},
+	{PersonaPackMemory, "io.zerone.memory", "主观记忆", "内置人物能力：按 Agent 主观解释记录与检索近期记忆，注入提示词。（对应 RunState 命名空间 io.zerone.subjective-memory，两者刻意不同名）"},
 	{PersonaPackRelationshipDynamics, "io.zerone.relationship-dynamics", "动态关系", "内置人物能力：维护 Agent 之间的定向态度与动态关系影响。"},
+}
+
+// BuiltinPersonaPackNames 返回内置人物能力扩展名（稳定顺序），
+// 供启动期断言与运维脚本核对种子是否真正落地。
+func BuiltinPersonaPackNames() []string {
+	names := make([]string, 0, len(builtinPersonaPacks))
+	for _, pack := range builtinPersonaPacks {
+		names = append(names, pack.Name)
+	}
+	return names
 }
 
 // builtinPersonaPackManifest 生成能通过 extensionmanifest 严格校验的最小
@@ -70,7 +90,7 @@ func (s *ExtensionLifecycleService) EnsureBuiltinPersonaPacks() error {
 }
 
 func (s *ExtensionLifecycleService) ensureBuiltinPersonaPack(tx *gorm.DB, pack builtinPersonaPack) error {
-	tenantID := "default"
+	tenantID := BuiltinPersonaPackTenant
 	raw := builtinPersonaPackManifest(pack)
 	manifest, errs := extensionmanifest.ValidateExtensionManifest([]byte(raw))
 	if len(errs) > 0 {
@@ -138,7 +158,7 @@ func (s *ExtensionLifecycleService) ensureBuiltinPersonaPack(tx *gorm.DB, pack b
 			Version:     ver.Version,
 			Status:      extension.InstallStatusEnabled,
 			InstalledBy: "system",
-			InstalledAt: time.Now(),
+			InstalledAt: time.Now().UTC(),
 		}
 		if err := tx.Create(&newInst).Error; err != nil {
 			if !isDuplicate(err) {

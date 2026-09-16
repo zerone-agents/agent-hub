@@ -1,7 +1,7 @@
 // ExtensionSlotRenderer 组件测试：四种声明式组件渲染、错误边界降级、
 // 动态数据源失败降级、加载骨架屏、响应式栅格类名。
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
@@ -77,6 +77,36 @@ describe('ExtensionSlotRenderer', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
   })
 
+  // P2-15 回归：扩展 manifest 的 ui.slots[].data 是自由 map，href 原样进
+  // <a href> 就等于把 javascript: 注入面交给扩展（点一下即 XSS）。
+  it('link-list 拒绝非法协议的 href，退化为纯文本', async () => {
+    mockedFetchSlots.mockResolvedValue([
+      item({
+        component: 'link-list',
+        title: '扩展链接',
+        data: {
+          links: [
+            { label: '恶意', href: 'javascript:alert(1)' },
+            { label: '协议相对', href: '//evil.com/x' },
+            { label: '正常', href: 'https://example.com/ok' }
+          ]
+        }
+      })
+    ])
+    renderSlot()
+
+    expect(await screen.findByRole('link', { name: '正常' })).toHaveAttribute(
+      'href',
+      'https://example.com/ok'
+    )
+    expect(screen.queryByRole('link', { name: '恶意' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '协议相对' })).toBeNull()
+    // 链接降级成文本，不是整项消失（用户仍能看到扩展想展示什么）
+    expect(screen.getByText('恶意')).toBeInTheDocument()
+    expect(screen.getByText('协议相对')).toBeInTheDocument()
+    expect(document.querySelectorAll('a')).toHaveLength(1)
+  })
+
   it('渲染 key-value 键值对', async () => {
     mockedFetchSlots.mockResolvedValue([
       item({ component: 'key-value', title: '配置', data: { entries: [{ key: '区域', value: '华东' }] } })
@@ -117,16 +147,37 @@ describe('ExtensionSlotRenderer', () => {
     expect(mockedFetchData).toHaveBeenCalledWith('/api/v1/extensions/io.zerone.test/metrics')
   })
 
-  it('动态数据源失败时显示「该扩展内容加载失败」，不影响其它组件', async () => {
+  it('动态数据源失败时降级提示，不影响其它组件', async () => {
     mockedFetchSlots.mockResolvedValue([
       item({ component: 'stat-card', title: '坏组件', dataSource: { path: '/x' } }),
       item({ component: 'stat-card', title: '好组件', data: { value: 1 } })
     ])
     mockedFetchData.mockRejectedValue(new Error('boom'))
     renderSlot()
-    expect(await screen.findByText('该扩展内容加载失败', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText('该扩展数据加载失败', {}, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByText('好组件')).toBeInTheDocument()
     expect(screen.getByText('1')).toBeInTheDocument()
+  })
+
+  // P2-16 回归：旧实现把失败 throw 进 SlotErrorBoundary，而边界没有复位逻辑，
+  // 后续 refetch 成功也永久显示"加载失败"。现在按 isError 渲染，
+  // 取数成功即自动恢复。
+  it('动态数据源先失败后成功：错误提示可恢复', async () => {
+    mockedFetchSlots.mockResolvedValue([
+      item({ component: 'stat-card', title: '动态', dataSource: { path: '/y' } })
+    ])
+    mockedFetchData.mockRejectedValue(new Error('boom'))
+    renderSlot()
+    expect(await screen.findByText('该扩展数据加载失败', {}, { timeout: 5000 })).toBeInTheDocument()
+
+    mockedFetchData.mockResolvedValue({ value: 9, description: '已恢复' })
+    await act(async () => {
+      await slotQueryClient.refetchQueries({ queryKey: ['extension-slot-data'] })
+    })
+
+    expect(await screen.findByText('9', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(screen.getByText('已恢复')).toBeInTheDocument()
+    expect(screen.queryByText('该扩展数据加载失败')).toBeNull()
   })
 
   it('插槽列表请求失败时静默降级为空', async () => {

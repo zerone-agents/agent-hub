@@ -14,6 +14,8 @@ package services
 
 import (
 	"errors"
+	"log"
+	"sync"
 
 	"control-panel/internal/domain/extension"
 
@@ -116,3 +118,25 @@ func (g *PersonaCapabilityGate) GateRecentMemoryProvider(inner RecentMemoryProvi
 		return inner(tenantID, runID, agentID)
 	}
 }
+
+// --- 未接线告警（P2）---
+
+// personaGateWarned 记录已告警过的服务名，保证每个服务进程内只打一条。
+var personaGateWarned sync.Map
+
+// WarnPersonaGateMissing 在某个消费方（services 与 handler 均可调用）的
+// PersonaCapabilityGate 未接线时打一次性警告。
+//
+// 未接线时消费方保持 fail-open（返回 true，等价于 H7 之前的"恒生效"行为）。
+// 这**不是**授权边界上的 fail-open：投递授权判定（relation_gate_denied）
+// 已与能力开关解耦、恒生效（见 agent_message_service 的关系门控段）。
+// 但 fail-open 若因为漏挂 SetPersonaCapabilityGate 而默默发生，管理员在
+// 页面上停用扩展会毫无效果且无人知道——所以至少留一条可检索的日志。
+func WarnPersonaGateMissing(service string) {
+	if _, loaded := personaGateWarned.LoadOrStore(service, struct{}{}); !loaded {
+		log.Printf("[h7] %s 未接线 PersonaCapabilityGate：人物能力门控整体失效（四个内置扩展停用后不生效）。若为生产接线缺失，请在 main.go 调用 SetPersonaCapabilityGate。", service)
+	}
+}
+
+// warnPersonaGateMissing 是包内别名，services 内部调用点用短名。
+func warnPersonaGateMissing(service string) { WarnPersonaGateMissing(service) }

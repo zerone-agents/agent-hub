@@ -15,43 +15,87 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// UpstreamGuardDisabled 仅供测试使用：临时关闭 upstream 私网地址阻断
+// upstreamGuardDisabled 仅供测试使用：临时关闭 upstream 私网地址阻断
 // （如 httptest 回环上游）。生产代码不得置位。
-var UpstreamGuardDisabled = false
+//
+// 用 atomic.Bool 而非导出布尔量：测试与其它用例并发时会读写它，
+// 且成对恢复的 API 形态比裸全局变量更不容易被误用后泄漏状态。
+var upstreamGuardDisabled atomic.Bool
 
-// disallowedUpstreamPrefixes 是 upstream 禁止指向的地址段：
-// 127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、
-// ::1/128、fc00::/7（ULA）、fe80::/10（链路本地）。
+// TestOnlyAllowPrivateUpstream 临时关闭 upstream 地址阻断，返回恢复函数。
+// 仅供测试使用，调用方必须 defer restore()；生产代码不得调用。
+func TestOnlyAllowPrivateUpstream() (restore func()) {
+	upstreamGuardDisabled.Store(true)
+	return func() { upstreamGuardDisabled.Store(false) }
+}
+
+func upstreamGuardEnabled() bool { return !upstreamGuardDisabled.Load() }
+
+// disallowedUpstreamPrefixes 是除标准库类别谓词之外、额外禁止的
+// 特殊用途 / 保留地址段。
+//
+// 判定语义是白名单（见 disallowedIPReason）：先由 netip 的类别谓词排除
+// 环回 / 链路本地 / 组播 / 私有 / 未指定，再叠加本表，最后要求剩余地址
+// 必须是全局单播。这样"新增保留段时忘了加进黑名单"不会直接变成漏洞——
+// 历史上 0.0.0.0、CGNAT(100.64/10)、NAT64/6to4/Teredo 都是因为只做黑名单枚举而漏过的。
 var disallowedUpstreamPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("127.0.0.0/8"),
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("172.16.0.0/12"),
-	netip.MustParsePrefix("192.168.0.0/16"),
-	netip.MustParsePrefix("169.254.0.0/16"),
-	netip.MustParsePrefix("::1/128"),
-	netip.MustParsePrefix("fc00::/7"),
-	netip.MustParsePrefix("fe80::/10"),
+	// ---- IPv4 特殊用途（RFC 6890 / 5737 / 6598 / 1112）----
+	netip.MustParsePrefix("0.0.0.0/8"),       // 本网络；0.0.0.0 拨号等价于本机
+	netip.MustParsePrefix("100.64.0.0/10"),   // CGNAT；含阿里云元数据 100.100.100.200
+	netip.MustParsePrefix("192.0.0.0/24"),    // IETF 协议专用
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.18.0.0/15"),   // 网络设备基准测试
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("240.0.0.0/4"),     // 保留；含 255.255.255.255 广播
+	// ---- IPv6 特殊用途 ----
+	netip.MustParsePrefix("::/128"),        // 未指定
+	netip.MustParsePrefix("64:ff9b::/96"),  // NAT64；可封装内网 IPv4
+	netip.MustParsePrefix("2001::/32"),     // Teredo；可封装内网 IPv4
+	netip.MustParsePrefix("2002::/16"),     // 6to4；可封装内网 IPv4
+	netip.MustParsePrefix("2001:db8::/32"), // 文档示例
 }
 
 // disallowedIPReason 返回 IP 被禁止的原因（空串表示允许）。
+// 白名单语义：只有确认为"全局单播且不在保留段内"的地址才放行。
 func disallowedIPReason(ip netip.Addr) string {
+	if !ip.IsValid() {
+		return "无效地址"
+	}
+	// 带 zone 的地址一律拒绝。netip.Prefix.Contains 对带 zone 的地址恒返回
+	// false，且 Unmap() 不剥离 zone——先 Unmap 再比对整表会全部漏过
+	// （::1%lo0 / fe80::1%eth0 / fd00::1%eth0 曾因此绕过环回与链路本地拦截）。
+	if ip.Zone() != "" {
+		return "带 zone 的地址"
+	}
 	ip = ip.Unmap()
+	switch {
+	case ip.IsUnspecified():
+		return "未指定地址"
+	case ip.IsLoopback():
+		return "环回地址"
+	case ip.IsLinkLocalUnicast():
+		return "链路本地地址"
+	case ip.IsInterfaceLocalMulticast():
+		return "接口本地组播地址"
+	case ip.IsLinkLocalMulticast():
+		return "链路本地组播地址"
+	case ip.IsMulticast():
+		return "组播地址"
+	case ip.IsPrivate():
+		return "私有地址"
+	}
 	for _, p := range disallowedUpstreamPrefixes {
 		if p.Contains(ip) {
-			switch {
-			case ip.IsLoopback():
-				return "环回地址"
-			case ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast():
-				return "链路本地地址"
-			case ip.IsPrivate():
-				return "私有地址"
-			default:
-				return "保留地址"
-			}
+			return "保留地址"
 		}
+	}
+	if !ip.IsGlobalUnicast() {
+		return "非全局单播地址"
 	}
 	return ""
 }
@@ -60,7 +104,7 @@ func disallowedIPReason(ip netip.Addr) string {
 // 非 IP 字面量（域名）一律放行（解析校验在转发前由
 // ResolveAndValidateUpstream 完成）。
 func ValidateUpstreamIPLiteral(host string) error {
-	if UpstreamGuardDisabled {
+	if !upstreamGuardEnabled() {
 		return nil
 	}
 	host = strings.TrimSpace(host)
@@ -104,7 +148,7 @@ func ValidateAndResolveIPs(raw string) ([]netip.Addr, error) {
 	}
 	host := up.Hostname()
 	if ip, err := netip.ParseAddr(host); err == nil {
-		if !UpstreamGuardDisabled {
+		if upstreamGuardEnabled() {
 			if reason := disallowedIPReason(ip); reason != "" {
 				return nil, fmt.Errorf("upstream 不允许指向%s %s", reason, ip.String())
 			}
@@ -125,7 +169,7 @@ func ValidateAndResolveIPs(raw string) ([]netip.Addr, error) {
 			return nil, fmt.Errorf("upstream 域名 %q 解析出无法识别的地址，拒绝转发", host)
 		}
 		addr = addr.Unmap()
-		if !UpstreamGuardDisabled {
+		if upstreamGuardEnabled() {
 			if reason := disallowedIPReason(addr); reason != "" {
 				return nil, fmt.Errorf("upstream 域名 %q 解析到%s %s，拒绝转发", host, reason, addr.String())
 			}

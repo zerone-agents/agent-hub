@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { Skeleton, theme } from 'antd'
 import { createStyles } from 'antd-style'
 import { fetchExtensionDataSource, fetchExtensionSlots, type ExtensionSlotItem } from '@/api/extensionSlots'
+import { safeExternalHref } from '@/utils/url'
 
 const useStyles = createStyles(({ css }) => ({
   grid: css`
@@ -149,8 +150,11 @@ function LinkList({ data }: { data?: Record<string, unknown> }) {
   return (
     <ul className={styles.linkList}>
       {links.map((link, i) => {
-        const href = asString(link?.href)
-        const label = asString(link?.label) || href
+        const label = asString(link?.label) || asString(link?.href)
+        // 扩展声明的 href 必须过协议白名单：manifest 的 ui.slots[].data 在后端
+        // 是自由 map[string]any，原样进 <a href> 就等于把 javascript: 注入面
+        // 交给扩展（点一下即 XSS）。校验不通过时退化为纯文本。
+        const href = safeExternalHref(link?.href)
         return (
           <li key={`${href}-${i}`}>
             {href ? (
@@ -216,21 +220,34 @@ function StaticBody({ item, data }: { item: ExtensionSlotItem; data?: Record<str
   }
 }
 
-// DataSourceBody：动态数据组件。失败（网络/代理 502/超限）抛给错误边界降级。
+// DataSourceBody：动态数据组件。网络/代理 502/超限等失败场景直接渲染降级文案。
+//
+// 这里刻意**不 throw**：错误边界一旦置 failed 就没有复位路径，后续 refetch
+// 成功也依旧永久显示"加载失败"。直接按 isError 渲染，refetch 成功后
+// isError 转 false，内容自然恢复；边界只兜底真正意外的渲染异常，
+// 并用 `key={dataUpdatedAt}` 让它在每次成功取数后重挂（等于自动复位）。
 function DataSourceBody({ item }: { item: ExtensionSlotItem }) {
-  const { data, isLoading, isError } = useQuery({
+  const { styles } = useStyles()
+  const { data, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ['extension-slot-data', item.extensionName, item.dataSource?.path],
     queryFn: () => fetchExtensionDataSource(item.dataSource?.path ?? ''),
     retry: 1,
     staleTime: 30_000
   })
   if (isLoading) return <Skeleton active paragraph={{ rows: 2 }} title={false} />
-  if (isError) throw new Error('扩展数据源加载失败')
-  const payload = (data ?? {}) as Record<string, unknown>
-  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'data' in payload) {
-    return <StaticBody item={item} data={(payload.data ?? {}) as Record<string, unknown>} />
+  if (isError) {
+    return <div className={styles.errorCard}>该扩展数据加载失败</div>
   }
-  return <StaticBody item={item} data={payload} />
+  const payload = (data ?? {}) as Record<string, unknown>
+  const body =
+    payload && typeof payload === 'object' && !Array.isArray(payload) && 'data' in payload
+      ? ((payload.data ?? {}) as Record<string, unknown>)
+      : payload
+  return (
+    <SlotErrorBoundary key={dataUpdatedAt}>
+      <StaticBody item={item} data={body} />
+    </SlotErrorBoundary>
+  )
 }
 
 function SlotCard({ item }: { item: ExtensionSlotItem }) {

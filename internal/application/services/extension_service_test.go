@@ -159,3 +159,73 @@ func TestExtensionServiceRegisterDefaultsAndValidation(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "source")
 }
+
+// P1-5 回归：列表类字段永不序列化成 null。
+//
+// 直接崩的路径是 `summarizePermissions` 在校验失败时 `return nil`，
+// 序列化成 `"permissions": null`，前端 `record.permissions.length` 抛
+// `undefined.length` 被根 ErrorBoundary 接住 → 整页白屏
+// （docs/h7-acceptance.md 记录的 belief disputes 事故同一形态）。
+func TestSummarizePermissionsNeverReturnsNil(t *testing.T) {
+	// 非法 JSON：无法解析出 manifest
+	require.Equal(t, []PermissionSummary{}, summarizePermissions(`{"apiVersion":`))
+	// 合法 JSON 但 manifest 校验失败（缺必填字段）
+	require.Equal(t, []PermissionSummary{}, summarizePermissions(`{"name":"x"}`))
+	// 合法 JSON、权限声明了但 actions 缺失 —— 严格校验里 actions 是硬错误
+	// （strict.go：`permissions[i].actions 至少声明一个操作`），所以整体校验
+	// 失败，权限清单要退回空切片而不是半截数据。
+	require.Equal(t, []PermissionSummary{}, summarizePermissions(`{
+	  "apiVersion": "agenthub.extension/v1alpha1",
+	  "name": "io.zerone.noactions",
+	  "version": "1.0.0",
+	  "displayName": "无操作声明",
+	  "description": "actions 缺失",
+	  "permissions": [{"permission": "state", "scope": "io.zerone.na/*"}]
+	}`))
+
+	// 正向对照：正常 manifest 仍能解析出权限
+	ok := summarizePermissions(string(testExtensionManifest("io.zerone.ok", "1.0.0")))
+	require.Len(t, ok, 1)
+	require.Equal(t, "state", ok[0].Permission)
+	require.Equal(t, []string{"read"}, ok[0].Actions)
+}
+
+// 同上：manifest 摘要的 slots 走 omitempty，但底层切片不能是 nil，
+// 否则一旦移除 omitempty 就会重新引入 null。
+func TestSummarizeManifestSlotsNeverNil(t *testing.T) {
+	// 校验失败分支（零值结构体也必须带上空切片）
+	require.NotNil(t, summarizeManifest(`{"apiVersion":`).Slots)
+	require.Empty(t, summarizeManifest(`{"apiVersion":`).Slots)
+	// 校验成功分支（fixture 声明了 ui.slots: ["sidebar"]）
+	require.Equal(t, []string{"sidebar"}, summarizeManifest(string(testExtensionManifest("io.zerone.slot", "1.0.0"))).Slots)
+}
+
+// 同上：Impact 的 permissions 只在 version 非空时赋值，未安装的扩展会
+// 直接返回 null。
+func TestExtensionImpactPermissionsNeverNil(t *testing.T) {
+	db := newExtensionTestDB(t)
+	svc := NewExtensionService(db)
+	lifecycle := NewExtensionLifecycleService(db)
+
+	res, err := svc.Register("tenant-impact", RegisterExtensionInput{
+		Manifest: testExtensionManifest("io.zerone.impact", "1.0.0"),
+	})
+	require.NoError(t, err)
+
+	// 尚未安装：version 为空，permissions 走不到赋值分支
+	impact, err := lifecycle.Impact("tenant-impact", res.Extension.ID)
+	require.NoError(t, err)
+	require.False(t, impact.Installed)
+	require.NotNil(t, impact.Permissions)
+	require.NotNil(t, impact.Dependents)
+	require.NotNil(t, impact.Dependencies)
+	require.NotNil(t, impact.NewStateSchemas)
+
+	// 已安装：正常带出权限清单
+	_, err = lifecycle.Install("tenant-impact", res.Extension.ID, "1.0.0", "admin")
+	require.NoError(t, err)
+	impact, err = lifecycle.Impact("tenant-impact", res.Extension.ID)
+	require.NoError(t, err)
+	require.True(t, impact.Installed)
+	require.Len(t, impact.Permissions, 1)
+}

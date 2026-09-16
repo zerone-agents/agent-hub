@@ -43,6 +43,22 @@ func flushUsage(t *testing.T, db *gorm.DB, n int) {
 
 func i64(v int64) *int64 { return &v }
 
+// TestUsageRecordPersistsUTC 锁定"写入时间戳必须是 UTC"这一约束。
+// 所有统计窗口（periodRange / NormalizeRange）都是 UTC 边界，而 SQLite
+// 按字符串比较带时区偏移的时间戳：若这里写本地时间，UTC+8 服务器上的
+// 用量记录会整天落在日/月窗口之外，预算与配额会少算且不告警。
+func TestUsageRecordPersistsUTC(t *testing.T) {
+	db := usageTestDB(t)
+	svc := newUsageSvc(t, db)
+	svc.Record(UsageRecordInput{Kind: usage.KindModelCall, TenantID: "ta"})
+	flushUsage(t, db, 1)
+
+	var rec usage.UsageRecord
+	require.NoError(t, db.Order("id DESC").First(&rec).Error)
+	_, offset := rec.CreatedAt.Zone()
+	require.Equal(t, 0, offset, "用量记录时间戳必须落 UTC，实际偏移 %d 秒", offset)
+}
+
 func TestUsageRecordNilServiceAndPanicSafe(t *testing.T) {
 	// nil 接收者：绝不 panic（Recover 在方法入口 defer）。
 	var nilSvc *UsageService
@@ -82,7 +98,7 @@ func TestUsageSummaryAggregatesCorrectly(t *testing.T) {
 		{TenantID: "ta", Kind: usage.KindModelCall, Model: "m1", TokensIn: i64(200), TokensOut: i64(100), LatencyMs: i64(300), Error: "boom", CreatedAt: day1.Add(2 * time.Hour)},
 		{TenantID: "ta", Kind: usage.KindMessage, TokensOut: i64(10), CreatedAt: day1.Add(3 * time.Hour)},
 		{TenantID: "ta", Kind: usage.KindModelCall, Model: "m2", CreatedAt: day1.Add(25 * time.Hour)}, // 次日
-		{TenantID: "tb", Kind: usage.KindModelCall, TokensIn: i64(999), CreatedAt: day1},             // 他租户
+		{TenantID: "tb", Kind: usage.KindModelCall, TokensIn: i64(999), CreatedAt: day1},              // 他租户
 	}
 	require.NoError(t, db.Create(&rows).Error)
 	svc := newUsageSvc(t, db)
@@ -97,10 +113,10 @@ func TestUsageSummaryAggregatesCorrectly(t *testing.T) {
 		byKind[k.Kind] = k
 	}
 	mc := byKind[usage.KindModelCall]
-	require.Equal(t, int64(3), mc.TotalCalls)                 // tb 不计
-	require.Equal(t, int64(450), mc.TotalTokens)              // (100+50)+(200+100)，in+out
+	require.Equal(t, int64(3), mc.TotalCalls)    // tb 不计
+	require.Equal(t, int64(450), mc.TotalTokens) // (100+50)+(200+100)，in+out
 	require.Equal(t, int64(1), mc.TotalErrors)
-	require.InDelta(t, 200.0, mc.AvgLatencyMs, 0.01)          // (100+300+NULL)/2
+	require.InDelta(t, 200.0, mc.AvgLatencyMs, 0.01) // (100+300+NULL)/2
 	require.Equal(t, int64(10), byKind[usage.KindMessage].TotalTokens)
 
 	// 趋势：9-10 两天 model_call = 2 与 1。

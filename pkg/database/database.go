@@ -1,9 +1,12 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,9 +20,9 @@ import (
 	"control-panel/internal/domain/chat"
 	"control-panel/internal/domain/collaboration"
 	"control-panel/internal/domain/decision"
+	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/extension"
 	"control-panel/internal/domain/extensionslot"
-	eventdomain "control-panel/internal/domain/event"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/personality"
 	"control-panel/internal/domain/provider"
@@ -126,6 +129,85 @@ func resolveBackfillTenant() string {
 	return ""
 }
 
+// --- 迁移互斥锁（P1）---
+
+const (
+	// migrationLockName 是 MySQL 命名锁名。GET_LOCK 的锁属于"会话"，
+	// 因此必须固定在同一条连接上 acquire/release，不能依赖连接池。
+	migrationLockName = "agenthub_schema_migrate"
+	// migrationLockTimeoutSeconds 是等待其它实例完成迁移的上限。
+	migrationLockTimeoutSeconds = 120
+)
+
+// acquireMigrationLock 在多副本部署下串行化整个迁移阶段，返回释放函数。
+// 非 MySQL（SQLite）直接返回空释放函数：单写库不存在并发迁移问题。
+func acquireMigrationLock() (func(), error) {
+	noop := func() {}
+	if DB == nil || DB.Dialector.Name() != "mysql" {
+		return noop, nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return noop, fmt.Errorf("获取数据库连接池失败: %w", err)
+	}
+	ctx := context.Background()
+	// 关键：锁绑定在单条连接上（MySQL GET_LOCK 是会话级），释放后立刻
+	// 归还并关闭该连接，确保会话结束、锁一定被释放（进程崩溃也不会留下
+	// 悬挂锁）。
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return noop, fmt.Errorf("获取迁移专用连接失败: %w", err)
+	}
+	var acquired sql.NullInt64
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", migrationLockName, migrationLockTimeoutSeconds).Scan(&acquired); err != nil {
+		conn.Close()
+		return noop, fmt.Errorf("获取数据库迁移锁失败: %w", err)
+	}
+	if !acquired.Valid || acquired.Int64 != 1 {
+		conn.Close()
+		return noop, fmt.Errorf("等待数据库迁移锁超时（%d 秒）：可能有另一个实例正在执行迁移，请稍后重试", migrationLockTimeoutSeconds)
+	}
+	log.Println("已获取数据库迁移锁，开始执行迁移")
+	return func() {
+		var released sql.NullInt64
+		if err := conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", migrationLockName).Scan(&released); err != nil {
+			log.Printf("释放数据库迁移锁失败（连接关闭时会自动释放）: %v", err)
+		}
+		if err := conn.Close(); err != nil {
+			log.Printf("关闭迁移专用连接失败: %v", err)
+		}
+	}, nil
+}
+
+// --- 破坏性迁移开关（P1）---
+
+// destructiveMigrationsEnv 是删除类迁移（删列/删表）的显式开关。
+const destructiveMigrationsEnv = "ALLOW_DESTRUCTIVE_MIGRATIONS"
+
+// destructiveMigrationsAllowed 报告是否允许执行删除类迁移。默认关闭：
+// 本分支所有迁移只有 up 没有 down，删掉的数据/列回滚旧镜像也救不回来。
+var destructiveMigrationsAllowed = parseBoolEnv(destructiveMigrationsEnv)
+
+func parseBoolEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// skipDestructiveMigration 在未显式 opt-in 时记录可执行的警告并返回 true，
+// 表示调用方应跳过本次删除。跳过是安全的：这些都是无消费方的遗留结构，
+// 留在库里只是占位。
+func skipDestructiveMigration(what string) bool {
+	if destructiveMigrationsAllowed {
+		return false
+	}
+	log.Printf("跳过破坏性迁移（%s）：默认不执行删列/删表——本分支迁移只有 up 没有 down，删掉后回滚旧镜像也救不回。确认已完成备份后设置 %s=1 再启动。", what, destructiveMigrationsEnv)
+	return true
+}
+
 // AutoMigrate runs the automatic migration for all models.
 // backfillTenant 指定存量行空 tenant_id 的回填目标；传空表示未显式指定
 // （仅 casdoor 模式合法），AutoMigrate 会从 user_identities 自动推断；
@@ -136,11 +218,21 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("database not initialized")
 	}
 
+	// 迁移串行化：多副本同时启动时，count-then-insert 的迁移会重复 INSERT
+	// 撞 1062，check-then-DDL 的迁移会重复 DROP COLUMN 撞 1091 —— 后者会让
+	// 后启动的副本直接启动失败。MySQL 用 GET_LOCK 把整个迁移阶段串起来；
+	// SQLite（单进程测试 / 单机部署）没有等价原语也不需要，直接跳过。
+	releaseLock, err := acquireMigrationLock()
+	if err != nil {
+		return err
+	}
+	defer releaseLock()
+
 	if err := migrateProviderAttributeIndex(); err != nil {
 		return fmt.Errorf("failed to migrate provider attribute index: %w", err)
 	}
 
-	err := DB.AutoMigrate(
+	err = DB.AutoMigrate(
 		&agent.AgentConfig{},
 		&personality.Template{},
 		&personality.Version{},
@@ -479,6 +571,9 @@ func migrateDropLegacyProviderColumns() error {
 	if DB == nil {
 		return nil
 	}
+	if skipDestructiveMigration("provider_summaries 遗留列 default_models/type") {
+		return nil
+	}
 	migrator := DB.Migrator()
 	if migrator.HasColumn(&provider.ProviderSummary{}, "default_models") {
 		if err := DB.Exec("ALTER TABLE provider_summaries DROP COLUMN `default_models`").Error; err != nil {
@@ -505,6 +600,9 @@ func migrateDropVendorPresets() error {
 	if DB == nil {
 		return nil
 	}
+	if skipDestructiveMigration("遗留备份表 vendor_presets") {
+		return nil
+	}
 	migrator := DB.Migrator()
 	if migrator.HasTable("vendor_presets") {
 		if err := DB.Exec("DROP TABLE `vendor_presets`").Error; err != nil {
@@ -525,6 +623,9 @@ func migrateDropVendorPresets() error {
 // SQLite-vs-MySQL uniformity reasons as migrateDropLegacyProviderColumns.
 func migrateDropLegacyTenantDomain() error {
 	if DB == nil {
+		return nil
+	}
+	if skipDestructiveMigration("遗留表 service_deployments/resources/tenants 与 users 游离列 tenant_id/casdoor_user_id") {
 		return nil
 	}
 	migrator := DB.Migrator()
@@ -553,6 +654,11 @@ func migrateDropLegacyTenantDomain() error {
 // `enabled` column and then drops that column. The new desktop_enabled /
 // mobile_enabled columns themselves are created by AutoMigrate from the model
 // tags. Idempotent: a no-op once the legacy column is gone.
+//
+// 刻意不受 ALLOW_DESTRUCTIVE_MIGRATIONS 约束：这里的 backfill 与 drop 是一次
+// 重命名（copy 到新列 + 删旧列）的两半，必须原子执行。只跳过 drop 会让
+// `UPDATE agents SET desktop_enabled = enabled` 每次启动都重跑，把运维后来
+// 改过的 desktop_enabled 用陈旧列的值反复覆盖回去 —— 比删列本身危险。
 func migrateAgentPlatformFlags() error {
 	// information_schema 是 MySQL 专有；sqlite（迁移测试）直接跳过——本函数
 	// 只处理遗留 enabled 列的回填/删除，不影响加列与租户回填。
@@ -585,6 +691,9 @@ func migrateAgentPlatformFlags() error {
 // AutoMigrate (which runs first in the sequence) has already added
 // max_session_queries, so a rename would always hit a duplicate-column
 // error. Idempotent: a no-op once the legacy column is gone.
+//
+// 与 migrateAgentPlatformFlags 同理，这里的 backfill+drop 是重命名的两半，
+// 刻意不受 ALLOW_DESTRUCTIVE_MIGRATIONS 约束（只跳过 drop 会让回填每启动重跑）。
 func migrateMaxSessionQueries() error {
 	// information_schema 是 MySQL 专有；sqlite（迁移测试）直接跳过——本函数
 	// 只处理遗留 max_session_turns 列的回填/删除，不影响加列与租户回填。
@@ -647,6 +756,10 @@ func migrateProviderAttributeIndex() error {
 		return err
 	}
 	if idxCount > 0 {
+		// 注意：这一次 DROP INDEX 刻意不受 ALLOW_DESTRUCTIVE_MIGRATIONS 约束。
+		// 它不是"清理遗留结构"，而是"重建索引"的第一步——同名旧索引不先删掉，
+		// 紧随其后的 AutoMigrate 无法建出复合索引 uk_provider_attr，会直接
+		// 启动失败。重命名/重建类操作不能加开关，否则开关一关就是启不来。
 		log.Println("Dropping old single-column uk_provider_attr index from provider_attributes...")
 		if err := DB.Exec("DROP INDEX uk_provider_attr ON provider_attributes").Error; err != nil {
 			return fmt.Errorf("failed to drop old uk_provider_attr index: %w", err)
@@ -685,6 +798,9 @@ func migrateDropToolRequiredColumn() error {
 	hasColumn := DB.Migrator().HasColumn("tools", "required")
 
 	if hasColumn {
+		if skipDestructiveMigration("tools 遗留列 required") {
+			return nil
+		}
 		log.Println("Dropping 'required' column from 'tools' table...")
 		if err := DB.Exec("ALTER TABLE tools DROP COLUMN required").Error; err != nil {
 			return err
@@ -884,6 +1000,9 @@ func migrateAigcModelCodes(db *gorm.DB) error {
 		}
 	}
 	if db.Migrator().HasColumn("aigc_configs", "model_codes") {
+		if skipDestructiveMigration("aigc_configs 遗留列 model_codes") {
+			return nil
+		}
 		if err := db.Exec("ALTER TABLE aigc_configs DROP COLUMN model_codes").Error; err != nil {
 			return fmt.Errorf("drop aigc_configs.model_codes column: %w", err)
 		}
@@ -1043,10 +1162,15 @@ func migrateProvidersTenantID() error {
 // 触发判据是双判据（OR 关系）：
 //  1. 旧全局唯一索引 uk_name 仍存在于任一四表（常规升级形态：AutoMigrate
 //     已建 uk_tenant_name，本函数删掉 uk_name 后重跑即为纯 no-op）；
-//  2. backfillTenantID 非空且四表中存在“遗留未回填行”（tenant_id=” 的
-//     行中，排除本就合法的共享行）——覆盖生产实锤的 legacy 形态：库的
-//     schema 本就无 uk_name（从未走过旧索引版本），判据 1 永不命中，
-//     回填被静默跳过，全部行停留共享域造成跨租户泄漏。
+//  2. 四表中存在“遗留未回填行”（tenant_id=” 的行中，排除本就合法的共享
+//     行）——覆盖生产实锤的 legacy 形态：库的 schema 本就无 uk_name（从未
+//     走过旧索引版本），判据 1 永不命中，回填被静默跳过，全部行停留共享域
+//     造成跨租户泄漏。
+//
+// 判据 2 刻意不附加“backfillTenantID 非空”：曾有的这个前置条件会把
+// “无法推断目标租户”（user_identities 为空或含多个租户）的情况也一并短路，
+// 于是遗留行既不回填也不报错，静默留在共享域。现在该情况下判据 2 命中后
+// 立即返回显式错误，且报错发生在任何破坏性 DDL 之前。
 //
 // 遗留行判定的表间差异：skills/scenes 无共享语义，任何 tenant_id=” 行
 // 都是无歧义的遗留信号；tools/mcps 的 ” 行可能是合法共享模板（预设/
@@ -1078,6 +1202,11 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 	// 预设行同名（('org-a','Skill') 与 ('','Skill') 合法共存），无条件按
 	// 名单归零会把租户私有行劫持进共享域，甚至撞 uk_tenant_name 唯一索引
 	// 导致启动失败。
+	// P1：第二判据不得挂在 backfillTenantID != "" 上。当无法推断租户
+	// （user_identities 为 0 行或 ≥2 行）且该库从未有过 uk_name 时，四张表里
+	// tenant_id='' 的遗留行此前既不回填也不报错，永久留在共享域被所有租户
+	// 读到——正是本函数要修的泄漏类型。现在改为：检测到遗留行而回填目标
+	// 不可推断时，**在任何破坏性 DDL 之前**直接报错，把静默降级成显式失败。
 	needsMigration := false
 	for _, model := range legacyModels {
 		if m.HasIndex(model, "uk_name") {
@@ -1085,7 +1214,12 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 			break
 		}
 	}
-	if !needsMigration && backfillTenantID != "" && hasLegacyUnbackfilledRows() {
+	if !needsMigration && hasLegacyUnbackfilledRows() {
+		if backfillTenantID == "" {
+			return fmt.Errorf(
+				"检测到存量数据 tenant_id 为空且无法自动推断目标租户（user_identities 为空或含多个租户）：请临时配置 CASDOOR_ORGANIZATION 指定回填目标，完成本次一次性迁移后移除该配置",
+			)
+		}
 		needsMigration = true
 	}
 
@@ -1128,6 +1262,10 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 	}
 
 	for table, model := range legacyModels {
+		// 刻意不受 ALLOW_DESTRUCTIVE_MIGRATIONS 约束：idx 的存在本身就是本段
+		// 迁移的幂等标记（判据 1），不删掉它会让整段迁移每次启动重跑 ——
+		// 其中包括把内置行 tenant_id 归零的 UPDATE，而那条 UPDATE 每次跑都
+		// 会劫持同名的租户私有行，甚至撞 uk_tenant_name 导致启动失败。
 		if m.HasIndex(model, "uk_name") {
 			if err := m.DropIndex(model, "uk_name"); err != nil {
 				return fmt.Errorf("drop %s.uk_name: %w", table, err)

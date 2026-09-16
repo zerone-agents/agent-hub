@@ -20,6 +20,7 @@ import {
 } from 'antd'
 import { createStyles } from 'antd-style'
 import { parseApiError } from '@/api/client'
+import { parseJsonSafe } from '@/utils/format'
 import type {
   TemplateInstallPlan,
   TemplateInstallResult,
@@ -81,9 +82,13 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
   const [step, setStep] = useState(0)
   const [version] = useState<string | undefined>(defaultVersion)
   const { data: versionDetail } = useTemplateVersion(templateId, version)
-  const spec: TemplateSpec | undefined = versionDetail?.spec
-    ? JSON.parse(versionDetail.spec)
-    : undefined
+  // 裸 JSON.parse 放在 render 体内有两个问题：spec 内容坏了会在渲染时抛错
+  // 被根 ErrorBoundary 接住（整页白屏），而且每次 render 都重解析一遍。
+  // 收进 useMemo + parseJsonSafe（解析失败退化成 undefined，页面照常渲染）。
+  const spec = useMemo(
+    () => parseJsonSafe<TemplateSpec>(versionDetail?.spec),
+    [versionDetail?.spec]
+  )
 
   // ① sections
   const [sections, setSections] = useState<string[]>(ALL_SECTIONS.map((s) => s.key))

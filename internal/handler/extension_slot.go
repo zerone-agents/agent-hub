@@ -1,8 +1,9 @@
 // ExtensionSlotHandler 是 H7.2 UI 插槽管理 API 与授权 API 代理。
 //
 // 管理端点：
-//   GET  /api/v1/admin/extensions/slots?slot=      聚合当前租户插槽内容
-//   POST /api/v1/admin/extensions/:id/slots/:slot/visible  临时隐藏/恢复组件
+//
+//	GET  /api/v1/admin/extensions/slots?slot=      聚合当前租户插槽内容
+//	POST /api/v1/admin/extensions/:id/slots/:slot/visible  临时隐藏/恢复组件
 //
 // 代理端点（注册在 /api/v1/extensions/:name/*，非 admin 分组、登录即可用）：
 // 只允许 GET；path 必须命中扩展 manifest 声明的 apiRoutes（声明时严格校验
@@ -32,17 +33,16 @@ const (
 )
 
 type ExtensionSlotHandler struct {
-	slots  *services.ExtensionSlotService
-	client *http.Client
+	slots *services.ExtensionSlotService
 	// secureClientFor 每次请求为 upstream 构造"校验 IP + 固定拨号"的
 	// HTTP 客户端（默认 SecureHTTPClientForUpstream，测试可替换）。
+	// 不存在裸客户端字段：任何直连都会绕开 SSRF 校验。
 	secureClientFor func(target string) (*http.Client, error)
 }
 
 func NewExtensionSlotHandler(s *services.ExtensionSlotService) *ExtensionSlotHandler {
 	return &ExtensionSlotHandler{
 		slots:           s,
-		client:          &http.Client{Timeout: extensionProxyTimeout},
 		secureClientFor: SecureHTTPClientForUpstream,
 	}
 }
@@ -100,6 +100,31 @@ func (h *ExtensionSlotHandler) SetSlotVisible(c *gin.Context) {
 		return
 	}
 	respondSuccess(c, ov)
+}
+
+// safeProxyLocation 判定上游返回的 Location 能否安全透传给调用方：
+// 只允许相对路径（不含协议相对写法 "//host"），或与本次请求 upstream
+// 同源（scheme + host 均相同）的绝对地址。其余一律不透传（返回空串）。
+func safeProxyLocation(loc, requestTarget string) string {
+	loc = strings.TrimSpace(loc)
+	if loc == "" || strings.HasPrefix(loc, "//") {
+		return ""
+	}
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme == "" && parsed.Host == "" {
+		return loc
+	}
+	base, err := url.Parse(strings.TrimSpace(requestTarget))
+	if err != nil || base.Host == "" {
+		return ""
+	}
+	if strings.EqualFold(parsed.Scheme, base.Scheme) && strings.EqualFold(parsed.Host, base.Host) {
+		return loc
+	}
+	return ""
 }
 
 // Proxy 是授权 API 通用代理：/api/v1/extensions/:name/*。
@@ -161,9 +186,16 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 	} else {
 		c.Header("Content-Type", "application/json; charset=utf-8")
 	}
-	// 3xx 不跟随跳转（防 Location 指向内网），原样透传含 Location
+	// 3xx 不跟随跳转（防 Location 指向内网）。同时也不能把上游给的任意绝对
+	// 地址经 Hub 域名透传出去——那会让本端点变成开放重定向器，并被用来
+	// 探测/引流到内网或钓鱼站。只放行"相对路径"与"与声明 upstream 同源"的
+	// Location，其余剔除并置 X-Extension-Location-Stripped 标记。
 	if loc := resp.Header.Get("Location"); loc != "" {
-		c.Header("Location", loc)
+		if safe := safeProxyLocation(loc, target); safe != "" {
+			c.Header("Location", safe)
+		} else {
+			c.Header("X-Extension-Location-Stripped", "true")
+		}
 	}
 	if truncated {
 		c.Header("X-Extension-Truncated", "true")
@@ -171,4 +203,3 @@ func (h *ExtensionSlotHandler) Proxy(c *gin.Context) {
 	c.Status(resp.StatusCode)
 	_, _ = c.Writer.Write(body)
 }
-

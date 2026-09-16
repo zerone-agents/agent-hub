@@ -14,6 +14,7 @@ import (
 // migration drops an existing vendor_presets table and is a no-op when the
 // table is already gone.
 func TestMigrateDropVendorPresets_DropsTableIdempotently(t *testing.T) {
+	allowDestructiveMigrationsForTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db

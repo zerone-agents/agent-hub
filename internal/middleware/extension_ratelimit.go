@@ -30,12 +30,11 @@ type ExtensionRateLimitConfig struct {
 const defaultExtensionRPM = 60
 
 // ExtensionRateLimit 返回按 (tenant, extension) 维度的固定窗口限流
-// 中间件。扩展身份取 X-Extension-Name 头；代理路由可直接用 :name
-// 路径参数（见 ExtensionRateLimitByParam）。
+// 中间件。扩展身份取 ExtensionIdentity 中间件写入上下文的已认证扩展名
+// （不再读取请求头：自报的名字不是限流维度，否则轮换名字即可绕过）；
+// 代理路由直接用 :name 路径参数即可（见 ExtensionRateLimitByParam）。
 func ExtensionRateLimit(cfg ExtensionRateLimitConfig) gin.HandlerFunc {
-	return ExtensionRateLimitByParam(cfg, func(c *gin.Context) string {
-		return c.GetHeader(ExtensionHeaderName)
-	})
+	return ExtensionRateLimitByParam(cfg, ExtensionIdentityOf)
 }
 
 // ExtensionRateLimitByParam 允许调用方自定义扩展名提取函数：

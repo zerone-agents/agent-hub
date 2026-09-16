@@ -79,9 +79,11 @@ func (s *AgentMessageService) SetPersonaHooks(belief *BeliefService, reldyn *Rel
 func (s *AgentMessageService) SetPersonaCapabilityGate(g *PersonaCapabilityGate) { s.personaGate = g }
 
 // personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
-// 原有"恒生效"行为（测试基座与旧接线兼容）。
+// 原有"恒生效"行为（测试基座与旧接线兼容），但打一条一次性告警，
+// 避免"漏挂 SetPersonaCapabilityGate"变成无人知晓的静默 fail-open。
 func (s *AgentMessageService) personaPackEnabled(tenantID, pack string) bool {
 	if s.personaGate == nil {
+		warnPersonaGateMissing("AgentMessageService")
 		return true
 	}
 	return s.personaGate.Enabled(tenantID, pack)
@@ -739,15 +741,23 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	// toward the source may require the target's confirmation for assign-like
 	// actions; inform/report are unaffected. This never rewrites the relation
 	// AllowedActions authorization above — it only records and surfaces.
+	//
+	// P1：授权判定与能力开关解耦。`!allowed → 拒绝投递` 是一条"拒绝"约束，
+	// 若把它放进"能力已启用"的条件里，停用 relationship-dynamics 扩展反而
+	// 会放宽投递授权（关闭功能不应扩大权限）。因此只要服务已接线就始终执行
+	// Gate 判定；只有 `needConfirm` 这类"影响力标注"才受能力开关控制。
+	// 判定出错时不拒绝（Gate 是叠加在关系 AllowedActions 之上的额外约束，
+	// 查询抖动不应阻断全部合法链路），但把原因写进 GuardReason 以便审计。
 	relationGate := ""
-	if s.personaRelDyn != nil && runID != "" && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics) {
+	if s.personaRelDyn != nil && runID != "" {
 		allowed, needConfirm, gateErr := s.personaRelDyn.Gate(tenantID, runID, target.ID, source.ID, input.Action)
 		switch {
 		case gateErr != nil:
 			log.Printf("[h6] relation gate evaluation failed: run=%s pair=%d->%d: %v", runID, source.ID, target.ID, gateErr)
+			relationGate = "relation_gate_eval_failed"
 		case !allowed:
 			return persistAuthorizationGuard("relation_gate_denied", fmt.Errorf("对方当前态度拒绝 %s 请求", input.Action))
-		case needConfirm:
+		case needConfirm && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics):
 			relationGate = "relation_gate_need_confirm"
 		}
 	}
@@ -1085,7 +1095,7 @@ func (s *AgentMessageService) execute(ctx context.Context, tenantID string, targ
 		})
 		s.usage.Record(UsageRecordInput{
 			Kind: usage.KindModelCall, TenantID: tenantID, AgentID: &targetID,
-			RunID: message.ConversationID,
+			RunID:    message.ConversationID,
 			TokensIn: &tokens, LatencyMs: &latencyMs, Error: msgErr,
 		})
 	}

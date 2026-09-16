@@ -83,8 +83,7 @@ func slotManifestWithAPI(name, upstream string) string {
 // httptest.NewServer 绑定 127.0.0.1，生产阻断逻辑下无法作为测试上游。
 func allowLoopbackUpstreamForTest(t *testing.T) {
 	t.Helper()
-	extensionmanifest.UpstreamGuardDisabled = true
-	t.Cleanup(func() { extensionmanifest.UpstreamGuardDisabled = false })
+	t.Cleanup(extensionmanifest.TestOnlyAllowPrivateUpstream())
 }
 
 func TestExtensionSlotHandlerListAndVisibleOverride(t *testing.T) {
@@ -223,10 +222,11 @@ func TestExtensionSlotProxyRejectsDisallowedUpstream(t *testing.T) {
 	require.Contains(t, w.Body.String(), "拒绝")
 }
 
-// TestExtensionSlotProxyPassesThroughRedirect 回归 P0：上游返回 302 +
-// 内网 Location 时，代理不得跟随跳转（SecureHTTPClient 拒绝重定向），
-// 3xx 应原样透传给调用方。
-func TestExtensionSlotProxyPassesThroughRedirect(t *testing.T) {
+// TestExtensionSlotProxyStripsCrossOriginRedirect 回归 P0：上游返回 302 +
+// 其它主机（尤其内网）的 Location 时，代理不得跟随跳转（SecureHTTPClient
+// 拒绝重定向），也不得把该 Location 经 Hub 域名透传出去——否则本端点
+// 会成为开放重定向器。此处断言跨源 Location 被剔除并留标记。
+func TestExtensionSlotProxyStripsCrossOriginRedirect(t *testing.T) {
 	allowLoopbackUpstreamForTest(t)
 	inner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -250,6 +250,36 @@ func TestExtensionSlotProxyPassesThroughRedirect(t *testing.T) {
 	w := httptest.NewRecorder()
 	env.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/extensions/io.zerone.redir/metrics", nil))
 	require.Equal(t, http.StatusFound, w.Code)
-	require.Equal(t, inner.URL+"/internal", w.Header().Get("Location"))
+	require.Empty(t, w.Header().Get("Location"), "跨源 Location 不得透传")
+	require.Equal(t, "true", w.Header().Get("X-Extension-Location-Stripped"))
 	require.NotContains(t, w.Body.String(), "internal")
+}
+
+// TestExtensionSlotProxyKeepsSameOriginRedirect 同源 Location 与相对路径
+// 不引入外部跳转目标，应当原样透传（不误伤合法用法）。
+func TestExtensionSlotProxyKeepsSameOriginRedirect(t *testing.T) {
+	allowLoopbackUpstreamForTest(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/metrics":
+			w.Header().Set("Location", "/v1/metrics-moved")
+			w.WriteHeader(http.StatusFound)
+		case "/v1/relative":
+			// 指向自身同源的绝对地址（httptest 的 host 即声明 upstream 的 host）
+			w.Header().Set("Location", "http://"+r.Host+"/v1/metrics-moved")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer upstream.Close()
+
+	env := extensionSlotRouter(t)
+	seedSlotExtension(t, env, slotManifestWithAPI("io.zerone.sameorigin", upstream.URL))
+
+	w := httptest.NewRecorder()
+	env.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/extensions/io.zerone.sameorigin/metrics", nil))
+	require.Equal(t, http.StatusFound, w.Code)
+	require.Equal(t, "/v1/metrics-moved", w.Header().Get("Location"))
+	require.Empty(t, w.Header().Get("X-Extension-Location-Stripped"))
 }

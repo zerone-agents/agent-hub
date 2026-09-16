@@ -191,10 +191,10 @@ func TestOrganizationMcpPersonaToolsEndToEndAndIsolation(t *testing.T) {
 	require.Equal(t, "neutral", payload["stance"])
 }
 
-// TestOrganizationMcpPersonaToolsDisabledByGate：管理员经 H7 扩展生命周期
-// 停用内置人物能力扩展后，对应 MCP 工具立即返回"能力 <pack> 已被停用"，
-// 未停用的能力不受影响；重新启用后恢复（H7 P1 门控）。
-func TestOrganizationMcpPersonaToolsDisabledByGate(t *testing.T) {
+// setupPersonaGateMcpRouter 建一个接入真实 PersonaCapabilityGate 的
+// organization MCP 路由（四个内置扩展已种子），供门控相关用例复用。
+func setupPersonaGateMcpRouter(t *testing.T) (*gin.Engine, *gorm.DB, *services.ExtensionLifecycleService) {
+	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &extension.Extension{}, &extension.Version{}, &extension.Install{}))
@@ -233,20 +233,90 @@ func TestOrganizationMcpPersonaToolsDisabledByGate(t *testing.T) {
 		tenant.SetTenantID(c, "tenant-a")
 		c.Next()
 	}, h.HandleMessage)
+	return router, db, lifecycle
+}
+
+// disableBuiltinExtension 经生命周期 API 停用 default 租户下的内置扩展。
+func disableBuiltinExtension(t *testing.T, db *gorm.DB, lifecycle *services.ExtensionLifecycleService, name string) {
+	t.Helper()
+	var ext extension.Extension
+	require.NoError(t, db.Where("tenant_id=? AND name=?", "default", name).First(&ext).Error)
+	_, err := lifecycle.Disable("default", ext.ID)
+	require.NoError(t, err)
+}
+
+// toolsListNames 取 tools/list 返回的工具名集合。
+func toolsListNames(t *testing.T, router http.Handler, token string) map[string]bool {
+	t.Helper()
+	rec := postOrganizationRPC(t, router, "tools/list", nil, token)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	names := map[string]bool{}
+	for _, tool := range response.Result.Tools {
+		names[tool.Name] = true
+	}
+	return names
+}
+
+// 回归 P2：tools/list 必须按能力门控过滤。旧实现无条件宣称六个人物工具
+// 全部可用，管理员停用扩展后 Agent 仍会照着列表调用、只能反复撞
+// "能力 X 已被停用"，白烧一轮。宣称可用的集合必须等于实际可调通的集合。
+func TestOrganizationMcpToolsListHidesDisabledPersonaTools(t *testing.T) {
+	router, db, lifecycle := setupPersonaGateMcpRouter(t)
+
+	// 默认全启用：六个工具都在。
+	names := toolsListNames(t, router, "token-a")
+	for _, want := range []string{"emotion_status", "belief_list", "belief_claim", "memory_record", "memory_recall", "relation_view"} {
+		require.True(t, names[want], "默认应列出 %s", want)
+	}
+	require.True(t, names["agent_send"], "非人物工具不受影响")
+
+	// 停用 emotion 与 memory（default 平台级；运行时租户 tenant-a 回退命中）。
+	disableBuiltinExtension(t, db, lifecycle, "io.zerone.emotion")
+	disableBuiltinExtension(t, db, lifecycle, "io.zerone.memory")
+
+	names = toolsListNames(t, router, "token-a")
+	require.False(t, names["emotion_status"], "停用后不得再宣称 emotion_status 可用")
+	require.False(t, names["memory_record"])
+	require.False(t, names["memory_recall"])
+	// 未停用的能力不受影响。
+	require.True(t, names["belief_list"])
+	require.True(t, names["belief_claim"])
+	require.True(t, names["relation_view"])
+	// 非人物工具始终在列表里。
+	require.True(t, names["agent_send"])
+	require.True(t, names["agent_relations"])
+
+	// 重新启用：立即回到列表（与 tools/call 的门控语义保持一致）。
+	var emotionExt extension.Extension
+	require.NoError(t, db.Where("tenant_id=? AND name=?", "default", "io.zerone.emotion").First(&emotionExt).Error)
+	_, err := lifecycle.Enable("default", emotionExt.ID)
+	require.NoError(t, err)
+	names = toolsListNames(t, router, "token-a")
+	require.True(t, names["emotion_status"])
+	require.False(t, names["memory_record"], "memory 仍处于停用状态")
+}
+
+// TestOrganizationMcpPersonaToolsDisabledByGate：管理员经 H7 扩展生命周期
+// 停用内置人物能力扩展后，对应 MCP 工具立即返回"能力 <pack> 已被停用"，
+// 未停用的能力不受影响；重新启用后恢复（H7 P1 门控）。
+func TestOrganizationMcpPersonaToolsDisabledByGate(t *testing.T) {
+	router, db, lifecycle := setupPersonaGateMcpRouter(t)
 
 	// 默认启用：emotion_status 正常返回。
 	_, isErr := callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
 	require.False(t, isErr)
 
 	// 停用 emotion 与 memory（default 平台级；运行时租户 tenant-a 回退命中）。
-	disable := func(name string) {
-		var ext extension.Extension
-		require.NoError(t, db.Where("tenant_id=? AND name=?", "default", name).First(&ext).Error)
-		_, err := lifecycle.Disable("default", ext.ID)
-		require.NoError(t, err)
-	}
-	disable("io.zerone.emotion")
-	disable("io.zerone.memory")
+	disableBuiltinExtension(t, db, lifecycle, "io.zerone.emotion")
+	disableBuiltinExtension(t, db, lifecycle, "io.zerone.memory")
 
 	payload, isErr := callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
 	require.True(t, isErr)
@@ -267,7 +337,7 @@ func TestOrganizationMcpPersonaToolsDisabledByGate(t *testing.T) {
 	// 重新启用 emotion：立即恢复。
 	var emotionExt extension.Extension
 	require.NoError(t, db.Where("tenant_id=? AND name=?", "default", "io.zerone.emotion").First(&emotionExt).Error)
-	_, err = lifecycle.Enable("default", emotionExt.ID)
+	_, err := lifecycle.Enable("default", emotionExt.ID)
 	require.NoError(t, err)
 	_, isErr = callPersonaTool(t, router, "token-a", "emotion_status", `{}`)
 	require.False(t, isErr)

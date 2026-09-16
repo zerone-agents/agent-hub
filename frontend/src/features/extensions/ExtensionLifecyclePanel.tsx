@@ -18,6 +18,7 @@ import {
   useUpgradeExtension
 } from '@/queries/useExtensionRegistry'
 import { tokens as t } from '@/styles/tokens'
+import { isVersionLower } from '@/utils/version'
 
 const useStyles = createStyles(({ css }) => ({
   card: css`
@@ -53,14 +54,20 @@ export default function ExtensionLifecyclePanel({
   const uninstall = useUninstallExtension(id)
   const impactQuery = useExtensionImpact(impactOpen ? id : undefined)
   const impact = impactQuery.data
+  // 列表字段一律按可能缺失处理：后端为 nil 切片时会序列化成 null，
+  // 直接 `.length` / `.map()` 就是 `undefined.length` 崩溃（整页白屏）。
+  const impactDependents = impact?.dependents ?? []
+  const impactDependencies = impact?.dependencies ?? []
+  const impactSchemas = impact?.newStateSchemas ?? []
+  const impactPermissions = impact?.permissions ?? []
 
   const installed = data.installed
   const currentVersion = data.installedVersion
-  const versions = data.versions.map((v) => v.version)
+  const versions = (data.versions ?? []).map((v) => v.version)
   const otherVersions = versions.filter((v) => v !== currentVersion)
-  const lowerVersions = otherVersions.filter(
-    (v) => versions.indexOf(v) > -1 && v < (currentVersion ?? '')
-  )
+  // 回滚候选必须是**语义上更低**的版本。原实现用 `v < currentVersion` 做字符串
+  // 比较，字典序下 '1.10.0' < '1.9.0' 成立 —— 会把更高版本混进回滚候选。
+  const lowerVersions = otherVersions.filter((v) => isVersionLower(v, currentVersion ?? ''))
   const busy =
     install.isPending ||
     enable.isPending ||
@@ -203,14 +210,14 @@ export default function ExtensionLifecyclePanel({
         title={`卸载前影响范围预览 · ${data.name}`}
         open={impactOpen}
         onCancel={() => setImpactOpen(false)}
-        okText={impact && impact.dependents.length > 0 ? '停用依赖方并卸载' : '确认卸载'}
+        okText={impactDependents.length > 0 ? '停用依赖方并卸载' : '确认卸载'}
         cancelText="取消"
         okButtonProps={{ danger: true, loading: busy }}
         onOk={() => {
           const mode = uninstallMode ?? { force: false, purge: false }
           run(async () => {
             await uninstall.mutateAsync({
-              force: mode.force || (impact?.dependents.length ?? 0) > 0,
+              force: mode.force || impactDependents.length > 0,
               purge: mode.purge
             })
           }, '扩展已卸载：历史运行状态数据依旧保留').then(() => setImpactOpen(false))
@@ -223,21 +230,21 @@ export default function ExtensionLifecyclePanel({
         {impact && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Alert
-              type={impact.dependents.length > 0 ? 'warning' : 'info'}
+              type={impactDependents.length > 0 ? 'warning' : 'info'}
               showIcon
               message={
-                impact.dependents.length > 0
-                  ? `以下扩展依赖它：${impact.dependents.join('、')}。卸载将自动停用这些依赖方。`
+                impactDependents.length > 0
+                  ? `以下扩展依赖它：${impactDependents.join('、')}。卸载将自动停用这些依赖方。`
                   : '没有其他扩展依赖它，可以安全卸载。'
               }
             />
             <div>
               <strong>它依赖谁</strong>
-              {impact.dependencies.length === 0 ? (
+              {impactDependencies.length === 0 ? (
                 <div style={{ color: t.textTertiary }}>未声明依赖</div>
               ) : (
                 <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-                  {impact.dependencies.map((d) => (
+                  {impactDependencies.map((d) => (
                     <li key={d.name}>
                       {d.name}@{d.range}
                       {d.optional ? '（可选）' : ''}：
@@ -253,11 +260,11 @@ export default function ExtensionLifecyclePanel({
             </div>
             <div>
               <strong>新增 stateSchemas</strong>
-              {impact.newStateSchemas.length === 0 ? (
+              {impactSchemas.length === 0 ? (
                 <div style={{ color: t.textTertiary }}>无新增</div>
               ) : (
                 <div style={{ marginTop: 6 }}>
-                  {impact.newStateSchemas.map((s) => (
+                  {impactSchemas.map((s) => (
                     <Tag key={s}>{s}</Tag>
                   ))}
                 </div>
@@ -265,13 +272,13 @@ export default function ExtensionLifecyclePanel({
             </div>
             <div>
               <strong>权限声明</strong>
-              {impact.permissions.length === 0 ? (
+              {impactPermissions.length === 0 ? (
                 <div style={{ color: t.textTertiary }}>未声明权限</div>
               ) : (
                 <div style={{ marginTop: 6 }}>
-                  {impact.permissions.map((p) => (
+                  {impactPermissions.map((p) => (
                     <Tag key={`${p.permission}:${p.scope}`}>
-                      {p.permission}:{p.scope}（{p.actions.join('/')}）
+                      {p.permission}:{p.scope}（{(p.actions ?? []).join('/')}）
                     </Tag>
                   ))}
                 </div>

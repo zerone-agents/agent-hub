@@ -73,9 +73,11 @@ func (s *WorkflowService) SetPersonaHooks(emotion *EmotionService, reldyn *Relat
 func (s *WorkflowService) SetPersonaCapabilityGate(g *PersonaCapabilityGate) { s.personaGate = g }
 
 // personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
-// 原有"恒生效"行为（测试基座与旧接线兼容）。
+// 原有"恒生效"行为（测试基座与旧接线兼容），但打一条一次性告警，
+// 避免"漏挂 SetPersonaCapabilityGate"变成无人知晓的静默 fail-open。
 func (s *WorkflowService) personaPackEnabled(tenantID, pack string) bool {
 	if s.personaGate == nil {
+		warnPersonaGateMissing("WorkflowService")
 		return true
 	}
 	return s.personaGate.Enabled(tenantID, pack)

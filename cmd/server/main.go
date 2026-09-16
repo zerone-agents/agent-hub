@@ -253,12 +253,32 @@ func main() {
 		cfg.Deployer.DeployerURLHost,
 	)
 	runService := services.NewRunService(database.GetDB())
+	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
+	// H7.4 授权服务必须在种子之前就位：EnsureBuiltinPersonaPacks 会把
+	// manifest 声明的权限同步成 grants 行（syncGrantsWithTx），而该方法在
+	// authz 为 nil 时是 no-op。此前种子跑在 SetAuthzService 之前，导致四个
+	// 内置扩展永远没有 grants，与本文件早先"授权同步与种子同事务"的注释不符。
+	extensionAuthzService := services.NewExtensionAuthzService(database.GetDB())
+	extensionLifecycleService.SetAuthzService(extensionAuthzService)
+	// H7.4（P0）扩展身份认证服务：签发/校验扩展凭据。
+	extensionIdentityService := services.NewExtensionIdentityService(database.GetDB())
 	// H7 P1：四个人物能力注册为 default 租户的内置扩展（默认已安装+启用），
 	// 之后所有生效路径经 PersonaCapabilityGate 运行时查询，管理员停用立即
 	// 生效且无需重启。种子幂等；失败必须中断启动（否则能力被静默关闭）。
-	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
 	if err := extensionLifecycleService.EnsureBuiltinPersonaPacks(); err != nil {
 		log.Fatalf("Failed to ensure builtin persona packs: %v", err)
+	}
+	// P0-3 启动期断言：种子必须真正落地 grants 行。syncGrantsWithTx 在 authz
+	// 未接线时是静默 no-op，而"把 SetAuthzService 放在种子之前"只是一句注释，
+	// 挡不住下一次重排——这里显式验证，把静默失效变成启动失败。
+	for _, packName := range services.BuiltinPersonaPackNames() {
+		count, err := extensionAuthzService.CountGrants(services.BuiltinPersonaPackTenant, packName)
+		if err != nil {
+			log.Fatalf("Failed to verify grants for builtin extension %s: %v", packName, err)
+		}
+		if count == 0 {
+			log.Fatalf("Builtin extension %s has no grants after seeding: extensionAuthzService must be wired before EnsureBuiltinPersonaPacks", packName)
+		}
 	}
 	personaGate := services.NewPersonaCapabilityGate(database.GetDB())
 	// H6 persona capability packs (WS6 wiring): all state lives in RunState;
@@ -330,9 +350,8 @@ func main() {
 	// H7.2 UI 插槽 / H7.4 权限 / H7.5 用量
 	extensionSlotService := services.NewExtensionSlotService(database.GetDB())
 	extensionSlotHandler := handler.NewExtensionSlotHandler(extensionSlotService)
-	extensionAuthzService := services.NewExtensionAuthzService(database.GetDB())
-	extensionLifecycleService.SetAuthzService(extensionAuthzService)
 	extensionAuthzHandler := handler.NewExtensionAuthzHandler(extensionAuthzService)
+	extensionIdentityHandler := handler.NewExtensionIdentityHandler(extensionIdentityService)
 	usageService := services.NewUsageService(database.GetDB())
 	usageAdminHandler := handler.NewUsageAdminHandler(usageService)
 	// H7.5 用量埋点注入（nil 安全）
@@ -522,6 +541,12 @@ func main() {
 	// builtin 用户必有角色，guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
 	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
+	// H7.4（P0）扩展身份认证：挂在 v1group 上，先于一切授权判定。带
+	// X-Extension-Name / X-Extension-Token 的请求先验证凭据（Hub 签发），
+	// 通过后把已认证扩展名写入上下文；不带这两个头的既有请求（前端控制台、
+	// Agent Runtime）行为完全不变。授权中间件只认上下文里的已认证名字，
+	// 因此"自己报一个扩展名"不再能影响任何判定。
+	v1group.Use(middleware.ExtensionIdentity(extensionIdentityService))
 	// H7.2 扩展数据代理：登录用户可访问已启用扩展声明的 GET 端点（限流 60/min）
 	extProxyGroup := v1group.Group("/extensions/:name",
 		middleware.ExtensionRateLimitByParam(middleware.ExtensionRateLimitConfig{RequestsPerMinute: 60},
@@ -539,25 +564,27 @@ func main() {
 	adminWrite.POST("/extensions/validate", extensionVerificationHandler.Validate)
 
 	// ---------- H1 isolated runs and generic state ----------
-	// H7.4 扩展身份强制检查：带 X-Extension-Name 头的请求按授权判定，
-	// 无授权 403；不带头的既有请求零影响（中间件内部放行）。
+	// H7.4 扩展身份强制检查：已认证扩展按 (permission, action, resource) 判定，
+	// 无授权 403；无扩展身份的既有请求零影响（中间件内部放行）。
+	// 覆盖面按"同一资源读写同权"对齐：同一资源不能出现"读受检查、写不受检查"，
+	// 否则持有 read 授权的扩展可以直接改成写。
 	runResource := func(c *gin.Context) string { return c.Param("id") }
 	adminRead.GET("/runs", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", nil), runHandler.List)
-	adminWrite.POST("/runs", runHandler.Create)
+	adminWrite.POST("/runs", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", nil), runHandler.Create)
 	adminRead.GET("/runs/:id", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.Get)
 	adminWrite.POST("/runs/:id/transitions", middleware.ExtensionAuthz(extensionAuthzService, "run", "update", runResource), runHandler.Transition)
-	adminWrite.POST("/runs/:id/agents", runHandler.AddAgent)
-	adminWrite.PUT("/runs/:id/route-plan", runHandler.PutRoutePlan)
-	adminRead.GET("/runs/:id/route-plan", runHandler.GetRoutePlan)
-	adminWrite.POST("/state-schemas", runHandler.RegisterSchema)
+	adminWrite.POST("/runs/:id/agents", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.AddAgent)
+	adminWrite.PUT("/runs/:id/route-plan", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.PutRoutePlan)
+	adminRead.GET("/runs/:id/route-plan", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.GetRoutePlan)
+	adminWrite.POST("/state-schemas", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", nil), runHandler.RegisterSchema)
 	adminWrite.POST("/runs/:id/states", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.InitializeState)
 	adminWrite.PUT("/runs/:id/states/:stateId", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.CommitState)
-	adminRead.GET("/runs/:id/state-changes", runHandler.StateChanges)
-	adminRead.GET("/runs/:id/activities", runHandler.Activities)
-	adminRead.GET("/runs/:id/events", eventHandler.ListRun)
-	adminWrite.POST("/runs/:id/activities", runHandler.AppendActivity)
-	adminRead.GET("/runs/:id/tool-results", toolResultHandler.List)
-	adminRead.GET("/runs/:id/agent-messages", agentMessageAdminHandler.ListRun)
+	adminRead.GET("/runs/:id/state-changes", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), runHandler.StateChanges)
+	adminRead.GET("/runs/:id/activities", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.Activities)
+	adminRead.GET("/runs/:id/events", middleware.ExtensionAuthz(extensionAuthzService, "event", "read", runResource), eventHandler.ListRun)
+	adminWrite.POST("/runs/:id/activities", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.AppendActivity)
+	adminRead.GET("/runs/:id/tool-results", middleware.ExtensionAuthz(extensionAuthzService, "tool", "read", runResource), toolResultHandler.List)
+	adminRead.GET("/runs/:id/agent-messages", middleware.ExtensionAuthz(extensionAuthzService, "message", "read", runResource), agentMessageAdminHandler.ListRun)
 	// H6 persona admin views (read-only; same authorization as neighboring run reads)
 	adminRead.GET("/runs/:id/persona-state", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.PersonaState)
 	adminRead.GET("/runs/:id/belief-disputes", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.BeliefDisputes)
@@ -592,6 +619,9 @@ func main() {
 	adminRead.GET("/extensions/:id/audit", extensionAuthzHandler.ListAudit)
 	adminWrite.POST("/extensions/:id/grants/:grantId/approve", extensionAuthzHandler.ApproveGrant)
 	adminWrite.DELETE("/extensions/:id/grants/:grantId", extensionAuthzHandler.RevokeGrant)
+	// H7.4 扩展身份凭据（P0）：签发/轮换与查询（明文仅签发响应返回一次）
+	adminRead.GET("/extensions/:id/credential", extensionIdentityHandler.Describe)
+	adminWrite.POST("/extensions/:id/credential", extensionIdentityHandler.Issue)
 	// H7.3 模板库
 	adminWrite.POST("/templates", templateAdminHandler.Register)
 	adminRead.GET("/templates", templateAdminHandler.List)
@@ -795,10 +825,25 @@ func main() {
 	// ---------- Knowledge MCP 运行时 ----------
 	// This endpoint is called by the agent runtime with an Agent Runtime Token,
 	// not a user JWT, so it must not be under the JWTAuthWithCLI middleware group.
-	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
+	// H7.4（P0）：额外挂扩展身份链——若调用方声明自己是某个扩展（成对给出
+	// 名称+凭据），则必须持有效凭据且拥有对应 grants；未声明身份的既有
+	// Runtime Token 调用行为不变。
+	knowledgeMcpChain := []gin.HandlerFunc{
+		middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey),
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.ExtensionAuthz(extensionAuthzService, "tool", "read", nil),
+		knowledgeMcpHandler.HandleMessage,
+	}
+	r.POST("/api/v1/knowledge/mcp", knowledgeMcpChain...)
 	// Organization MCP shares runtime-token authentication with knowledge MCP,
 	// but authorizes every send against the directed relation table.
-	r.POST("/api/v1/organization/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), organizationMcpHandler.HandleMessage)
+	organizationMcpChain := []gin.HandlerFunc{
+		middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey),
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.ExtensionAuthz(extensionAuthzService, "message", "write", nil),
+		organizationMcpHandler.HandleMessage,
+	}
+	r.POST("/api/v1/organization/mcp", organizationMcpChain...)
 
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组

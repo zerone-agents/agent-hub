@@ -9,6 +9,7 @@ import { createStyles } from 'antd-style'
 import { useNavigate, useParams } from 'react-router'
 import { parseApiError } from '@/api/client'
 import { useExtensionDetail, useExtensionVersion } from '@/queries/useExtensionRegistry'
+import { prettyJson } from '@/utils/format'
 import ExtensionLifecyclePanel from './ExtensionLifecyclePanel'
 import ExtensionGrantsPanel from './ExtensionGrantsPanel'
 import { tokens as t } from '@/styles/tokens'
@@ -92,52 +93,61 @@ export default function ExtensionDetailPage() {
         dataSource={data?.versions ?? []}
         pagination={false}
         expandable={{
-          expandedRowRender: (record) => (
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <div>
-                <strong>Manifest 摘要</strong>
-                <div style={{ marginTop: 6, color: t.textSecondary }}>
-                  状态模式 {record.manifestSummary.stateSchemaCount} · 事件{' '}
-                  {record.manifestSummary.eventCount} · 工具 {record.manifestSummary.toolCount} · 关系{' '}
-                  {record.manifestSummary.relationCount} · 提示注入{' '}
-                  {record.manifestSummary.promptInjectionCount}
-                </div>
-                {record.manifestSummary.slots && record.manifestSummary.slots.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    UI 插槽：
-                    {record.manifestSummary.slots.map((slot) => (
-                      <Tag key={slot} style={{ marginInlineEnd: 4 }}>
-                        {slot}
-                      </Tag>
-                    ))}
+          expandedRowRender: (record) => {
+            // 列表字段一律先收口成数组：后端 nil 切片会序列化成 null，
+            // 直接 `.length` 就是 `undefined.length` 抛错被根 ErrorBoundary
+            // 接住 → 整页白屏（与 docs/h7-acceptance.md 记录的 belief
+            // disputes 事故同一形态）。
+            const slots = record.manifestSummary.slots ?? []
+            const permissions = record.permissions ?? []
+            return (
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <div>
+                  <strong>Manifest 摘要</strong>
+                  <div style={{ marginTop: 6, color: t.textSecondary }}>
+                    状态模式 {record.manifestSummary.stateSchemaCount} · 事件{' '}
+                    {record.manifestSummary.eventCount} · 工具 {record.manifestSummary.toolCount} · 关系{' '}
+                    {record.manifestSummary.relationCount} · 提示注入{' '}
+                    {record.manifestSummary.promptInjectionCount}
                   </div>
-                )}
-              </div>
-              <div>
-                <strong>权限清单</strong>
-                {record.permissions.length === 0 ? (
-                  <div style={{ marginTop: 6, color: t.textTertiary }}>未声明权限</div>
-                ) : (
-                  <Table
-                    rowKey={(r) => `${r.permission}:${r.scope}`}
-                    size="small"
-                    style={{ marginTop: 6 }}
-                    dataSource={record.permissions}
-                    pagination={false}
-                    columns={[
-                      { title: '权限类', dataIndex: 'permission', width: 120 },
-                      { title: '范围', dataIndex: 'scope' },
-                      {
-                        title: '操作',
-                        dataIndex: 'actions',
-                        render: (actions: string[]) => actions.map((a) => <Tag key={a}>{a}</Tag>)
-                      }
-                    ]}
-                  />
-                )}
-              </div>
-            </Space>
-          )
+                  {slots.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      UI 插槽：
+                      {slots.map((slot) => (
+                        <Tag key={slot} style={{ marginInlineEnd: 4 }}>
+                          {slot}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <strong>权限清单</strong>
+                  {permissions.length === 0 ? (
+                    <div style={{ marginTop: 6, color: t.textTertiary }}>未声明权限</div>
+                  ) : (
+                    <Table
+                      rowKey={(r) => `${r.permission}:${r.scope}`}
+                      size="small"
+                      style={{ marginTop: 6 }}
+                      dataSource={permissions}
+                      pagination={false}
+                      columns={[
+                        { title: '权限类', dataIndex: 'permission', width: 120 },
+                        { title: '范围', dataIndex: 'scope' },
+                        {
+                          title: '操作',
+                          dataIndex: 'actions',
+                          render: (actions: string[] | undefined) =>
+                            (actions ?? []).map((a) => <Tag key={a}>{a}</Tag>)
+                        }
+                      ]}
+                    />
+                  )}
+                </div>
+              </Space>
+            )
+          }
         }}
         columns={[
           { title: '版本', dataIndex: 'version', width: 140 },
@@ -145,7 +155,9 @@ export default function ExtensionDetailPage() {
             title: '内容哈希',
             dataIndex: 'contentHash',
             render: (v: string) => (
-              <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v.slice(0, 12)}…</span>
+              <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                {(v ?? '').slice(0, 12)}…
+              </span>
             )
           },
           { title: '变更说明', dataIndex: 'changelog', render: (v: string) => v || '—' },
@@ -178,9 +190,7 @@ export default function ExtensionDetailPage() {
       >
         {versionQuery.isLoading && <div>加载中…</div>}
         {versionQuery.data && (
-          <pre className={styles.manifest}>
-            {JSON.stringify(JSON.parse(versionQuery.data.manifest), null, 2)}
-          </pre>
+          <pre className={styles.manifest}>{prettyJson(versionQuery.data.manifest)}</pre>
         )}
         {versionQuery.error && (
           <Alert type="error" showIcon message={parseApiError(versionQuery.error)} />

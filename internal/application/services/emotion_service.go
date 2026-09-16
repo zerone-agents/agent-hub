@@ -18,10 +18,13 @@ import (
 // 状态命名空间 io.zerone.emotion，schema emotion-state v1，subject=agent。
 type EmotionService struct {
 	runService *RunService
+	// now 是可替换时钟：Status 的惰性衰减结算以它为"当前时间"。
+	// 生产恒为 time.Now().UTC()；测试可锁定时间以避免用例随时间失效。
+	now func() time.Time
 }
 
 func NewEmotionService(runService *RunService) *EmotionService {
-	return &EmotionService{runService: runService}
+	return &EmotionService{runService: runService, now: func() time.Time { return time.Now().UTC() }}
 }
 
 // EnsureSchemas 幂等注册 emotion-state v1 状态模式：先查后注册，
@@ -49,7 +52,7 @@ func (s *EmotionService) Status(tenantID, runID string, agentID uint64) (*emotio
 	if err != nil {
 		return nil, err
 	}
-	settled := emotion.SettleDecay(current, current.UpdatedAt, time.Now().UTC())
+	settled := emotion.SettleDecay(current, current.UpdatedAt, s.now())
 	if !sameEmotionState(current, settled) {
 		// 惰性结算写回（带新 revision）；已冻结的局只允许读，跳过持久化。
 		if _, err := s.runService.CommitState(tenantID, runID, stateRow.ID, CommitStateInput{
@@ -77,7 +80,7 @@ func (s *EmotionService) OnEvent(tenantID, runID string, agentID uint64, eventTy
 		return fmt.Errorf("幂等键不能为空")
 	}
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = s.now()
 	}
 
 	stateRow, err := s.findState(tenantID, runID, agentID)

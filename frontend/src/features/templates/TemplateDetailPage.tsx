@@ -10,6 +10,7 @@ import { createStyles } from 'antd-style'
 import { useNavigate, useParams } from 'react-router'
 import { parseApiError } from '@/api/client'
 import type { TemplateSpec } from '@/api/templates'
+import { parseJsonSafe } from '@/utils/format'
 import {
   useExportTemplate,
   useRegisterTemplate,
@@ -106,7 +107,9 @@ export default function TemplateDetailPage() {
     return <div className={styles.page}>加载中…</div>
   }
 
-  const spec = versionDetail?.spec ? (JSON.parse(versionDetail.spec) as TemplateSpec) : undefined
+  // 不能裸 JSON.parse：spec 内容坏了会在 render 体内抛错被根 ErrorBoundary
+  // 接住 → 整页白屏。解析失败退化成 undefined，页面其余部分照常渲染。
+  const spec = parseJsonSafe<TemplateSpec>(versionDetail?.spec)
 
   const handleExport = async () => {
     try {

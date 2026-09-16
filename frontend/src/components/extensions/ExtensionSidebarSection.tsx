@@ -3,6 +3,7 @@
 // 只有链接项会被采纳，其他组件类型在侧边栏不渲染；逐项包错误边界。
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { fetchExtensionSlots, type ExtensionSlotItem } from '@/api/extensionSlots'
+import { safeExternalHref } from '@/utils/url'
 import SlotItemErrorBoundary from './SlotItemErrorBoundary'
 
 interface SidebarLink {
@@ -13,7 +14,12 @@ interface SidebarLink {
 function collectLinks(item: ExtensionSlotItem): SidebarLink[] {
   if (item.component !== 'link-list' || !Array.isArray(item.data?.links)) return []
   return (item.data.links as Record<string, unknown>[])
-    .map((link) => ({ label: String(link?.label ?? link?.href ?? ''), href: String(link?.href ?? '') }))
+    .map((link) => ({
+      label: String(link?.label ?? link?.href ?? ''),
+      // 扩展提供的 href 先过协议白名单：manifest 的 data 是自由 map，
+      // 原样进 <a href> 会让 javascript: 直接可点。校验不过的项被过滤掉。
+      href: safeExternalHref(link?.href)
+    }))
     .filter((link) => link.href)
 }
 

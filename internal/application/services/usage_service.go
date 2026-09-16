@@ -66,13 +66,13 @@ type UsageRecordInput struct {
 
 // KindSummary 是一个 kind 的汇总。
 type KindSummary struct {
-	Kind          string  `json:"kind"`
-	TotalCalls    int64   `json:"totalCalls"`
-	TotalTokens   int64   `json:"totalTokens"`
-	TotalCost     int64   `json:"totalCostMicros"`
-	TotalErrors   int64   `json:"totalErrors"`
-	AvgLatencyMs  float64 `json:"avgLatencyMs"`
-	DeniedCount   int64   `json:"deniedCount"`
+	Kind         string  `json:"kind"`
+	TotalCalls   int64   `json:"totalCalls"`
+	TotalTokens  int64   `json:"totalTokens"`
+	TotalCost    int64   `json:"totalCostMicros"`
+	TotalErrors  int64   `json:"totalErrors"`
+	AvgLatencyMs float64 `json:"avgLatencyMs"`
+	DeniedCount  int64   `json:"deniedCount"`
 }
 
 // DailyTrend 是一天的 kind 汇总（趋势数组元素）。
@@ -114,10 +114,10 @@ type DimensionPage struct {
 
 // ErrorRow 是错误聚合行。
 type ErrorRow struct {
-	Kind        string    `json:"kind"`
-	Error       string    `json:"error"`
-	Count       int64     `json:"count"`
-	LastAt      time.Time `json:"lastAt"`
+	Kind   string    `json:"kind"`
+	Error  string    `json:"error"`
+	Count  int64     `json:"count"`
+	LastAt time.Time `json:"lastAt"`
 }
 
 // BudgetView 是预算 + 当前周期用量进度。
@@ -136,16 +136,16 @@ type StorageRow struct {
 
 // HealthReport 是 /health 的合成状态。
 type HealthReport struct {
-	Status          string       `json:"status"` // green / yellow / red
-	DB              string       `json:"db"`
-	QueueBacklog    int          `json:"queueBacklog"`
-	QueueDropped    int64        `json:"queueDropped"`
-	TodayErrorRate  float64      `json:"todayErrorRatePct"`
-	ExtensionsTotal int64        `json:"extensionsTotal"`
-	ExtensionsOn    int64        `json:"extensionsOn"`
-	ExtensionsOff   int64        `json:"extensionsOff"`
-	UptimeSec       int64        `json:"uptimeSec"`
-	CheckedAt       time.Time    `json:"checkedAt"`
+	Status          string    `json:"status"` // green / yellow / red
+	DB              string    `json:"db"`
+	QueueBacklog    int       `json:"queueBacklog"`
+	QueueDropped    int64     `json:"queueDropped"`
+	TodayErrorRate  float64   `json:"todayErrorRatePct"`
+	ExtensionsTotal int64     `json:"extensionsTotal"`
+	ExtensionsOn    int64     `json:"extensionsOn"`
+	ExtensionsOff   int64     `json:"extensionsOff"`
+	UptimeSec       int64     `json:"uptimeSec"`
+	CheckedAt       time.Time `json:"checkedAt"`
 }
 
 // modelPrice 是单个模型的单价（每百万 token 的分计价）。
@@ -230,7 +230,10 @@ func (s *UsageService) Record(in UsageRecordInput) {
 		CreatedAt:     in.CreatedAt,
 	}
 	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = time.Now()
+		// 必须落 UTC：所有统计窗口（periodRange / NormalizeRange）都是 UTC 边界，
+		// 而 SQLite 按字符串比较带偏移的时间戳；写本地时间会让 UTC+8 服务器上
+		// 的记录整天落在日/月窗口之外，导致用量与预算少算。
+		rec.CreatedAt = time.Now().UTC()
 	}
 	if in.TokensIn != nil || in.TokensOut != nil {
 		rec.CostMicros = s.costMicros(in.Model, in.TokensIn, in.TokensOut)
@@ -439,7 +442,8 @@ func (s *UsageService) fireAlert(tenantID string, alert *usage.UsageAlert, ruleN
 			log.Printf("[usage] fire alert panic recovered: %v", r)
 		}
 	}()
-	now := time.Now()
+	// 同 Record：持久化时间戳统一 UTC，避免与 last_fired_at 的节流窗口比较错位。
+	now := time.Now().UTC()
 	var alertID uint64
 	channel, webhookURL := "log", ""
 	if alert != nil {

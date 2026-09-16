@@ -209,7 +209,7 @@ func (s *ExtensionAuthzService) Enforce(tenantID, extensionName, permission, act
 		Allowed:       allowed,
 		DeniedReason:  reason,
 		IP:            ip,
-		CreatedAt:     time.Now(),
+		CreatedAt:     time.Now().UTC(),
 	}
 	// 审计写入失败不阻断判定结果（判定已基于授权行完成）
 	_ = s.db.Create(&audit).Error
@@ -307,6 +307,23 @@ func (s *ExtensionAuthzService) ListGrants(tenantID string, extID uint64) ([]ext
 		return nil, err
 	}
 	return grants, nil
+}
+
+// CountGrants 按扩展名统计租户内的授权行数。供启动期断言使用：
+// 种子/安装必须真正落地 grants，而 syncGrantsWithTx 在 authz 未接线时是
+// 静默 no-op —— 仅靠"调用顺序正确"的注释无法防止回归，启动期用本方法
+// 验证一次，把静默失效变成显式失败。
+func (s *ExtensionAuthzService) CountGrants(tenantID, extensionName string) (int64, error) {
+	tenantID = normalizedTenant(tenantID)
+	extensionName = strings.TrimSpace(extensionName)
+	if extensionName == "" {
+		return 0, lifecycleErrorf(400, "extensionName 必填")
+	}
+	var total int64
+	err := s.db.Model(&extension.Grant{}).
+		Where("tenant_id=? AND extension_name=?", tenantID, extensionName).
+		Count(&total).Error
+	return total, err
 }
 
 // AuditFilter 是审计分页过滤条件。

@@ -11,6 +11,7 @@ import (
 )
 
 func TestMigrateDropLegacyColumns_RemovesDefaultModelsAndType(t *testing.T) {
+	allowDestructiveMigrationsForTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db

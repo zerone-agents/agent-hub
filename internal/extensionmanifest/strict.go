@@ -23,10 +23,23 @@ import (
 // 扩展 manifest 协议标识（沿用 v1alpha1 协议，见 docs/h7-decisions.md D1）。
 const ExtensionAPIVersion = "agenthub.extension/v1alpha1"
 
-// PermissionScopes 是权限声明白名单（H7.0 十类）。
+// PermissionScopes 是权限声明白名单。
+//
+// 与已挂载的授权检查点严格对应（两边任何一侧改动都必须同步，否则会出现
+// "检查永远不放行"的死锁式拒绝）：
+//
+//	run      → GET/POST /admin/runs*（Run 生命周期、成员、路由计划、状态变更视图）
+//	state    → /admin/runs/:id/states*、persona 只读视图
+//	workflow → /admin/workflows*（H5 工作流与审批）
+//	agent    → /admin/agents 只读
+//	message  → POST /api/v1/organization/mcp（代表 Agent 投递组织消息）
+//	tool     → POST /api/v1/knowledge/mcp（知识库检索工具调用）
+//
+// "run" 是 H7.4 遗留决策项：当时白名单里没有 run，而授权检查却按 run 类
+// 判定，导致这些端点对任何扩展恒 403（合法扩展也无法通过）。此处补齐。
 var PermissionScopes = []string{
 	"agent", "state", "message", "model", "tool",
-	"event", "network", "storage", "ui", "group", "workflow",
+	"event", "network", "storage", "ui", "group", "workflow", "run",
 }
 
 // UISlots 是 UI 插槽白名单（H7.0 七类，H7.2 实现渲染）。
@@ -117,12 +130,12 @@ var UIComponentTypes = []string{"stat-card", "link-list", "key-value", "markdown
 
 // ManifestUISlot 是一条插槽挂载声明。
 type ManifestUISlot struct {
-	Slot     string                 `json:"slot"`           // 插槽名，必须在 UISlots 白名单内
-	Component string                `json:"component"`      // 组件类型，必须在 UIComponentTypes 内
-	Title    string                 `json:"title,omitempty"`
-	Order    int                    `json:"order,omitempty"`  // 同插槽内排序，小的在前
-	Visible  *bool                  `json:"visible,omitempty"` // 默认 true；false 即默认隐藏
-	Data     map[string]any         `json:"data,omitempty"`    // 组件静态数据
+	Slot      string         `json:"slot"`      // 插槽名，必须在 UISlots 白名单内
+	Component string         `json:"component"` // 组件类型，必须在 UIComponentTypes 内
+	Title     string         `json:"title,omitempty"`
+	Order     int            `json:"order,omitempty"`   // 同插槽内排序，小的在前
+	Visible   *bool          `json:"visible,omitempty"` // 默认 true；false 即默认隐藏
+	Data      map[string]any `json:"data,omitempty"`    // 组件静态数据
 	// DataSource 声明动态数据：只允许 GET 扩展自己的 admin 授权 API 端点。
 	DataSource *ManifestUIDataSource `json:"dataSource,omitempty"`
 }

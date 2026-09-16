@@ -6,7 +6,8 @@ import { ChartLineIcon, DownloadIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import dayjs, { type Dayjs } from 'dayjs'
 import PrimaryButton from '@/components/PrimaryButton'
-import { parseApiError } from '@/api/client'
+import apiClient, { parseApiError } from '@/api/client'
+import { filenameFromDisposition, saveBlob } from '@/utils/download'
 import {
   USAGE_KIND_LABELS,
   formatMicros,
@@ -23,6 +24,16 @@ import UsageTrendChart from './UsageTrendChart'
 import { tokens as t } from '@/styles/tokens'
 
 const { RangePicker } = DatePicker
+
+/** 导出接口在出错时可能返回 200 + JSON 错误信封，这里取回可读文案。 */
+async function readExportError(blob: Blob): Promise<string> {
+  try {
+    const body = JSON.parse(await blob.text()) as { error?: string; message?: string }
+    return body.error ?? body.message ?? '导出失败'
+  } catch {
+    return '导出失败'
+  }
+}
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -100,6 +111,7 @@ export default function UsageOverviewPage() {
   const [preset, setPreset] = useState<Preset>('7d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [metric, setMetric] = useState<Metric>('calls')
+  const [exporting, setExporting] = useState(false)
 
   const range: UsageRange = useMemo(() => {
     if (preset === 'custom' && customRange) {
@@ -118,6 +130,35 @@ export default function UsageOverviewPage() {
   const totalErrors = kinds.reduce((s, k) => s + k.totalErrors, 0)
   const errorRate = totalCalls > 0 ? (totalErrors / totalCalls) * 100 : 0
 
+  // 导出走 apiClient 取 blob 后落盘，**不能**用 window.open / <a href>：
+  // 那是普通浏览器导航，不经过 axios 拦截器，不带 Authorization 头，
+  // 新标签页必然 401；而且 window.open 被弹窗拦截时返回 null 且不抛错，
+  // 原来的 try/catch 是死代码 —— 用户点了没反应也看不到任何提示。
+  const exportCsv = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const res = await apiClient.get<Blob>(usageApi.exportUrl(range), {
+        responseType: 'blob',
+        // 导出是整段明细，默认 10s 很容易超时
+        timeout: 60000
+      })
+      const blob = res.data
+      // 后端先写 200 + CSV 头再生成内容，出错时会落成 JSON —— 按类型区分，
+      // 否则会把错误 JSON 存成 .csv 让用户以为导出成功。
+      if (/^application\/json/i.test(blob.type)) {
+        message.error(await readExportError(blob))
+        return
+      }
+      const fallback = `usage_records_${range.from ?? 'all'}_${range.to ?? 'all'}.csv`
+      saveBlob(blob, filenameFromDisposition(res.headers['content-disposition'], fallback))
+    } catch (e) {
+      message.error(parseApiError(e))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -129,12 +170,9 @@ export default function UsageOverviewPage() {
         </div>
         <PrimaryButton
           icon={<DownloadIcon size={16} />}
+          loading={exporting}
           onClick={() => {
-            try {
-              window.open(usageApi.exportUrl(range), '_blank')
-            } catch (e) {
-              message.error(parseApiError(e))
-            }
+            void exportCsv()
           }}
         >
           导出 CSV

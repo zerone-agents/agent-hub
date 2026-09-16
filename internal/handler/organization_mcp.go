@@ -76,9 +76,11 @@ func (h *OrganizationMcpHandler) SetPersonaGate(g *services.PersonaCapabilityGat
 }
 
 // personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
-// 工具恒可用（测试基座与旧接线兼容）。
+// 工具恒可用（测试基座与旧接线兼容），但打一条一次性告警以避免
+// "漏挂 SetPersonaGate"变成无人知晓的静默 fail-open。
 func (h *OrganizationMcpHandler) personaPackEnabled(tenantID, pack string) bool {
 	if h.personaGate == nil {
+		services.WarnPersonaGateMissing("OrganizationMcpHandler")
 		return true
 	}
 	return h.personaGate.Enabled(tenantID, pack)
@@ -113,7 +115,7 @@ func (h *OrganizationMcpHandler) HandleMessage(c *gin.Context) {
 	case "notifications/initialized":
 		c.Status(http.StatusNoContent)
 	case "tools/list":
-		c.JSON(http.StatusOK, h.handleToolsList(req.ID))
+		c.JSON(http.StatusOK, h.handleToolsList(c, req.ID))
 	case "tools/call":
 		response, err := h.handleToolsCall(c.Request.Context(), c, req.ID, req.Params)
 		if err != nil {
@@ -138,7 +140,22 @@ func (h *OrganizationMcpHandler) handleInitialize(id interface{}) jsonRPCRespons
 	}
 }
 
-func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
+// personaToolPacks 把人物能力工具名映射到其所属能力包。
+// tools/list 与 tools/call 共用同一份映射：宣称可用的工具集必须与
+// 实际能调通的工具集一致，否则 Agent 会反复撞"能力已被停用"。
+var personaToolPacks = map[string]string{
+	"emotion_status": services.PersonaPackEmotion,
+	"belief_list":    services.PersonaPackBelief,
+	"belief_claim":   services.PersonaPackBelief,
+	"memory_record":  services.PersonaPackMemory,
+	"memory_recall":  services.PersonaPackMemory,
+	"relation_view":  services.PersonaPackRelationshipDynamics,
+}
+
+// handleToolsList 返回当前租户下真正可用的工具清单：
+// 对应内置扩展被停用的人物工具不再出现在列表里（此前的实现无条件宣称
+// 全部可用，Agent 按列表调用只会拿到"能力 X 已被停用"，反复浪费一轮）。
+func (h *OrganizationMcpHandler) handleToolsList(c *gin.Context, id interface{}) jsonRPCResponse {
 	tools := []map[string]interface{}{
 		{
 			"name":        "agent_relations",
@@ -254,7 +271,16 @@ func (h *OrganizationMcpHandler) handleToolsList(id interface{}) jsonRPCResponse
 			"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"target_agent_id": map[string]interface{}{"type": "integer"}}, "required": []string{"target_agent_id"}},
 		},
 	}
-	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": tools}}
+	tenantID := tenant.GetTenantID(c)
+	visible := make([]map[string]interface{}, 0, len(tools))
+	for _, tool := range tools {
+		name, _ := tool["name"].(string)
+		if pack, ok := personaToolPacks[name]; ok && !h.personaPackEnabled(tenantID, pack) {
+			continue
+		}
+		visible = append(visible, tool)
+	}
+	return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]interface{}{"tools": visible}}
 }
 
 func groupMessageTool(name, description string, channel bool) map[string]interface{} {

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Alert, App, Button, Empty, Popconfirm, Space, Table, Tabs, Tag } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { unwrapResponse } from '@/api/client'
+import { parseApiError, unwrapResponse } from '@/api/client'
 import {
   extensionAuthzApi,
   type ExtensionAccessAuditItem,
@@ -56,22 +56,27 @@ export default function ExtensionGrantsPanel({ extensionId }: { extensionId: num
     queryClient.invalidateQueries({ queryKey: ['extensions', extensionId, 'audit'] })
   }
 
+  // `success:false` 的响应 HTTP 状态仍是 200，axios 不会判为错误 —— 必须
+  // unwrapResponse 才能发现失败，否则后端拒绝也会弹"撤销成功"。
   const revokeMutation = useMutation({
-    mutationFn: (grantId: number) => extensionAuthzApi.revokeGrant(extensionId, grantId),
+    mutationFn: async (grantId: number) =>
+      unwrapResponse(await extensionAuthzApi.revokeGrant(extensionId, grantId)),
     onSuccess: () => {
       message.success('授权已撤销，即时生效')
       invalidate()
     },
-    onError: (e: Error) => message.error(e.message)
+    // 用 parseApiError 而不是 e.message：403 时 axios 给的是英文原文
+    onError: (e: unknown) => message.error(parseApiError(e))
   })
 
   const approveMutation = useMutation({
-    mutationFn: (grantId: number) => extensionAuthzApi.approveGrant(extensionId, grantId),
+    mutationFn: async (grantId: number) =>
+      unwrapResponse(await extensionAuthzApi.approveGrant(extensionId, grantId)),
     onSuccess: () => {
       message.success('授权已批准')
       invalidate()
     },
-    onError: (e: Error) => message.error(e.message)
+    onError: (e: unknown) => message.error(parseApiError(e))
   })
 
   return (
@@ -82,7 +87,7 @@ export default function ExtensionGrantsPanel({ extensionId }: { extensionId: num
           showIcon
           style={{ marginBottom: 12 }}
           message="加载授权列表失败"
-          description={(grantsQuery.error as Error).message}
+          description={parseApiError(grantsQuery.error)}
         />
       )}
       <Tabs

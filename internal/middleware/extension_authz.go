@@ -1,10 +1,16 @@
-// H7.4 扩展身份强制检查中间件。
+// H7.4 扩展授权强制检查中间件。
 //
-// 工作原理：HTTP 代理（H7.2 / H7.6 SDK）在替扩展发起调用时注入
-// X-Extension-Name 请求头标识扩展身份。本中间件只在请求携带该头时
-// 生效：按 (tenant, extension, permission, action, resource) 调 Enforce
-// 判定，未授权返回 403「扩展未被授予该权限」；不带该头的既有请求
-// 直接放行，行为零变化。
+// 身份来源：本中间件**不读取任何请求头**。扩展名只从
+// ExtensionIdentity 中间件写入上下文的"已认证扩展名"取值（见
+// extension_identity.go）。这样"自己报一个扩展名就拿到判定"的路径不复存在：
+// 想影响判定结果，必须先通过凭据校验。
+//
+// 判定规则：按 (tenant, extension, permission, action, resource) 调 Enforce，
+// 未授权返回 403「扩展未被授予该权限」。
+//
+// 无已认证扩展身份 → 直接放行：这些路由同时服务于人类控制台与 Agent
+// Runtime，它们的访问控制由 JWT / Runtime Token 负责；扩展 grants 是叠加在
+// 已认证调用方之上的**额外收窄**，不是控制台的主认证手段。
 package middleware
 
 import (
@@ -12,10 +18,11 @@ import (
 	"strings"
 
 	"control-panel/internal/domain/tenant"
+
 	"github.com/gin-gonic/gin"
 )
 
-// ExtensionHeaderName 是代理注入的扩展身份请求头。
+// ExtensionHeaderName 是扩展身份请求头（由 ExtensionIdentity 中间件校验）。
 const ExtensionHeaderName = "X-Extension-Name"
 
 // ExtensionEnforcer 是 ExtensionAuthzService.Enforce 的最小接口形态
@@ -24,17 +31,17 @@ type ExtensionEnforcer interface {
 	Enforce(tenantID, extensionName, permission, action, resource, ip string) bool
 }
 
-// ExtensionAuthz 返回强制检查中间件：permission/action 描述被保护端点
+// ExtensionAuthz 返回授权检查中间件：permission/action 描述被保护端点
 // 对应的权限类与操作；resourceFn 可选，从请求提取具体资源（如路径中的
-// agent name / state namespace），不传则资源匹配留空（只按权限类+动作判定）。
+// run id / agent name / state namespace），不传则资源匹配留空。
 //
-// 无 X-Extension-Name 头：直接放行（既有非扩展请求零影响）。
-// 有头但无授权：403 且写审计（Enforce 内部完成）。
+// 无已认证扩展身份：直接放行（人类/Agent 请求零影响）。
+// 有已认证身份但无授权：403 且写审计（Enforce 内部完成）。
 func ExtensionAuthz(enforcer ExtensionEnforcer, permission, action string, resourceFn func(*gin.Context) string) gin.HandlerFunc {
 	permission = strings.TrimSpace(permission)
 	action = strings.TrimSpace(action)
 	return func(c *gin.Context) {
-		extName := strings.TrimSpace(c.GetHeader(ExtensionHeaderName))
+		extName := ExtensionIdentityOf(c)
 		if extName == "" {
 			c.Next()
 			return

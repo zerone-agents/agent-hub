@@ -349,7 +349,10 @@ func (s *ExtensionService) GetEnabled(tx *gorm.DB, tenantID, name, version strin
 func summarizeManifest(raw string) VersionManifestSummary {
 	manifest, errs := extensionmanifest.ValidateExtensionManifest([]byte(raw))
 	if len(errs) > 0 || manifest == nil {
-		return VersionManifestSummary{}
+		// P1：失败分支也要交出空切片而不是零值 —— VersionManifestSummary 的
+		// Slots 没有 omitempty，零值会序列化成 `null`，前端 `.length` / `.map()`
+		// 直接抛错被根 ErrorBoundary 接住 → 整页白屏。
+		return VersionManifestSummary{Slots: []string{}}
 	}
 	summary := VersionManifestSummary{
 		DisplayName:          manifest.DisplayName,
@@ -359,6 +362,10 @@ func summarizeManifest(raw string) VersionManifestSummary {
 		ToolCount:            len(manifest.Tools),
 		RelationCount:        len(manifest.Relations),
 		PromptInjectionCount: len(manifest.PromptInjections),
+		// P1：列表字段永不序列化成 null。前端按 `x.length` / `x.map()` 使用，
+		// null 会变成 `undefined.length` 抛错被根 ErrorBoundary 接住 → 整页白屏
+		// （docs/h7-acceptance.md 记录的 belief disputes 事故是同一形态）。
+		Slots: []string{},
 	}
 	if manifest.UI != nil {
 		summary.Slots = manifest.UI.SlotNames()
@@ -369,11 +376,17 @@ func summarizeManifest(raw string) VersionManifestSummary {
 func summarizePermissions(raw string) []PermissionSummary {
 	manifest, errs := extensionmanifest.ValidateExtensionManifest([]byte(raw))
 	if len(errs) > 0 || manifest == nil {
-		return nil
+		// 同上：返回空切片而不是 nil。manifest 校验失败的扩展在列表页仍要能渲染，
+		// 只是权限清单显示"未声明"。
+		return []PermissionSummary{}
 	}
 	out := make([]PermissionSummary, 0, len(manifest.Permissions))
 	for _, p := range manifest.Permissions {
-		out = append(out, PermissionSummary{Permission: p.Permission, Scope: p.Scope, Actions: p.Actions})
+		actions := p.Actions
+		if actions == nil {
+			actions = []string{}
+		}
+		out = append(out, PermissionSummary{Permission: p.Permission, Scope: p.Scope, Actions: actions})
 	}
 	return out
 }

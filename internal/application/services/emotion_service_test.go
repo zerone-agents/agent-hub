@@ -16,6 +16,12 @@ func newEmotionTestService(t *testing.T) (*EmotionService, *RunService) {
 	return NewEmotionService(rs), rs
 }
 
+// pinEmotionClock 把服务的"当前时间"钉在 now 上。Status 的惰性衰减结算
+// 以该时间为准，不钉住的话断言值会随真实时间推移而漂移。
+func pinEmotionClock(es *EmotionService, now time.Time) {
+	es.now = func() time.Time { return now }
+}
+
 func TestEmotionServiceEnsureSchemasIdempotent(t *testing.T) {
 	es, rs := newEmotionTestService(t)
 	_, err := rs.Create("t1", CreateRunInput{Name: "scene"})
@@ -49,6 +55,8 @@ func TestEmotionServiceOnEventAppliesVocabularyAndIsIdempotent(t *testing.T) {
 	r, err := rs.Create("t1", CreateRunInput{Name: "scene"})
 	require.NoError(t, err)
 	at := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	// 时钟钉在事件时间上：Status 读取不做衰减，期望值不随真实时间改变。
+	pinEmotionClock(es, at)
 
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "praised", 3, at, "evt-1")) // +24
 	status, err := es.Status("t1", r.ID, 7)
@@ -84,9 +92,10 @@ func TestEmotionServiceDecaySettlesByEventTime(t *testing.T) {
 	es, rs := newEmotionTestService(t)
 	r, err := rs.Create("t1", CreateRunInput{Name: "scene"})
 	require.NoError(t, err)
-	// 注意：Status 读取时按真实当前时间结算衰减，因此事件时间必须以
-	// now 为锚，不能用写死的过去日期。
+	// 注意：Status 读取时按"当前时间"结算衰减，因此事件时间必须以 now
+	// 为锚，不能用写死的过去日期；时钟同样钉在 now 上保证可复现。
 	now := time.Now().UTC()
+	pinEmotionClock(es, now)
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "betrayed", 3, now.Add(-48*time.Hour), "evt-b")) // -40
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "threatened", 3, now, "evt-t"))
 	// 48h × 20/day = 40 衰减后回到 0，再 -40 → 负面情绪重新生效
@@ -100,10 +109,12 @@ func TestEmotionServiceDecayTowardBaselineAcrossReads(t *testing.T) {
 	es, rs := newEmotionTestService(t)
 	r, err := rs.Create("t1", CreateRunInput{Name: "scene"})
 	require.NoError(t, err)
-	at := time.Now().UTC().Add(-72 * time.Hour) // 强度 40 在 3 天前应已衰减到 0
+	now := time.Now().UTC()
+	at := now.Add(-72 * time.Hour) // 强度 40 在 3 天前应已衰减到 0
+	pinEmotionClock(es, now)
 
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "betrayed", 2, at, "evt-old")) // -40（×1.5 触顶 -40）
-	require.NoError(t, es.OnEvent("t1", r.ID, 7, "praised", 1, time.Now().UTC(), "evt-new"))
+	require.NoError(t, es.OnEvent("t1", r.ID, 7, "praised", 1, now, "evt-new"))
 	status, err := es.Status("t1", r.ID, 7)
 	require.NoError(t, err)
 	// 旧事件已完全衰减，新事件 +12
@@ -117,6 +128,7 @@ func TestEmotionServiceRunIsolation(t *testing.T) {
 	r2, err := rs.Create("t1", CreateRunInput{Name: "run-two"})
 	require.NoError(t, err)
 	at := time.Now().UTC()
+	pinEmotionClock(es, at)
 
 	require.NoError(t, es.OnEvent("t1", r1.ID, 7, "praised", 3, at, "evt-r1"))
 
@@ -136,6 +148,7 @@ func TestEmotionServiceNarrationPersistedInState(t *testing.T) {
 	r, err := rs.Create("t1", CreateRunInput{Name: "scene"})
 	require.NoError(t, err)
 	at := time.Now().UTC()
+	pinEmotionClock(es, at)
 
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "insulted", 3, at, "evt-i"))                 // -40
 	require.NoError(t, es.OnEvent("t1", r.ID, 7, "insulted", 3, at.Add(time.Hour), "evt-i2")) // 再 -40 → 0

@@ -1,6 +1,7 @@
 // 系统健康状态卡片：绿/黄/红合成状态 + DB / 队列 / 今日错误率 / 扩展启停 / uptime。
-import { Card, Statistic, Tag } from 'antd'
+import { Alert, Card, Statistic, Tag } from 'antd'
 import { createStyles } from 'antd-style'
+import { parseApiError } from '@/api/client'
 import { useUsageHealth } from '@/queries/useUsage'
 import { tokens as t } from '@/styles/tokens'
 
@@ -38,12 +39,25 @@ export function formatUptime(sec: number): string {
 
 export default function UsageHealthCard() {
   const { styles } = useStyles()
-  const { data, isLoading } = useUsageHealth()
-  if (isLoading || !data) return null
+  const { data, isLoading, error } = useUsageHealth()
+  // 查询失败时不能静默 return null：整块卡片凭空消失，用户会以为这页
+  // 本来就没有健康状态区域，运维漏看告警也追不到痕迹（P2-20）。
+  if (error) {
+    return (
+      <Alert
+        className={styles.card}
+        type="error"
+        showIcon
+        message="系统健康状态加载失败"
+        description={parseApiError(error)}
+      />
+    )
+  }
+  if (isLoading || !data) return <Card className={styles.card} loading />
   const meta = STATUS_META[data.status] ?? STATUS_META.green
 
   return (
-    <Card className={styles.card} loading={isLoading}>
+    <Card className={styles.card}>
       <div>
         <span className={styles.statusDot} style={{ background: meta.color }} />
         <strong style={{ fontSize: t.textLg }}>{meta.label}</strong>

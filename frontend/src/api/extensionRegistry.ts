@@ -4,7 +4,9 @@ import apiClient from './client'
 export interface ExtensionPermission {
   permission: string
   scope: string
-  actions: string[]
+  // 可选：后端 actions 为 nil 切片时会序列化成 null。
+  // 这类"列表字段"统一声明为可选，强制调用方写 `?? []`。
+  actions?: string[]
 }
 
 export interface ExtensionListItem {
@@ -34,6 +36,7 @@ export interface ExtensionListResult {
 export interface ExtensionVersionManifestSummary {
   displayName: string
   description: string
+  // slots 走 `omitempty`，为空时字段整体缺失；其余列表字段可能为 null。
   slots?: string[]
   stateSchemaCount: number
   eventCount: number
@@ -51,7 +54,9 @@ export interface ExtensionVersionSummary {
   createdBy: string
   createdAt: string
   manifestSummary: ExtensionVersionManifestSummary
-  permissions: ExtensionPermission[]
+  // manifest 校验失败时后端返回 null（H7 已改为返回 `[]`，此声明保留
+  // 可选以强制前端写出 `?? []`，不再依赖后端行为）。
+  permissions?: ExtensionPermission[]
 }
 
 export interface ExtensionDetail {
@@ -130,10 +135,11 @@ export interface ExtensionImpact {
   version?: string
   installed: boolean
   status?: string
-  dependents: string[]
-  dependencies: ExtensionImpactDependency[]
-  newStateSchemas: string[]
-  permissions: ExtensionPermission[]
+  // 同上：均可为 null（未安装/无依赖/无权限声明时）
+  dependents?: string[]
+  dependencies?: ExtensionImpactDependency[]
+  newStateSchemas?: string[]
+  permissions?: ExtensionPermission[]
 }
 
 export const extensionRegistryApi = {

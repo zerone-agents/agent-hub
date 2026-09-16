@@ -53,11 +53,82 @@ func TestEnsureBuiltinPersonaPacks_Idempotent(t *testing.T) {
 	require.Equal(t, extension.InstallStatusDisabled, inst.Status)
 }
 
+// TestBuiltinPersonaPackUninstallDoesNotResurrect 回归 P1：内置扩展的"卸载"
+// 必须落成"停用"而非物理删除安装行。
+//
+// 若物理删除，启动期 EnsureBuiltinPersonaPacks 会发现安装行不存在并按
+// InstallStatusEnabled 重建，于是管理员的卸载动作在下次重启后被静默撤销
+// （页面显示已卸载、重启后又变回启用态），与 H7"可停用/卸载"的目标矛盾。
+func TestBuiltinPersonaPackUninstallDoesNotResurrect(t *testing.T) {
+	f := newLifecycleFixture(t)
+	require.NoError(t, f.lifecycle.EnsureBuiltinPersonaPacks())
+
+	ext := findBuiltinExtension(t, f, "io.zerone.emotion")
+
+	// 卸载内置扩展：转为停用，安装行保留。
+	res, err := f.lifecycle.Uninstall("default", ext.ID, false, false)
+	require.NoError(t, err)
+	require.True(t, res.BuiltinDisableOnly, "内置扩展卸载应标记为仅停用")
+	inst, err := findInstall(f.db, "default", ext.ID)
+	require.NoError(t, err)
+	require.NotNil(t, inst, "安装行必须保留，否则启动期种子会把它重新装回来")
+	require.Equal(t, extension.InstallStatusDisabled, inst.Status)
+
+	// 重启（再次种子）：仍保持停用，不被静默恢复。
+	require.NoError(t, f.lifecycle.EnsureBuiltinPersonaPacks())
+	inst, err = findInstall(f.db, "default", ext.ID)
+	require.NoError(t, err)
+	require.NotNil(t, inst)
+	require.Equal(t, extension.InstallStatusDisabled, inst.Status, "重启后不得自动恢复启用")
+
+	// purge（彻底清除）对内置扩展应被拒绝：否则扩展行被删掉后种子会重建全套。
+	_, err = f.lifecycle.Uninstall("default", ext.ID, false, true)
+	require.Error(t, err, "内置扩展不支持 purge 彻底卸载")
+}
+
 func findBuiltinExtension(t *testing.T, f *lifecycleFixture, name string) *extension.Extension {
 	t.Helper()
 	var ext extension.Extension
 	require.NoError(t, f.db.Where("tenant_id=? AND name=?", "default", name).First(&ext).Error)
 	return &ext
+}
+
+// TestEnsureBuiltinPersonaPacks_SyncsGrants 回归 P0：种子必须把四个内置扩展
+// manifest 声明的权限真正同步成 grants 行，并且 Enforce 能据此放行。
+//
+// 这条路径此前在生产接线里是失效的：main.go 中种子跑在 SetAuthzService 之前，
+// 而 syncGrantsWithTx 遇到 authz==nil 直接返回 nil（静默 no-op），于是四个内置
+// 扩展永远没有 grants 行。旧测试基座本身不接 authz，所以"授权同步与种子同事务"
+// 这句话从未被任何用例验证过——本用例把 authz 接上再断言，才能证伪。
+func TestEnsureBuiltinPersonaPacks_SyncsGrants(t *testing.T) {
+	f := newLifecycleFixture(t)
+	require.NoError(t, f.db.AutoMigrate(&extension.Grant{}, &extension.AccessAudit{}))
+	authz := NewExtensionAuthzService(f.db)
+	f.lifecycle.SetAuthzService(authz)
+
+	require.NoError(t, f.lifecycle.EnsureBuiltinPersonaPacks())
+
+	for _, pack := range builtinPersonaPacks {
+		ext := findBuiltinExtension(t, f, pack.Name)
+		grants, err := authz.ListGrants("default", ext.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, grants, "内置扩展 %s 必须有 grants 行", pack.Name)
+		require.True(t, authz.Enforce("default", pack.Name, "state", "read", "", "127.0.0.1"),
+			"%s 的 state/read 应被授权放行", pack.Name)
+	}
+
+	// 幂等：重复种子不产生重复 grants。
+	require.NoError(t, f.lifecycle.EnsureBuiltinPersonaPacks())
+	ext := findBuiltinExtension(t, f, "io.zerone.emotion")
+	grants, err := authz.ListGrants("default", ext.ID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+
+	// 停用后 Enforce 立即拒绝（默认拒绝语义，与中间件一致）。
+	_, err = f.lifecycle.Disable("default", ext.ID)
+	require.NoError(t, err)
+	require.False(t, authz.Enforce("default", ext.Name, "state", "read", "", "127.0.0.1"),
+		"停用扩展后不应再放行")
 }
 
 // TestPersonaCapabilityGate_EnableDisable：停用/启用经生命周期 API 立即
