@@ -26,6 +26,12 @@ func TestStaticCacheHeaders(t *testing.T) {
 	}{
 		{"/static/assets/index-abc123.js", "public, max-age=31536000, immutable"},
 		{"/static/assets/clipboard-Bu3j9iBs.js", "public, max-age=31536000, immutable"},
+		// h5 移动端 SPA：hashed 资源同样 immutable，入口与子路径 revalidate
+		{"/static/h5/assets/index-BNxGOWSa.js", "public, max-age=31536000, immutable"},
+		{"/static/h5/assets/index-C0vLp-Ku.css", "public, max-age=31536000, immutable"},
+		{"/static/h5", "no-cache"},
+		{"/static/h5/", "no-cache"},
+		{"/static/h5/index.html", "no-cache"},
 		{"/static", "no-cache"},
 		{"/static/", "no-cache"},
 		{"/static/index.html", "no-cache"},

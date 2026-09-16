@@ -59,7 +59,8 @@ var staticFiles embed.FS
 // sent — without these headers, users keep running stale JS after upgrades.
 func staticCacheHeaders(c *gin.Context) {
 	p := c.Request.URL.Path
-	if strings.HasPrefix(p, "/static/assets/") {
+	// /static/h5/assets/ 为移动端 h5 的 content-hashed 资源，同 frontend
+	if strings.HasPrefix(p, "/static/assets/") || strings.HasPrefix(p, "/static/h5/assets/") {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	} else if p == "/static" || strings.HasPrefix(p, "/static/") {
 		c.Header("Cache-Control", "no-cache")
