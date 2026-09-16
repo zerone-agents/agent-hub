@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# inject-token.mjs 临时凭证文件（绝不可提交）
+public/_token.json
