@@ -79,7 +79,7 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
       }
     }
     return items
-  }, [listData, boundIds, listComplete])
+  }, [t, listData, boundIds, listComplete])
 
   useEffect(() => {
     if (open) {

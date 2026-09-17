@@ -333,7 +333,7 @@ export function useChatStream(): UseChatStreamReturn {
         abortRef.current = null
       }
     }
-  }, [])
+  }, [t])
 
   return { state, send, reset }
 }

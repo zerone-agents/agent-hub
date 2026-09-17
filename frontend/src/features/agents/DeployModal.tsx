@@ -520,7 +520,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
     if (isArchived) return t('agents.deploy.stArchived')
     if (deploymentStatus === 'not_found') return t('agents.deploy.stNotDeployed')
     return deploymentStatus || t('agents.deploy.badgeUnknown')
-  }, [isRunning, isArchived, deploymentStatus, status?.health])
+  }, [t, isRunning, isArchived, deploymentStatus, status?.health])
 
   const statusLine = useMemo(() => buildStatusLine(status), [status])
 

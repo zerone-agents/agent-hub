@@ -82,7 +82,7 @@ export default function KnowledgeSettingsPage() {
       ];
     }
     return options;
-  }, [dataset?.embd_id, embdRawToValue, embeddingGroups]);
+  }, [t, dataset?.embd_id, embdRawToValue, embeddingGroups]);
   const candidatesLoading = providers.isLoading || multiragEmbedding.isLoading;
 
   useEffect(() => {

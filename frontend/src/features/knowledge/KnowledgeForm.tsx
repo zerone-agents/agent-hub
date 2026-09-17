@@ -682,7 +682,7 @@ export default function KnowledgeForm({
       ];
     }
     return groupsToAntdOptions(embeddingGroups);
-  }, [editing?.embd_id, embdRawToValue, embeddingGroups]);
+  }, [t, editing?.embd_id, embdRawToValue, embeddingGroups]);
 
   const layoutOptions = useMemo<SelectOptionGroup[]>(() => {
     const saved = editing?.parser_config.layout_recognize;
@@ -702,6 +702,7 @@ export default function KnowledgeForm({
     }
     return groupsToAntdOptions(layoutGroups);
   }, [
+    t,
     editing?.parser_config.layout_recognize,
     layoutRawToValue,
     layoutGroups,

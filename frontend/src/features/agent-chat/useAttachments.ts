@@ -76,7 +76,7 @@ export function useAttachments() {
       ])
       return null
     },
-    [commit]
+    [t, commit]
   )
 
   const remove = useCallback(
@@ -142,7 +142,7 @@ export function useAttachments() {
         setUploading(false)
       }
     },
-    [commit]
+    [t, commit]
   )
 
   return { items, uploading, add, remove, clearAll, invalidate, upload }
