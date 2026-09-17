@@ -138,7 +138,7 @@ export default function ChatHomePage() {
           groupedSections.map((section) => (
             <section key={section.name} className={styles.section}>
               <div className={styles.sectionTitle}>
-                <span>{section.name}</span>
+                <span>{section.name === '默认分组' ? t('agentChat.defaultGroup') : section.name}</span>
                 <span className={styles.sectionCount}>{section.agents.length}</span>
               </div>
               <div className={styles.grid}>

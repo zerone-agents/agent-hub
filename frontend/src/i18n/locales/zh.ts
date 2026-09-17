@@ -555,6 +555,8 @@ const zh = {
       bubbleRunning: '进行中',
       bubbleAria: '批量任务{{state}}，点击查看',
       reasonAlreadyDeployed: '已部署，建议重新部署',
+      reasonStoppedOrError: '容器已停止或出错，建议重新部署',
+      reasonErrorRedeploy: '部署出错，建议重新部署',
       reasonTransitioning: '容器状态转换中（{{status}}），稍后再试',
       reasonNotDeployed: '未部署',
       reasonStopped: '已停止',

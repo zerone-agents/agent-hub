@@ -172,12 +172,14 @@ const useStyles = createStyles(({ css }) => ({
 
 const PAGE_SIZE = 10;
 
+// 筛选选项 label 存 i18n key，消费处 map t()——模块级 i18next.t() 会在首次
+// import 时烘焙语言，运行期切换不生效（PR #172 review 阻塞项 2）。
 const STATUS_OPTIONS = [
-  { label: i18next.t('knowledge.docs.runParsing'), value: "1" },
-  { label: i18next.t('knowledge.docs.runCancelled'), value: "2" },
-  { label: i18next.t('knowledge.docs.runDone'), value: "3" },
-  { label: i18next.t('knowledge.docs.runFailed'), value: "4" },
-  { label: i18next.t('knowledge.docs.runUnparsed'), value: "0" },
+  { label: 'knowledge.docs.runParsing', value: "1" },
+  { label: 'knowledge.docs.runCancelled', value: "2" },
+  { label: 'knowledge.docs.runDone', value: "3" },
+  { label: 'knowledge.docs.runFailed', value: "4" },
+  { label: 'knowledge.docs.runUnparsed', value: "0" },
 ];
 
 const SUFFIX_OPTIONS = [
@@ -718,7 +720,7 @@ export default function KnowledgeDocumentsPage() {
             maxTagCount="responsive"
             placeholder={t('knowledge.docs.statusPh')}
             style={{ minWidth: 160 }}
-            options={STATUS_OPTIONS}
+            options={STATUS_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
             value={runFilter}
             onChange={(value) => {
               setRunFilter(value);

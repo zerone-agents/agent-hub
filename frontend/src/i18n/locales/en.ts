@@ -557,6 +557,8 @@ const en = {
       bubbleRunning: 'in progress',
       bubbleAria: 'Bulk task {{state}}, click to view',
       reasonAlreadyDeployed: 'Already deployed; redeploy recommended',
+      reasonStoppedOrError: 'Container stopped or errored; redeploy recommended',
+      reasonErrorRedeploy: 'Deploy error; redeploy recommended',
       reasonTransitioning: 'Container state transitioning ({{status}}), try again later',
       reasonNotDeployed: 'Not deployed',
       reasonStopped: 'Stopped',

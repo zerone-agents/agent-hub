@@ -56,7 +56,7 @@ export function classifyBulkOperation(
       if (knownUnknown) return { classification: 'executable' } // 幂等安全
       if (status === 'running') return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonAlreadyDeployed') }
       if (TRANSITIONING.has(status)) return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonTransitioning', { status }) }
-      return { classification: 'skipped', reason: '容器已停止或出错，建议重新部署' } // stopped/exited/error
+      return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonStoppedOrError') } // stopped/exited/error
     }
     case 'redeploy': {
       if (HAS_CONTAINER.has(status)) return { classification: 'executable' }
@@ -68,7 +68,7 @@ export function classifyBulkOperation(
       if (knownUnknown) return { classification: 'executable' } // 失败可见
       if (NO_CONTAINER.has(status)) return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonNotDeployed') }
       if (status === 'stopped' || status === 'exited') return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonStopped') }
-      return { classification: 'skipped', reason: '部署出错，建议重新部署' } // error
+      return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonErrorRedeploy') } // error
     }
     case 'delete': {
       if (NO_CONTAINER.has(status)) return { classification: 'executable' }
