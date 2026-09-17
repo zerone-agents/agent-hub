@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import i18next, { setAppLanguage, type AppLanguage } from '@/i18n'
-
-function normalize(lng: string | undefined): AppLanguage {
-  return lng === 'en' ? 'en' : 'zh'
-}
+import i18next, {
+  normalizeLanguage,
+  setAppLanguage,
+  type AppLanguage
+} from '@/i18n'
 
 /**
  * 响应式语言状态。i18next 实例是单一事实来源，本 hook 只订阅
@@ -12,11 +12,11 @@ function normalize(lng: string | undefined): AppLanguage {
  */
 export function useLanguage() {
   const [language, setLocal] = useState<AppLanguage>(() =>
-    normalize(i18next.language)
+    normalizeLanguage(i18next.language)
   )
   useEffect(() => {
     const onChange = (lng: string) => {
-      setLocal(normalize(lng))
+      setLocal(normalizeLanguage(lng))
     }
     i18next.on('languageChanged', onChange)
     return () => {

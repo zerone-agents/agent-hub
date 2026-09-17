@@ -4,6 +4,7 @@ import { createStyles } from 'antd-style'
 import { useTranslation } from 'react-i18next'
 import type { MenuProps } from 'antd'
 import { useLanguage } from '@/hooks/useLanguage'
+import { normalizeLanguage } from '@/i18n'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -42,7 +43,7 @@ export default function LanguageSwitch() {
         items,
         selectedKeys: [language],
         onClick: ({ key }) => {
-          setLanguage(key === 'en' ? 'en' : 'zh')
+          setLanguage(normalizeLanguage(key))
         }
       }}
       trigger={['click']}
