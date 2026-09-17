@@ -39,7 +39,9 @@ function inviteStatusColor(status: string): string {
 }
 
 export default function UsersPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  // 列表日期格式跟随界面语言（zh 下输出与原 toLocaleString('zh-CN') 逐字一致）
+  const dateLocale = i18n.language === 'zh' ? 'zh-CN' : 'en-US'
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
@@ -143,7 +145,7 @@ export default function UsersPage() {
       dataIndex: 'createdAt',
       key: 'createdAt',
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString('zh-CN')
+      render: (v: string) => new Date(v).toLocaleString(dateLocale)
     },
     {
       title: t('users.columns.actions'),
@@ -219,7 +221,7 @@ export default function UsersPage() {
       dataIndex: 'expiresAt',
       key: 'expiresAt',
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString('zh-CN')
+      render: (v: string) => new Date(v).toLocaleString(dateLocale)
     },
     {
       title: t('users.columns.actions'),
