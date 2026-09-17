@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Breadcrumb } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { KeyIcon, ListIcon, ScrollIcon, ShieldCheckIcon, SidebarSimpleIcon, UsersIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { MenuProps } from 'antd'
@@ -144,6 +145,7 @@ interface AppHeaderProps {
 
 export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const { styles, cx } = useStyles()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
@@ -180,7 +182,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       ? [{
           key: 'users',
           icon: <UsersIcon size={14} />,
-          label: '用户管理',
+          label: t('components.appHeader.users'),
           onClick: async () => { await navigate('/settings/users'); }
         }]
       : []),
@@ -188,7 +190,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       ? [{
           key: 'audit-logs',
           icon: <ScrollIcon size={14} />,
-          label: '审计日志',
+          label: t('components.appHeader.auditLogs'),
           onClick: async () => { await navigate('/settings/audit-logs'); }
         }]
       : []),
@@ -204,7 +206,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       ? [{
           key: 'aigc-config',
           icon: <ShieldCheckIcon size={14} />,
-          label: 'AIGC 标识配置',
+          label: t('components.appHeader.aigcConfig'),
           onClick: async () => { await navigate('/settings/aigc'); }
         }]
       : [])
@@ -219,7 +221,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
             type="button"
             className={styles.toggleBtn}
             onClick={onToggleSidebar}
-            aria-label="切换侧边栏"
+            aria-label={t('components.appHeader.toggleSidebar')}
           >
             <SidebarSimpleIcon size={20} />
           </button>
@@ -229,7 +231,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
             type="button"
             className={cx(styles.burgerBtn, mobileMenuOpen && styles.burgerBtnActive)}
             onClick={() => { setMobileMenuOpen(!mobileMenuOpen); }}
-            aria-label="菜单"
+            aria-label={t('components.appHeader.menu')}
           >
             <ListIcon size={22} weight="bold" />
           </button>

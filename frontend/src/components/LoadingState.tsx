@@ -1,5 +1,6 @@
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 
 const useStyles = createStyles(({ css }) => ({
   wrapper: css`
@@ -11,11 +12,12 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-export default function LoadingState({ tip = '加载中...' }: { tip?: string }) {
+export default function LoadingState({ tip }: { tip?: string }) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   return (
     <div className={styles.wrapper}>
-      <Spin size="large" description={tip} />
+      <Spin size="large" description={tip ?? t('common.loading')} />
     </div>
   )
 }

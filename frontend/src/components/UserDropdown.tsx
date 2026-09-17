@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Avatar, Dropdown, type MenuProps } from 'antd'
 import { LockIcon, SignOutIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
 import { tokens as t } from '@/styles/tokens'
@@ -49,6 +50,7 @@ interface UserDropdownProps {
 
 export default function UserDropdown({ extraItems }: UserDropdownProps) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
@@ -64,13 +66,13 @@ export default function UserDropdown({ extraItems }: UserDropdownProps) {
     {
       key: 'change-password',
       icon: <LockIcon size={14} />,
-      label: '修改密码',
+      label: t('components.userDropdown.changePassword'),
       onClick: () => { setPwdModalOpen(true); }
     },
     {
       key: 'logout',
       icon: <SignOutIcon size={14} />,
-      label: '退出登录',
+      label: t('common.logout'),
       onClick: () => { void handleLogout(); }
     }
   ]

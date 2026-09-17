@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Input, Modal, Typography } from 'antd'
+import { useTranslation } from 'react-i18next'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import PrimaryButton from '@/components/PrimaryButton'
 
@@ -28,6 +29,7 @@ export function showManualCopy(text: string) {
 }
 
 export function ManualCopyHost() {
+  const { t } = useTranslation()
   const [text, setText] = useState<string | null>(null)
   const taRef = useRef<TextAreaRef>(null)
 
@@ -38,15 +40,15 @@ export function ManualCopyHost() {
 
   return (
     <Modal
-      title="手动复制"
+      title={t('components.manualCopy.title')}
       open={text !== null}
       onCancel={() => { setText(null) }}
-      footer={<PrimaryButton onClick={() => { setText(null) }}>关闭</PrimaryButton>}
+      footer={<PrimaryButton onClick={() => { setText(null) }}>{t('components.manualCopy.close')}</PrimaryButton>}
       afterOpenChange={(open) => { if (open) taRef.current?.focus() }}
       destroyOnHidden
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 13 }}>
-        浏览器限制非 HTTPS 页面自动复制。请选中下方内容后按 ⌘C / Ctrl+C 复制，完成后关闭。
+        {t('components.manualCopy.hint')}
       </Typography.Paragraph>
       <Input.TextArea
         ref={taRef}

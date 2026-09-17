@@ -127,6 +127,14 @@ if (!isUsableStorage(globalThis.localStorage)) {
   }
 }
 
+// 全局初始化 i18n（模块副作用 init，语言默认 zh）：测试不经过 main.tsx，
+// 不加则 useTranslation 拿到未初始化实例，t() 直接返回 key 本身，组件测试
+// 的中文文案断言全部失败。资源中文值与原硬编码逐字一致 → 既有断言零改动。
+// 必须用动态 import 且置于 localStorage shim 之后：静态 import 会被提升到
+// 模块体之前执行，届时 Node 25 的裸 localStorage（无方法空对象）会让
+// readStoredLanguage 抛 "getItem is not a function"。
+await import('@/i18n')
+
 // jsdom does not implement matchMedia; antd / lobe-ui expect it.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: jsdom does not implement matchMedia despite TS lib typing it as required
 if (!window.matchMedia) {
