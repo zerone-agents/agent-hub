@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Popconfirm, Tooltip, Empty } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,7 +11,7 @@ import { useKnowledgeList, useDeleteKnowledge } from '@/queries/useKnowledge'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import type { KnowledgeDataset } from '@/api/knowledge'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import BorderedTable from '@/components/BorderedTable'
 import KnowledgeForm from './KnowledgeForm'
 
@@ -28,11 +29,11 @@ const useStyles = createStyles(({ css }) => ({
     @media (max-width: 768px) { flex-direction: column; gap: 16px; }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl}; font-weight: 700; color: ${t.text};
+    font-size: ${tk.text3xl}; font-weight: 700; color: ${tk.text};
     letter-spacing: -0.03em; line-height: 1.15;
   `,
   pageSub: css`
-    margin-top: 4px; font-size: ${t.textBase}; color: ${t.textTertiary};
+    margin-top: 4px; font-size: ${tk.textBase}; color: ${tk.textTertiary};
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
@@ -42,23 +43,24 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; justify-content: center; padding: 80px 0;
   `,
   nameLink: css`
-    color: ${t.ink}; font-weight: 600; cursor: pointer;
+    color: ${tk.ink}; font-weight: 600; cursor: pointer;
     &:hover { text-decoration: underline; }
   `,
   actBtn: css`
     width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-    border: none; background: transparent; border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted}; cursor: pointer; transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    border: none; background: transparent; border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted}; cursor: pointer; transition: all 0.15s;
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `
 }))
 
 const PAGE_SIZE = 10
 
 export default function KnowledgeListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const navigate = useNavigate()
 
@@ -84,38 +86,38 @@ export default function KnowledgeListPage() {
 
   const columns: ColumnsType<KnowledgeDataset> = [
     {
-      title: '名称',
+      title: t('knowledge.list.name'),
       dataIndex: 'name',
       key: 'name',
       width: 200,
       render: (_, record) => (
         <span className={styles.nameLink} onClick={async () => { await navigate(`/knowledge/${record.id}`); }}>
-          {record.name || '未命名'}
+          {record.name || t('knowledge.list.unnamed')}
         </span>
       )
     },
     {
-      title: '描述',
+      title: t('knowledge.list.desc'),
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
       render: (value: string) => (
         <Tooltip title={value} placement="topLeft">
-          <span style={{ color: t.textTertiary }}>{value || '-'}</span>
+          <span style={{ color: tk.textTertiary }}>{value || '-'}</span>
         </Tooltip>
       )
     },
-    { title: '文档数', dataIndex: 'doc_num', key: 'doc_num', width: 80, align: 'right' },
-    { title: '分块数', dataIndex: 'chunk_num', key: 'chunk_num', width: 80, align: 'right' },
-    { title: '解析方法', dataIndex: 'parser_id', key: 'parser_id', width: 110 },
+    { title: t('knowledge.list.docNum'), dataIndex: 'doc_num', key: 'doc_num', width: 80, align: 'right' },
+    { title: t('knowledge.list.chunkNum'), dataIndex: 'chunk_num', key: 'chunk_num', width: 80, align: 'right' },
+    { title: t('knowledge.list.parser'), dataIndex: 'parser_id', key: 'parser_id', width: 110 },
     {
-      title: '更新时间',
+      title: t('knowledge.list.updatedAt'),
       key: 'update_time',
       width: 140,
       render: (_, record) => formatTime(record.update_time ?? record.update_date)
     },
     {
-      title: '操作',
+      title: t('knowledge.list.actions'),
       key: 'action',
       width: 100,
       fixed: 'right',
@@ -126,7 +128,7 @@ export default function KnowledgeListPage() {
               <button
                 type="button"
                 className={styles.actBtn}
-                title="编辑"
+                title={t('common.edit')}
                 onClick={() => {
                   setEditing(record)
                   setFormOpen(true)
@@ -135,14 +137,14 @@ export default function KnowledgeListPage() {
                 <PencilSimpleIcon size={14} />
               </button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除知识库 "${record.name}"？此操作不可撤销。`}
-                okText="删除"
+                title={t('scenes.deleteConfirmTitle')}
+                description={t('knowledge.list.deleteConfirm', { name: record.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => deleteKnowledge.mutateAsync(record.id)}
               >
-                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title={t('common.delete')}>
                   <TrashIcon size={14} />
                 </button>
               </Popconfirm>
@@ -157,8 +159,8 @@ export default function KnowledgeListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>知识库管理</div>
-          <div className={styles.pageSub}>管理知识库、文档、分块与检索测试</div>
+          <div className={styles.pageTitle}>{t('knowledge.list.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('knowledge.list.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton
@@ -168,14 +170,14 @@ export default function KnowledgeListPage() {
               setFormOpen(true)
             }}
           >
-            新建知识库
+            {t('knowledge.list.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
         <NameSearch
-          placeholder="搜索知识库名称"
+          placeholder={t('knowledge.list.searchPlaceholder')}
           onSearch={(value) => {
             setKeywords(value)
             setPage(1)
@@ -197,8 +199,8 @@ export default function KnowledgeListPage() {
           locale={{
             emptyText: (
               <Empty
-                image={<DatabaseIcon size={48} color={t.textMuted} />}
-                description={keywords ? '未找到匹配的知识库' : '还没有知识库，点击右上角新建'}
+                image={<DatabaseIcon size={48} color={tk.textMuted} />}
+                description={keywords ? t('knowledge.list.emptyNoMatch') : t('knowledge.list.emptyNone')}
               />
             )
           }}
@@ -206,7 +208,7 @@ export default function KnowledgeListPage() {
             current: page,
             pageSize: PAGE_SIZE,
             total,
-            showTotal: (n) => `共 ${n} 条`,
+            showTotal: (n) => t('common.totalItems', { total: n }),
             onChange: (next) => { setPage(next); }
           }}
         />

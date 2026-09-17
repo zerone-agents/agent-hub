@@ -8,27 +8,28 @@ import {
   Spin,
   Tooltip
 } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useParams } from 'react-router'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { useRetrievalTest } from '@/queries/useKnowledge'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   form: css`
-    background: ${t.surface}; border-radius: ${t.radius}px; box-shadow: ${t.elevation1};
+    background: ${tk.surface}; border-radius: ${tk.radius}px; box-shadow: ${tk.elevation1};
     padding: 20px 24px; margin: 8px 0 20px;
   `,
   params: css`
     display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end;
   `,
   resultHead: css`
-    font-size: ${t.textSm}; color: ${t.textTertiary}; margin-bottom: 12px;
+    font-size: ${tk.textSm}; color: ${tk.textTertiary}; margin-bottom: 12px;
   `,
   card: css`
-    background: ${t.surface}; border-radius: ${t.radius}px; box-shadow: ${t.elevation1};
+    background: ${tk.surface}; border-radius: ${tk.radius}px; box-shadow: ${tk.elevation1};
     padding: 16px 18px; margin-bottom: 12px;
     animation: cardUp 0.3s ease backwards;
     @keyframes cardUp {
@@ -40,13 +41,13 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;
   `,
   docName: css`
-    font-size: ${t.textSm}; font-weight: 600; color: ${t.text};
+    font-size: ${tk.textSm}; font-weight: 600; color: ${tk.text};
   `,
   docId: css`
-    font-size: ${t.textXs}; color: ${t.textMuted};
+    font-size: ${tk.textXs}; color: ${tk.textMuted};
   `,
   content: css`
-    font-size: ${t.textSm}; color: ${t.textSecondary}; line-height: 1.6; white-space: pre-wrap;
+    font-size: ${tk.textSm}; color: ${tk.textSecondary}; line-height: 1.6; white-space: pre-wrap;
   `,
   loadingWrap: css`
     display: flex; justify-content: center; padding: 60px 0;
@@ -70,6 +71,7 @@ const DEFAULTS: RetrievalFormValues = {
 }
 
 export default function KnowledgeRetrievalPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { id = '' } = useParams()
   const [form] = Form.useForm<RetrievalFormValues>()
@@ -99,23 +101,23 @@ export default function KnowledgeRetrievalPage() {
         onFinish={handleFinish}
       >
         <Form.Item
-          label="检索问题"
+          label={t('knowledge.retrieval.question')}
           name="question"
-          rules={[{ required: true, message: '请输入检索问题' }]}
+          rules={[{ required: true, message: t('knowledge.retrieval.questionRequired') }]}
         >
-          <Input.TextArea rows={2} placeholder="输入用于测试召回效果的问题" />
+          <Input.TextArea rows={2} placeholder={t('knowledge.retrieval.questionPh')} />
         </Form.Item>
         <div className={styles.params}>
           <Form.Item label="top_k" name="top_k" style={{ marginBottom: 0 }}>
             <InputNumber min={1} max={4096} style={{ width: 120 }} />
           </Form.Item>
-          <Form.Item label="相似度阈值" name="similarity_threshold" style={{ marginBottom: 0 }}>
+          <Form.Item label={t('knowledge.retrieval.threshold')} name="similarity_threshold" style={{ marginBottom: 0 }}>
             <InputNumber min={0} max={1} step={0.05} style={{ width: 120 }} />
           </Form.Item>
-          <Form.Item label="向量相似度权重" name="vector_similarity_weight" style={{ marginBottom: 0 }}>
+          <Form.Item label={t('knowledge.retrieval.vectorWeight')} name="vector_similarity_weight" style={{ marginBottom: 0 }}>
             <InputNumber min={0} max={1} step={0.05} style={{ width: 140 }} />
           </Form.Item>
-          <Form.Item label="高亮" name="highlight" valuePropName="checked" style={{ marginBottom: 0 }}>
+          <Form.Item label={t('knowledge.retrieval.highlight')} name="highlight" valuePropName="checked" style={{ marginBottom: 0 }}>
             <Switch />
           </Form.Item>
           {canWrite && (
@@ -125,7 +127,7 @@ export default function KnowledgeRetrievalPage() {
                 icon={<MagnifyingGlassIcon size={16} />}
                 loading={retrieval.isPending}
               >
-                检索测试
+                {t('knowledge.retrieval.testBtn')}
               </PrimaryButton>
             </Form.Item>
           )}
@@ -139,17 +141,17 @@ export default function KnowledgeRetrievalPage() {
       ) : result ? (
         result.chunks.length > 0 ? (
           <div>
-            <div className={styles.resultHead}>共召回 {result.total} 条分块</div>
+            <div className={styles.resultHead}>{t('knowledge.retrieval.recalled', { n: result.total })}</div>
             {result.chunks.map((chunk) => (
               <div key={chunk.id} className={styles.card}>
                 <div className={styles.cardMeta}>
-                  <Tag color="blue">相似度 {chunk.similarity.toFixed(3)}</Tag>
-                  <Tooltip title="向量 / 关键词相似度">
+                  <Tag color="blue">{t('knowledge.retrieval.similarity', { v: chunk.similarity.toFixed(3) })}</Tag>
+                  <Tooltip title={t('knowledge.retrieval.simTooltip')}>
                     <Tag>
-                      向量 {chunk.vector_similarity.toFixed(2)} · 词 {chunk.term_similarity.toFixed(2)}
+                      {t('knowledge.retrieval.vectorTerm', { v: chunk.vector_similarity.toFixed(2), t: chunk.term_similarity.toFixed(2) })}
                     </Tag>
                   </Tooltip>
-                  <span className={styles.docName}>{chunk.document_name || '未知文档'}</span>
+                  <span className={styles.docName}>{chunk.document_name || t('knowledge.retrieval.unknownDoc')}</span>
                   <span className={styles.docId}>{chunk.document_id}</span>
                 </div>
                 <div className={styles.content}>{chunk.content}</div>
@@ -157,10 +159,10 @@ export default function KnowledgeRetrievalPage() {
             ))}
           </div>
         ) : (
-          <Empty description="没有召回结果，可尝试降低相似度阈值" />
+          <Empty description={t('knowledge.retrieval.emptyNoResult')} />
         )
       ) : (
-        <Empty description="输入问题后点击「检索测试」查看召回结果" />
+        <Empty description={t('knowledge.retrieval.emptyHint')} />
       )}
     </div>
   )
