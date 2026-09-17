@@ -25,7 +25,7 @@ const en = {
       inactive: 'Disabled'
     },
     notFound: {
-      subTitle: 'Sorry, the page you visited does not exist.',
+      subtitle: 'Sorry, the page you visited does not exist.',
       back: 'Back to Home'
     },
     appHeader: {

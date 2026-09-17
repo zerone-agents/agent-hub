@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
-import { Result, Button } from 'antd'
+import { Result } from 'antd'
+import PrimaryButton from '@/components/PrimaryButton'
 // class 组件不能用 useTranslation hook，走 i18next 实例直调
 // （语言切换后已渲染的 fallback 页不重渲染，可接受——错误边界是最后防线）。
 import i18next from '@/i18n'
@@ -36,9 +37,9 @@ export class ErrorBoundary extends Component<Props, State> {
           title={i18next.t('components.errorBoundary.title')}
           subTitle={this.state.error.message}
           extra={
-            <Button type="primary" onClick={this.handleReload}>
+            <PrimaryButton onClick={this.handleReload}>
               {i18next.t('components.errorBoundary.refresh')}
-            </Button>
+            </PrimaryButton>
           }
         />
       )

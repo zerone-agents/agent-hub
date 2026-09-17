@@ -1,6 +1,7 @@
-import { Result, Button } from 'antd'
+import { Result } from 'antd'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import PrimaryButton from '@/components/PrimaryButton'
 
 export default function NotFound() {
   const navigate = useNavigate()
@@ -9,11 +10,11 @@ export default function NotFound() {
     <Result
       status="404"
       title="404"
-      subTitle={t('components.notFound.subTitle')}
+      subTitle={t('components.notFound.subtitle')}
       extra={
-        <Button type="primary" onClick={async () => { await navigate('/dashboard'); }}>
+        <PrimaryButton onClick={async () => { await navigate('/dashboard'); }}>
           {t('components.notFound.back')}
-        </Button>
+        </PrimaryButton>
       }
     />
   )

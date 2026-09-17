@@ -97,7 +97,7 @@ export default function ThemeControls() {
         menu={{
           selectedKeys: [preference],
           onClick: ({ key }) => { setPreference(key as ThemePreference); },
-          items: appearanceOptions
+          items: appearanceOptions.map((o) => ({ ...o, label: t(o.label) }))
         }}
       >
         <Tooltip title={t('components.themeControls.switchMode')}>

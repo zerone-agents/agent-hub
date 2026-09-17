@@ -23,7 +23,7 @@ const zh = {
       inactive: '停用'
     },
     notFound: {
-      subTitle: '抱歉，您访问的页面不存在。',
+      subtitle: '抱歉，您访问的页面不存在。',
       back: '回到首页'
     },
     appHeader: {
