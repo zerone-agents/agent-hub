@@ -556,8 +556,104 @@ const zh = {
     }
   },
   chat: {
+    sessions: '聊天记录',
+    searchPlaceholder: '搜索会话...',
+    noMatch: '未找到匹配会话',
+    empty: '暂无聊天记录',
+    untitled: '未命名会话',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirmDesc: '所有消息将被永久删除',
+    noMessages: '该会话暂无消息',
+    backToList: '返回会话列表',
+    pickTitle: '选择一个会话',
+    pickDesc: '从左侧列表中选择会话以查看对话内容',
+    parts: {
+      file: '文件',
+      expired: '临时文件已不可用',
+      metaOnly: '仅元数据',
+      downloadAria: '下载 {{name}}'
+    },
+    toolCall: {
+      input: '输入',
+      pending: '等待结果…',
+      emptyOutput: '（无输出）'
+    },
+    msg: {
+      roleUser: '用户',
+      roleAssistant: '助手',
+      roleSystem: '系统',
+      roleTool: '工具',
+      hidden: '已隐藏'
+    },
+    legacyResult: '结果',
     toast: {
       sessionDeleted: '会话已删除'
+    }
+  },
+  users: {
+    pageTitle: '用户管理',
+    pageSub: '邀请用户、管理角色与账号状态。仅管理员可见。',
+    toast: { updated: '已更新', revoked: '已撤销' },
+    columns: {
+      username: '用户名',
+      nickname: '昵称',
+      role: '角色',
+      status: '状态',
+      createdAt: '创建时间',
+      actions: '操作',
+      note: '备注'
+    },
+    status: { pending: '待审批', active: '启用', disabled: '禁用' },
+    disable: '禁用',
+    enable: '启用',
+    disableConfirmTitle: '确认禁用该用户？',
+    disableConfirmDesc: '用户将立即下线。',
+    reset: '重置',
+    resetPassword: '重置密码',
+    resetConfirmTitle: '确认重置密码？',
+    resetConfirmDesc: '将为 "{{name}}" 生成随机新密码，原密码立即失效，所有会话下线。',
+    revoke: '撤销',
+    loginLink: '登录链接',
+    createInvite: '创建邀请',
+    sectionUsers: '用户',
+    sectionInvites: '邀请记录',
+    resetSuccessTitle: '重置密码成功',
+    resetSuccessHint: '新密码仅显示这一次，请立即复制并安全送达被重置的用户：',
+    copy: '复制',
+    copyFail: '复制失败，请手动选择复制',
+    changePassword: {
+      mismatch: '两次输入的新密码不一致',
+      rule: '新密码至少 8 位，且需包含字母和数字',
+      done: '密码已更新',
+      title: '修改密码',
+      ok: '更新密码',
+      current: '当前密码',
+      next: '新密码（至少 8 位，含字母和数字）',
+      confirm: '确认新密码'
+    },
+    invite: {
+      roleMember: '成员（member，只读使用）',
+      roleMaintainer: '维护者（maintainer，可管资源）',
+      roleAdmin: '管理员（admin，可邀请+管用户）',
+      copied: '邀请链接已复制',
+      createdTitle: '邀请创建成功',
+      createTitle: '创建邀请链接',
+      done: '完成',
+      create: '创建',
+      close: '关闭',
+      onceHint: '链接仅显示这一次，请立即复制保存。关闭后无法再获取该链接（如丢失只能撤销重建）。',
+      roleLabel: '角色',
+      noteLabel: '备注（可选）',
+      notePlaceholder: '例如：给张三',
+      ttlLabel: '有效期（天，1-30）'
+    },
+    loginLinkModal: {
+      copied: '登录链接已复制',
+      title: '登录链接',
+      done: '完成',
+      close: '关闭',
+      hint: '将此链接发给新用户，通过 Casdoor 完成登录（未注册的账号可在登录页注册）后回到本页即可看到该用户。',
+      generating: '生成中…'
     }
   },
   login: {

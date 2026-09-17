@@ -558,8 +558,104 @@ const en = {
     }
   },
   chat: {
+    sessions: 'Chat History',
+    searchPlaceholder: 'Search sessions...',
+    noMatch: 'No matching sessions',
+    empty: 'No chat history yet',
+    untitled: 'Untitled session',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirmDesc: 'All messages will be permanently deleted',
+    noMessages: 'No messages in this session',
+    backToList: 'Back to session list',
+    pickTitle: 'Pick a session',
+    pickDesc: 'Select a session from the list on the left to view the conversation',
+    parts: {
+      file: 'File',
+      expired: 'Temporary file no longer available',
+      metaOnly: 'Metadata only',
+      downloadAria: 'Download {{name}}'
+    },
+    toolCall: {
+      input: 'Input',
+      pending: 'Waiting for result…',
+      emptyOutput: '(no output)'
+    },
+    msg: {
+      roleUser: 'User',
+      roleAssistant: 'Assistant',
+      roleSystem: 'System',
+      roleTool: 'Tool',
+      hidden: 'Hidden'
+    },
+    legacyResult: 'Result',
     toast: {
       sessionDeleted: 'Session deleted'
+    }
+  },
+  users: {
+    pageTitle: 'Users',
+    pageSub: 'Invite users, manage roles and account status. Admin only.',
+    toast: { updated: 'Updated', revoked: 'Revoked' },
+    columns: {
+      username: 'Username',
+      nickname: 'Nickname',
+      role: 'Role',
+      status: 'Status',
+      createdAt: 'Created At',
+      actions: 'Actions',
+      note: 'Note'
+    },
+    status: { pending: 'Pending', active: 'Enabled', disabled: 'Disabled' },
+    disable: 'Disable',
+    enable: 'Enable',
+    disableConfirmTitle: 'Disable this user?',
+    disableConfirmDesc: 'The user will be signed out immediately.',
+    reset: 'Reset',
+    resetPassword: 'Reset Password',
+    resetConfirmTitle: 'Reset the password?',
+    resetConfirmDesc: 'A new random password will be generated for "{{name}}"; the old one stops working and all sessions are signed out.',
+    revoke: 'Revoke',
+    loginLink: 'Login Link',
+    createInvite: 'Create Invite',
+    sectionUsers: 'Users',
+    sectionInvites: 'Invitations',
+    resetSuccessTitle: 'Password Reset',
+    resetSuccessHint: 'The new password is shown only once. Copy it now and deliver it securely to the user:',
+    copy: 'Copy',
+    copyFail: 'Copy failed. Please select and copy manually',
+    changePassword: {
+      mismatch: 'The two new passwords do not match',
+      rule: 'New password must be at least 8 characters and contain letters and numbers',
+      done: 'Password updated',
+      title: 'Change Password',
+      ok: 'Update Password',
+      current: 'Current password',
+      next: 'New password (at least 8 characters, letters and numbers)',
+      confirm: 'Confirm new password'
+    },
+    invite: {
+      roleMember: 'Member (read-only)',
+      roleMaintainer: 'Maintainer (manage resources)',
+      roleAdmin: 'Admin (invite + manage users)',
+      copied: 'Invitation link copied',
+      createdTitle: 'Invitation Created',
+      createTitle: 'Create Invitation Link',
+      done: 'Done',
+      create: 'Create',
+      close: 'Close',
+      onceHint: 'This link is shown only once. Copy and save it now — it cannot be retrieved after closing (if lost, revoke and recreate).',
+      roleLabel: 'Role',
+      noteLabel: 'Note (optional)',
+      notePlaceholder: 'e.g. for Zhang San',
+      ttlLabel: 'Validity (days, 1-30)'
+    },
+    loginLinkModal: {
+      copied: 'Login link copied',
+      title: 'Login Link',
+      done: 'Done',
+      close: 'Close',
+      hint: 'Send this link to the new user. After signing in via Casdoor (unregistered accounts can sign up on the login page), the user will appear on this page.',
+      generating: 'Generating…'
     }
   },
   login: {

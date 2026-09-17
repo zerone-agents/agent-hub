@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Input, Pagination, Popconfirm } from 'antd'
 import { MagnifyingGlassIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -6,7 +7,7 @@ import type { ChatSession } from '@/api/chat'
 import { useChatSessions, useDeleteChatSession } from '@/queries/useChat'
 import { useProviders } from '@/queries/useProviders'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   sidebar: css`
@@ -28,7 +29,7 @@ const useStyles = createStyles(({ css }) => ({
   head: css`
     padding: 16px 20px 8px;
   `,
-  title: css`font-size: 14px; font-weight: 600; color: ${t.text}; margin: 0 0 12px;`,
+  title: css`font-size: 14px; font-weight: 600; color: ${tk.text}; margin: 0 0 12px;`,
   search: css`margin-bottom: 8px;`,
   list: css`
     flex: 1; overflow-y: auto; padding: 4px 8px;
@@ -38,31 +39,31 @@ const useStyles = createStyles(({ css }) => ({
   loading: css`display: flex; justify-content: center; padding: 40px 0;`,
   empty: css`
     display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 40px 0; color: ${t.textMuted}; font-size: 12px;
+    padding: 40px 0; color: ${tk.textMuted}; font-size: 12px;
   `,
   item: css`
     display: flex; align-items: flex-start; gap: 8px;
-    padding: 10px 12px; border-radius: ${t.radiusSm}px;
+    padding: 10px 12px; border-radius: ${tk.radiusSm}px;
     cursor: pointer; transition: background 0.12s;
-    &:hover { background: ${t.surfaceHover}; }
+    &:hover { background: ${tk.surfaceHover}; }
   `,
-  itemActive: css`background: ${t.surfaceHover};`,
+  itemActive: css`background: ${tk.surfaceHover};`,
   body: css`flex: 1; min-width: 0;`,
   itemTitle: css`
-    font-size: 13px; font-weight: 500; color: ${t.text};
+    font-size: 13px; font-weight: 500; color: ${tk.text};
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   `,
   meta: css`
     display: flex; align-items: center; gap: 4px; margin-top: 2px;
-    font-size: 11px; color: ${t.textMuted};
+    font-size: 11px; color: ${tk.textMuted};
   `,
   dot: css`opacity: 0.5;`,
   delBtn: css`
     flex-shrink: 0; width: 24px; height: 24px;
     display: flex; align-items: center; justify-content: center;
     border: none; background: transparent; border-radius: 3px;
-    color: ${t.textMuted}; cursor: pointer; transition: all 0.15s;
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    color: ${tk.textMuted}; cursor: pointer; transition: all 0.15s;
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   pagination: css`
     display: flex; justify-content: center; padding: 8px 0 12px;
@@ -76,6 +77,7 @@ interface SessionListPanelProps {
 }
 
 export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }: SessionListPanelProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data, isLoading, page, pageSize, setPage } = useChatSessions()
   const deleteSession = useDeleteChatSession()
@@ -123,13 +125,13 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
   return (
     <div className={`${styles.sidebar} ${hideOnMobile ? styles.sidebarHiddenMobile : ''}`}>
       <div className={styles.head}>
-        <h2 className={styles.title}>聊天记录</h2>
+        <h2 className={styles.title}>{t('chat.sessions')}</h2>
         <Input
           className={styles.search}
-          placeholder="搜索会话..."
+          placeholder={t('chat.searchPlaceholder')}
           allowClear
           size="small"
-          prefix={<MagnifyingGlassIcon size={14} color={t.textMuted} />}
+          prefix={<MagnifyingGlassIcon size={14} color={tk.textMuted} />}
           value={search}
           onChange={(e) => { setSearch(e.target.value); }}
         />
@@ -140,8 +142,8 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
           <div className={styles.loading}><Spin size="small" /></div>
         ) : filtered.length === 0 ? (
           <div className={styles.empty}>
-            <ChatCircleDotsIcon size={32} weight="thin" color={t.textMuted} />
-            <span>{search ? '未找到匹配会话' : '暂无聊天记录'}</span>
+            <ChatCircleDotsIcon size={32} weight="thin" color={tk.textMuted} />
+            <span>{search ? t('chat.noMatch') : t('chat.empty')}</span>
           </div>
         ) : (
           filtered.map((session) => (
@@ -151,7 +153,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
               onClick={() => { onSelect(session); }}
             >
               <div className={styles.body}>
-                <div className={styles.itemTitle}>{session.title || '未命名会话'}</div>
+                <div className={styles.itemTitle}>{session.title || t('chat.untitled')}</div>
                 <div className={styles.meta}>
                   <span>{session.display_name ?? session.user_name ?? (session.user_id.slice(0, 8) || '-')}</span>
                   <span className={styles.dot}>·</span>
@@ -161,11 +163,11 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
                 </div>
               </div>
               <Popconfirm
-                title="确认删除？"
-                description="所有消息将被永久删除"
-                okText="删除"
+                title={t('chat.deleteConfirmTitle')}
+                description={t('chat.deleteConfirmDesc')}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={(e) => {
                   e?.stopPropagation()
                   deleteSession.mutate(session.id)
@@ -174,7 +176,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
                 <button
                   type="button"
                   className={styles.delBtn}
-                  title="删除"
+                  title={t('common.delete')}
                   onClick={(e) => { e.stopPropagation(); }}
                 >
                   <TrashIcon size={13} />

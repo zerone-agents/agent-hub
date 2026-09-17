@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Pagination } from 'antd'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
@@ -53,6 +54,7 @@ interface MessageViewerProps {
 }
 
 export default function MessageViewer({ session }: MessageViewerProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data, isLoading, page, pageSize, setPage } = useChatMessages(session.id)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -77,7 +79,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerInfo}>
-          <div className={styles.headerTitle}>{session.title || '未命名会话'}</div>
+          <div className={styles.headerTitle}>{session.title || t('chat.untitled')}</div>
           <div className={styles.metaRow}>
             {session.user_id && (
               <span className={styles.chip}>
@@ -97,7 +99,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
         {isLoading ? (
           <div className={styles.msgLoading}><Spin size="medium" /></div>
         ) : messages.length === 0 ? (
-          <div className={styles.msgEmpty}>该会话暂无消息</div>
+          <div className={styles.msgEmpty}>{t('chat.noMessages')}</div>
         ) : (
           messages.map((msg) => <MessageBubble key={msg.id} message={msg} buildAttachmentUrl={buildAttachmentUrl} />)
         )}
