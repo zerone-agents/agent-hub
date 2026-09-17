@@ -3,6 +3,7 @@ import { Dropdown, Tooltip } from 'antd'
 import { createStyles } from 'antd-style'
 import { themes, type ThemePreference } from '@/styles/themes'
 import { useThemeStore } from '@/stores/theme'
+import { useTranslation } from 'react-i18next'
 
 const useStyles = createStyles(({ css }) => ({
   controls: css`
@@ -49,13 +50,14 @@ const appearanceOptions: {
   label: string
   icon: React.ReactNode
 }[] = [
-  { key: 'light', label: '浅色', icon: <SunIcon size={16} /> },
-  { key: 'dark', label: '深色', icon: <MoonIcon size={16} /> },
-  { key: 'system', label: '跟随系统', icon: <DesktopIcon size={16} /> }
+  { key: 'light', label: 'components.themeControls.light', icon: <SunIcon size={16} /> },
+  { key: 'dark', label: 'components.themeControls.dark', icon: <MoonIcon size={16} /> },
+  { key: 'system', label: 'components.themeControls.system', icon: <DesktopIcon size={16} /> }
 ]
 
 export default function ThemeControls() {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const themeId = useThemeStore((state) => state.themeId)
   const preference = useThemeStore((state) => state.preference)
   const setThemeId = useThemeStore((state) => state.setThemeId)
@@ -65,7 +67,7 @@ export default function ThemeControls() {
     preference === 'dark' ? MoonIcon : preference === 'light' ? SunIcon : DesktopIcon
 
   return (
-    <div className={styles.controls} aria-label="主题设置">
+    <div className={styles.controls} aria-label={t('components.themeControls.settings')}>
       <Dropdown
         trigger={['click']}
         menu={{
@@ -76,15 +78,15 @@ export default function ThemeControls() {
             .sort((a, b) => a.order - b.order)
             .map((theme) => ({
               key: theme.id,
-              label: theme.label,
+              label: t(theme.label),
               icon: (
                 <PaletteIcon size={16} color={theme.light.primary} weight="fill" />
               )
             }))
         }}
       >
-        <Tooltip title="切换配色">
-          <button type="button" className={styles.button} aria-label="切换配色">
+        <Tooltip title={t('components.themeControls.switchColor')}>
+          <button type="button" className={styles.button} aria-label={t('components.themeControls.switchColor')}>
             <PaletteIcon size={18} />
           </button>
         </Tooltip>
@@ -98,11 +100,11 @@ export default function ThemeControls() {
           items: appearanceOptions
         }}
       >
-        <Tooltip title="切换明暗模式">
+        <Tooltip title={t('components.themeControls.switchMode')}>
           <button
             type="button"
             className={styles.button}
-            aria-label="切换明暗模式"
+            aria-label={t('components.themeControls.switchMode')}
           >
             <AppearanceIcon size={18} />
           </button>

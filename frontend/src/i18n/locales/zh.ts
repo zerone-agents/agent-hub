@@ -10,7 +10,61 @@ const zh = {
     cancel: '取消',
     totalItems: '共 {{total}} 条',
     brandSubtitle: 'AI Agent 管理平台',
-    logout: '退出登录'
+    logout: '退出登录',
+    loading: '加载中...'
+  },
+  components: {
+    confirmDelete: {
+      title: '确认删除？',
+      description: '删除后不可恢复'
+    },
+    statusBadge: {
+      active: '启用',
+      inactive: '停用'
+    },
+    notFound: {
+      subTitle: '抱歉，您访问的页面不存在。',
+      back: '回到首页'
+    },
+    appHeader: {
+      users: '用户管理',
+      auditLogs: '审计日志',
+      aigcConfig: 'AIGC 标识配置',
+      toggleSidebar: '切换侧边栏',
+      menu: '菜单'
+    },
+    userDropdown: {
+      changePassword: '修改密码'
+    },
+    errorBoundary: {
+      title: '页面出错了',
+      refresh: '刷新页面'
+    },
+    themeControls: {
+      light: '浅色',
+      dark: '深色',
+      system: '跟随系统',
+      settings: '主题设置',
+      switchColor: '切换配色',
+      switchMode: '切换明暗模式'
+    },
+    headerLinks: {
+      github: 'GitHub 仓库',
+      site: '官方网站',
+      ariaLabel: '相关链接'
+    },
+    nameSearch: {
+      placeholder: '搜索名称'
+    },
+    passwordInput: {
+      show: '显示密码',
+      hide: '隐藏密码'
+    },
+    manualCopy: {
+      title: '手动复制',
+      close: '关闭',
+      hint: '浏览器限制非 HTTPS 页面自动复制。请选中下方内容后按 ⌘C / Ctrl+C 复制，完成后关闭。'
+    }
   },
   auth: {
     guestTitle: '体验模式',

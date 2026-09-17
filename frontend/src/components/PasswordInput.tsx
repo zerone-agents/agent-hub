@@ -2,6 +2,7 @@ import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { Input, type InputProps, type InputRef } from 'antd';
 import { createStyles } from 'antd-style';
 import { forwardRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const useStyles = createStyles(({ css }) => ({
   // 浏览器自动填充时 Chrome 只给内层 input 涂蓝色 inset 阴影，
@@ -25,6 +26,7 @@ const useStyles = createStyles(({ css }) => ({
 const PasswordInput = forwardRef<InputRef, Omit<InputProps, 'type' | 'suffix'>>(
   ({ value, onChange, onPressEnter, className, ...rest }, ref) => {
     const { styles, cx } = useStyles();
+    const { t } = useTranslation();
     const [visible, setVisible] = useState(false);
     return (
       <Input
@@ -39,7 +41,7 @@ const PasswordInput = forwardRef<InputRef, Omit<InputProps, 'type' | 'suffix'>>(
           <span
             role="button"
             tabIndex={-1}
-            aria-label={visible ? '隐藏密码' : '显示密码'}
+            aria-label={visible ? t('components.passwordInput.hide') : t('components.passwordInput.show')}
             aria-pressed={visible}
             onMouseDown={(e) => { e.preventDefault(); }}
             onClick={() => { setVisible((v) => !v); }}

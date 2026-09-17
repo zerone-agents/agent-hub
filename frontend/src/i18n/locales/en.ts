@@ -12,7 +12,61 @@ const en = {
     cancel: 'Cancel',
     totalItems: '{{total}} items in total',
     brandSubtitle: 'AI Agent Management Platform',
-    logout: 'Log Out'
+    logout: 'Log Out',
+    loading: 'Loading...'
+  },
+  components: {
+    confirmDelete: {
+      title: 'Confirm deletion?',
+      description: 'This cannot be undone'
+    },
+    statusBadge: {
+      active: 'Enabled',
+      inactive: 'Disabled'
+    },
+    notFound: {
+      subTitle: 'Sorry, the page you visited does not exist.',
+      back: 'Back to Home'
+    },
+    appHeader: {
+      users: 'Users',
+      auditLogs: 'Audit Logs',
+      aigcConfig: 'AIGC Labeling',
+      toggleSidebar: 'Toggle sidebar',
+      menu: 'Menu'
+    },
+    userDropdown: {
+      changePassword: 'Change Password'
+    },
+    errorBoundary: {
+      title: 'Something went wrong',
+      refresh: 'Refresh Page'
+    },
+    themeControls: {
+      light: 'Light',
+      dark: 'Dark',
+      system: 'System',
+      settings: 'Theme settings',
+      switchColor: 'Switch color scheme',
+      switchMode: 'Switch light/dark mode'
+    },
+    headerLinks: {
+      github: 'GitHub Repository',
+      site: 'Official Website',
+      ariaLabel: 'Related links'
+    },
+    nameSearch: {
+      placeholder: 'Search name'
+    },
+    passwordInput: {
+      show: 'Show password',
+      hide: 'Hide password'
+    },
+    manualCopy: {
+      title: 'Manual Copy',
+      close: 'Close',
+      hint: 'Browsers restrict automatic copying on non-HTTPS pages. Select the content below and press ⌘C / Ctrl+C to copy, then close.'
+    }
   },
   auth: {
     guestTitle: 'Experience Mode',

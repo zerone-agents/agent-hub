@@ -1,16 +1,18 @@
 import { Result, Button } from 'antd'
 import { useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 
 export default function NotFound() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   return (
     <Result
       status="404"
       title="404"
-      subTitle="抱歉，您访问的页面不存在。"
+      subTitle={t('components.notFound.subTitle')}
       extra={
         <Button type="primary" onClick={async () => { await navigate('/dashboard'); }}>
-          回到首页
+          {t('components.notFound.back')}
         </Button>
       }
     />
