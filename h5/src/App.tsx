@@ -542,23 +542,6 @@ export default function App() {
     setDocuments((prev) => prev.filter((d) => d.id !== id));
   };
 
-  const handleSaveMessageToKnowledge = (content: string, title?: string) => {
-    const docTitle = title || `AI协同生成_${new Date().toLocaleTimeString('zh-CN').replace(/:/g, '')}.docx`;
-    const newDoc: KnowledgeDocument = {
-      id: 'doc-' + Date.now(),
-      name: docTitle,
-      type: 'docx',
-      category: 'mine',
-      size: `${Math.max(10, Math.round(content.length / 30))} KB`,
-      updatedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      content,
-      summary: content.slice(0, 90) + (content.length > 90 ? '...' : ''),
-      tags: ['AI生成', '对话沉淀'],
-    };
-    setDocuments((prev) => [newDoc, ...prev]);
-    setActiveTab('knowledge');
-  };
-
   // 未登录判定：本地无登录态（authRole 为空）或接口 401（token 过期，agentsNeedLogin）。
   // casdoor（线上）模式下未登录 → 所有 Tab 统一展示同一套登录引导页（含知识库——之前它没有提示），
   // 登录按钮直跳 Casdoor SSO，不经过「我的」中转。builtin（本地 mock）保持各 Tab 原有引导。
@@ -590,7 +573,6 @@ export default function App() {
             isLoading={isLoading}
             onSendMessage={handleSendMessage}
             onSelectAgent={handleSelectAgent}
-            onSaveMessageToKnowledge={handleSaveMessageToKnowledge}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onGoLogin={goLogin}
           />

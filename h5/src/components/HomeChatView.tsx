@@ -9,7 +9,6 @@ import {
   Paperclip,
   Check,
   Copy,
-  FolderKanban,
   Clock,
   ExternalLink,
   Bot
@@ -27,7 +26,6 @@ interface HomeChatViewProps {
   isLoading: boolean;
   onSendMessage: (text: string) => void;
   onSelectAgent: (agent: Agent) => void;
-  onSaveMessageToKnowledge: (content: string, title?: string) => void;
   onNavigateToTab: (tab: 'chat' | 'agents' | 'knowledge' | 'profile') => void;
   /** 点「去登录」：线上直接跳 Casdoor SSO（不经过中间引导页），本地 mock 落到「我的」页 */
   onGoLogin?: () => void;
@@ -42,7 +40,6 @@ export const HomeChatView: React.FC<HomeChatViewProps> = ({
   isLoading,
   onSendMessage,
   onSelectAgent,
-  onSaveMessageToKnowledge,
   onNavigateToTab,
   onGoLogin,
 }) => {
@@ -240,13 +237,26 @@ export const HomeChatView: React.FC<HomeChatViewProps> = ({
                     </div>
                   )}
 
-                  {/* Render content */}
-                  <div className="whitespace-pre-wrap font-sans break-words space-y-1">
-                    {msg.content}
-                  </div>
+                  {/* Render content：思考停顿期（SSE 首 token 未到，content 为空）显示思考动画，
+                      而不是空气泡——否则大模型思考久了用户不知道在干啥 */}
+                  {msg.content ? (
+                    <div className="whitespace-pre-wrap font-sans break-words space-y-1">
+                      {msg.content}
+                      {msg.isStreaming && (
+                        <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-emerald-500/70 rounded-xs animate-pulse align-text-bottom" />
+                      )}
+                    </div>
+                  ) : msg.isStreaming ? (
+                    <div className="flex items-center gap-1.5 text-gray-400 py-0.5">
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" />
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:0.4s]" />
+                      <span className="ml-1 text-[11px]">正在思考中…</span>
+                    </div>
+                  ) : null}
 
-                  {/* Assistant response toolbar */}
-                  {msg.role !== 'user' && (
+                  {/* Assistant response toolbar（流式输出结束后才显示，避免存到半截内容） */}
+                  {msg.role !== 'user' && !msg.isStreaming && msg.content && (
                     <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-50 text-[10px] text-gray-400">
                       <button
                         onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -263,15 +273,6 @@ export const HomeChatView: React.FC<HomeChatViewProps> = ({
                             <span>复制</span>
                           </>
                         )}
-                      </button>
-
-                      <button
-                        onClick={() => onSaveMessageToKnowledge(msg.content, `Zerone输出_${new Date().toLocaleTimeString('zh-CN')}`)}
-                        className="hover:text-emerald-700 flex items-center gap-1 cursor-pointer text-emerald-600 font-medium"
-                        title="将此回复转存为知识库资料"
-                      >
-                        <FolderKanban className="w-3 h-3" />
-                        <span>存至资料库</span>
                       </button>
                     </div>
                   )}
