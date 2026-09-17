@@ -1,4 +1,6 @@
 import type { Tool } from '@/api/tools'
+// 纯函数上下文：分组 label 直调 i18next
+import i18next from '@/i18n'
 
 export interface ToolOption {
   value: string
@@ -25,7 +27,7 @@ export function buildToolOptions(
     const isMissingCustom = tl.source === 'custom' && tl.artifactStatus === 'missing'
     const option: ToolOption = {
       value: tl.name,
-      label: isMissingCustom ? `${tl.name}（缺少工具文件）` : tl.name,
+      label: isMissingCustom ? i18next.t('agents.toolOptions.missingFile', { name: tl.name }) : tl.name,
       disabled:
         defaultToolNames.has(tl.name) ||
         (isMissingCustom && !selectedTools.includes(tl.name))
@@ -37,7 +39,7 @@ export function buildToolOptions(
     }
   }
   const groups: ToolOptionGroup[] = []
-  if (builtin.length > 0) groups.push({ label: '内置工具', options: builtin })
-  if (custom.length > 0) groups.push({ label: '自定义工具', options: custom })
+  if (builtin.length > 0) groups.push({ label: i18next.t('tools.builtinSection'), options: builtin })
+  if (custom.length > 0) groups.push({ label: i18next.t('tools.customSection'), options: custom })
   return groups
 }

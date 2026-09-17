@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Popconfirm } from 'antd'
 import { PlusIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -11,7 +12,7 @@ import {
 } from '@/queries/useAgentChat'
 import PrimaryButton from '@/components/PrimaryButton'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   sidebar: css`
@@ -37,7 +38,7 @@ const useStyles = createStyles(({ css }) => ({
   title: css`
     font-size: 14px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     margin: 0 0 12px;
   `,
   list: css`
@@ -54,7 +55,7 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 8px;
     padding: 40px 0;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 12px;
   `,
   item: css`
@@ -62,15 +63,15 @@ const useStyles = createStyles(({ css }) => ({
     align-items: flex-start;
     gap: 8px;
     padding: 10px 12px;
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     cursor: pointer;
     transition: background 0.12s;
     &:hover {
-      background: ${t.surfaceHover};
+      background: ${tk.surfaceHover};
     }
   `,
   itemActive: css`
-    background: ${t.surfaceHover};
+    background: ${tk.surfaceHover};
   `,
   body: css`
     flex: 1;
@@ -79,14 +80,14 @@ const useStyles = createStyles(({ css }) => ({
   itemTitle: css`
     font-size: 13px;
     font-weight: 500;
-    color: ${t.text};
+    color: ${tk.text};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   `,
   meta: css`
     font-size: 11px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     margin-top: 2px;
   `,
   delBtn: css`
@@ -99,11 +100,11 @@ const useStyles = createStyles(({ css }) => ({
     border: none;
     background: transparent;
     border-radius: 3px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     cursor: pointer;
     &:hover {
       background: rgba(220, 38, 38, 0.06);
-      color: ${t.danger};
+      color: ${tk.danger};
     }
   `
 }))
@@ -125,6 +126,7 @@ export default function ChatSessionList({
   streamingSessionId,
   hideOnMobile
 }: ChatSessionListProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data } = useAgentChatSessions(agentName)
   const createSession = useCreateAgentChatSession(agentName)
@@ -147,7 +149,7 @@ export default function ChatSessionList({
   return (
     <div className={`${styles.sidebar} ${hideOnMobile ? styles.sidebarHiddenMobile : ''}`}>
       <div className={styles.head}>
-        <h2 className={styles.title}>会话</h2>
+        <h2 className={styles.title}>{t('agentChat.sessions')}</h2>
         <PrimaryButton
           icon={<PlusIcon size={14} weight="bold" />}
           loading={creating}
@@ -155,14 +157,14 @@ export default function ChatSessionList({
           onClick={handleNew}
           style={{ width: '100%' }}
         >
-          新建会话
+          {t('agentChat.newSession')}
         </PrimaryButton>
       </div>
       <div className={styles.list}>
         {sessions.length === 0 ? (
           <div className={styles.empty}>
-            <ChatCircleDotsIcon size={32} weight="thin" color={t.textMuted} />
-            <span>暂无会话</span>
+            <ChatCircleDotsIcon size={32} weight="thin" color={tk.textMuted} />
+            <span>{t('agentChat.noSessions')}</span>
           </div>
         ) : (
           sessions.map((s) => {
@@ -175,15 +177,15 @@ export default function ChatSessionList({
               onClick={() => { if (!rowDisabled) onSelect(s) }}
             >
               <div className={styles.body}>
-                <div className={styles.itemTitle}>{s.title || '新会话'}</div>
+                <div className={styles.itemTitle}>{s.title || t('agentChat.sessionFallback')}</div>
                 <div className={styles.meta}>{formatTime(s.updated_at)}</div>
               </div>
               {!streamingSessionId && (
                 <Popconfirm
-                  title="确认删除？"
-                  okText="删除"
+                  title={t('scenes.deleteConfirmTitle')}
+                  okText={t('common.delete')}
                   okButtonProps={{ danger: true }}
-                  cancelText="取消"
+                  cancelText={t('common.cancel')}
                   onConfirm={(e) => {
                     e?.stopPropagation()
                     deleteSession.mutate(s.id, {
@@ -194,7 +196,7 @@ export default function ChatSessionList({
                   <button
                     type="button"
                     className={styles.delBtn}
-                    title="删除"
+                    title={t('common.delete')}
                     onClick={(e) => { e.stopPropagation(); }}
                   >
                     <TrashIcon size={13} />

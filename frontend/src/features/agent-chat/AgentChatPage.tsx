@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+// 组件外纯函数：直调 i18next
+import i18next from '@/i18n'
 import { useParams, useNavigate } from 'react-router'
 import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
@@ -10,7 +13,7 @@ import { isGuestUser } from '@/lib/auth-guest'
 import { attachmentContentUrl, type AgentChatSession, type AttachmentDesc } from '@/api/agent-chat'
 import type { ChatMessage } from '@/api/chat'
 import { useAgentChatCapabilities, useAgentChatMessages } from '@/queries/useAgentChat'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import MessageBubble from '@/features/chat/MessageBubble'
 import ChatSessionList from './ChatSessionList'
 import ChatInput, { type ChatInputHandle } from './ChatInput'
@@ -64,9 +67,9 @@ const useStyles = createStyles(({ css }) => ({
       align-items: center;
       gap: 6px;
       padding: 12px 16px;
-      font-size: ${t.textSm};
+      font-size: ${tk.textSm};
       font-weight: 500;
-      color: ${t.ink};
+      color: ${tk.ink};
       background: transparent;
       border: none;
       border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -75,7 +78,7 @@ const useStyles = createStyles(({ css }) => ({
       flex-shrink: 0;
       transition: background 0.15s;
       &:hover {
-        background: ${t.inkSubtle};
+        background: ${tk.inkSubtle};
       }
     }
   `,
@@ -90,10 +93,10 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     padding: 6px 16px;
-    border: 1px solid ${t.danger};
+    border: 1px solid ${tk.danger};
     border-radius: 20px;
     background: var(--card);
-    color: ${t.danger};
+    color: ${tk.danger};
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -106,7 +109,7 @@ const useStyles = createStyles(({ css }) => ({
     margin: 0 16px;
     padding: 6px 10px;
     font-size: 12px;
-    color: ${t.danger};
+    color: ${tk.danger};
     background: rgba(220, 38, 38, 0.06);
     border-radius: 6px;
   `
@@ -120,19 +123,20 @@ import { ArrowLeftIcon } from '@phosphor-icons/react'
 function sendErrorMessage(errorCode: string | undefined, fallback: string | null): string | null {
   switch (errorCode) {
     case 'attachment_missing':
-      return '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送'
+      return i18next.t('agentChat.attachExpiredRebuilt')
     case 'generation_mismatch':
-      return '附件已过期（Runtime 已更新），本地文件已恢复，可直接重试发送'
+      return i18next.t('agentChat.attachExpiredUpdated')
     case 'generation_unavailable':
-      return 'Runtime 部署状态异常，请稍后重试'
+      return i18next.t('agentChat.runtimeUnhealthy')
     case 'runtime_attachment_unsupported':
-      return '当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）'
+      return i18next.t('agentChat.runtimeNoAttach')
     default:
       return fallback
   }
 }
 
 function AgentChatInner({ name }: { name: string }) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const navigate = useNavigate()
   const { data: mode } = useAuthMode()
@@ -324,7 +328,7 @@ function AgentChatInner({ name }: { name: string }) {
       try {
         descriptors = await attachments.upload(name, selected.id)
       } catch (err) {
-        setUploadError(`附件上传失败：${err instanceof Error ? err.message : '未知错误'}`)
+        setUploadError(t('agentChat.uploadFail', { error: err instanceof Error ? err.message : t('agentChat.unknownError') }))
         return false
       }
     }
@@ -375,7 +379,7 @@ function AgentChatInner({ name }: { name: string }) {
           <button
             type="button"
             onClick={() => { void Promise.resolve(navigate('/agents/chat')) }}
-            aria-label="返回 Agent 列表"
+            aria-label={t('agentChat.backToAgents')}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <ArrowLeftIcon size={16} />
@@ -406,7 +410,7 @@ function AgentChatInner({ name }: { name: string }) {
                 onClick={() => { setSelected(null); }}
               >
                 <ArrowLeftIcon size={16} />
-                返回会话列表
+                {t('agentChat.backToSessions')}
               </button>
               <div className={styles.messages} ref={scrollRef} onScroll={handleScroll}>
                 {displayMessages.length === 0 && !isStreaming ? (
@@ -449,7 +453,7 @@ function AgentChatInner({ name }: { name: string }) {
               {isStreaming && (
                 <div className={styles.stopBar}>
                   <button type="button" className={styles.stopBtn} onClick={() => { stream.reset(); }}>
-                    <StopIcon size={12} weight="fill" /> 停止回复
+                    <StopIcon size={12} weight="fill" /> {t('agentChat.stopReply')}
                   </button>
                 </div>
               )}
@@ -472,7 +476,7 @@ function AgentChatInner({ name }: { name: string }) {
             </>
           ) : (
             <div className={styles.emptyPane}>
-              <Empty description="选择左侧会话或新建会话开始对话" />
+              <Empty description={t('agentChat.pickSession')} />
             </div>
           )}
         </div>

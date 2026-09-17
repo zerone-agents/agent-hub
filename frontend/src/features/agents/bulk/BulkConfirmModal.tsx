@@ -1,9 +1,10 @@
 import { Modal, Tag } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation, ClassifiedItem, Classification } from './classifyBulkOperation'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   group: css`
@@ -13,7 +14,7 @@ const useStyles = createStyles(({ css }) => ({
   groupTitle: css`
     font-size: 12px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     margin-bottom: 6px;
   `,
   names: css`
@@ -27,14 +28,14 @@ const useStyles = createStyles(({ css }) => ({
   `,
   reason: css`
     font-size: 11px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
   `,
 }))
 
 const GROUPS: { key: Classification; label: string; color: string }[] = [
-  { key: 'executable', label: '可执行', color: 'green' },
-  { key: 'skipped', label: '跳过', color: 'default' },
-  { key: 'blocked', label: '受限', color: 'red' },
+  { key: 'executable', label: 'agents.bulk.clsExecutable', color: 'green' },
+  { key: 'skipped', label: 'agents.bulk.clsSkipped', color: 'default' },
+  { key: 'blocked', label: 'agents.bulk.clsBlocked', color: 'red' },
 ]
 
 export interface BulkConfirmModalProps {
@@ -47,6 +48,7 @@ export interface BulkConfirmModalProps {
 }
 
 export default function BulkConfirmModal({ open, operation, items, onCancel, onConfirm }: BulkConfirmModalProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const primaryStyles = usePrimaryButtonStyle()
   const executableCount = items.filter((i) => i.classification === 'executable').length
@@ -54,11 +56,11 @@ export default function BulkConfirmModal({ open, operation, items, onCancel, onC
 
   return (
     <Modal
-      title={`批量${BULK_OPERATION_LABEL[operation]}`}
+      title={t('agents.bulk.confirmTitle', { op: t(BULK_OPERATION_LABEL[operation]) })}
       open={open}
       onCancel={onCancel}
-      cancelText="取消"
-      okText={`${BULK_OPERATION_LABEL[operation]} ${executableCount} 个`}
+      cancelText={t('common.cancel')}
+      okText={t('agents.bulk.confirmOk', { op: t(BULK_OPERATION_LABEL[operation]), n: executableCount })}
       okButtonProps={{
         disabled: executableCount === 0,
         // 统一注入共享主按钮样式（AGENTS.md）；删除操作叠加 danger（review S2：两者都保留）
@@ -74,7 +76,7 @@ export default function BulkConfirmModal({ open, operation, items, onCancel, onC
         return (
           <div key={key} className={styles.group}>
             <div className={styles.groupTitle}>
-              <Tag color={color} className={styles.nameTag}>{label} · {group.length}</Tag>
+              <Tag color={color} className={styles.nameTag}>{t(label)} · {group.length}</Tag>
             </div>
             <div className={styles.names}>
               {group.map((item) => (

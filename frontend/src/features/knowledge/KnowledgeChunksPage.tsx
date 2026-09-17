@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next'
+// 组件外纯函数：直调 i18next
+import i18next from '@/i18n'
 import {
   Badge,
   Button,
@@ -317,7 +320,7 @@ function SafeContent({
   clipped: boolean;
 }) {
   const { styles, cx } = useStyles();
-  const html = sanitizeAllowedInlineHtml(content || "(空)");
+  const html = sanitizeAllowedInlineHtml(content || i18next.t('knowledge.chunks.emptyContent'));
   return (
     <div
       className={cx(styles.content, clipped ? styles.clipped : undefined)}
@@ -330,8 +333,8 @@ function formatPositions(chunk: KnowledgeChunk): string {
   const positions = chunk.positions;
   if (positions.length === 0) return "-";
   const first = positions[0];
-  if (Array.isArray(first)) return `位置 ${first.slice(0, 3).join(", ")}`;
-  return `位置 ${positions.slice(0, 3).map(String).join(", ")}`;
+  if (Array.isArray(first)) return i18next.t('knowledge.chunks.position', { list: first.slice(0, 3).join(", ") });
+  return i18next.t('knowledge.chunks.position', { list: positions.slice(0, 3).map(String).join(", ") });
 }
 
 function tagFeasText(chunk: KnowledgeChunk | null): string {
@@ -394,7 +397,7 @@ function ChunkImage({
       .then((blob) => {
         if (!active) return;
         if (blob.type && !blob.type.startsWith("image/")) {
-          throw new Error("图片代理返回了非图片内容");
+          throw new Error(i18next.t('knowledge.chunks.imgProxyError'));
         }
         objectURL = URL.createObjectURL(blob);
         setImageSrc(objectURL);
@@ -420,9 +423,9 @@ function ChunkImage({
   const copyImageId = async () => {
     const result = await copyOrManual(imageId);
     if (result === "copied") {
-      message.success("已复制 image id");
+      message.success(i18next.t('knowledge.chunks.copiedImageId'));
     } else if (result === "failed") {
-      message.error("复制失败");
+      message.error(i18next.t('knowledge.chunks.copyFail'));
     }
   };
 
@@ -431,7 +434,7 @@ function ChunkImage({
       {status === "failed" ? (
         <div className={styles.imageFallback}>
           <ImageSquareIcon size={18} />
-          <span>图片加载失败</span>
+          <span>{i18next.t('knowledge.chunks.imgLoadFail')}</span>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             ID {imageId.slice(0, 8)}
           </Typography.Text>
@@ -442,10 +445,10 @@ function ChunkImage({
           ) : null}
           <div className={styles.imageFallbackActions}>
             <Button size="small" type="link" onClick={retry}>
-              重试
+              {i18next.t('knowledge.chunks.retry')}
             </Button>
             <Button size="small" type="link" onClick={() => void copyImageId()}>
-              复制 ID
+              {i18next.t('knowledge.chunks.copyId')}
             </Button>
           </div>
         </div>
@@ -494,6 +497,7 @@ function ChunkEditor({
   documentId,
   onClose,
 }: ChunkEditorProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles();
   const [form] = Form.useForm<ChunkFormValues>();
   const [imageBase64, setImageBase64] = useState("");
@@ -534,12 +538,12 @@ function ChunkEditor({
       try {
         const parsed = JSON.parse(tagFeasTextValue) as unknown;
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          message.error("结构化标签必须是 JSON 对象");
+          message.error(i18next.t('knowledge.chunks.tagNotObject'));
           return;
         }
         tagFeas = parsed as Record<string, unknown>;
       } catch {
-        message.error("结构化标签不是有效 JSON");
+        message.error(i18next.t('knowledge.chunks.tagInvalid'));
         return;
       }
     }
@@ -565,21 +569,21 @@ function ChunkEditor({
 
   return (
     <Drawer
-      title={editing ? "编辑切片" : "新增切片"}
+      title={editing ? i18next.t('knowledge.chunks.editTitle') : i18next.t('knowledge.chunks.createTitle')}
       open={open}
       onClose={onClose}
       size={720}
       destroyOnHidden
       extra={
         <Space>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
           <Button
             type="primary"
             loading={submitting}
-            aria-label={editing ? "保存切片" : "创建切片"}
+            aria-label={editing ? i18next.t('knowledge.chunks.saveAria') : i18next.t('knowledge.chunks.createAria')}
             onClick={submit}
           >
-            {editing ? "保存" : "创建"}
+            {editing ? i18next.t('knowledge.chunks.save') : i18next.t('knowledge.chunks.create')}
           </Button>
         </Space>
       }
@@ -590,18 +594,18 @@ function ChunkEditor({
             value={previewMode}
             onChange={(value) => { setPreviewMode(value as "edit" | "preview"); }}
             options={[
-              { label: "编辑", value: "edit" },
-              { label: "预览", value: "preview" },
+              { label: i18next.t('knowledge.chunks.modeEdit'), value: "edit" },
+              { label: i18next.t('knowledge.chunks.modePreview'), value: "preview" },
             ]}
           />
 
           {previewMode === "edit" ? (
             <Form.Item
-              label="内容"
+              label={i18next.t('knowledge.chunks.content')}
               name="content"
-              rules={[{ required: true, message: "请输入切片内容" }]}
+              rules={[{ required: true, message: i18next.t('knowledge.chunks.contentRequired') }]}
             >
-              <Input.TextArea rows={10} placeholder="切片文本内容" />
+              <Input.TextArea rows={10} placeholder={i18next.t('knowledge.chunks.contentPh')} />
             </Form.Item>
           ) : (
             <div className={styles.preview}>
@@ -609,37 +613,37 @@ function ChunkEditor({
             </div>
           )}
 
-          <Form.Item label="关键词" name="important_keywords">
+          <Form.Item label={i18next.t('knowledge.chunks.keywords')} name="important_keywords">
             <Select
               mode="tags"
-              placeholder="输入后回车添加关键词"
+              placeholder={i18next.t('knowledge.chunks.keywordsPh')}
               tokenSeparators={[","]}
             />
           </Form.Item>
 
-          <Form.Item label="关联问题" name="questions">
+          <Form.Item label={i18next.t('knowledge.chunks.questions')} name="questions">
             <Select
               mode="tags"
-              placeholder="输入后回车添加问题"
+              placeholder={i18next.t('knowledge.chunks.questionsPh')}
               tokenSeparators={[","]}
             />
           </Form.Item>
 
-          <Form.Item label="标签" name="tag_kwd">
+          <Form.Item label={i18next.t('knowledge.chunks.tag')} name="tag_kwd">
             <Select
               mode="tags"
-              placeholder="输入后回车添加标签"
+              placeholder={i18next.t('knowledge.chunks.tagPh')}
               tokenSeparators={[","]}
             />
           </Form.Item>
 
-          <Form.Item label="结构化标签 JSON" name="tag_feas_text">
-            <Input.TextArea rows={4} placeholder='例如 {"source":"manual"}' />
+          <Form.Item label={i18next.t('knowledge.chunks.tagJson')} name="tag_feas_text">
+            <Input.TextArea rows={4} placeholder={i18next.t('knowledge.chunks.tagJsonPh')} />
           </Form.Item>
 
           {editing?.image_id ? (
             <Space orientation="vertical">
-              <Typography.Text strong>图片</Typography.Text>
+              <Typography.Text strong>{i18next.t('knowledge.chunks.image')}</Typography.Text>
               <ChunkImage
                 datasetId={datasetId}
                 imageId={editing.image_id}
@@ -647,14 +651,14 @@ function ChunkEditor({
                 height={120}
               />
               <Typography.Text type="secondary">
-                当前 RESTful update 未确认支持图片替换，本轮只展示。
+                i18next.t('knowledge.chunks.imgReadOnly')
               </Typography.Text>
             </Space>
           ) : null}
 
           {!editing ? (
             <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-              <Typography.Text strong>图片切片</Typography.Text>
+              <Typography.Text strong>{i18next.t('knowledge.chunks.imgChunk')}</Typography.Text>
               <Upload
                 accept="image/*"
                 maxCount={1}
@@ -666,7 +670,7 @@ function ChunkEditor({
                   return Upload.LIST_IGNORE;
                 }}
               >
-                <Button icon={<ImageSquareIcon size={16} />}>选择图片</Button>
+                <Button icon={<ImageSquareIcon size={16} />}>{i18next.t('knowledge.chunks.selectImage')}</Button>
               </Upload>
               {imagePreviewUrl ? (
                 <Image width={180} src={imagePreviewUrl} alt="preview image" />
@@ -680,6 +684,7 @@ function ChunkEditor({
 }
 
 export default function KnowledgeChunksPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles();
   const navigate = useNavigate();
   const { id = "", documentId = "" } = useParams();
@@ -748,7 +753,7 @@ export default function KnowledgeChunksPage() {
 
   const bulkSwitch = (availableValue: boolean) => {
     switchChunks.mutate({ chunkIds: selectedIds, available: availableValue });
-    message.success(availableValue ? "已批量启用切片" : "已批量停用切片");
+    message.success(availableValue ? t('knowledge.chunks.bulkEnabled') : t('knowledge.chunks.bulkDisabled'));
     setSelectedIds([]);
   };
 
@@ -760,9 +765,9 @@ export default function KnowledgeChunksPage() {
   const copyChunkId = async (chunkId: string) => {
     const result = await copyOrManual(chunkId);
     if (result === "copied") {
-      message.success("已复制 chunk id");
+      message.success(t('knowledge.chunks.copiedChunkId'));
     } else if (result === "failed") {
-      message.error("复制失败");
+      message.error(t('knowledge.chunks.copyFail'));
     }
   };
 
@@ -774,7 +779,7 @@ export default function KnowledgeChunksPage() {
         onClick={async () => { await navigate(`/knowledge/${id}/documents`); }}
       >
         <ArrowLeftIcon size={14} />
-        返回文档列表
+        {t('knowledge.chunks.backToDocs')}
       </button>
 
       <div className={styles.shell}>
@@ -782,7 +787,7 @@ export default function KnowledgeChunksPage() {
           <div className={styles.toolbar}>
             <div className={styles.filters}>
               <Input.Search
-                placeholder="搜索切片内容"
+                placeholder={t('knowledge.chunks.searchPh')}
                 allowClear
                 style={{ width: 260 }}
                 onSearch={(value) => {
@@ -796,17 +801,17 @@ export default function KnowledgeChunksPage() {
                   { setDisplayMode(value as "ellipsis" | "full"); }
                 }
                 options={[
-                  { label: "省略", value: "ellipsis" },
-                  { label: "全文", value: "full" },
+                  { label: t('knowledge.chunks.ellipsis'), value: "ellipsis" },
+                  { label: t('knowledge.chunks.full'), value: "full" },
                 ]}
               />
               <Select
                 value={availableFilter}
                 style={{ width: 130 }}
                 options={[
-                  { label: "全部状态", value: "all" },
-                  { label: "仅启用", value: "enabled" },
-                  { label: "仅停用", value: "disabled" },
+                  { label: t('knowledge.chunks.statusAll'), value: "all" },
+                  { label: t('knowledge.chunks.statusEnabled'), value: "enabled" },
+                  { label: t('knowledge.chunks.statusDisabled'), value: "disabled" },
                 ]}
                 onChange={(value) => {
                   setAvailableFilter(value);
@@ -819,7 +824,7 @@ export default function KnowledgeChunksPage() {
                   indeterminate={selectedIds.length > 0 && !allCurrentSelected}
                   onChange={(event) => { toggleAll(event.target.checked); }}
                 >
-                  选择本页
+                  {t('knowledge.chunks.selectPage')}
                 </Checkbox>
               )}
             </div>
@@ -829,7 +834,7 @@ export default function KnowledgeChunksPage() {
                 loading={query.isFetching}
                 onClick={() => query.refetch()}
               >
-                刷新
+                {t('knowledge.chunks.refresh')}
               </Button>
               {canWrite && (
                 <Button
@@ -837,7 +842,7 @@ export default function KnowledgeChunksPage() {
                   icon={<PlusIcon size={16} weight="bold" />}
                   onClick={openCreate}
                 >
-                  新增切片
+                  {t('knowledge.chunks.createChunk')}
                 </Button>
               )}
             </div>
@@ -846,33 +851,33 @@ export default function KnowledgeChunksPage() {
           {canWrite && selectedIds.length > 0 ? (
             <div className={styles.bulkBar}>
               <Typography.Text strong>
-                已选择 {selectedIds.length} 个切片
+                {t('knowledge.chunks.selectedN', { n: selectedIds.length })}
               </Typography.Text>
               <Space wrap>
                 <Button
                   size="small"
-                  aria-label="批量启用切片"
+                  aria-label={t('knowledge.chunks.bulkEnableAria')}
                   onClick={() => { bulkSwitch(true); }}
                 >
-                  启用
+                  {t('knowledge.chunks.enable')}
                 </Button>
                 <Button
                   size="small"
-                  aria-label="批量停用切片"
+                  aria-label={t('knowledge.chunks.bulkDisableAria')}
                   onClick={() => { bulkSwitch(false); }}
                 >
-                  停用
+                  {t('knowledge.chunks.disable')}
                 </Button>
                 <Popconfirm
-                  title="确认删除选中切片？"
-                  description={`将删除 ${selectedIds.length} 个切片。`}
-                  okText="删除"
+                  title={t('knowledge.chunks.deleteSelectedTitle')}
+                  description={t('knowledge.chunks.deleteSelectedDesc', { n: selectedIds.length })}
+                  okText={t('common.delete')}
                   okButtonProps={{ danger: true }}
-                  cancelText="取消"
+                  cancelText={t('common.cancel')}
                   onConfirm={bulkDelete}
                 >
                   <Button size="small" danger icon={<TrashIcon size={14} />}>
-                    删除
+                    {t('common.delete')}
                   </Button>
                 </Popconfirm>
                 <Button
@@ -880,7 +885,7 @@ export default function KnowledgeChunksPage() {
                   type="text"
                   onClick={() => { setSelectedIds([]); }}
                 >
-                  清除选择
+                  {t('knowledge.chunks.clearSelection')}
                 </Button>
               </Space>
             </div>
@@ -889,7 +894,7 @@ export default function KnowledgeChunksPage() {
           <div className={styles.list}>
             {chunks.length === 0 && !query.isLoading ? (
               <Empty
-                description={keywords ? "未找到匹配的切片" : "还没有切片"}
+                description={keywords ? t('knowledge.chunks.emptyNoMatch') : t('knowledge.chunks.emptyNone')}
               />
             ) : null}
             {chunks.map((chunk) => (
@@ -910,7 +915,7 @@ export default function KnowledgeChunksPage() {
                     <Tag>{formatPositions(chunk)}</Tag>
                     <Badge
                       status={chunk.available ? "success" : "default"}
-                      text={chunk.available ? "启用" : "停用"}
+                      text={chunk.available ? t('knowledge.chunks.enable') : t('knowledge.chunks.disable')}
                     />
                     <Typography.Text type="secondary">
                       ID {chunk.id.slice(0, 8)}
@@ -965,13 +970,13 @@ export default function KnowledgeChunksPage() {
                         icon={<PencilSimpleIcon size={16} />}
                         onClick={() => { openEdit(chunk); }}
                       >
-                        编辑
+                        {t('common.edit')}
                       </Button>
                       <Popconfirm
-                        title="确认删除该切片？"
-                        okText="删除"
+                        title={t('knowledge.chunks.deleteTitle')}
+                        okText={t('common.delete')}
                         okButtonProps={{ danger: true }}
-                        cancelText="取消"
+                        cancelText={t('common.cancel')}
                         onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
                       >
                         <Button
@@ -980,7 +985,7 @@ export default function KnowledgeChunksPage() {
                           danger
                           icon={<TrashIcon size={16} />}
                         >
-                          删除
+                          {t('common.delete')}
                         </Button>
                       </Popconfirm>
                     </>
@@ -1001,7 +1006,7 @@ export default function KnowledgeChunksPage() {
               current={page}
               pageSize={PAGE_SIZE}
               total={total}
-              showTotal={(count) => `共 ${count} 条`}
+              showTotal={(count) => t('common.totalItems', { total: count })}
               onChange={(next) => { setPage(next); }}
             />
           </div>
@@ -1010,29 +1015,28 @@ export default function KnowledgeChunksPage() {
         <aside className={styles.sidePanel}>
           <div className={styles.panelTitle}>
             <FileTextIcon size={18} weight="duotone" />
-            文档信息
+            {t('knowledge.chunks.docInfo')}
           </div>
           <Descriptions column={1} size="small">
-            <Descriptions.Item label="名称">
+            <Descriptions.Item label={t('knowledge.chunks.name')}>
               {document?.name ?? "-"}
             </Descriptions.Item>
-            <Descriptions.Item label="切片数">{total}</Descriptions.Item>
-            <Descriptions.Item label="解析方法">
+            <Descriptions.Item label={t('knowledge.chunks.chunkCount')}>{total}</Descriptions.Item>
+            <Descriptions.Item label={t('knowledge.chunks.parser')}>
               {document?.parser_id ?? "-"}
             </Descriptions.Item>
-            <Descriptions.Item label="来源">
+            <Descriptions.Item label={t('knowledge.chunks.source')}>
               {document?.source_type ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="Metadata">
               {document?.meta_fields.length
-                ? `${document.meta_fields.length} 项`
+                ? t('knowledge.chunks.metaCount', { n: document.meta_fields.length })
                 : "-"}
             </Descriptions.Item>
           </Descriptions>
           <Divider />
           <Typography.Text type="secondary">
-            图片切片通过 control-panel gateway 加载；完整 Office/PDF
-            预览排在后续增强。
+            {t('knowledge.chunks.imgNote')}
           </Typography.Text>
         </aside>
       </div>

@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { useMemo } from 'react'
 import { createStyles } from 'antd-style'
 import { Empty } from 'antd'
@@ -9,15 +10,15 @@ import { useAuthMode } from '@/features/login/useAuthMode'
 import { useUserInfo } from '@/queries/useUserInfo'
 import { isGuestUser } from '@/lib/auth-guest'
 import ChatLayout from './ChatLayout'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   badge: css`
     padding: 2px 10px;
     border-radius: 999px;
     font-size: 12px;
-    background: color-mix(in srgb, ${t.softAccent} 18%, transparent);
-    color: ${t.ink};
+    background: color-mix(in srgb, ${tk.softAccent} 18%, transparent);
+    color: ${tk.ink};
   `,
   main: css`
     padding: 32px 24px;
@@ -38,8 +39,8 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
-    color: ${t.text};
-    font-size: ${t.textBase};
+    color: ${tk.text};
+    font-size: ${tk.textBase};
     font-weight: 600;
     margin-bottom: 12px;
   `,
@@ -51,8 +52,8 @@ const useStyles = createStyles(({ css }) => ({
     height: 20px;
     padding: 0 6px;
     border-radius: 10px;
-    background: ${t.inkSubtle};
-    color: ${t.ink};
+    background: ${tk.inkSubtle};
+    color: ${tk.ink};
     font-size: 12px;
     font-weight: 600;
   `,
@@ -69,7 +70,7 @@ const useStyles = createStyles(({ css }) => ({
     cursor: pointer;
     transition: box-shadow 0.15s ease, transform 0.15s ease;
     &:hover { box-shadow: var(--elevation-2); transform: translateY(-2px); }
-    &:focus-visible { outline: 2px solid ${t.ink}; outline-offset: 2px; }
+    &:focus-visible { outline: 2px solid ${tk.ink}; outline-offset: 2px; }
   `,
   cardIcon: css`
     width: 40px;
@@ -82,11 +83,11 @@ const useStyles = createStyles(({ css }) => ({
   cardTitle: css`
     font-size: 15px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   cardDesc: css`
     font-size: 13px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -99,6 +100,7 @@ const useStyles = createStyles(({ css }) => ({
  * 聊天总览。数据来自公开聊天视图（guest 仅见 guestEnabled，服务端过滤）。
  */
 export default function ChatHomePage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const navigate = useNavigate()
   const { data: agents, isLoading } = usePublicAgents()
@@ -128,15 +130,15 @@ export default function ChatHomePage() {
   }, [agents])
 
   return (
-    <ChatLayout badge={guest ? <span className={styles.badge}>体验模式</span> : undefined}>
+    <ChatLayout badge={guest ? <span className={styles.badge}>{t('agentChat.guestBadge')}</span> : undefined}>
       <div className={styles.main}>
         {!isLoading && (agents ?? []).length === 0 ? (
-          <Empty description={guest ? '暂无可体验的 Agent，请联系管理员开放' : '暂无 Agent'} />
+          <Empty description={guest ? t('agentChat.guestEmpty') : t('agentChat.emptyAgents')} />
         ) : (
           groupedSections.map((section) => (
             <section key={section.name} className={styles.section}>
               <div className={styles.sectionTitle}>
-                <span>{section.name}</span>
+                <span>{section.name === '默认分组' ? t('agentChat.defaultGroup') : section.name}</span>
                 <span className={styles.sectionCount}>{section.agents.length}</span>
               </div>
               <div className={styles.grid}>
@@ -149,7 +151,7 @@ export default function ChatHomePage() {
                   >
                     <div
                       className={styles.cardIcon}
-                      style={{ background: a.config.iconBgColor ?? t.inkLight, color: a.config.iconColor ?? t.ink }}
+                      style={{ background: a.config.iconBgColor ?? tk.inkLight, color: a.config.iconColor ?? tk.ink }}
                     >
                       <ChatCircleDotsIcon size={20} weight="duotone" />
                     </div>

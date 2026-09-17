@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { useTranslation } from 'react-i18next'
 import { Form, Button, Spin } from "antd";
 import { createStyles } from "antd-style";
 import { useParams } from "react-router";
@@ -7,7 +8,7 @@ import { useMultiragModels } from "@/queries/useMultirag";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
 import { useCanWrite } from "@/hooks/useCanWrite";
 import { parseApiError } from "@/api/client";
-import { tokens as t } from "@/styles/tokens";
+import { tokens as tk } from "@/styles/tokens";
 import {
   buildRawToValueMap,
   DatasetFields,
@@ -21,9 +22,9 @@ import { buildEmbeddingCandidates, decodeCandidateValue } from "./candidates";
 
 const useStyles = createStyles(({ css }) => ({
   card: css`
-    background: ${t.surface};
-    border-radius: ${t.radius}px;
-    box-shadow: ${t.elevation1};
+    background: ${tk.surface};
+    border-radius: ${tk.radius}px;
+    box-shadow: ${tk.elevation1};
     padding: 24px 28px;
     max-width: 640px;
     margin-top: 8px;
@@ -39,6 +40,7 @@ const useStyles = createStyles(({ css }) => ({
 }));
 
 export default function KnowledgeSettingsPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles();
   const { id = "" } = useParams();
   const [form] = Form.useForm<DatasetFormValues>();
@@ -68,10 +70,10 @@ export default function KnowledgeSettingsPage() {
     if (saved && !embdRawToValue.has(saved)) {
       return [
         {
-          label: "当前值（不可用）",
+          label: t('knowledge.settings.currentValue'),
           options: [
             {
-              label: `${saved}（模型不可用，请重新选择）`,
+              label: t('knowledge.settings.modelUnavailable', { saved }),
               value: saved,
             },
           ],
@@ -80,7 +82,7 @@ export default function KnowledgeSettingsPage() {
       ];
     }
     return options;
-  }, [dataset?.embd_id, embdRawToValue, embeddingGroups]);
+  }, [t, dataset?.embd_id, embdRawToValue, embeddingGroups]);
   const candidatesLoading = providers.isLoading || multiragEmbedding.isLoading;
 
   useEffect(() => {
@@ -133,7 +135,7 @@ export default function KnowledgeSettingsPage() {
           {
             name: "embd_id",
             errors: [
-              "知识库已生成文本块，向量模型已锁定。页面已刷新，请重试。",
+              t('knowledge.settings.locked'),
             ],
           },
         ]);
@@ -167,7 +169,7 @@ export default function KnowledgeSettingsPage() {
               onClick={handleSave}
               loading={updateKnowledge.isPending}
             >
-              保存设置
+              {t('knowledge.settings.save')}
             </Button>
           )}
         </div>

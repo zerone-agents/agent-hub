@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { message } from 'antd'
 import { createStyles } from 'antd-style'
 import { DownloadIcon, WarningIcon } from '@phosphor-icons/react'
 import { agentFilesApi, type FileEntry } from '@/api/agent-files'
 import { parseApiError } from '@/api/client'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 /**
  * CwdFilePreview — inline preview + download for a single selected file.
@@ -28,14 +29,14 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: ${t.surface};
+    background: ${tk.surface};
   `,
   placeholder: css`
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 12px;
   `,
   header: css`
@@ -44,14 +45,14 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: space-between;
     gap: 8px;
     padding: 6px 10px;
-    border-bottom: 1px solid ${t.inkLighter};
+    border-bottom: 1px solid ${tk.inkLighter};
     font-size: 12px;
-    color: ${t.textSecondary};
-    background: ${t.surface};
+    color: ${tk.textSecondary};
+    background: ${tk.surface};
   `,
   filename: css`
-    font-family: ${t.fontMono};
-    color: ${t.text};
+    font-family: ${tk.fontMono};
+    color: ${tk.text};
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -64,15 +65,15 @@ const useStyles = createStyles(({ css }) => ({
     gap: 4px;
     padding: 2px 8px;
     border: none;
-    border-radius: ${t.radiusSm};
+    border-radius: ${tk.radiusSm};
     background: transparent;
-    color: ${t.ink};
+    color: ${tk.ink};
     text-decoration: none;
     font-family: inherit;
     font-size: 12px;
     cursor: pointer;
     &:hover {
-      background: ${t.inkLight};
+      background: ${tk.inkLight};
     }
   `,
   body: css`
@@ -80,15 +81,15 @@ const useStyles = createStyles(({ css }) => ({
     min-height: 0;
     overflow: auto;
     padding: 8px 10px;
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 12.5px;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   pre: css`
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 12.5px;
   `,
   notice: css`
@@ -98,21 +99,21 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     gap: 10px;
     padding: 32px 16px;
-    color: ${t.textSecondary};
+    color: ${tk.textSecondary};
     text-align: center;
   `,
   noticeIcon: css`
-    color: ${t.warning};
+    color: ${tk.warning};
   `,
   noticeText: css`
     font-size: 13px;
   `,
   truncated: css`
     padding: 4px 10px;
-    background: ${t.inkSubtle};
-    color: ${t.textTertiary};
+    background: ${tk.inkSubtle};
+    color: ${tk.textTertiary};
     font-size: 11px;
-    border-bottom: 1px solid ${t.inkLighter};
+    border-bottom: 1px solid ${tk.inkLighter};
   `,
   embedded: css`
     width: 100%;
@@ -293,6 +294,7 @@ export async function fetchText(
 }
 
 export default function CwdFilePreview(props: Props) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { agentName, selectedFile } = props
   const [state, setState] = useState<PreviewState>(initialState)
@@ -453,7 +455,7 @@ export default function CwdFilePreview(props: Props) {
   if (!selectedFile) {
     return (
       <div className={styles.root}>
-        <div className={styles.placeholder}>选择文件预览</div>
+        <div className={styles.placeholder}>{t('agentChat.selectFilePh')}</div>
       </div>
     )
   }
@@ -467,7 +469,7 @@ export default function CwdFilePreview(props: Props) {
     try {
       const res = await agentFilesApi.getContent(agentName, fullPath(selectedFile))
       if (!res.ok) {
-        message.error(`下载失败：HTTP ${res.status}`)
+        message.error(t('agentChat.downloadFailHttp', { status: res.status }))
         return
       }
       const blob = await res.blob()
@@ -480,7 +482,7 @@ export default function CwdFilePreview(props: Props) {
       a.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      message.error(`下载失败：${parseApiError(err)}`)
+      message.error(t('agentChat.downloadFail', { error: parseApiError(err) }))
     }
   }
 
@@ -494,19 +496,19 @@ export default function CwdFilePreview(props: Props) {
           type="button"
           className={styles.downloadLink}
           onClick={handleDownload}
-          aria-label="下载"
+          aria-label={t('agentChat.download')}
         >
           <DownloadIcon size={14} />
-          下载
+          {t('agentChat.download')}
         </button>
       </div>
 
-      {state.loading && <div className={styles.notice}>加载中…</div>}
+      {state.loading && <div className={styles.notice}>{t('agentChat.loading')}</div>}
 
       {!state.loading && state.error && (
         <div className={styles.notice}>
           <WarningIcon size={24} className={styles.noticeIcon} />
-          <span className={styles.noticeText}>加载失败：{state.error}</span>
+          <span className={styles.noticeText}>{t('agentChat.loadFailWithError', { error: state.error })}</span>
         </div>
       )}
 
@@ -514,14 +516,14 @@ export default function CwdFilePreview(props: Props) {
         <div className={styles.notice}>
           <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
-            文件较大（超过 {(PREVIEW_BYTE_CAP / 1024).toFixed(0)} KB），仅提供下载。
+            {t('agentChat.fileTooLarge', { kb: (PREVIEW_BYTE_CAP / 1024).toFixed(0) })}
           </span>
         </div>
       )}
 
       {!state.loading && state.truncated && (
         <div className={styles.truncated}>
-          已截断：仅显示前 {(PREVIEW_BYTE_CAP / 1024).toFixed(0)} KB。完整内容请下载。
+          {t('agentChat.truncated', { kb: (PREVIEW_BYTE_CAP / 1024).toFixed(0) })}
         </div>
       )}
 
@@ -538,7 +540,7 @@ export default function CwdFilePreview(props: Props) {
         >
           <div className={styles.notice}>
             <WarningIcon size={24} className={styles.noticeIcon} />
-            <span className={styles.noticeText}>PDF 预览不可用，请使用下载按钮</span>
+            <span className={styles.noticeText}>{t('agentChat.pdfUnavailable')}</span>
           </div>
         </object>
       )}
@@ -554,7 +556,7 @@ export default function CwdFilePreview(props: Props) {
         <div className={styles.notice}>
           <WarningIcon size={24} className={styles.noticeIcon} />
           <span className={styles.noticeText}>
-            不支持预览{state.mime ? `（${state.mime}）` : ''}
+            {t('agentChat.noPreviewPrefix')}{state.mime ? t('agentChat.mimeSuffix', { mime: state.mime }) : ''}
           </span>
         </div>
       )}

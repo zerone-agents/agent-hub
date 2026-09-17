@@ -1,18 +1,19 @@
 import { Button, Modal, Progress, Tag } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation } from './classifyBulkOperation'
 import type { BulkItemStatus, BulkTaskItem, BulkTaskSummary, TaskPhase } from './useBulkAgentTask'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const STATUS_META: Record<BulkItemStatus, { label: string; color: string }> = {
-  pending: { label: '等待', color: 'default' },
-  running: { label: '执行中', color: 'processing' },
-  succeeded: { label: '成功', color: 'success' },
-  failed: { label: '失败', color: 'error' },
-  skipped: { label: '跳过', color: 'warning' },
-  blocked: { label: '受限', color: 'error' },
+  pending: { label: 'agents.bulk.taskPending', color: 'default' },
+  running: { label: 'agents.bulk.taskRunning', color: 'processing' },
+  succeeded: { label: 'agents.bulk.taskSucceeded', color: 'success' },
+  failed: { label: 'agents.bulk.taskFailed', color: 'error' },
+  skipped: { label: 'agents.bulk.taskSkipped', color: 'warning' },
+  blocked: { label: 'agents.bulk.taskBlocked', color: 'error' },
 }
 
 const useStyles = createStyles(({ css }) => ({
@@ -23,7 +24,7 @@ const useStyles = createStyles(({ css }) => ({
     gap: 12px;
     margin-bottom: 12px;
     font-size: 13px;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   list: css`
     max-height: 320px;
@@ -38,21 +39,21 @@ const useStyles = createStyles(({ css }) => ({
     gap: 8px;
     padding: 6px 8px;
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     font-size: 12px;
   `,
   title: css`
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
   name: css`
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 11px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
   `,
   reason: css`
     flex: 1;
@@ -60,7 +61,7 @@ const useStyles = createStyles(({ css }) => ({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: ${t.danger};
+    color: ${tk.danger};
     font-size: 11px;
     text-align: right;
   `,
@@ -82,6 +83,7 @@ export interface BulkTaskModalProps {
 export default function BulkTaskModal({
   open, phase, operation, items, summary, onCollapse, onClose,
 }: BulkTaskModalProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const settled = summary.succeeded + summary.failed + summary.skipped + summary.blocked
   const running = phase === 'running'
@@ -89,7 +91,7 @@ export default function BulkTaskModal({
 
   return (
     <Modal
-      title={`批量${operation ? BULK_OPERATION_LABEL[operation] : ''}进度`}
+      title={t('agents.bulk.progressTitle', { op: operation ? t(BULK_OPERATION_LABEL[operation]) : '' })}
       open={open}
       onCancel={running ? onCollapse : onClose}
       closable
@@ -98,9 +100,9 @@ export default function BulkTaskModal({
       width={560}
       footer={
         running ? (
-          <Button onClick={onCollapse}>收起</Button>
+          <Button onClick={onCollapse}>{t('agents.bulk.collapse')}</Button>
         ) : (
-          <PrimaryButton onClick={onClose}>关闭</PrimaryButton>
+          <PrimaryButton onClick={onClose}>{t('agents.bulk.close')}</PrimaryButton>
         )
       }
     >
@@ -108,7 +110,7 @@ export default function BulkTaskModal({
         <span>{settled}/{summary.total}</span>
         <Progress percent={percent} size="small" style={{ flex: 1, margin: 0 }} />
         <span>
-          成功 {summary.succeeded} · 失败 {summary.failed} · 跳过 {summary.skipped} · 受限 {summary.blocked}
+          {t('agents.bulk.summary', { succeeded: summary.succeeded, failed: summary.failed, skipped: summary.skipped, blocked: summary.blocked })}
         </span>
       </div>
       <div className={styles.list}>
@@ -118,7 +120,7 @@ export default function BulkTaskModal({
             <span className={styles.name}>{item.name}</span>
             <span className={styles.spacer} />
             {item.reason && <span className={styles.reason}>{item.reason}</span>}
-            <Tag color={STATUS_META[item.status].color}>{STATUS_META[item.status].label}</Tag>
+            <Tag color={STATUS_META[item.status].color}>{t(STATUS_META[item.status].label)}</Tag>
           </div>
         ))}
       </div>

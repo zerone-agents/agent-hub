@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { useTranslation } from 'react-i18next'
 import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
 import { Popconfirm, Tag, Tooltip, Checkbox } from 'antd'
 import { createStyles } from 'antd-style'
@@ -7,14 +8,14 @@ import EntityCard from '@/components/EntityCard'
 import { hasPendingArtifactUpdates } from './pendingArtifactUpdates'
 import { getIconComponent } from '@/utils/icons'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   iconImg: css`
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
   `,
   stats: css`
     display: flex;
@@ -28,10 +29,10 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     cursor: pointer;
     transition: color 0.15s;
-    &:hover { color: ${t.ink}; }
+    &:hover { color: ${tk.ink}; }
   `,
   actBtn: css`
     width: 30px;
@@ -41,18 +42,18 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted};
+    border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   selectableWrap: css`
     position: relative;
-    border-radius: ${t.radius}px;
+    border-radius: ${tk.radius}px;
     border: 2px solid transparent;
     cursor: pointer;
     transition: border-color 0.15s;
@@ -98,6 +99,7 @@ export default function AgentCard({
   onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge,
   selectionMode = false, selected = false, onToggleSelect,
 }: AgentCardProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
 
   const IconCmp = agent.config.iconName ? getIconComponent(agent.config.iconName) : null
@@ -122,7 +124,7 @@ export default function AgentCard({
     letterSpacing: '0.02em',
     textTransform: 'uppercase',
     background: 'color-mix(in srgb, var(--foreground) 8%, transparent)',
-    color: t.ink
+    color: tk.ink
   }
 
   const platformBadgeStyle: React.CSSProperties = {
@@ -141,29 +143,29 @@ export default function AgentCard({
       headerExtra={
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           {hasPending && (
-            <Tooltip title="工具/技能已更新，重新部署后生效">
-              <Tag color="orange" data-testid="pending-badge">待更新</Tag>
+            <Tooltip title={t('agents.card.pendingTooltip')}>
+              <Tag color="orange" data-testid="pending-badge">{t('agents.card.pending')}</Tag>
             </Tooltip>
           )}
-          {agent.isDefault && <span style={defaultBadgeStyle}>默认</span>}
-          {agent.desktopEnabled && <span style={platformBadgeStyle}>桌面端</span>}
-          {agent.mobileEnabled && <span style={platformBadgeStyle}>手机端</span>}
+          {agent.isDefault && <span style={defaultBadgeStyle}>{t('agents.card.defaultBadge')}</span>}
+          {agent.desktopEnabled && <span style={platformBadgeStyle}>{t('agents.card.desktop')}</span>}
+          {agent.mobileEnabled && <span style={platformBadgeStyle}>{t('agents.card.mobile')}</span>}
         </div>
       }
-      description={agent.config.description?.zh ?? agent.config.description?.en ?? '暂无描述'}
+      description={agent.config.description?.zh ?? agent.config.description?.en ?? t('agents.card.noDesc')}
       bodyExtra={
         <div className={selectionMode ? `${styles.stats} ${styles.statsDisabled}` : styles.stats}>
           <span className={styles.statLink} onClick={() => { onEditSubagents(agent); }}>
             <DiamondsFourIcon size={12} />
-            {agent.subagents?.length ?? 0} 子代理
+            {t('agents.card.subagentCount', { n: agent.subagents?.length ?? 0 })}
           </span>
           <span className={styles.statLink} onClick={() => { onEditTools(agent); }}>
             <WrenchIcon size={12} />
-            {agent.tools?.length ?? 0} 工具
+            {t('agents.card.toolCount', { n: agent.tools?.length ?? 0 })}
           </span>
           <span className={styles.statLink} onClick={() => { onEditSkills(agent); }}>
             <StarIcon size={12} />
-            {agent.skills?.length ?? 0} 技能
+            {t('agents.card.skillCount', { n: agent.skills?.length ?? 0 })}
           </span>
           <span className={styles.statLink} onClick={() => { onEditMcps(agent); }}>
             <PlugsConnectedIcon size={12} />
@@ -171,35 +173,35 @@ export default function AgentCard({
           </span>
           <span className={styles.statLink} onClick={() => { onEditKnowledge(agent); }}>
             <BooksIcon size={12} />
-            {agent.datasets?.length ?? 0} 知识库
+            {t('agents.card.kbCount', { n: agent.datasets?.length ?? 0 })}
           </span>
           <span className={styles.statLink} onClick={() => { onEditModel(agent); }}>
             <CpuIcon size={12} />
             {!modelDisplayName && <PlusIcon size={10} />}
-            {modelDisplayName || '未选模型'}
+            {modelDisplayName || t('agents.card.noModel')}
           </span>
         </div>
       }
       footerLeft={formatTime(agent.createdAt)}
       footerRight={selectionMode ? undefined : (
         <>
-          <button type="button" className={styles.actBtn} title="部署" onClick={() => { onDeploy(agent); }}>
+          <button type="button" className={styles.actBtn} title={t('agents.card.deploy')} onClick={() => { onDeploy(agent); }}>
             <RocketIcon size={14} />
           </button>
           {canWrite && (
             <>
-              <button type="button" className={styles.actBtn} title="编辑" onClick={() => { onEdit(agent); }}>
+              <button type="button" className={styles.actBtn} title={t('common.edit')} onClick={() => { onEdit(agent); }}>
                 <PencilSimpleIcon size={14} />
               </button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除 "${agent.name}"？此操作不可撤销。`}
-                okText="删除"
+                title={t('scenes.deleteConfirmTitle')}
+                description={t('scenes.deleteConfirm', { name: agent.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => { onDelete(agent.name); }}
               >
-                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title={t('common.delete')}>
                   <TrashIcon size={14} />
                 </button>
               </Popconfirm>
@@ -215,7 +217,7 @@ export default function AgentCard({
   return (
     <div
       className={`${styles.selectableWrap}${selected ? ` ${styles.selectableSelected}` : ''}`}
-      aria-label={`选择 ${agent.name}`}
+      aria-label={t('agents.card.selectAria', { name: agent.name })}
       tabIndex={0}
       onClick={() => { onToggleSelect?.(agent.name); }}
       onKeyDown={(e) => {

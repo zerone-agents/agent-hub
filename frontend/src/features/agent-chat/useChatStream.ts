@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { agentChatApi, ApiError, type AttachmentDesc } from '@/api/agent-chat'
 import type { ContentPart } from './types'
 
@@ -104,6 +105,7 @@ interface UseChatStreamReturn {
  * then appends the full message; tool_result appends and advances the marker.
  */
 export function useChatStream(): UseChatStreamReturn {
+  const { t } = useTranslation()
   const [state, setState] = useState<StreamState>(INITIAL)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -283,7 +285,7 @@ export function useChatStream(): UseChatStreamReturn {
               const message =
                 errorList.join('\n') ||
                 (data.error_type ?? '') ||
-                'Runtime 请求失败，请稍后重试'
+                t('agentChat.runtimeFail')
               publish()
               // errorPersisted=true：后端会把该错误落库为系统消息，
               // 页面 refetch 后可 reset 流状态做去重
@@ -315,7 +317,7 @@ export function useChatStream(): UseChatStreamReturn {
           setState((s) => ({
             ...s,
             phase: 'error',
-            error: '连接超时（60 秒无数据），可能是网络中断或工具执行时间过长；刷新后可查看已保存的消息',
+            error: t('agentChat.connTimeout'),
             errorPersisted: false,
           }))
         }
@@ -331,7 +333,7 @@ export function useChatStream(): UseChatStreamReturn {
         abortRef.current = null
       }
     }
-  }, [])
+  }, [t])
 
   return { state, send, reset }
 }

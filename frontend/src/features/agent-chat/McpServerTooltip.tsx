@@ -1,7 +1,8 @@
 import { Tag, Tooltip, theme } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import type { McpServerSummary } from '@/api/agents'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   overlay: css`
@@ -28,7 +29,7 @@ const useStyles = createStyles(({ css }) => ({
     padding: 1px 6px;
     border-radius: 3px;
     font-size: 11px;
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
   `,
   row: css`
     display: flex;
@@ -39,12 +40,12 @@ const useStyles = createStyles(({ css }) => ({
   rowKey: css`
     flex: 0 0 70px;
     color: var(--mcp-tooltip-text-muted);
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
   `,
   rowValue: css`
     flex: 1;
     color: var(--mcp-tooltip-text);
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     word-break: break-all;
   `,
   redacted: css`
@@ -72,7 +73,7 @@ const useStyles = createStyles(({ css }) => ({
   triggerTag: css`
     cursor: help;
     &:hover {
-      background: ${t.inkSubtle};
+      background: ${tk.inkSubtle};
     }
   `,
 }))
@@ -87,6 +88,7 @@ interface Props {
  * to bypass antd Tooltip's hover-trigger complexity).
  */
 export function McpServerTooltipOverlay({ name, server }: Props) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { useToken } = theme
   const { token } = useToken()
@@ -130,7 +132,7 @@ export function McpServerTooltipOverlay({ name, server }: Props) {
       </div>
       {server.error && (
         <div className={styles.errorRow}>
-          <span role="img" aria-label="错误">⚠</span> {server.error}
+          <span role="img" aria-label={t('agentChat.errorAria')}>⚠</span> {server.error}
         </div>
       )}
       {rows.map((r) => (
@@ -152,14 +154,15 @@ export function McpServerTooltipOverlay({ name, server }: Props) {
  * degradation is visible at a glance without a red whole-agent alarm.
  */
 export default function McpServerTooltip({ name, server }: Props) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const degraded = server.connectionStatus === 'error' || server.error !== undefined
   return (
     <Tooltip title={<McpServerTooltipOverlay name={name} server={server} />} placement="bottom">
       <Tag className={styles.triggerTag} tabIndex={0}>
-        {degraded && <span className={styles.degradedDot} aria-label="连接失败" />}
+        {degraded && <span className={styles.degradedDot} aria-label={t('agentChat.connFailAria')} />}
         {name} · {server.transport}
-        {degraded && <span className={styles.degradedText}> 连接失败</span>}
+        {degraded && <span className={styles.degradedText}>{t('agentChat.connFail')}</span>}
       </Tag>
     </Tooltip>
   )

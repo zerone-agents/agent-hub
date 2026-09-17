@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from 'react-i18next'
+// 模块级纯函数/Rule：直调 i18next
+import i18next from '@/i18n'
 import {
   Collapse,
   Divider,
@@ -49,25 +52,6 @@ export interface DatasetFormValues {
   parser_config_extra: string;
 }
 
-export const PERMISSION_OPTIONS = [
-  { label: "仅自己", value: "me" },
-  { label: "团队共享", value: "team" },
-];
-
-export const PARSER_OPTIONS = [
-  { label: "通用 (naive)", value: "naive" },
-  { label: "问答 (qa)", value: "qa" },
-  { label: "论文 (paper)", value: "paper" },
-  { label: "书籍 (book)", value: "book" },
-  { label: "法律 (laws)", value: "laws" },
-  { label: "手册 (manual)", value: "manual" },
-  { label: "表格 (table)", value: "table" },
-  { label: "演示 (presentation)", value: "presentation" },
-  { label: "图片 (picture)", value: "picture" },
-  { label: "整体 (one)", value: "one" },
-  { label: "邮件 (email)", value: "email" },
-];
-
 const LAYOUT_OPTIONS = [
   { label: "DeepDOC", value: "DeepDOC" },
   { label: "Plain Text", value: "Plain Text" },
@@ -116,11 +100,6 @@ export function groupsToAntdOptions(
   }));
 }
 
-const MINERU_PARSE_METHOD_OPTIONS = [
-  { label: "自动", value: "auto" },
-  { label: "文本", value: "txt" },
-  { label: "OCR", value: "ocr" },
-];
 
 const MINERU_LANG_OPTIONS = [
   { label: "English", value: "English" },
@@ -208,10 +187,34 @@ function parseExtraParserConfig(
   if (text === "") return {};
   const parsed = JSON.parse(text) as unknown;
   if (!isRecord(parsed)) {
-    throw new Error("高级 JSON 必须是 JSON 对象");
+    throw new Error(i18next.t('knowledge.form.advJsonNotObject'));
   }
   return parsed;
 }
+
+// 选项 label 存 i18n key，使用处 map t()（模块级拿不到 hook；ThemeControls 同款约定）
+const MINERU_PARSE_METHOD_OPTIONS = [
+  { label: 'knowledge.form.embedAuto', value: "auto" },
+  { label: 'knowledge.form.embedTxt', value: "txt" },
+  { label: "OCR", value: "ocr" },
+];
+const PERMISSION_OPTIONS = [
+  { label: 'knowledge.form.permMe', value: "me" },
+  { label: 'knowledge.form.permTeam', value: "team" },
+];
+const PARSER_OPTIONS = [
+  { label: 'knowledge.form.parserGeneric', value: "naive" },
+  { label: 'knowledge.form.parserQa', value: "qa" },
+  { label: 'knowledge.form.parserPaper', value: "paper" },
+  { label: 'knowledge.form.parserBook', value: "book" },
+  { label: 'knowledge.form.parserLaws', value: "laws" },
+  { label: 'knowledge.form.parserManual', value: "manual" },
+  { label: 'knowledge.form.parserTable', value: "table" },
+  { label: 'knowledge.form.parserPresentation', value: "presentation" },
+  { label: 'knowledge.form.parserPicture', value: "picture" },
+  { label: 'knowledge.form.parserOne', value: "one" },
+  { label: 'knowledge.form.parserEmail', value: "email" },
+];
 
 /** Advanced parser_config must be a JSON object (or empty). */
 const parserConfigExtraRule: Rule = {
@@ -223,7 +226,7 @@ const parserConfigExtraRule: Rule = {
       return Promise.resolve();
     } catch (error) {
       return Promise.reject(
-        error instanceof Error ? error : new Error("高级 JSON 不是合法 JSON"),
+        error instanceof Error ? error : new Error(i18next.t('knowledge.form.advJsonInvalid')),
       );
     }
   },
@@ -325,22 +328,23 @@ function ParserConfigFields({
   layoutOptions?: SelectOptionGroup[];
   layoutLoading?: boolean;
 }) {
+  const { t } = useTranslation()
   return (
     <>
       <Divider titlePlacement="left" plain>
-        解析配置
+        {t('knowledge.form.parseSection')}
       </Divider>
       <Typography.Paragraph type="secondary" style={{ marginTop: -6 }}>
-        常用 parser_config 已结构化展示，未覆盖字段会保留在高级 JSON。
+        {t('knowledge.form.parseHint')}
       </Typography.Paragraph>
       <Row gutter={12}>
         <Col xs={24} md={12}>
-          <Form.Item label="解析布局" name="layout_recognize">
+          <Form.Item label={t('knowledge.form.parseLayout')} name="layout_recognize">
             {layoutOptions ? (
               <Select
                 options={layoutOptions}
                 loading={layoutLoading}
-                placeholder="选择解析布局"
+                placeholder={t('knowledge.form.parseLayoutPh')}
                 showSearch={{ optionFilterProp: 'label' }}
               />
             ) : (
@@ -349,13 +353,13 @@ function ParserConfigFields({
           </Form.Item>
         </Col>
         <Col xs={24} md={12}>
-          <Form.Item label="分块 token" name="chunk_token_num">
+          <Form.Item label={t('knowledge.form.chunkToken')} name="chunk_token_num">
             <InputNumber min={1} max={8192} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
       </Row>
-      <Form.Item label="分隔符" name="delimiter">
-        <Input placeholder={"例如 \\n!?。；！？"} />
+      <Form.Item label={t('knowledge.form.delimiter')} name="delimiter">
+        <Input placeholder={t('knowledge.form.delimiterPh')} />
       </Form.Item>
 
       <Form.Item
@@ -368,7 +372,7 @@ function ParserConfigFields({
           <Row gutter={12}>
             <Col xs={24} md={12}>
               <Form.Item
-                label="启用子切片"
+                label={t('knowledge.form.childChunks')}
                 name="enable_children"
                 valuePropName="checked"
               >
@@ -376,10 +380,10 @@ function ParserConfigFields({
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item label="子切片分隔符" name="children_delimiter">
+              <Form.Item label={t('knowledge.form.childDelimiter')} name="children_delimiter">
                 <Input
                   disabled={!getFieldValue("enable_children")}
-                  placeholder={"例如 \\n"}
+                  placeholder={t('knowledge.form.childDelimiterPh')}
                 />
               </Form.Item>
             </Col>
@@ -389,17 +393,17 @@ function ParserConfigFields({
 
       <Row gutter={12}>
         <Col xs={24} md={8}>
-          <Form.Item label="图片/表格上下文" name="image_table_context_window">
+          <Form.Item label={t('knowledge.form.imgTableCtx')} name="image_table_context_window">
             <InputNumber min={0} max={20} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
         <Col xs={24} md={8}>
-          <Form.Item label="自动关键词" name="auto_keywords">
+          <Form.Item label={t('knowledge.form.autoKeywords')} name="auto_keywords">
             <InputNumber min={0} max={30} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
         <Col xs={24} md={8}>
-          <Form.Item label="自动问题" name="auto_questions">
+          <Form.Item label={t('knowledge.form.autoQuestions')} name="auto_questions">
             <InputNumber min={0} max={30} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
@@ -407,7 +411,7 @@ function ParserConfigFields({
       <Row gutter={12}>
         <Col xs={24} md={12}>
           <Form.Item
-            label="目录提取"
+            label={t('knowledge.form.tocExtract')}
             name="toc_extraction"
             valuePropName="checked"
           >
@@ -416,7 +420,7 @@ function ParserConfigFields({
         </Col>
         <Col xs={24} md={12}>
           <Form.Item
-            label="Excel 转 HTML"
+            label={t('knowledge.form.excelHtml')}
             name="html4excel"
             valuePropName="checked"
           >
@@ -439,12 +443,12 @@ function ParserConfigFields({
               </Divider>
               <Row gutter={12}>
                 <Col xs={24} md={12}>
-                  <Form.Item label="解析方式" name="mineru_parse_method">
-                    <Select options={MINERU_PARSE_METHOD_OPTIONS} />
+                  <Form.Item label={t('knowledge.form.parseMethod')} name="mineru_parse_method">
+                    <Select options={MINERU_PARSE_METHOD_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
-                  <Form.Item label="语言" name="mineru_lang">
+                  <Form.Item label={t('knowledge.form.lang')} name="mineru_lang">
                     <Select options={MINERU_LANG_OPTIONS} />
                   </Form.Item>
                 </Col>
@@ -452,7 +456,7 @@ function ParserConfigFields({
               <Row gutter={12}>
                 <Col xs={24} md={12}>
                   <Form.Item
-                    label="公式识别"
+                    label={t('knowledge.form.formula')}
                     name="mineru_formula_enable"
                     valuePropName="checked"
                   >
@@ -461,7 +465,7 @@ function ParserConfigFields({
                 </Col>
                 <Col xs={24} md={12}>
                   <Form.Item
-                    label="表格识别"
+                    label={t('knowledge.form.tableReco')}
                     name="mineru_table_enable"
                     valuePropName="checked"
                   >
@@ -479,12 +483,12 @@ function ParserConfigFields({
         items={[
           {
             key: "advanced",
-            label: "高级 JSON",
+            label: t('knowledge.form.advJson'),
             children: (
               <Form.Item
                 name="parser_config_extra"
                 rules={[parserConfigExtraRule]}
-                tooltip="未覆盖的历史字段会保留在这里；需为合法 JSON 对象，可留空"
+                tooltip={t('knowledge.form.advJsonTip')}
               >
                 <Input.TextArea
                   rows={5}
@@ -520,34 +524,35 @@ export function DatasetFields({
   layoutOptions?: SelectOptionGroup[];
   layoutLoading?: boolean;
 }) {
+  const { t } = useTranslation()
   return (
     <>
       <Form.Item
-        label="名称"
+        label={t('knowledge.form.name')}
         name="name"
         rules={[
-          { required: true, message: "请输入知识库名称" },
-          { max: 128, message: "名称最多 128 个字符" },
+          { required: true, message: t('knowledge.form.nameRequired') },
+          { max: 128, message: t('knowledge.form.nameMax') },
         ]}
       >
-        <Input placeholder="知识库名称" disabled={nameDisabled} />
+        <Input placeholder={t('knowledge.form.namePh')} disabled={nameDisabled} />
       </Form.Item>
-      <Form.Item label="描述" name="description">
-        <Input.TextArea rows={2} placeholder="知识库用途描述" maxLength={512} />
+      <Form.Item label={t('knowledge.form.desc')} name="description">
+        <Input.TextArea rows={2} placeholder={t('knowledge.form.descPh')} maxLength={512} />
       </Form.Item>
-      <Form.Item label="权限" name="permission">
-        <Select options={PERMISSION_OPTIONS} />
+      <Form.Item label={t('knowledge.form.permLabel')} name="permission">
+        <Select options={PERMISSION_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
       </Form.Item>
-      <Form.Item label="解析方法" name="parser_id">
-        <Select options={PARSER_OPTIONS} showSearch={{ optionFilterProp: 'label' }} />
+      <Form.Item label={t('knowledge.form.parserLabel')} name="parser_id">
+        <Select options={PARSER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} showSearch={{ optionFilterProp: 'label' }} />
       </Form.Item>
       <Form.Item
-        label="Embedding 模型"
+        label={t('knowledge.form.embedModel')}
         name="embd_id"
         extra={
           embeddingLocked ? (
             <Typography.Text type="secondary">
-              {`当前知识库已有 ${embeddingChunkCount} 个文本块。向量模型决定现有索引的向量空间，不能直接更换；如需更换，请新建知识库或使用完整的重建索引流程。`}
+              {t('knowledge.form.embedLockedNote', { n: embeddingChunkCount })}
             </Typography.Text>
           ) : undefined
         }
@@ -557,7 +562,7 @@ export function DatasetFields({
             readOnly
             suffix={
               <Tag variant="filled" icon={<LockKeyIcon size={12} />}>
-                已锁定
+                {t('knowledge.form.lockedBadge')}
               </Tag>
             }
           />
@@ -565,11 +570,11 @@ export function DatasetFields({
           <Select
             options={embeddingOptions}
             loading={embeddingLoading}
-            placeholder="选择 Embedding 模型"
+            placeholder={t('knowledge.form.embedPh')}
             showSearch={{ optionFilterProp: 'label' }}
           />
         ) : (
-          <Input placeholder="如 bge-m3、text-embedding-3-small" />
+          <Input placeholder={t('knowledge.form.embedIdPh')} />
         )}
       </Form.Item>
       <ParserConfigFields
@@ -591,6 +596,10 @@ export default function KnowledgeForm({
   editing,
   onClose,
 }: KnowledgeFormProps) {
+  const { t } = useTranslation()
+
+
+
   const [form] = Form.useForm<DatasetFormValues>();
   const [syncing, setSyncing] = useState(false);
   const createKnowledge = useCreateKnowledge();
@@ -661,10 +670,10 @@ export default function KnowledgeForm({
     if (typeof saved === "string" && saved && !embdRawToValue.has(saved)) {
       return [
         {
-          label: "当前值（不可用）",
+          label: t('knowledge.settings.currentValue'),
           options: [
             {
-              label: `${saved}（模型不可用，请重新选择）`,
+              label: t('knowledge.settings.modelUnavailable', { saved }),
               value: saved,
             },
           ],
@@ -673,17 +682,17 @@ export default function KnowledgeForm({
       ];
     }
     return groupsToAntdOptions(embeddingGroups);
-  }, [editing?.embd_id, embdRawToValue, embeddingGroups]);
+  }, [t, editing?.embd_id, embdRawToValue, embeddingGroups]);
 
   const layoutOptions = useMemo<SelectOptionGroup[]>(() => {
     const saved = editing?.parser_config.layout_recognize;
     if (typeof saved === "string" && saved && !layoutRawToValue.has(saved)) {
       return [
         {
-          label: "当前值（不可用）",
+          label: t('knowledge.settings.currentValue'),
           options: [
             {
-              label: `${saved}（不可用，请重新选择）`,
+              label: t('knowledge.settings.unavailable', { saved }),
               value: saved,
             },
           ],
@@ -693,6 +702,7 @@ export default function KnowledgeForm({
     }
     return groupsToAntdOptions(layoutGroups);
   }, [
+    t,
     editing?.parser_config.layout_recognize,
     layoutRawToValue,
     layoutGroups,
@@ -778,13 +788,13 @@ export default function KnowledgeForm({
 
   return (
     <Modal
-      title={editing ? "编辑知识库" : "新建知识库"}
+      title={editing ? t('knowledge.form.editTitle') : t('knowledge.form.createTitle')}
       open={open}
       onOk={handleOk}
       onCancel={onClose}
       confirmLoading={submitting || syncing}
-      okText={editing ? "保存" : "创建"}
-      cancelText="取消"
+      okText={editing ? t('knowledge.form.saveBtn') : t('knowledge.form.createBtn')}
+      cancelText={t('common.cancel')}
       destroyOnHidden
       width={760}
     >

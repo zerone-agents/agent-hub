@@ -1,10 +1,11 @@
 import { type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import BrandMark from '@/components/BrandMark'
 import ThemeControls from '@/components/ThemeControls'
 import HeaderLinks from '@/components/HeaderLinks'
 import UserDropdown from '@/components/UserDropdown'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 // 聊天域共享页眉壳：/agents/chat 总览与 /agents/:name/chat 聊天页同款排版
 // （对齐管理页 AppHeader：sticky 毛玻璃、52px、右侧 HeaderLinks + 主题控件 +
@@ -54,7 +55,7 @@ const useStyles = createStyles(({ css }) => ({
     gap: 10px;
     font-size: 16px;
     font-weight: 700;
-    color: ${t.ink};
+    color: ${tk.ink};
   `,
   actions: css`
     display: flex;
@@ -85,6 +86,7 @@ interface ChatLayoutProps {
 }
 
 export default function ChatLayout({ left, badge, fill, children }: ChatLayoutProps) {
+  const { t } = useTranslation()
   const { styles, cx } = useStyles()
   return (
     <div className={cx(styles.page, fill && styles.pageFill)}>
@@ -94,7 +96,7 @@ export default function ChatLayout({ left, badge, fill, children }: ChatLayoutPr
             {left ?? (
               <div className={styles.brand}>
                 <BrandMark size={28} />
-                Agent 聊天
+                {t('agentChat.chatTitle')}
               </div>
             )}
           </div>

@@ -1,14 +1,15 @@
 import type { Agent, DeploymentStatus } from '@/api/agents'
+import i18next from '@/i18n'
 
 /** 批量操作类型（issue #141 第一阶段 + 用户新增的停止）。 */
 export type BulkOperation = 'deploy' | 'redeploy' | 'stop' | 'delete'
 
 /** 操作中文标签（确认弹窗、进度 Modal 等共用，review 提示去重）。 */
 export const BULK_OPERATION_LABEL: Record<BulkOperation, string> = {
-  deploy: '部署',
-  redeploy: '重新部署',
-  stop: '停止',
-  delete: '删除',
+  deploy: 'agents.bulk.opDeploy',
+  redeploy: 'agents.bulk.opRedeploy',
+  stop: 'agents.bulk.opStop',
+  delete: 'agents.bulk.opDelete',
 }
 
 /**
@@ -53,26 +54,26 @@ export function classifyBulkOperation(
     case 'deploy': {
       if (NO_CONTAINER.has(status)) return { classification: 'executable' }
       if (knownUnknown) return { classification: 'executable' } // 幂等安全
-      if (status === 'running') return { classification: 'skipped', reason: '已部署，建议重新部署' }
-      if (TRANSITIONING.has(status)) return { classification: 'skipped', reason: `容器状态转换中（${status}），稍后再试` }
-      return { classification: 'skipped', reason: '容器已停止或出错，建议重新部署' } // stopped/exited/error
+      if (status === 'running') return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonAlreadyDeployed') }
+      if (TRANSITIONING.has(status)) return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonTransitioning', { status }) }
+      return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonStoppedOrError') } // stopped/exited/error
     }
     case 'redeploy': {
       if (HAS_CONTAINER.has(status)) return { classification: 'executable' }
       if (knownUnknown) return { classification: 'executable' } // force 重建，无论容器是否存在都达目标
-      return { classification: 'skipped', reason: '未部署' } // not_found/archived
+      return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonNotDeployed') } // not_found/archived
     }
     case 'stop': {
       if (status === 'running' || TRANSITIONING.has(status)) return { classification: 'executable' }
       if (knownUnknown) return { classification: 'executable' } // 失败可见
-      if (NO_CONTAINER.has(status)) return { classification: 'skipped', reason: '未部署' }
-      if (status === 'stopped' || status === 'exited') return { classification: 'skipped', reason: '已停止' }
-      return { classification: 'skipped', reason: '部署出错，建议重新部署' } // error
+      if (NO_CONTAINER.has(status)) return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonNotDeployed') }
+      if (status === 'stopped' || status === 'exited') return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonStopped') }
+      return { classification: 'skipped', reason: i18next.t('agents.bulk.reasonErrorRedeploy') } // error
     }
     case 'delete': {
       if (NO_CONTAINER.has(status)) return { classification: 'executable' }
       // 其余一切（含 unknown/未识别）→ blocked，与后端 409 对齐（fail-closed）
-      return { classification: 'blocked', reason: '有活跃部署，需先删除部署' }
+      return { classification: 'blocked', reason: i18next.t('agents.bulk.reasonActiveDeploy') }
     }
   }
 }
@@ -84,7 +85,7 @@ export function classifyAllAgents(
   prechecks: ReadonlyMap<string, PrecheckResult>,
 ): ClassifiedItem[] {
   return agents.map((agent) => {
-    const precheck = prechecks.get(agent.name) ?? { kind: 'error', error: new Error('预检结果缺失') }
+    const precheck = prechecks.get(agent.name) ?? { kind: 'error', error: new Error(i18next.t('agents.bulk.precheckMissing')) }
     const { classification, reason } = classifyBulkOperation(op, precheck)
     return { agent, precheck, classification, reason }
   })
