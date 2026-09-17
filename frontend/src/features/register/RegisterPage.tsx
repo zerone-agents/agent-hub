@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate, useSearchParams } from 'react-router'
@@ -140,6 +141,7 @@ const useStyles = createStyles(({ css }) => ({
 type State = 'loading' | 'ok' | 'invalid'
 
 export default function RegisterPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [searchParams] = useSearchParams()
   const inviteToken = searchParams.get('token') ?? ''
@@ -187,18 +189,18 @@ export default function RegisterPage() {
           <BrandMark size={56} />
         </div>
         <div className={styles.brandTitle}>Zerone Agent Hub</div>
-        <div className={styles.brandSubtitle}>AI Agent 管理平台</div>
+        <div className={styles.brandSubtitle}>{t('common.brandSubtitle')}</div>
       </div>
       <div className={styles.body}>
-        <div className={styles.bodyTitle}>加入 Agent Hub</div>
-        <div className={styles.bodySubtitle}>填写信息完成注册</div>
-        {note && <div className={styles.note}>邀请备注：{note}</div>}
+        <div className={styles.bodyTitle}>{t('register.title')}</div>
+        <div className={styles.bodySubtitle}>{t('register.sub')}</div>
+        {note && <div className={styles.note}>{t('register.inviteNote', { note })}</div>}
         {error && <div className={styles.error}>{error}</div>}
         {/* 注册页关闭自动填充：form 级 off + 全部字段 off。 */}
         <form noValidate autoComplete="off" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
           <div className={styles.field}>
             <Input
-              placeholder="用户名（3-32 位字母数字下划线连字符）"
+              placeholder={t('register.usernamePlaceholder')}
               name="username"
               value={username}
               onChange={(e) => { setUsername(e.target.value); }}
@@ -208,7 +210,7 @@ export default function RegisterPage() {
           </div>
           <div className={styles.field}>
             <Input
-              placeholder="昵称（可选）"
+              placeholder={t('register.nicknamePlaceholder')}
               name="displayName"
               value={displayName}
               onChange={(e) => { setDisplayName(e.target.value); }}
@@ -218,7 +220,7 @@ export default function RegisterPage() {
           </div>
           <div className={styles.field}>
             <PasswordInput
-              placeholder="密码（至少 8 位，含字母和数字）"
+              placeholder={t('register.passwordPlaceholder')}
               name="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); }}
@@ -231,7 +233,7 @@ export default function RegisterPage() {
             className={styles.submitBtn}
             disabled={loading || !username || !password}
           >
-            {loading ? <Spin size="small" /> : '注册并登录'}
+            {loading ? <Spin size="small" /> : t('register.submit')}
           </button>
         </form>
       </div>
@@ -251,11 +253,11 @@ export default function RegisterPage() {
             <div className={styles.logoMark}>
               <BrandMark size={56} />
             </div>
-            <div className={styles.brandTitle}>邀请链接无效</div>
+            <div className={styles.brandTitle}>{t('register.invalidTitle')}</div>
           </div>
           <div className={styles.body}>
             <div className={styles.bodySubtitle}>
-              邀请链接无效或已失效，请联系管理员重新获取。
+              {t('register.invalidDesc')}
             </div>
             <a
               className={styles.link}
@@ -265,7 +267,7 @@ export default function RegisterPage() {
                 void Promise.resolve(navigate('/login', { replace: true }))
               }}
             >
-              返回登录
+              {t('register.backToLogin')}
             </a>
           </div>
         </div>

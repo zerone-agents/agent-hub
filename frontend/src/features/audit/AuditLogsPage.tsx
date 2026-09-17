@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, DatePicker, Input, Select, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -23,11 +24,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = { success: 'green', failure: 'red', partial: 'orange' }
-const STATUS_LABELS: Record<string, string> = { success: '成功', failure: '失败', partial: '部分生效' }
+const STATUS_LABELS: Record<string, string> = { success: 'audit.status.success', failure: 'audit.status.failure', partial: 'audit.status.partial' }
 
 const PAGE_SIZE = 20
 
 export default function AuditLogsPage() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [category, setCategory] = useState<string | undefined>()
   const [user, setUser] = useState('')
@@ -69,17 +71,17 @@ export default function AuditLogsPage() {
   }
 
   const columns: ColumnsType<AuditLog> = [
-    { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (v: string) => new Date(v).toLocaleString() },
-    { title: '用户', key: 'user', render: (_, r) => r.userName || r.userId || '-' },
-    { title: '动作', dataIndex: 'action', key: 'action', width: 200, render: (v: string, r) => <Tag color={CATEGORY_COLORS[r.category]}>{v}</Tag> },
-    { title: '对象', key: 'target', render: (_, r) => <span title={r.targetId}>{r.targetName || r.targetId || '-'}</span> },
-    { title: '结果', dataIndex: 'status', key: 'status', width: 100, render: (v: string) => <Tag color={STATUS_COLORS[v]}>{STATUS_LABELS[v] ?? v}</Tag> },
+    { title: t('audit.columns.time'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (v: string) => new Date(v).toLocaleString() },
+    { title: t('audit.columns.user'), key: 'user', render: (_, r) => r.userName || r.userId || '-' },
+    { title: t('audit.columns.action'), dataIndex: 'action', key: 'action', width: 200, render: (v: string, r) => <Tag color={CATEGORY_COLORS[r.category]}>{v}</Tag> },
+    { title: t('audit.columns.target'), key: 'target', render: (_, r) => <span title={r.targetId}>{r.targetName || r.targetId || '-'}</span> },
+    { title: t('audit.columns.result'), dataIndex: 'status', key: 'status', width: 100, render: (v: string) => <Tag color={STATUS_COLORS[v]}>{t(STATUS_LABELS[v] ?? v)}</Tag> },
     { title: 'IP', dataIndex: 'remoteIp', key: 'remoteIp', width: 140 }
   ]
 
   return (
     <div>
-      <PageHeader title="审计日志" subtitle="管理操作审计记录（只读）" />
+      <PageHeader title={t('audit.pageTitle')} subtitle={t('audit.pageSub')} />
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <Select
           allowClear
@@ -90,7 +92,7 @@ export default function AuditLogsPage() {
           onChange={(v) => { setCategory(v); setPage(1) }}
         />
         <Input.Search
-          placeholder="搜索用户"
+          placeholder={t('audit.searchPlaceholder')}
           allowClear
           style={{ width: 200 }}
           onSearch={(v) => { setUser(v); setPage(1) }}
@@ -103,7 +105,7 @@ export default function AuditLogsPage() {
           }}
         />
         <Button icon={<ArrowsClockwiseIcon size={14} />} onClick={handleRefresh}>
-          刷新
+          {t('audit.refresh')}
         </Button>
       </div>
       <BorderedTable<AuditLog>
@@ -123,7 +125,7 @@ export default function AuditLogsPage() {
             r.detail ? (
               <pre style={{ margin: 0 }}>{JSON.stringify(r.detail, null, 2)}</pre>
             ) : (
-              <Typography.Text type="secondary">无详情</Typography.Text>
+              <Typography.Text type="secondary">{t('audit.noDetail')}</Typography.Text>
             )
         }}
       />

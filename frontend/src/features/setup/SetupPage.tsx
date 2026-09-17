@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin } from 'antd'
 import { createStyles } from 'antd-style'
 import { useNavigate } from 'react-router'
@@ -120,6 +121,7 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 export default function SetupPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -138,11 +140,11 @@ export default function SetupPage() {
   const handleSubmit = async () => {
     setError('')
     if (password.length < 8) {
-      setError('密码至少 8 位，且需包含字母和数字')
+      setError(t('setup.passwordRule'))
       return
     }
     if (password !== confirm) {
-      setError('两次输入的密码不一致')
+      setError(t('setup.passwordMismatch'))
       return
     }
     setLoading(true)
@@ -177,11 +179,11 @@ export default function SetupPage() {
             <BrandMark size={56} />
           </div>
           <div className={styles.brandTitle}>Zerone Agent Hub</div>
-          <div className={styles.brandSubtitle}>AI Agent 管理平台</div>
+          <div className={styles.brandSubtitle}>{t('common.brandSubtitle')}</div>
         </div>
         <div className={styles.body}>
-          <div className={styles.bodyTitle}>初始化系统</div>
-          <div className={styles.bodySubtitle}>创建管理员账号（用户名固定为 admin）</div>
+          <div className={styles.bodyTitle}>{t('setup.initTitle')}</div>
+          <div className={styles.bodySubtitle}>{t('setup.initSub')}</div>
           {error && <div className={styles.error}>{error}</div>}
           <form noValidate onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
             {/* 用户名固定为 admin。渲染一个离屏 username 输入框，
@@ -198,7 +200,7 @@ export default function SetupPage() {
             />
             <div className={styles.field}>
               <PasswordInput
-                placeholder="设置管理员密码"
+                placeholder={t('setup.passwordPlaceholder')}
                 name="password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); }}
@@ -208,7 +210,7 @@ export default function SetupPage() {
             </div>
             <div className={styles.field}>
               <PasswordInput
-                placeholder="确认密码"
+                placeholder={t('setup.confirmPlaceholder')}
                 name="confirmPassword"
                 value={confirm}
                 onChange={(e) => { setConfirm(e.target.value); }}
@@ -221,7 +223,7 @@ export default function SetupPage() {
               className={styles.submitBtn}
               disabled={loading || !password || !confirm}
             >
-              {loading ? <Spin size="small" /> : '创建并登录'}
+              {loading ? <Spin size="small" /> : t('setup.submit')}
             </button>
           </form>
         </div>
