@@ -520,7 +520,13 @@ const en = {
       chat: 'Chat',
       deployBtn: 'Deploy',
       destroy: 'Delete Permanently',
-      statusLabel: 'Status: '
+      statusLabel: 'Status: ',
+      startBtn: 'Start',
+      redeployConfirmTitle: 'Redeploy {{name}}',
+      redeployConfirmOk: 'Confirm Redeploy',
+      redeployNoticeTitle: 'Redeploy will recreate the container',
+      redeployNoticeDesc: 'If the option below is checked, a new API key is generated and the old one stops working immediately; clients using it need to be reconfigured.',
+      rotateKey: 'Also rotate the API key (old key will be revoked)'
     },
     bulk: {
       selectedCount: '{{n}} selected',
@@ -770,7 +776,18 @@ const en = {
       emptyNoMatch: 'No matching documents',
       emptyNoUpload: 'No documents yet. Click to upload',
       emptyNone: 'No documents',
-      close: 'Close'
+      close: 'Close',
+      statusDocCol: 'Document',
+      statusColState: 'Status',
+      progressMsg: 'Progress',
+      statusChunkCount: 'Chunks',
+      elapsed: 'Elapsed',
+      startTime: 'Started At',
+      errorSummary: 'Error',
+      parseFail: 'Parse failed',
+      renameTitle: 'Rename Document',
+      saveBtn: 'Save',
+      renamePh: 'Enter a new document name'
     },
     retrieval: {
       question: 'Question',
@@ -1166,6 +1183,9 @@ const en = {
     fileTooLarge: 'File is large (over {{kb}} KB); download only.',
     truncated: 'Truncated: showing the first {{kb}} KB. Download for the full content.',
     pdfUnavailable: 'PDF preview unavailable; use the download button',
+    selectFilePh: 'Select a file to preview',
+    downloadFailHttp: 'Download failed: HTTP {{status}}',
+    downloadFail: 'Download failed: {{error}}',
     noPreviewPrefix: 'Preview not supported',
     mimeSuffix: ' ({{mime}})'
   },

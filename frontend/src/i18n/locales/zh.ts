@@ -518,7 +518,13 @@ const zh = {
       chat: '聊天',
       deployBtn: '部署',
       destroy: '彻底删除',
-      statusLabel: '状态: '
+      statusLabel: '状态: ',
+      startBtn: '启动',
+      redeployConfirmTitle: '重新部署 {{name}}',
+      redeployConfirmOk: '确认重新部署',
+      redeployNoticeTitle: '重新部署将重新创建容器',
+      redeployNoticeDesc: '如果勾选下方选项，将生成新的 API Key，旧 API Key 会立即失效，使用旧 Key 的客户端需要重新配置。',
+      rotateKey: '同时轮转 API Key（旧 Key 将失效）'
     },
     bulk: {
       selectedCount: '已选 {{n}} 个',
@@ -768,7 +774,18 @@ const zh = {
       emptyNoMatch: '未找到匹配的文档',
       emptyNoUpload: '还没有文档，点击上传',
       emptyNone: '暂无文档',
-      close: '关闭'
+      close: '关闭',
+      statusDocCol: '文档',
+      statusColState: '状态',
+      progressMsg: '进度消息',
+      statusChunkCount: '分块数',
+      elapsed: '耗时',
+      startTime: '开始时间',
+      errorSummary: '错误摘要',
+      parseFail: '解析失败',
+      renameTitle: '重命名文档',
+      saveBtn: '保存',
+      renamePh: '输入新的文档名称'
     },
     retrieval: {
       question: '检索问题',
@@ -1164,6 +1181,9 @@ const zh = {
     fileTooLarge: '文件较大（超过 {{kb}} KB），仅提供下载。',
     truncated: '已截断：仅显示前 {{kb}} KB。完整内容请下载。',
     pdfUnavailable: 'PDF 预览不可用，请使用下载按钮',
+    selectFilePh: '选择文件预览',
+    downloadFailHttp: '下载失败：HTTP {{status}}',
+    downloadFail: '下载失败：{{error}}',
     noPreviewPrefix: '不支持预览',
     mimeSuffix: '（{{mime}}）'
   },

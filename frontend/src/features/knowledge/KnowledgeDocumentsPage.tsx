@@ -887,33 +887,33 @@ export default function KnowledgeDocumentsPage() {
               status={statusDoc.run === "4" ? "exception" : undefined}
             />
             <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="文档">
+              <Descriptions.Item label={t('knowledge.docs.statusDocCol')}>
                 {statusDoc.name}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label={t('knowledge.docs.statusColState')}>
                 {statusMeta(statusDoc).label}
               </Descriptions.Item>
-              <Descriptions.Item label="进度消息">
+              <Descriptions.Item label={t('knowledge.docs.progressMsg')}>
                 {statusDoc.progress_msg || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="分块数">
+              <Descriptions.Item label={t('knowledge.docs.statusChunkCount')}>
                 {statusDoc.chunk_num}
               </Descriptions.Item>
-              <Descriptions.Item label="耗时">
+              <Descriptions.Item label={t('knowledge.docs.elapsed')}>
                 {statusDoc.process_duration
                   ? `${statusDoc.process_duration}s`
                   : "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="开始时间">
+              <Descriptions.Item label={t('knowledge.docs.startTime')}>
                 {formatTime(
                   statusDoc.process_begin_at ??
                     statusDoc.create_time ??
                     statusDoc.create_date,
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="错误摘要">
+              <Descriptions.Item label={t('knowledge.docs.errorSummary')}>
                 {statusDoc.run === "4"
-                  ? statusDoc.progress_msg || "解析失败"
+                  ? statusDoc.progress_msg || t('knowledge.docs.parseFail')
                   : "-"}
               </Descriptions.Item>
             </Descriptions>
@@ -922,12 +922,12 @@ export default function KnowledgeDocumentsPage() {
       </Modal>
 
       <Modal
-        title="重命名文档"
+        title={t('knowledge.docs.renameTitle')}
         open={!!renaming}
         onOk={submitRename}
         onCancel={() => { setRenaming(null); }}
         confirmLoading={updateDocument.isPending}
-        okText="保存"
+        okText={t('knowledge.docs.saveBtn')}
         cancelText={t('common.cancel')}
         destroyOnHidden
       >
@@ -935,7 +935,7 @@ export default function KnowledgeDocumentsPage() {
           value={renameValue}
           onChange={(event) => { setRenameValue(event.target.value); }}
           onPressEnter={submitRename}
-          placeholder="输入新的文档名称"
+          placeholder={t('knowledge.docs.renamePh')}
           style={{ marginTop: 8 }}
         />
       </Modal>

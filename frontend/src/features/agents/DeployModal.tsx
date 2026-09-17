@@ -844,7 +844,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               loading={loading}
               disabled={isMissingConfig || !canWrite || loading}
             >
-              部署
+              {t('agents.deploy.deployBtn')}
             </PrimaryButton>
           )}
 
@@ -888,7 +888,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                   loading={loading}
                   disabled={!canWrite || loading}
                 >
-                  启动
+                  {t('agents.deploy.startBtn')}
                 </PrimaryButton>
               ) : null}
               <Button
@@ -908,7 +908,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
       <Modal
         open={confirmOpen}
-        title={`重新部署 ${agent.config.title?.zh ?? agent.config.title?.en ?? agent.name}`}
+        title={t('agents.deploy.redeployConfirmTitle', { name: agent.config.title?.zh ?? agent.config.title?.en ?? agent.name })}
         onCancel={() => {
           setConfirmOpen(false)
           setRotateKey(false)
@@ -916,16 +916,16 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setConfirmOpen(false); setRotateKey(false) }}>取消</Button>
+            <Button onClick={() => { setConfirmOpen(false); setRotateKey(false) }}>{t('common.cancel')}</Button>
             <PrimaryButton onClick={() => { void handleDeploy(true, rotateKey); setConfirmOpen(false); setRotateKey(false) }}>
-              确认重新部署
+              {t('agents.deploy.redeployConfirmOk')}
             </PrimaryButton>
           </div>
         }
       >
         <Alert
-          title="重新部署将重新创建容器"
-          description="如果勾选下方选项，将生成新的 API Key，旧 API Key 会立即失效，使用旧 Key 的客户端需要重新配置。"
+          title={t('agents.deploy.redeployNoticeTitle')}
+          description={t('agents.deploy.redeployNoticeDesc')}
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
@@ -935,7 +935,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           onChange={(e) => { setRotateKey(e.target.checked); }}
           style={{ color: '#d48806' }}
         >
-          同时轮转 API Key（旧 Key 将失效）
+          {t('agents.deploy.rotateKey')}
         </Checkbox>
       </Modal>
     </Modal>

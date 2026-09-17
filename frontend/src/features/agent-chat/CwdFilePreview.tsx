@@ -469,7 +469,7 @@ export default function CwdFilePreview(props: Props) {
     try {
       const res = await agentFilesApi.getContent(agentName, fullPath(selectedFile))
       if (!res.ok) {
-        message.error(`下载失败：HTTP ${res.status}`)
+        message.error(t('agentChat.downloadFailHttp', { status: res.status }))
         return
       }
       const blob = await res.blob()
@@ -482,7 +482,7 @@ export default function CwdFilePreview(props: Props) {
       a.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      message.error(`下载失败：${parseApiError(err)}`)
+      message.error(t('agentChat.downloadFail', { error: parseApiError(err) }))
     }
   }
 
@@ -496,7 +496,7 @@ export default function CwdFilePreview(props: Props) {
           type="button"
           className={styles.downloadLink}
           onClick={handleDownload}
-          aria-label="下载"
+          aria-label={t('agentChat.download')}
         >
           <DownloadIcon size={14} />
           {t('agentChat.download')}
