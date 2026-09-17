@@ -10,9 +10,10 @@ import type { Scene } from '@/api/scenes'
 import type { Agent } from '@/api/agents'
 import { useScenes, useDeleteScene } from '@/queries/useScenes'
 import { useAgents } from '@/queries/useAgents'
+import { useTranslation } from 'react-i18next'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import BorderedTable from '@/components/BorderedTable'
 import SceneForm from './SceneForm'
 
@@ -30,23 +31,23 @@ const useStyles = createStyles(({ css }) => ({
     @media (max-width: 768px) { flex-direction: column; gap: 16px; }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl}; font-weight: 700; color: ${t.text};
+    font-size: ${tk.text3xl}; font-weight: 700; color: ${tk.text};
     letter-spacing: -0.03em; line-height: 1.15;
   `,
   pageSub: css`
-    margin-top: 4px; font-size: ${t.textBase}; color: ${t.textTertiary};
+    margin-top: 4px; font-size: ${tk.textBase}; color: ${tk.textTertiary};
   `,
   loadingWrap: css`
     display: flex; justify-content: center; padding: 80px 0;
   `,
   actBtn: css`
     width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-    border: none; background: transparent; border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted}; cursor: pointer; transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    border: none; background: transparent; border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted}; cursor: pointer; transition: all 0.15s;
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
@@ -61,6 +62,7 @@ function getAgentTitle(agents: Agent[], agentName: string): string {
 
 export default function SceneListPage() {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const { data: scenes = [], isLoading } = useScenes()
   const { data: agents = [] } = useAgents()
   const deleteScene = useDeleteScene()
@@ -88,43 +90,43 @@ export default function SceneListPage() {
   }, [scenes, keywords])
 
   const columns: ColumnsType<Scene> = [
-    { title: '场景标识', dataIndex: 'name', key: 'name', width: 160 },
+    { title: t('scenes.columns.name'), dataIndex: 'name', key: 'name', width: 160 },
     {
-      title: '场景名称',
+      title: t('scenes.columns.title'),
       key: 'title',
       width: 180,
       render: (_, record) => record.title || record.titleEn || record.name
     },
     {
-      title: '关联 Agent',
+      title: t('scenes.columns.agent'),
       key: 'agent',
       width: 180,
       render: (_, record) => getAgentTitle(agents, record.agent)
     },
     {
-      title: '提示词',
+      title: t('scenes.columns.prompt'),
       key: 'prompt',
       ellipsis: true,
       render: (_, record) => (
         <Tooltip title={record.prompt} placement="topLeft">
-          <span style={{ color: t.textTertiary }}>{record.prompt || '-'}</span>
+          <span style={{ color: tk.textTertiary }}>{record.prompt || '-'}</span>
         </Tooltip>
       )
     },
     {
-      title: '状态',
+      title: t('scenes.columns.status'),
       key: 'enabled',
       width: 90,
       render: (_, record) => <StatusBadge enabled={record.enabled} />
     },
     {
-      title: '创建时间',
+      title: t('scenes.columns.createdAt'),
       key: 'createdAt',
       width: 160,
       render: (_, record) => formatTime(record.createdAt)
     },
     {
-      title: '操作',
+      title: t('scenes.columns.actions'),
       key: 'action',
       width: 100,
       fixed: 'right',
@@ -135,7 +137,7 @@ export default function SceneListPage() {
               <button
                 type="button"
                 className={styles.actBtn}
-                title="编辑"
+                title={t('common.edit')}
                 onClick={() => {
                   setEditingScene(record)
                   setFormOpen(true)
@@ -144,14 +146,14 @@ export default function SceneListPage() {
                 <PencilSimpleIcon size={14} />
               </button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除 "${record.name}"？此操作不可撤销。`}
-                okText="删除"
+                title={t('scenes.deleteConfirmTitle')}
+                description={t('scenes.deleteConfirm', { name: record.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => { deleteScene.mutate(record.name); }}
               >
-                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title="删除">
+                <button type="button" className={`${styles.actBtn} ${styles.actBtnDanger}`} title={t('common.delete')}>
                   <TrashIcon size={14} />
                 </button>
               </Popconfirm>
@@ -166,8 +168,8 @@ export default function SceneListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>场景管理</div>
-          <div className={styles.pageSub}>管理 Agent 场景配置，组合 Agent 与提示词预设</div>
+          <div className={styles.pageTitle}>{t('scenes.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('scenes.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton
@@ -177,14 +179,14 @@ export default function SceneListPage() {
               setFormOpen(true)
             }}
           >
-            新建场景
+            {t('scenes.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
           <NameSearch
-            placeholder="搜索场景名称"
+            placeholder={t('scenes.searchPlaceholder')}
             onSearch={setKeywords}
             realtime
           />
@@ -204,7 +206,7 @@ export default function SceneListPage() {
           pagination={{
             pageSize: 10,
             showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`
+            showTotal: (total) => t('common.totalItems', { total })
           }}
         />
       )}

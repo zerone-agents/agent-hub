@@ -7,6 +7,7 @@ import type { Scene } from '@/api/scenes'
 import { useAgents } from '@/queries/useAgents'
 import { useCreateScene, useUpdateScene } from '@/queries/useScenes'
 import { identifierFormRules } from '@/utils/identifier'
+import { useTranslation } from 'react-i18next'
 
 const useStyles = createStyles(({ css }) => ({
   head: css`
@@ -53,6 +54,7 @@ interface FormValues {
 
 export default function SceneForm({ open, editingScene, onClose }: SceneFormProps) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const [form] = Form.useForm<FormValues>()
   const { data: agents = [] } = useAgents()
   const createScene = useCreateScene()
@@ -125,48 +127,48 @@ export default function SceneForm({ open, editingScene, onClose }: SceneFormProp
       destroyOnHidden
     >
       <div className={styles.head}>
-        <div className={styles.title}>{editingScene ? '编辑场景' : '新建场景'}</div>
+        <div className={styles.title}>{editingScene ? t('scenes.editTitle') : t('scenes.create')}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
           <XIcon size={18} />
         </button>
       </div>
 
       <Form form={form} layout="vertical" className={styles.body} requiredMark={false}>
-        <div className={styles.section}>基本信息</div>
-        <Form.Item label="场景标识" name="name" rules={identifierFormRules('场景标识')}>
+        <div className={styles.section}>{t('scenes.form.basicSection')}</div>
+        <Form.Item label={t('scenes.columns.name')} name="name" rules={identifierFormRules(t('scenes.columns.name'))}>
           <Input placeholder="e.g. default-scene" disabled={!!editingScene} />
         </Form.Item>
-        <Form.Item label="关联 Agent" name="agentId" rules={[{ required: true, message: '请选择关联 Agent' }]}>
+        <Form.Item label={t('scenes.columns.agent')} name="agentId" rules={[{ required: true, message: t('scenes.form.agentRequired') }]}>
           <Select
-            placeholder="选择关联的 Agent"
+            placeholder={t('scenes.form.agentPlaceholder')}
             showSearch={{ optionFilterProp: 'label' }}
             options={agentOptions}
           />
         </Form.Item>
 
-        <Form.Item label="场景名称" name="title">
-          <Input placeholder="场景展示名称" />
+        <Form.Item label={t('scenes.columns.title')} name="title">
+          <Input placeholder={t('scenes.form.titlePlaceholder')} />
         </Form.Item>
         <Form.Item label="Scene Name (EN)" name="titleEn">
           <Input placeholder="Scene display name" />
         </Form.Item>
 
-        <div className={styles.section} style={{ marginTop: 20 }}>提示词配置</div>
-        <Form.Item label="提示词" name="prompt">
-          <Input.TextArea placeholder="输入该场景的提示词，定义 Agent 的行为和角色" rows={4} />
+        <div className={styles.section} style={{ marginTop: 20 }}>{t('scenes.form.promptSection')}</div>
+        <Form.Item label={t('scenes.columns.prompt')} name="prompt">
+          <Input.TextArea placeholder={t('scenes.form.promptPlaceholder')} rows={4} />
         </Form.Item>
         <Form.Item label="Prompt (EN)" name="promptEn">
           <Input.TextArea placeholder="Define the agent's behavior and role" rows={4} />
         </Form.Item>
-        <Form.Item label="启用状态" name="enabled" valuePropName="checked">
+        <Form.Item label={t('scenes.form.enabled')} name="enabled" valuePropName="checked">
           <Switch />
         </Form.Item>
       </Form>
 
       <div className={styles.foot}>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {editingScene ? '更新' : '创建'}
+          {editingScene ? t('scenes.update') : t('scenes.createSubmit')}
         </PrimaryButton>
       </div>
     </Modal>
