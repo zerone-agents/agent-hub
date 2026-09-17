@@ -1,4 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Form, Input, Select, Upload, Spin, Button } from 'antd'
 import type { UploadProps } from 'antd'
 import { XIcon, UploadSimpleIcon } from '@phosphor-icons/react'
@@ -88,6 +89,7 @@ interface FormValues {
 }
 
 export default function SkillForm({ open, editingSkill, onClose }: SkillFormProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const createSkill = useCreateSkill()
@@ -149,19 +151,19 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
     if (!file.name.endsWith('.zip')) {
       // 校验失败必须同时清掉已持有的文件，否则按钮仍显示旧文件名、提交会带上旧文件
       setSelectedFile(null)
-      setUploadError('仅支持 .zip 格式文件')
+      setUploadError(t('skills.form.zipOnly'))
       return Upload.LIST_IGNORE
     }
     // Filename charset must match the backend identifier rule — fail fast
     // here so the user can rename, instead of bouncing off the API.
     if (!isValidIdentifier(file.name)) {
       setSelectedFile(null)
-      setUploadError('文件名只能包含字母、数字、点、下划线和横线')
+      setUploadError(t('skills.form.filenameCharset'))
       return Upload.LIST_IGNORE
     }
     if (file.size > 50 * 1024 * 1024) {
       setSelectedFile(null)
-      setUploadError('文件大小不能超过 50MB')
+      setUploadError(t('skills.form.tooLarge'))
       return Upload.LIST_IGNORE
     }
     setUploadError('')
@@ -176,7 +178,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
       })
       .catch((err: unknown) => {
         setSkillMdEntries([])
-        setSkillMdError(err instanceof Error ? err.message : '解析 SKILL.md 失败')
+        setSkillMdError(err instanceof Error ? err.message : t('skills.form.parseFail'))
         setSkillMdLoading(false)
       })
     return false // prevent auto-upload
@@ -198,7 +200,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
       })
     } else {
       if (!selectedFile) {
-        setUploadError('请选择要上传的 .zip 文件')
+        setUploadError(t('skills.form.zipRequired'))
         return
       }
       const formData = new FormData()
@@ -226,7 +228,7 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
       destroyOnHidden
     >
       <div className={styles.head}>
-        <div className={styles.title}>{editingSkill ? '编辑技能' : '新建技能'}</div>
+        <div className={styles.title}>{editingSkill ? t('skills.form.editTitle') : t('skills.create')}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
           <XIcon size={18} />
         </button>
@@ -234,65 +236,65 @@ export default function SkillForm({ open, editingSkill, onClose }: SkillFormProp
 
       <div className={styles.content}>
         <Form form={form} layout="vertical" className={styles.formCol} requiredMark={false}>
-          <div className={styles.section}>基本信息</div>
-          <Form.Item label="技能标识" name="name" rules={identifierFormRules('技能标识')}>
+          <div className={styles.section}>{t('skills.form.basicSection')}</div>
+          <Form.Item label={t('skills.form.nameKey')} name="name" rules={identifierFormRules(t('skills.form.nameKey'))}>
             <Input placeholder="e.g. webapp-testing" disabled={!!editingSkill} />
           </Form.Item>
-          <Form.Item label="技能类型" name="type" rules={[{ required: true }]}>
+          <Form.Item label={t('skills.form.typeLabel')} name="type" rules={[{ required: true }]}>
             <Select disabled={!!editingSkill} options={[
-              { label: '专家 (Expert)', value: 'expert' },
-              { label: '社区 (Community)', value: 'community' }
+              { label: t('skills.form.typeExpert'), value: 'expert' },
+              { label: t('skills.form.typeCommunity'), value: 'community' }
             ]} />
           </Form.Item>
 
-          <div className={styles.section} style={{ marginTop: 20 }}>显示设置</div>
-          <Form.Item label="展示名称" name="title">
-            <Input placeholder="技能名称" />
+          <div className={styles.section} style={{ marginTop: 20 }}>{t('skills.form.displaySection')}</div>
+          <Form.Item label={t('skills.form.titleLabel')} name="title">
+            <Input placeholder={t('skills.form.titlePlaceholder')} />
           </Form.Item>
           <Form.Item label="Display Name (EN)" name="titleEn">
             <Input placeholder="Skill name" />
           </Form.Item>
-          <Form.Item label="功能描述" name="description">
-            <Input.TextArea placeholder="描述此技能的功能用途" rows={2} />
+          <Form.Item label={t('skills.form.descLabel')} name="description">
+            <Input.TextArea placeholder={t('skills.form.descPlaceholder')} rows={2} />
           </Form.Item>
           <Form.Item label="Description (EN)" name="descriptionEn">
             <Input.TextArea placeholder="Describe this skill" rows={2} />
           </Form.Item>
 
-          <div className={styles.section} style={{ marginTop: 20 }}>上传文件</div>
+          <div className={styles.section} style={{ marginTop: 20 }}>{t('skills.form.uploadSection')}</div>
           <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".zip" maxCount={1}>
             <button type="button" className={styles.uploadBtn}>
               <UploadSimpleIcon size={16} />
-              {selectedFile ? selectedFile.name : '选择 .zip 文件'}
+              {selectedFile ? selectedFile.name : t('skills.form.selectFile')}
             </button>
           </Upload>
           {uploadError && <div className={styles.uploadError}>{uploadError}</div>}
           {!uploadError && (
             <div className={styles.uploadHint}>
               {editingSkill
-                ? '留空则保留原文件，选择新文件将替换'
-                : 'ZIP 包内须包含 SKILL.md（位于根目录或子目录均可），最大 50MB'}
+                ? t('skills.form.keepFileHint')
+                : t('skills.form.zipHint')}
             </div>
           )}
         </Form>
 
         <div className={styles.previewCol}>
-          <div className={styles.previewHead}>SKILL.md 预览</div>
+          <div className={styles.previewHead}>{t('skills.form.previewTitle')}</div>
           <Suspense fallback={<Spin size="small" />}>
             <SkillMdPreview
               loading={skillMdLoading}
               entries={skillMdEntries}
               error={skillMdError}
-              placeholder='选择 zip 文件后预览'
+              placeholder={t('skills.form.previewPlaceholder')}
             />
           </Suspense>
         </div>
       </div>
 
       <div className={styles.foot}>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {editingSkill ? '更新' : '创建'}
+          {editingSkill ? t('scenes.update') : t('scenes.createSubmit')}
         </PrimaryButton>
       </div>
     </Modal>

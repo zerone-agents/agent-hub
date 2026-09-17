@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Form, Input, Upload, Button } from 'antd'
 import type { UploadProps } from 'antd'
 import { XIcon, UploadSimpleIcon } from '@phosphor-icons/react'
@@ -175,6 +176,7 @@ interface FormValues {
 }
 
 export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const createCustomTool = useCreateCustomTool()
@@ -231,7 +233,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
   const handleSubmit = async () => {
     const file = selectedFile
     if (cfg.fileRequired && !file) {
-      setUploadError('请选择工具文件')
+      setUploadError(t('tools.form.fileRequired'))
       return
     }
 
@@ -291,23 +293,23 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
           <>
             {cfg.showNameField && (
               <>
-                <div className={styles.sectionTitle}>基本信息</div>
+                <div className={styles.sectionTitle}>{t('tools.form.basicSection')}</div>
                 <Form.Item
-                  label="工具标识"
+                  label={t('tools.form.nameKey')}
                   name="name"
-                  rules={identifierFormRules('工具标识')}
+                  rules={identifierFormRules(t('tools.form.nameKey'))}
                 >
                   <Input placeholder="e.g. SayHello" disabled={!cfg.nameEditable} />
                 </Form.Item>
               </>
             )}
 
-            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>显示设置</div>
-            <Form.Item label="中文名称" name="title">
-              <Input placeholder="中文名称" />
+            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('tools.form.displaySection')}</div>
+            <Form.Item label={t('tools.form.titleLabel')} name="title">
+              <Input placeholder={t('tools.form.titlePlaceholder')} />
             </Form.Item>
-            <Form.Item label="功能描述" name="description">
-              <Input.TextArea placeholder="描述此工具的功能用途" rows={3} />
+            <Form.Item label={t('tools.form.descLabel')} name="description">
+              <Input.TextArea placeholder={t('tools.form.descPlaceholder')} rows={3} />
             </Form.Item>
             <Form.Item label="Description (EN)" name="descriptionEn">
               <Input.TextArea placeholder="Tool description in English (optional)" rows={3} />
@@ -321,7 +323,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".ts,.mts,.js,.mjs" maxCount={1}>
           <button type="button" className={styles.uploadBtn}>
             <UploadSimpleIcon size={16} />
-            {selectedFile ? selectedFile.name : '选择 .ts / .mts / .js / .mjs 文件'}
+            {selectedFile ? selectedFile.name : t('tools.form.selectFile')}
           </button>
         </Upload>
         {uploadError && <div className={styles.uploadError}>{uploadError}</div>}
@@ -330,15 +332,15 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         )}
         {cfg.showTrustHints && (
           <div className={styles.hintBlock}>
-            <div>· 工具标识必须与文件内默认导出的 name 一致，部署时由 Runtime 最终校验</div>
-            <div>· 仅支持 Node.js 内置模块、@zerone-agent/agent-runtime/tools 与 zod，不安装 npm 依赖</div>
-            <div>· 工具将在 Agent Runtime 进程中执行并拥有完整 Node.js 权限，仅上传可信代码</div>
+            <div>· {t('tools.form.hint1')}</div>
+            <div>· {t('tools.form.hint2')}</div>
+            <div>· {t('tools.form.hint3')}</div>
           </div>
         )}
       </Form>
 
       <div className={styles.modalFoot}>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
           {cfg.submitText}
         </PrimaryButton>
