@@ -15,12 +15,16 @@ export function useLanguage() {
     normalize(i18next.language)
   )
   useEffect(() => {
-    const onChange = (lng: string) => setLocal(normalize(lng))
+    const onChange = (lng: string) => {
+      setLocal(normalize(lng))
+    }
     i18next.on('languageChanged', onChange)
     return () => {
       i18next.off('languageChanged', onChange)
     }
   }, [])
-  const set = useCallback((lang: AppLanguage) => setAppLanguage(lang), [])
+  const set = useCallback((lang: AppLanguage) => {
+    setAppLanguage(lang)
+  }, [])
   return { language, setLanguage: set }
 }

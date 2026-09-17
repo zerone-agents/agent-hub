@@ -11,18 +11,26 @@ describe('useLanguage', () => {
 
   it('setAppLanguage 触发订阅者重渲染', () => {
     const { result } = renderHook(() => useLanguage())
-    act(() => setAppLanguage('en'))
+    act(() => {
+      setAppLanguage('en')
+    })
     expect(result.current.language).toBe('en')
-    act(() => setAppLanguage('zh'))
+    act(() => {
+      setAppLanguage('zh')
+    })
     expect(result.current.language).toBe('zh')
   })
 
   it('hook 的 setLanguage 与 setAppLanguage 等效', () => {
     const { result } = renderHook(() => useLanguage())
-    act(() => result.current.setLanguage('en'))
+    act(() => {
+      result.current.setLanguage('en')
+    })
     expect(result.current.language).toBe('en')
     expect(document.documentElement.lang).toBe('en')
-    act(() => result.current.setLanguage('zh'))
+    act(() => {
+      result.current.setLanguage('zh')
+    })
     expect(result.current.language).toBe('zh')
   })
 })

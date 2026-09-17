@@ -11,6 +11,7 @@ import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
 import HeaderLinks from '@/components/HeaderLinks'
+import LanguageSwitch from '@/components/LanguageSwitch'
 import UserDropdown from '@/components/UserDropdown'
 
 const useStyles = createStyles(({ css }) => ({
@@ -244,6 +245,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
 
         <div className={styles.actions}>
           <HeaderLinks />
+          <LanguageSwitch />
           <ThemeControls />
           <UserDropdown extraItems={userMenuExtraItems} />
         </div>
