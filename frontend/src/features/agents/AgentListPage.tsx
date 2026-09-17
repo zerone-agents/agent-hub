@@ -730,7 +730,7 @@ export default function AgentListPage() {
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setSubagentOpen(false); }}>取消</Button>
+            <Button onClick={() => { setSubagentOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateSubagents.isPending}
@@ -739,7 +739,7 @@ export default function AgentListPage() {
                   setSubagentOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
@@ -766,7 +766,7 @@ export default function AgentListPage() {
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setToolOpen(false); }}>取消</Button>
+            <Button onClick={() => { setToolOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentTools.isPending}
@@ -776,7 +776,7 @@ export default function AgentListPage() {
                   setToolOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
@@ -803,7 +803,7 @@ export default function AgentListPage() {
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setSkillOpen(false); }}>取消</Button>
+            <Button onClick={() => { setSkillOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentSkills.isPending}
@@ -812,7 +812,7 @@ export default function AgentListPage() {
                   setSkillOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
@@ -841,7 +841,7 @@ export default function AgentListPage() {
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setMcpOpen(false); }}>取消</Button>
+            <Button onClick={() => { setMcpOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentMcps.isPending}
@@ -850,7 +850,7 @@ export default function AgentListPage() {
                   setMcpOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
@@ -882,14 +882,14 @@ export default function AgentListPage() {
         onCancel={() => { setModelOpen(false); }}
         footer={
           <div className={styles.modalFoot}>
-            <Button onClick={() => { setModelOpen(false); }}>取消</Button>
+            <Button onClick={() => { setModelOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <div className={styles.footRight}>
                 <Button onClick={handleTest} disabled={!canTest} loading={testing}>
                   <PlugIcon size={14} /> {t('agents.modals.test')}
                 </Button>
                 <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
-                  确认
+                  {t('agents.modals.confirm')}
                 </PrimaryButton>
               </div>
             )}

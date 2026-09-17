@@ -455,7 +455,7 @@ export default function CwdFilePreview(props: Props) {
   if (!selectedFile) {
     return (
       <div className={styles.root}>
-        <div className={styles.placeholder}>选择文件预览</div>
+        <div className={styles.placeholder}>{t('agentChat.selectFilePh')}</div>
       </div>
     )
   }

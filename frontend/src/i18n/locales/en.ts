@@ -403,6 +403,7 @@ const en = {
       skillPh: 'Select skills',
       mcpPh: 'Select MCP',
       test: 'Test',
+      confirm: 'Confirm',
       offlineWarning: '⚠️ The original provider or model is offline. Please re-select',
       selectProvider: 'Select provider',
       selectProviderPh: 'Select provider',
@@ -709,7 +710,11 @@ const en = {
       chunkCount: 'Chunks',
       parser: 'Parser',
       source: 'Source',
-      metaCount: '{{n}} items'
+      metaCount: '{{n}} items',
+      clearSelection: 'Clear Selection',
+      emptyNoMatch: 'No matching chunks',
+      emptyNone: 'No chunks yet',
+      imgNote: 'Image chunks load via the control-panel gateway; full Office/PDF preview is a future enhancement.'
     },
     docs: {
       runParsing: 'Parsing',
@@ -764,7 +769,8 @@ const en = {
       clearSelection: 'Clear Selection',
       emptyNoMatch: 'No matching documents',
       emptyNoUpload: 'No documents yet. Click to upload',
-      emptyNone: 'No documents'
+      emptyNone: 'No documents',
+      close: 'Close'
     },
     retrieval: {
       question: 'Question',
@@ -1145,6 +1151,7 @@ const en = {
     collapse: 'Collapse',
     chatTitle: 'Agent Chat',
     aigcHint: 'AI-generated content — please verify carefully',
+    configParseFail: 'Agent config failed to parse; calls may not work',
     attachExpiredRebuilt: 'Attachments expired (runtime rebuilt). Local files are restored; you can retry sending',
     attachExpiredUpdated: 'Attachments expired (runtime updated). Local files are restored; you can retry sending',
     runtimeUnhealthy: 'Runtime deployment is unhealthy, please retry later',

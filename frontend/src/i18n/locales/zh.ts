@@ -401,6 +401,7 @@ const zh = {
       skillPh: '选择技能',
       mcpPh: '选择 MCP',
       test: '测试',
+      confirm: '确认',
       offlineWarning: '⚠️ 原 Provider 或模型已下线，请重新选择',
       selectProvider: '选择供应商',
       selectProviderPh: '选择供应商',
@@ -707,7 +708,11 @@ const zh = {
       chunkCount: '切片数',
       parser: '解析方法',
       source: '来源',
-      metaCount: '{{n}} 项'
+      metaCount: '{{n}} 项',
+      clearSelection: '清除选择',
+      emptyNoMatch: '未找到匹配的切片',
+      emptyNone: '还没有切片',
+      imgNote: '图片切片通过 control-panel gateway 加载；完整 Office/PDF 预览排在后续增强。'
     },
     docs: {
       runParsing: '解析中',
@@ -762,7 +767,8 @@ const zh = {
       clearSelection: '清除选择',
       emptyNoMatch: '未找到匹配的文档',
       emptyNoUpload: '还没有文档，点击上传',
-      emptyNone: '暂无文档'
+      emptyNone: '暂无文档',
+      close: '关闭'
     },
     retrieval: {
       question: '检索问题',
@@ -1143,6 +1149,7 @@ const zh = {
     collapse: '折叠',
     chatTitle: 'Agent 聊天',
     aigcHint: '内容由 AI 生成，请仔细甄别',
+    configParseFail: 'Agent 配置解析失败，可能无法调用',
     attachExpiredRebuilt: '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送',
     attachExpiredUpdated: '附件已过期（Runtime 已更新），本地文件已恢复，可直接重试发送',
     runtimeUnhealthy: 'Runtime 部署状态异常，请稍后重试',

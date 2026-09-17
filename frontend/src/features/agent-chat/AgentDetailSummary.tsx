@@ -1,7 +1,8 @@
 import { Tooltip } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { CaretDownIcon, CaretUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   // 内嵌页眉的紧凑形态（原整行 bar 改为页眉内联胶囊）：宽度自适应、无底边框、
@@ -23,10 +24,10 @@ const useStyles = createStyles(({ css }) => ({
     user-select: none;
     transition: background 0.15s;
     &:hover {
-      background: ${t.surfaceHover};
+      background: ${tk.surfaceHover};
     }
     &:focus-visible {
-      outline: 2px solid ${t.ink};
+      outline: 2px solid ${tk.ink};
       outline-offset: -2px;
     }
     @media (max-width: 768px) {
@@ -37,7 +38,7 @@ const useStyles = createStyles(({ css }) => ({
   name: css`
     font-size: 15px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -47,13 +48,13 @@ const useStyles = createStyles(({ css }) => ({
     min-width: 0;
   `,
   warning: css`
-    color: ${t.danger};
+    color: ${tk.danger};
     display: inline-flex;
     align-items: center;
   `,
   modelPill: css`
-    background: ${t.inkLight};
-    color: ${t.text};
+    background: ${tk.inkLight};
+    color: ${tk.text};
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 13px;
@@ -62,7 +63,7 @@ const useStyles = createStyles(({ css }) => ({
     flex-shrink: 0;
   `,
   separator: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 13px;
   `,
   countWrapper: css`
@@ -75,16 +76,16 @@ const useStyles = createStyles(({ css }) => ({
   `,
   count: css`
     font-size: 13px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     & > b {
-      color: ${t.text};
+      color: ${tk.text};
       font-weight: 500;
       margin-left: 2px;
     }
   `,
   chevron: css`
     margin-left: 4px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     display: inline-flex;
     align-items: center;
   `,
@@ -115,6 +116,7 @@ export default function AgentDetailSummary({
   expanded,
   onToggle,
 }: Props) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const Chevron = expanded ? CaretUpIcon : CaretDownIcon
 
@@ -136,7 +138,7 @@ export default function AgentDetailSummary({
       <span className={styles.name}>
         {name}
         {status === 'unavailable' && (
-          <Tooltip title="Agent 配置解析失败，可能无法调用">
+          <Tooltip title={t('agentChat.configParseFail')}>
             <span className={styles.warning} data-testid="status-warning">
               <WarningCircleIcon size={14} weight="fill" />
             </span>
