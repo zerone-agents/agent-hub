@@ -1,4 +1,5 @@
 import { memo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import {
   FolderIcon,
@@ -9,7 +10,7 @@ import {
 } from '@phosphor-icons/react'
 import { useDirEntries } from '@/queries/useAgentFiles'
 import type { FileEntry } from '@/api/agent-files'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   list: css`
@@ -18,7 +19,7 @@ const useStyles = createStyles(({ css }) => ({
     margin: 0;
     overflow-y: auto;
     flex: 1 1 auto;
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 12.5px;
   `,
   node: css`
@@ -28,20 +29,20 @@ const useStyles = createStyles(({ css }) => ({
     padding: 3px 8px;
     cursor: pointer;
     user-select: none;
-    color: ${t.textSecondary};
+    color: ${tk.textSecondary};
     border-radius: 2px;
     &:hover {
-      background: ${t.inkLight};
+      background: ${tk.inkLight};
     }
     &.selected {
-      background: ${t.inkLight};
-      color: ${t.text};
+      background: ${tk.inkLight};
+      color: ${tk.text};
     }
   `,
   icon: css`
     flex-shrink: 0;
     display: inline-flex;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
   `,
   name: css`
     overflow: hidden;
@@ -49,13 +50,13 @@ const useStyles = createStyles(({ css }) => ({
     white-space: nowrap;
   `,
   symlinkTarget: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 11px;
     margin-left: 4px;
   `,
   placeholder: css`
     padding: 4px 16px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-style: italic;
   `,
 }))
@@ -67,12 +68,13 @@ interface TreeProps {
 }
 
 export default function CwdFileTree(props: TreeProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   // Root directory load — empty path = cwd root.
   const root = useDirEntries(props.agentName, '', true)
 
   if (root.isLoading) {
-    return <div className={styles.placeholder}>加载中…</div>
+    return <div className={styles.placeholder}>{t('agentChat.loading')}</div>
   }
   if (root.isError || !root.data) {
     // Bubble up to panel: returning null here hides only the tree, panel
@@ -81,7 +83,7 @@ export default function CwdFileTree(props: TreeProps) {
   }
 
   return (
-    <ul className={styles.list} role="tree" aria-label="Agent 工作区">
+    <ul className={styles.list} role="tree" aria-label={t('agentChat.workspace')}>
       {root.data.entries.map((entry) => (
         <CwdFileNode
           key={entry.name}
@@ -110,6 +112,7 @@ interface NodeProps {
 // only fire when entry/selected/expanded props change.
 const CwdFileNode = memo(function CwdFileNode(props: NodeProps) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const { entry, depth, basePath, agentName, selectedPath, onSelect } = props
   const [expanded, setExpanded] = useState(false)
 
@@ -154,12 +157,12 @@ const CwdFileNode = memo(function CwdFileNode(props: NodeProps) {
         >
           {children.isLoading && (
             <li className={styles.placeholder} style={{ paddingLeft: 16 + depth * 12 }}>
-              加载中…
+              {t('agentChat.loading')}
             </li>
           )}
           {children.isError && (
             <li className={styles.placeholder} style={{ paddingLeft: 16 + depth * 12 }}>
-              加载失败，<span onClick={() => children.refetch()}>点击重试</span>
+              {t('agentChat.loadFailPrefix')}<span onClick={() => children.refetch()}>{t('agentChat.retryLink')}</span>
             </li>
           )}
           {children.data?.entries.map((child) => (
