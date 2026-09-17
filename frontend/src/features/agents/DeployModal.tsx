@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+// buildStatusLine 是组件外纯函数，直调 i18next
+import i18next from '@/i18n'
 import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography, message } from 'antd'
 import {
   RocketIcon,
@@ -22,7 +25,7 @@ import { useKnowledgeList } from '@/queries/useKnowledge'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Agent, DeploymentStatus } from '@/api/agents'
 import type { Provider } from '@/api/providers'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const { Text } = Typography
 
@@ -45,13 +48,13 @@ interface DeployModalProps {
 const POLL_FAST_MS = 2000   // mid-state: creating / starting / unknown
 const POLL_SLOW_MS = 15000  // terminal: running+healthy / stopped / error / not_found
 
-const stepLabels = ['准备配置', '创建容器', '等待运行', '健康检查通过']
+const stepLabels = ['agents.deploy.stepPrepare', 'agents.deploy.stepContainer', 'agents.deploy.stepWaiting', 'agents.deploy.stepHealth']
 
 const useStyles = createStyles(({ css }) => ({
   infoCard: css`
-    background: ${t.paper};
+    background: ${tk.paper};
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radius}px;
+    border-radius: ${tk.radius}px;
     padding: 14px 16px;
     margin-bottom: 16px;
   `,
@@ -63,15 +66,15 @@ const useStyles = createStyles(({ css }) => ({
     margin-bottom: 12px;
   `,
   infoTitle: css`
-    font-size: ${t.textBase};
+    font-size: ${tk.textBase};
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     line-height: 1.3;
     margin: 0 0 2px 0;
   `,
   infoDesc: css`
-    font-size: ${t.textXs};
-    color: ${t.textTertiary};
+    font-size: ${tk.textXs};
+    color: ${tk.textTertiary};
     margin: 0;
     line-height: 1.4;
   `,
@@ -84,24 +87,24 @@ const useStyles = createStyles(({ css }) => ({
     text-transform: uppercase;
     letter-spacing: 0.02em;
   `,
-  statusRunning: css`background: rgba(5, 150, 105, 0.10); color: ${t.success};`,
-  statusStopped: css`background: rgba(107, 114, 128, 0.10); color: ${t.textTertiary};`,
-  statusError: css`background: rgba(220, 38, 38, 0.10); color: ${t.danger};`,
-  statusArchived: css`background: rgba(245, 158, 11, 0.10); color: ${t.warning};`,
-  statusDefault: css`background: color-mix(in srgb, var(--primary) 7%, transparent); color: ${t.ink};`,
+  statusRunning: css`background: rgba(5, 150, 105, 0.10); color: ${tk.success};`,
+  statusStopped: css`background: rgba(107, 114, 128, 0.10); color: ${tk.textTertiary};`,
+  statusError: css`background: rgba(220, 38, 38, 0.10); color: ${tk.danger};`,
+  statusArchived: css`background: rgba(245, 158, 11, 0.10); color: ${tk.warning};`,
+  statusDefault: css`background: color-mix(in srgb, var(--primary) 7%, transparent); color: ${tk.ink};`,
   infoGrid: css`
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
-    font-size: ${t.textXs};
+    font-size: ${tk.textXs};
   `,
   infoLabel: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 11px;
     margin-bottom: 2px;
   `,
   infoValue: css`
-    color: ${t.text};
+    color: ${tk.text};
     font-weight: 500;
   `,
   capabilityWrap: css`
@@ -114,14 +117,14 @@ const useStyles = createStyles(({ css }) => ({
     flex: 1;
     min-width: 140px;
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     padding: 10px 12px;
     background: var(--card);
   `,
   fullBlock: css`
     width: 100%;
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     padding: 10px 12px;
     background: var(--card);
     margin-bottom: 12px;
@@ -129,7 +132,7 @@ const useStyles = createStyles(({ css }) => ({
   capabilityTitle: css`
     font-size: 11px;
     font-weight: 600;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     text-transform: uppercase;
     letter-spacing: 0.03em;
     margin-bottom: 8px;
@@ -142,18 +145,18 @@ const useStyles = createStyles(({ css }) => ({
   capabilityTag: css`
     font-size: 11px;
     font-weight: 500;
-    color: ${t.text} !important;
-    background: ${t.inkSubtle} !important;
+    color: ${tk.text} !important;
+    background: ${tk.inkSubtle} !important;
     border-color: color-mix(in srgb, var(--foreground) 10%, transparent) !important;
     margin-inline-end: 0 !important;
   `,
   emptyText: css`
-    font-size: ${t.textXs};
-    color: ${t.textMuted};
+    font-size: ${tk.textXs};
+    color: ${tk.textMuted};
   `,
   apiCard: css`
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     padding: 10px 12px;
     background: var(--card);
     margin-bottom: 16px;
@@ -169,15 +172,15 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   apiLabel: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     width: 72px;
     flex-shrink: 0;
     white-space: nowrap;
     font-weight: 500;
   `,
   apiValue: css`
-    color: ${t.text};
-    font-family: ${t.fontMono};
+    color: ${tk.text};
+    font-family: ${tk.fontMono};
     font-size: 11px;
     flex: 1;
     min-width: 0;
@@ -188,17 +191,17 @@ const useStyles = createStyles(({ css }) => ({
     border: none;
     background: transparent;
     cursor: pointer;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     padding: 2px;
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;
     &:hover {
-      color: ${t.ink};
+      color: ${tk.ink};
     }
   `,
   copied: css`
-    color: ${t.success};
+    color: ${tk.success};
     font-size: 11px;
     flex-shrink: 0;
   `,
@@ -250,16 +253,16 @@ function getStepStatus(
 function buildStatusLine(s: DeploymentStatus | null): string {
   if (!s?.status) return ''
   const parts: string[] = []
-  if (s.status === 'not_found') parts.push('未部署')
-  else if (s.status === 'running') parts.push('容器运行中')
-  else if (s.status === 'stopped' || s.status === 'exited') parts.push('容器已停止')
-  else if (s.status === 'archived') parts.push('已归档')
-  else if (s.status === 'error') parts.push('部署出错')
-  else parts.push('容器创建中')
+  if (s.status === 'not_found') parts.push(i18next.t('agents.deploy.stNotDeployed'))
+  else if (s.status === 'running') parts.push(i18next.t('agents.deploy.stRunning'))
+  else if (s.status === 'stopped' || s.status === 'exited') parts.push(i18next.t('agents.deploy.stStopped'))
+  else if (s.status === 'archived') parts.push(i18next.t('agents.deploy.stArchived'))
+  else if (s.status === 'error') parts.push(i18next.t('agents.deploy.stError'))
+  else parts.push(i18next.t('agents.deploy.stCreating'))
   if (s.status === 'running') {
-    if (s.health === 'starting') parts.push('健康检查中')
-    else if (s.health === 'healthy') parts.push('健康检查通过')
-    else if (s.health === 'unhealthy') parts.push('健康检查异常')
+    if (s.health === 'starting') parts.push(i18next.t('agents.deploy.stChecking'))
+    else if (s.health === 'healthy') parts.push(i18next.t('agents.deploy.stPassed'))
+    else if (s.health === 'unhealthy') parts.push(i18next.t('agents.deploy.stAbnormal'))
   }
   if (s.message) parts.push(s.message)
   return parts.join(' · ')
@@ -276,6 +279,7 @@ function isMidState(s: DeploymentStatus | null): boolean {
 }
 
 export default function DeployModal({ agent, providers, open, onClose }: DeployModalProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const canWrite = useCanWrite()
   const queryClient = useQueryClient()
@@ -507,15 +511,15 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
   }, [isRunning, isArchived, isStoppedOrError, deploymentStatus, styles])
 
   const statusText = useMemo(() => {
-    if (isRunning && status?.health === 'healthy') return '运行中'
-    if (isRunning && status?.health === 'starting') return '启动中'
-    if (isRunning) return '运行中'
-    if (deploymentStatus === 'error') return '错误'
-    if (deploymentStatus === 'stopped') return '已停止'
-    if (deploymentStatus === 'exited') return '已退出'
-    if (isArchived) return '已归档'
-    if (deploymentStatus === 'not_found') return '未部署'
-    return deploymentStatus || '未知'
+    if (isRunning && status?.health === 'healthy') return t('agents.deploy.badgeRunning')
+    if (isRunning && status?.health === 'starting') return t('agents.deploy.badgeStarting')
+    if (isRunning) return t('agents.deploy.badgeRunning')
+    if (deploymentStatus === 'error') return t('agents.deploy.badgeError')
+    if (deploymentStatus === 'stopped') return t('agents.deploy.badgeStopped')
+    if (deploymentStatus === 'exited') return t('agents.deploy.badgeExited')
+    if (isArchived) return t('agents.deploy.stArchived')
+    if (deploymentStatus === 'not_found') return t('agents.deploy.stNotDeployed')
+    return deploymentStatus || t('agents.deploy.badgeUnknown')
   }, [isRunning, isArchived, deploymentStatus, status?.health])
 
   const statusLine = useMemo(() => buildStatusLine(status), [status])
@@ -531,7 +535,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
             </Tag>
           ))
         ) : (
-          <span className={styles.emptyText}>无</span>
+          <span className={styles.emptyText}>{t('agents.deploy.none')}</span>
         )}
       </div>
     </div>
@@ -544,7 +548,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       setTimeout(() => { setCopied(null); }, 1500)
     } else if (result === 'failed') {
       // 纯 HTTP + IP 等非安全上下文下两条复制路径都可能失败——静默吞错会让测试者误判
-      message.error('复制失败，请手动选择复制')
+      message.error(t('users.copyFail'))
     }
     // 'manual'：手动复制框已弹出，不显示成功态
   }
@@ -559,15 +563,15 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <RocketIcon size={20} weight="duotone" />
-          <span>部署 Agent</span>
+          <span>{t('agents.deploy.deployAgent')}</span>
         </div>
       }
     >
       <div style={{ padding: '16px 0' }}>
         {isMissingConfig && (
           <Alert
-            title="未配置模型"
-            description="请先为 Agent 配置 Provider 和 Model，否则部署可能失败。"
+            title={t('agents.deploy.noModelTitle')}
+            description={t('agents.deploy.noModelDesc')}
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
@@ -603,7 +607,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <div className={styles.infoValue}>{agent.config.modelId ?? '-'}</div>
             </div>
             <div>
-              <div className={styles.infoLabel}>端口</div>
+              <div className={styles.infoLabel}>{t('agents.deploy.port')}</div>
               <div className={styles.infoValue}>{status?.hostPort ?? '-'}</div>
             </div>
           </div>
@@ -616,8 +620,8 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           if (tools.length === 0 && subagents.length === 0) return null
           return (
             <div className={styles.capabilityWrap}>
-              {tools.length > 0 && renderCapabilityBlock('工具', tools)}
-              {subagents.length > 0 && renderCapabilityBlock('子代理', subagents)}
+              {tools.length > 0 && renderCapabilityBlock(t('agents.deploy.toolsBlock'), tools)}
+              {subagents.length > 0 && renderCapabilityBlock(t('agents.deploy.subagentsBlock'), subagents)}
             </div>
           )
         })()}
@@ -628,7 +632,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
-              <div className={styles.capabilityTitle}>技能</div>
+              <div className={styles.capabilityTitle}>{t('agents.deploy.skillsBlock')}</div>
               <div className={styles.capabilityTags}>
                 {items.map((item) => (
                   <Tag key={item} className={styles.capabilityTag}>{item}</Tag>
@@ -644,7 +648,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           if (items.length === 0) return null
           return (
             <div className={styles.fullBlock}>
-              <div className={styles.capabilityTitle}>知识库</div>
+              <div className={styles.capabilityTitle}>{t('agents.deploy.kbBlock')}</div>
               <div className={styles.capabilityTags}>
                 {items.map((item) => (
                   <Tag key={item} className={styles.capabilityTag}>{datasetNameMap.get(item) ?? item}</Tag>
@@ -673,17 +677,17 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         {/* Agent API 信息：部署成功后显示 URL 和 API Key */}
         {isRunning && status?.runtimeUrl && (
           <div className={styles.apiCard}>
-            <div className={styles.capabilityTitle}>API 信息</div>
+            <div className={styles.capabilityTitle}>{t('agents.deploy.apiInfo')}</div>
             <div className={styles.apiRow}>
               <span className={styles.apiLabel}>URL</span>
               <span className={styles.apiValue}>{absoluteRuntimeUrl(status.runtimeUrl)}</span>
               <button
                 type="button"
                 className={styles.apiAction}
-                title="复制 URL"
+                title={t('agents.deploy.copyUrl')}
                 onClick={() => handleCopy('url', absoluteRuntimeUrl(status.runtimeUrl ?? ''))}
               >
-                {copied === 'url' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
+                {copied === 'url' ? <span className={styles.copied}>{t('agents.deploy.copied')}</span> : <CopyIcon size={13} />}
               </button>
             </div>
             <div className={styles.apiRow}>
@@ -694,7 +698,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <button
                 type="button"
                 className={styles.apiAction}
-                title={showApiKey ? '隐藏' : '显示'}
+                title={showApiKey ? t('agents.deploy.hide') : t('agents.deploy.show')}
                 onClick={() => { setShowApiKey(!showApiKey); }}
               >
                 {showApiKey ? <EyeSlashIcon size={13} /> : <EyeIcon size={13} />}
@@ -703,10 +707,10 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 <button
                   type="button"
                   className={styles.apiAction}
-                  title="复制 Key"
+                  title={t('agents.deploy.copyKey')}
                   onClick={() => handleCopy('key', status.apiKey ?? '')}
                 >
-                  {copied === 'key' ? <span className={styles.copied}>已复制</span> : <CopyIcon size={13} />}
+                  {copied === 'key' ? <span className={styles.copied}>{t('agents.deploy.copied')}</span> : <CopyIcon size={13} />}
                 </button>
               )}
             </div>
@@ -731,7 +735,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                     const state = getStepStatus(idx, current, deploymentStatus, status?.health)
                     return {
                       key: idx,
-                      title: label,
+                      title: t(label),
                       status: state,
                       icon:
                         state === 'finish' ? (
@@ -766,12 +770,12 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <Text type="warning">
                 {[
                   ...(status.pendingArtifactUpdates.tools.length > 0
-                    ? [`Tools: ${status.pendingArtifactUpdates.tools.join('、')} 已更新`]
+                    ? [t('agents.deploy.pendingItem', { label: 'Tools', items: status.pendingArtifactUpdates.tools.join('、') })]
                     : []),
                   ...(status.pendingArtifactUpdates.skills.length > 0
-                    ? [`Skills: ${status.pendingArtifactUpdates.skills.join('、')} 已更新`]
+                    ? [t('agents.deploy.pendingItem', { label: 'Skills', items: status.pendingArtifactUpdates.skills.join('、') })]
                     : []),
-                ].join('；')}，运行中 Agent 仍为旧版，重新部署后生效
+                ].join('；')}{t('agents.deploy.pendingSuffix')}
               </Text>
             </div>
           )}
@@ -780,7 +784,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
           <div style={{ marginBottom: 16 }}>
             <Space orientation="vertical" size="small">
               <Text type="danger">
-                状态: <Text strong>{status.status}</Text>
+                {t('agents.deploy.statusLabel')}<Text strong>{status.status}</Text>
               </Text>
               {status.message && (
                 <Text type="secondary">{status.message}</Text>
@@ -792,7 +796,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         <div className={styles.footer}>
           {!statusLoaded ? (
             <Button disabled loading>
-              加载中
+              {t('agents.deploy.loading')}
             </Button>
           ) : (
             <>
@@ -804,7 +808,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={!canWrite || loading}
               >
-                停止
+                {t('agents.deploy.stop')}
               </Button>
               <Button
                 danger
@@ -813,7 +817,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={!canWrite || loading}
               >
-                归档
+                {t('agents.deploy.archive')}
               </Button>
               <Button
                 icon={<ArrowClockwiseIcon size={16} />}
@@ -821,14 +825,14 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={!canWrite || loading}
               >
-                重新部署
+                {t('agents.deploy.redeploy')}
               </Button>
               <PrimaryButton
                 icon={<ChatsCircleIcon size={16} weight="fill" />}
                 onClick={handleLaunch}
                 disabled={!canLaunch || loading}
               >
-                聊天
+                {t('agents.deploy.chat')}
               </PrimaryButton>
             </>
           )}
@@ -853,7 +857,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={!canWrite || loading}
               >
-                彻底删除
+                {t('agents.deploy.destroy')}
               </Button>
               <PrimaryButton
                 icon={<ArrowClockwiseIcon size={16} />}
@@ -861,7 +865,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={isMissingConfig || !canWrite || loading}
               >
-                重新部署
+                {t('agents.deploy.redeploy')}
               </PrimaryButton>
             </>
           )}
@@ -875,7 +879,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={!canWrite || loading}
               >
-                归档
+                {t('agents.deploy.archive')}
               </Button>
               {(deploymentStatus === 'stopped' || deploymentStatus === 'exited') ? (
                 <PrimaryButton
@@ -893,7 +897,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
                 loading={loading}
                 disabled={isMissingConfig || !canWrite || loading}
               >
-                重新部署
+                {t('agents.deploy.redeploy')}
               </Button>
             </>
           )}

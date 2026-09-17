@@ -1,7 +1,8 @@
 import { RocketIcon } from '@phosphor-icons/react'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import type { TaskPhase } from './useBulkAgentTask'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   bubble: css`
@@ -14,13 +15,13 @@ const useStyles = createStyles(({ css }) => ({
     gap: 8px;
     padding: 10px 16px;
     border-radius: 999px;
-    background: ${t.surface};
+    background: ${tk.surface};
     border: 1px solid var(--border);
-    box-shadow: ${t.elevation2};
+    box-shadow: ${tk.elevation2};
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   dot: css`
     width: 10px;
@@ -29,10 +30,10 @@ const useStyles = createStyles(({ css }) => ({
     flex-shrink: 0;
   `,
   dotGreen: css`
-    background: ${t.success};
+    background: ${tk.success};
   `,
   dotRed: css`
-    background: ${t.danger};
+    background: ${tk.danger};
   `,
 }))
 
@@ -48,6 +49,7 @@ export interface BulkTaskBubbleProps {
 }
 
 export default function BulkTaskBubble({ visible, phase, progressText, dot, onClick }: BulkTaskBubbleProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   if (!visible) return null
 
@@ -56,7 +58,7 @@ export default function BulkTaskBubble({ visible, phase, progressText, dot, onCl
       className={styles.bubble}
       data-testid="bulk-task-bubble"
       role="button"
-      aria-label={`批量任务${phase === 'done' ? '已完成' : '进行中'}，点击查看`}
+      aria-label={t('agents.bulk.bubbleAria', { state: phase === 'done' ? t('agents.bulk.bubbleDone') : t('agents.bulk.bubbleRunning') })}
       onClick={onClick}
     >
       {phase === 'running' ? (

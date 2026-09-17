@@ -1,9 +1,10 @@
 import { Button } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { RocketIcon, ArrowClockwiseIcon, StopIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { BULK_OPERATION_LABEL } from './classifyBulkOperation'
 import type { BulkOperation } from './classifyBulkOperation'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   // bulkBar 样式沿用知识库文档页既有多选栏视觉
@@ -14,7 +15,7 @@ const useStyles = createStyles(({ css }) => ({
     gap: 12px;
     padding: 10px 12px;
     border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
-    border-radius: ${t.radius}px;
+    border-radius: ${tk.radius}px;
     background: linear-gradient(
       90deg,
       color-mix(in srgb, var(--foreground) 6%, transparent),
@@ -34,7 +35,7 @@ const useStyles = createStyles(({ css }) => ({
   count: css`
     font-size: 13px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   right: css`
     display: flex;
@@ -71,18 +72,19 @@ export default function BulkActionBar({
   onSelectAll, onSelectPendingUpdates, onClear, onOperation, onExit,
   operationsDisabled, prechecking,
 }: BulkActionBarProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const noSelection = selectedCount === 0
 
   return (
     <div className={styles.bulkBar} data-testid="bulk-action-bar">
       <div className={styles.left}>
-        <span className={styles.count}>已选 {selectedCount} 个</span>
-        <Button type="link" size="small" onClick={onSelectAll}>全选</Button>
+        <span className={styles.count}>{t('agents.bulk.selectedCount', { n: selectedCount })}</span>
+        <Button type="link" size="small" onClick={onSelectAll}>{t('agents.bulk.selectAll')}</Button>
         <Button type="link" size="small" disabled={pendingUpdateCount === 0} onClick={onSelectPendingUpdates}>
-          全选待更新
+          {t('agents.bulk.selectAllPending')}
         </Button>
-        <Button type="link" size="small" disabled={noSelection} onClick={onClear}>清空</Button>
+        <Button type="link" size="small" disabled={noSelection} onClick={onClear}>{t('agents.bulk.clear')}</Button>
       </div>
       <div className={styles.right}>
         {OPERATIONS.map(({ op, icon, danger }) => (
@@ -96,10 +98,10 @@ export default function BulkActionBar({
             loading={prechecking === op}
             onClick={() => { onOperation(op); }}
           >
-            {BULK_OPERATION_LABEL[op]}
+            {t(BULK_OPERATION_LABEL[op])}
           </Button>
         ))}
-        <Button size="small" onClick={onExit}>退出</Button>
+        <Button size="small" onClick={onExit}>{t('agents.bulk.exit')}</Button>
       </div>
     </div>
   )

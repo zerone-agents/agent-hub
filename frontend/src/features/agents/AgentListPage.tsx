@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
@@ -18,7 +19,7 @@ import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
 import { unwrapResponse } from '@/api/client'
 import type { ApiEnvelope } from '@/api/client'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
 import { buildToolOptions } from './toolOptions'
@@ -43,12 +44,12 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
     @media (max-width: 768px) { flex-direction: column; gap: 16px; }
   `,
-  pageTitle: css`font-size: ${t.text3xl}; font-weight: 700; color: ${t.text}; letter-spacing: -0.03em; line-height: 1.15;`,
-  pageSub: css`margin-top: 4px; font-size: ${t.textBase}; color: ${t.textTertiary};`,
+  pageTitle: css`font-size: ${tk.text3xl}; font-weight: 700; color: ${tk.text}; letter-spacing: -0.03em; line-height: 1.15;`,
+  pageSub: css`margin-top: 4px; font-size: ${tk.textBase}; color: ${tk.textTertiary};`,
   loadingWrap: css`display: flex; justify-content: center; padding: 80px 0;`,
   emptyState: css`text-align: center; padding: 80px 0;`,
-  emptyTitle: css`font-size: ${t.textLg}; font-weight: 600; color: ${t.text}; margin-bottom: 6px;`,
-  emptyDesc: css`color: ${t.textTertiary}; font-size: ${t.textSm};`,
+  emptyTitle: css`font-size: ${tk.textLg}; font-weight: 600; color: ${tk.text}; margin-bottom: 6px;`,
+  emptyDesc: css`color: ${tk.textTertiary}; font-size: ${tk.textSm};`,
   modalFoot: css`
     display: flex; justify-content: space-between; align-items: center; gap: 10px;
     padding: 14px 24px; border-top: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
@@ -64,11 +65,11 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
   `,
-  sectionGroupTitle: css`display: flex; align-items: center; gap: 8px; color: ${t.text}; font-size: ${t.textBase}; font-weight: 600;`,
+  sectionGroupTitle: css`display: flex; align-items: center; gap: 8px; color: ${tk.text}; font-size: ${tk.textBase}; font-weight: 600;`,
   sectionCount: css`
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 24px; height: 24px; padding: 0 8px;
-    background: ${t.inkSubtle}; color: ${t.ink}; border-radius: 12px;
+    background: ${tk.inkSubtle}; color: ${tk.ink}; border-radius: 12px;
     font-size: 12px; font-weight: 600;
   `,
   toolbar: css`
@@ -81,6 +82,7 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 export default function AgentListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
@@ -443,10 +445,10 @@ export default function AgentListPage() {
       })
       const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
       if (result?.success) {
-        message.success(`连接成功 · ${result.latencyMs}ms`)
+        message.success(t('providers.connectSuccess', { ms: result.latencyMs }))
         setTestPassed(true)
       } else {
-        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
+        message.error(t('providers.connectFail', { error: result?.error ?? t('providers.unknownError') }))
         setTestPassed(false)
       }
     } catch {
@@ -482,8 +484,8 @@ export default function AgentListPage() {
       })
       setModelOpen(false)
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : '未知错误'
-      message.error(`保存失败 · ${errMsg}`)
+      const errMsg = err instanceof Error ? err.message : t('providers.unknownError')
+      message.error(t('agents.saveFail', { error: errMsg }))
     } finally {
       setSaving(false)
     }
@@ -505,8 +507,8 @@ export default function AgentListPage() {
     const expert = skills.filter((s) => s.type === 'expert').map((s) => ({ value: s.name, label: s.name }))
     const community = skills.filter((s) => s.type === 'community').map((s) => ({ value: s.name, label: s.name }))
     const groups: { label: string; options: { value: string; label: string }[] }[] = []
-    if (expert.length) groups.push({ label: '专家技能', options: expert })
-    if (community.length) groups.push({ label: '社区技能', options: community })
+    if (expert.length) groups.push({ label: t('skills.expertSection'), options: expert })
+    if (community.length) groups.push({ label: t('skills.communitySection'), options: community })
     return groups
   })()
 
@@ -591,19 +593,19 @@ export default function AgentListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>Agent 管理</div>
-          <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
+          <div className={styles.pageTitle}>{t('agents.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('agents.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-            新建代理
+            {t('agents.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
         <NameSearch
-          placeholder="搜索代理名称"
+          placeholder={t('agents.searchPlaceholder')}
           onSearch={setKeywords}
           realtime
         />
@@ -614,7 +616,7 @@ export default function AgentListPage() {
               icon={<ChatCircleDotsIcon size={14} />}
               onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
             >
-              开始对话
+              {t('agents.startChat')}
             </Button>
           )}
           {selectionMode && canWrite ? (
@@ -635,7 +637,7 @@ export default function AgentListPage() {
                 icon={<CheckSquareIcon size={14} />}
                 onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
               >
-                批量操作
+                {t('agents.bulkOps')}
               </Button>
             )
           )}
@@ -646,16 +648,16 @@ export default function AgentListPage() {
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : agents.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={t.textMuted} /></div>
-          <div className={styles.emptyTitle}>暂无代理</div>
-          <div className={styles.emptyDesc}>创建您的第一个代理以开始使用</div>
+          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={tk.textMuted} /></div>
+          <div className={styles.emptyTitle}>{t('agents.emptyTitle')}</div>
+          <div className={styles.emptyDesc}>{t('agents.emptyDesc')}</div>
         </div>
       ) : (
         sortedGroups.map(group => (
           <div key={group} className={styles.section}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionGroupTitle}>
-                <span>{group}</span>
+                <span>{group === '默认分组' ? t('agents.defaultGroup') : group}</span>
                 <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>
               {selectionMode && canWrite && (
@@ -664,7 +666,7 @@ export default function AgentListPage() {
                   size="small"
                   onClick={() => { addNames((groupedAgents[group] ?? []).map((a) => a.name)); }}
                 >
-                  全选本组
+                  {t('agents.selectAllInGroup')}
                 </Button>
               )}
             </div>
@@ -722,7 +724,7 @@ export default function AgentListPage() {
 
       {/* Sub-agents modal */}
       <Modal
-        title="管理子代理"
+        title={t('agents.modals.subagentTitle')}
         open={subagentOpen}
         onCancel={() => { setSubagentOpen(false); }}
         width={480}
@@ -743,11 +745,11 @@ export default function AgentListPage() {
           </div>
         }
       >
-        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>选择此代理可调用的子代理：</p>
+        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>{t('agents.modals.subagentHint')}</p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择子代理"
+          placeholder={t('agents.modals.subagentPh')}
           options={subagentOptions}
           size="large"
           value={selectedSubagents}
@@ -758,7 +760,7 @@ export default function AgentListPage() {
 
       {/* Tools modal */}
       <Modal
-        title="管理工具"
+        title={t('agents.modals.toolTitle')}
         open={toolOpen}
         onCancel={() => { setToolOpen(false); }}
         width={480}
@@ -780,11 +782,11 @@ export default function AgentListPage() {
           </div>
         }
       >
-        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>选择此代理可使用的工具：</p>
+        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>{t('agents.modals.toolHint')}</p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择工具"
+          placeholder={t('agents.modals.toolPh')}
           options={toolOptions}
           size="large"
           value={selectedTools}
@@ -795,7 +797,7 @@ export default function AgentListPage() {
 
       {/* Skills modal */}
       <Modal
-        title="管理技能"
+        title={t('agents.modals.skillTitle')}
         open={skillOpen}
         onCancel={() => { setSkillOpen(false); }}
         width={480}
@@ -817,12 +819,12 @@ export default function AgentListPage() {
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          选择此代理的技能（专家和社区技能均可选）：
+          t('agents.modals.skillHint')
         </p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择技能"
+          placeholder={t('agents.modals.skillPh')}
           options={skillOptions}
           size="large"
           value={selectedSkills}
@@ -833,7 +835,7 @@ export default function AgentListPage() {
 
       {/* MCPs modal */}
       <Modal
-        title="管理 MCP"
+        title={t('agents.modals.mcpTitle')}
         open={mcpOpen}
         onCancel={() => { setMcpOpen(false); }}
         width={480}
@@ -855,15 +857,15 @@ export default function AgentListPage() {
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          选择此代理可使用的 MCP 服务器（在 MCP 配置页面管理可用列表）：
+          t('agents.modals.mcpHint')
         </p>
         {mcps.length === 0 ? (
-          <Empty description="请先在 MCP 配置页面添加服务器" />
+          <Empty description={t('agents.modals.mcpEmpty')} />
         ) : (
           <Select
             mode="multiple"
             style={{ width: '100%' }}
-            placeholder="选择 MCP"
+            placeholder={t('agents.modals.mcpPh')}
             options={mcpOptions}
             size="large"
             value={selectedMcps}
@@ -875,7 +877,7 @@ export default function AgentListPage() {
 
       {/* Model modal */}
       <Modal
-        title="设置模型"
+        title={t('agents.modals.modelTitle')}
         open={modelOpen}
         onCancel={() => { setModelOpen(false); }}
         footer={
@@ -884,7 +886,7 @@ export default function AgentListPage() {
             {canWrite && (
               <div className={styles.footRight}>
                 <Button onClick={handleTest} disabled={!canTest} loading={testing}>
-                  <PlugIcon size={14} /> 测试
+                  <PlugIcon size={14} /> {t('agents.modals.test')}
                 </Button>
                 <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
                   确认
@@ -897,7 +899,7 @@ export default function AgentListPage() {
         destroyOnHidden
       >
         {providers.length === 0 ? (
-          <Empty description="请先在模型管理添加 Provider" />
+          <Empty description={t('agents.modals.modelEmpty')} />
         ) : (
           <>
             {/* Provider/Model offline warning */}
@@ -913,7 +915,7 @@ export default function AgentListPage() {
               if (!hit) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>
-                    ⚠️ 原 Provider 或模型已下线，请重新选择
+                    t('agents.modals.offlineWarning')
                   </p>
                 )
               }
@@ -923,12 +925,12 @@ export default function AgentListPage() {
             {/* Provider Select */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                选择供应商
+                {t('agents.modals.selectProvider')}
               </label>
               <Select
                 style={{ width: '100%' }}
                 size="large"
-                placeholder="选择供应商"
+                placeholder={t('agents.modals.selectProviderPh')}
                 allowClear
                 value={selectedProviderId ?? undefined}
                 onChange={handleProviderChange}
@@ -950,12 +952,12 @@ export default function AgentListPage() {
             {selectedProviderId && (
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                  选择或输入模型
+                  {t('agents.modals.selectOrInputModel')}
                 </label>
                 <AutoComplete
                   style={{ width: '100%' }}
                   size="large"
-                  placeholder="选择模型或输入自定义模型 ID"
+                  placeholder={t('agents.modals.selectModelPh')}
                   disabled={!canWrite}
                   value={modelDropdownOpen || !selectedModelSuggestion ? selectedModelId : selectedModelSuggestion.display}
                   onChange={(value) => {
@@ -1001,14 +1003,14 @@ export default function AgentListPage() {
               if (selectedProvider.fields.length === 0) {
                 return (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    该 Provider 无需额外连接参数
+                    t('agents.modals.noConnParams')
                   </p>
                 )
               }
 
               return (
                 <>
-                  <div className={styles.sectionTitle}>连接参数</div>
+                  <div className={styles.sectionTitle}>{t('agents.modals.connSection')}</div>
                   {selectedProvider.fields.map((field) => (
                     <div key={field.key} style={{ marginBottom: 16 }}>
                       <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -1019,14 +1021,14 @@ export default function AgentListPage() {
                   <Input
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
-                    placeholder={`输入${field.label}`}
+                    placeholder={t('agents.modals.inputPh', { label: field.label })}
                     disabled={!canWrite}
                   />
                 ) : field.type === 'select' ? (
                   <Select
                     value={fieldValues[field.key] ?? undefined}
                     onChange={(v) => { updateField(field.key, v); }}
-                    placeholder={`选择${field.label}`}
+                    placeholder={t('agents.modals.selectPh', { label: field.label })}
                     style={{ width: '100%' }}
                     options={[]}
                     disabled={!canWrite}
@@ -1035,7 +1037,7 @@ export default function AgentListPage() {
                   <Input
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
-                    placeholder={`输入${field.label}`}
+                    placeholder={t('agents.modals.inputPh', { label: field.label })}
                     disabled={!canWrite}
                   />
                 )}
