@@ -27,7 +27,9 @@ import {
 import { fetchPublicAgents, ApiError } from './api/agents';
 import { fetchScenes } from './api/scenes';
 import { createChatSession, streamChatMessage } from './api/chat';
-import { getStoredAuth, storeAuth, loginWithToken, extractOAuthTokensFromUrl, AUTH_CHANGED_EVENT } from './api/auth';
+import { getStoredAuth, storeAuth, loginWithToken, extractOAuthTokensFromUrl, AUTH_CHANGED_EVENT, fetchAuthMode, OAUTH_REDIRECT_PATH } from './api/auth';
+import type { AuthMode } from './api/auth';
+import { LoginGuide } from './components/LoginGuide';
 
 /** 默认 Agent：优先「办公助手」（暂时按名称硬编码，后续可改为后台配置），
  *  找不到再退列表第一个。绝不再落到本地假数据。 */
@@ -45,6 +47,27 @@ export default function App() {
   // guest（体验用户）：后端 /api/v1/admin/** 恒 403 → 知识库 Tab 对其隐藏（zerone guest 定位=仅聊天）。
   const [authRole, setAuthRole] = useState<string | undefined>(() => getStoredAuth()?.role);
   const showKnowledge = authRole !== 'guest';
+  // 知识库写操作（新建/上传/编辑/删除）：后端 /api/v1/admin/** 需 maintainer+，
+  // member/guest 只能看（guest 连 Tab 都不显示，见上）。
+  const canWriteKnowledge = authRole === 'admin' || authRole === 'maintainer';
+
+  // 登录入口：casdoor（线上）直接跳 /auth/login（302 到 Casdoor 授权页，PKCE 参数由后端动态生成），
+  // 不经过「我的」中转页；builtin（本地 mock）落到「我的」页账号密码登录。
+  const goLogin = () => {
+    fetchAuthMode().then((mode) => {
+      if (mode === 'casdoor') {
+        window.location.href = `/auth/login?redirect=${encodeURIComponent(OAUTH_REDIRECT_PATH)}`;
+      } else {
+        setActiveTab('profile');
+      }
+    });
+  };
+
+  // 后端认证模式（casdoor=线上 SSO / builtin=本地 mock 账号密码）
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  useEffect(() => {
+    fetchAuthMode().then(setAuthMode);
+  }, []);
 
   // Casdoor OAuth 回调落地：URL 上带 ?token=&refreshToken=（部署在 console /static/h5/ 时
   // 由 /auth/login?redirect=/h5/ 完成跳转）。验证 token 后写入登录态并广播。
@@ -95,11 +118,13 @@ export default function App() {
   // 首页卡片只显示当前 Agent 的场景；没有就不显示，不用写死的假场景。
   const [scenes, setScenes] = useState<ScenarioPrompt[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
+  // 拉取 Agent 列表（function 声明提升，供下面两个 effect 复用）。
+  // isStale 用于忽略过期响应（effect 清理后不再 setState）。
+  // 拉取期间保留旧列表，拉到新数据再整体替换——切 Tab 重新拉时不闪空。
+  function loadAgents(isStale?: () => boolean) {
     fetchPublicAgents()
       .then((list) => {
-        if (cancelled) return;
+        if (isStale?.()) return;
         setAgentsNeedLogin(false);
         setAgents(list); // 以线上真实数据为准，空列表就是空
         // 恢复上次选择：仅当它还存在于真实列表时生效，否则默认「办公助手」
@@ -111,14 +136,19 @@ export default function App() {
         setActiveAgent(restored ?? pickDefaultAgent(list));
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (isStale?.()) return;
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           setAgents([]);
           setActiveAgent(null);
           setAgentsNeedLogin(true);
         }
-        // 其他错误（网络/5xx）：静默保留 INITIAL_AGENTS 兜底
+        // 其他错误（网络/5xx）：静默保留现有列表兜底
       });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAgents(() => cancelled);
     fetchScenes()
       .then((list) => {
         if (!cancelled) setScenes(list);
@@ -130,7 +160,16 @@ export default function App() {
       cancelled = true;
     };
     // authRole 变化（登录/退出）后重新拉取，保证列表跟随身份切换
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authRole]);
+
+  // 每次进「专家」Tab 重新拉一次 Agent 列表：后台改了激活开关后切过来就能看到，
+  // 不用整页刷新。拉取期间旧列表还在，拉到再替换（loadAgents 内部保证不闪空）。
+  useEffect(() => {
+    if (activeTab !== 'agents') return;
+    loadAgents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Active chat state
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
@@ -520,10 +559,27 @@ export default function App() {
     setActiveTab('knowledge');
   };
 
+  // 未登录判定：本地无登录态（authRole 为空）或接口 401（token 过期，agentsNeedLogin）。
+  // casdoor（线上）模式下未登录 → 所有 Tab 统一展示同一套登录引导页（含知识库——之前它没有提示），
+  // 登录按钮直跳 Casdoor SSO，不经过「我的」中转。builtin（本地 mock）保持各 Tab 原有引导。
+  const needAuth = !authRole || agentsNeedLogin;
+  const showUnifiedLogin = authMode === 'casdoor' && needAuth;
+
   return (
     <MobileFrame>
       {/* View Switcher based on active tab */}
       <div className="flex-1 flex flex-col min-h-0 relative overflow-hidden">
+        {showUnifiedLogin ? (
+          <LoginGuide
+            onSsoLogin={goLogin}
+            onAuthSuccess={(a) => {
+              setAuthRole(a.role);
+              // 体验用户（guest）登录后自动跳聊天页
+              if (a.role === 'guest') setActiveTab('chat');
+            }}
+          />
+        ) : (
+        <>
         {activeTab === 'chat' && (
           <HomeChatView
             scenarioPrompts={activeScenes}
@@ -536,6 +592,7 @@ export default function App() {
             onSelectAgent={handleSelectAgent}
             onSaveMessageToKnowledge={handleSaveMessageToKnowledge}
             onNavigateToTab={(tab) => setActiveTab(tab)}
+            onGoLogin={goLogin}
           />
         )}
 
@@ -543,7 +600,7 @@ export default function App() {
           <AgentsView
             agents={agents}
             needLogin={agentsNeedLogin}
-            onGoLogin={() => setActiveTab('profile')}
+            onGoLogin={goLogin}
             onSelectAgent={(agent) => setSelectedAgentDetail(agent)}
           />
         )}
@@ -552,6 +609,7 @@ export default function App() {
           <KnowledgeBaseView
             documents={documents}
             folders={folders}
+            canWrite={canWriteKnowledge}
             onOpenUpload={(folderId) =>
               setUploadModalState({
                 isOpen: true,
@@ -588,6 +646,8 @@ export default function App() {
             }}
             onLogout={() => setAuthRole(undefined)}
           />
+        )}
+        </>
         )}
 
         {/* Agent Detail Modal (matching Screenshot 4) */}

@@ -51,7 +51,7 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ agents, needLogin = fals
           onClick={onGoLogin}
           className="px-8 py-2.5 rounded-full bg-neutral-900 text-white text-sm font-semibold shadow-sm cursor-pointer transition-all active:scale-95"
         >
-          去登录 / 注册
+          使用 Zerone 账号登录
         </button>
       </div>
     );

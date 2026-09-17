@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Wifi, Battery, Smartphone, Maximize2, Minimize2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Smartphone, Maximize2, Minimize2 } from 'lucide-react';
 
 interface MobileFrameProps {
   children: React.ReactNode;
@@ -7,19 +7,6 @@ interface MobileFrameProps {
 
 export const MobileFrame: React.FC<MobileFrameProps> = ({ children }) => {
   const [isPhoneView, setIsPhoneView] = useState(true);
-  const [currentTime, setCurrentTime] = useState('11:18');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      setCurrentTime(`${hours}:${minutes}`);
-    };
-    updateTime();
-    const timer = setInterval(updateTime, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
   return (
     <div className="h-screen w-full bg-[#F1F3F5] flex flex-col items-center justify-center sm:p-3 overflow-hidden">
@@ -56,23 +43,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children }) => {
             : 'max-w-3xl sm:rounded-2xl border sm:border-gray-200/90'
         }`}
       >
-        {/* Mobile Top Status Bar */}
-        <div
-          id="mobile-status-bar"
-          className="h-9 bg-white px-5 pt-1.5 flex items-center justify-between text-xs font-semibold text-neutral-800 select-none z-40 border-b border-gray-50"
-        >
-          <div className="tracking-tight">{currentTime}</div>
-          <div className="flex items-center gap-1.5 text-neutral-800 text-[11px]">
-            <span className="font-bold text-[10px] tracking-tighter">5G</span>
-            <Wifi className="w-3.5 h-3.5 stroke-[2.5]" />
-            <div className="flex items-center gap-0.5">
-              <span className="text-[10px] font-normal">70</span>
-              <Battery className="w-4 h-4 stroke-[2.5]" />
-            </div>
-          </div>
-        </div>
-
-        {/* App Content */}
+        {/* App Content（真实手机浏览器自带状态栏，不再渲染模拟状态栏） */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#F8F9FA]">
           {children}
         </div>

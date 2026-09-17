@@ -12,7 +12,7 @@
  */
 
 import type { Agent } from '../types';
-import { getAuthHeader, getStoredAuth } from './auth';
+import { getAuthHeader } from './auth';
 
 /** agent-hub 公开列表返回的 Agent 结构（字段全可选，防御性处理） */
 interface HubAgentConfig {
@@ -27,6 +27,10 @@ interface HubAgent {
   name: string;
   config?: HubAgentConfig;
   group?: string;
+  /** 平台激活开关（后台 Agent 表单勾选）：desktopEnabled=桌面端代理 / mobileEnabled=手机端。
+   *  H5 是移动端产品，只展示 mobileEnabled=true 的——「激活的才展示」。 */
+  desktopEnabled?: boolean;
+  mobileEnabled?: boolean;
 }
 
 interface ApiEnvelope<T> {
@@ -90,30 +94,19 @@ export class ApiError extends Error {
 }
 
 /** 拉取 Agent 列表；失败时抛错由调用方决定兜底。
- *  可见规则（真实后端）：
- *  - 管理角色（admin/maintainer/member）：走 /api/v1/admin/agents 全量列表，
- *    不按部署状态过滤——未部署的 Agent 也能在专家页看到；
- *  - guest / 未登录：走对客视图 /api/v1/agents?view=chat（仅 running + guest_enabled）。
+ *  可见规则（真实后端）——两道过滤，缺一不可：
+ *  1. /api/v1/agents?view=chat：后端只返回「已部署可聊」的（deployment_status=running；
+ *     guest 再叠加 guest_enabled=true），不过滤平台开关；
+ *  2. 前端再叠加 mobileEnabled=true：H5 是移动端产品，后台只勾了「桌面端代理」
+ *     的 Agent（截图里那种只标「桌面端」的）不应在手机上展示。
+ *  所以最终 = running ∧ mobileEnabled（∧ guest 的 guestEnabled）。
+ *  注意：后台没给任何 Agent 勾「手机端」时列表会是空的——这是正确行为，
+ *  需要运营在 console 给要放到 H5 的 Agent 勾上「手机端」开关。
  *  未登录返回 401（ApiError），调用方应显示登录引导而不是兜底假数据。 */
 export async function fetchPublicAgents(): Promise<Agent[]> {
-  const role = getStoredAuth()?.role;
-  if (role && role !== 'guest') {
-    try {
-      const res = await fetch('/api/v1/admin/agents', { headers: getAuthHeader() });
-      // member 等角色可能无 admin 读权限 → 403 时回落对客视图
-      if (res.ok) {
-        const json = (await res.json()) as ApiEnvelope<{ agents?: HubAgent[] }>;
-        return (json?.data?.agents ?? []).map(mapHubAgent);
-      }
-      if (res.status === 401) throw new ApiError(401, '登录态失效');
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      // 网络异常等 → 回落对客视图再试
-    }
-  }
   const res = await fetch('/api/v1/agents?view=chat', { headers: getAuthHeader() });
   if (!res.ok) throw new ApiError(res.status, `agents 接口返回 ${res.status}`);
   const json = (await res.json()) as ApiEnvelope<{ agents?: HubAgent[] }>;
   const list = json?.data?.agents ?? [];
-  return list.map(mapHubAgent);
+  return list.filter((a) => a.mobileEnabled === true).map(mapHubAgent);
 }

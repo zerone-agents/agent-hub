@@ -20,6 +20,9 @@ import { KnowledgeBaseModal } from './KnowledgeBaseModal';
 interface KnowledgeBaseViewProps {
   documents: KnowledgeDocument[];
   folders: KnowledgeFolder[];
+  /** 写权限（新建/上传/编辑/删除）：后端 /api/v1/admin/** 需 maintainer+，
+   *  体验用户（guest）与 member 只读，不显示任何写操作入口 */
+  canWrite?: boolean;
   onOpenUpload: (defaultFolderId?: string) => void;
   onOpenDocDetail: (doc: KnowledgeDocument) => void;
   onOpenDocEdit: (doc: KnowledgeDocument) => void;
@@ -40,6 +43,7 @@ interface KnowledgeBaseViewProps {
 export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
   documents,
   folders,
+  canWrite = true,
   onOpenUpload,
   onOpenDocDetail,
   onDeleteDoc,
@@ -133,15 +137,17 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
               </h1>
             </div>
 
-            <button
-              onClick={() =>
-                setFolderModalState({ isOpen: true, mode: 'edit', folder: currentFolder })
-              }
-              className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer transition-colors shrink-0"
-              title="编辑知识库"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
+            {canWrite && (
+              <button
+                onClick={() =>
+                  setFolderModalState({ isOpen: true, mode: 'edit', folder: currentFolder })
+                }
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer transition-colors shrink-0"
+                title="编辑知识库"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Files inside this folder */}
@@ -152,7 +158,7 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                   <FileText className="w-6 h-6" />
                 </div>
                 <div className="text-xs font-bold text-gray-800">暂无文件</div>
-                <div className="text-[11px] text-gray-400 mt-1">点右下角 + 上传文件</div>
+                {canWrite && <div className="text-[11px] text-gray-400 mt-1">点右下角 + 上传文件</div>}
               </div>
             ) : (
               currentFolderDocs.map((doc) => (
@@ -179,15 +185,17 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => onDeleteDoc(doc.id)}
-                      className="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 cursor-pointer transition-colors"
-                      title="删除文件"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => onDeleteDoc(doc.id)}
+                        className="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 cursor-pointer transition-colors"
+                        title="删除文件"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -227,7 +235,7 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
 
             {filteredFolders.length === 0 ? (
               <div className="p-6 text-center bg-white rounded-2xl border border-gray-200/80 text-gray-400 text-xs">
-                暂无知识库，点右下角 + 新建
+                {canWrite ? '暂无知识库，点右下角 + 新建' : '暂无知识库'}
               </div>
             ) : (
               <div className="space-y-2">
@@ -252,30 +260,34 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Right Actions */}
+                    {/* Right Actions（编辑/删除按写权限显示，只读角色只剩进入箭头） */}
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFolderModalState({ isOpen: true, mode: 'edit', folder });
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
-                        title="编辑知识库"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`确定要删除知识库「${folder.name}」吗？`)) {
-                            onDeleteFolder(folder.id);
-                          }
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
-                        title="删除知识库"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canWrite && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFolderModalState({ isOpen: true, mode: 'edit', folder });
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
+                            title="编辑知识库"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm(`确定要删除知识库「${folder.name}」吗？`)) {
+                                onDeleteFolder(folder.id);
+                              }
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
+                            title="删除知识库"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
                       <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all ml-0.5" />
                     </div>
                   </div>
@@ -286,8 +298,8 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
         </div>
       )}
 
-      {/* FAB Action Sheet (点击 + 弹出) */}
-      {fabOpen && (
+      {/* FAB Action Sheet (点击 + 弹出)——仅写权限角色可打开 */}
+      {canWrite && fabOpen && (
         <div
           className="absolute inset-0 z-40 bg-black/30 backdrop-blur-2xs animate-in fade-in duration-150"
           onClick={() => setFabOpen(false)}
@@ -338,19 +350,21 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
         </div>
       )}
 
-      {/* Floating + Button */}
-      <button
-        onClick={() => setFabOpen((v) => !v)}
-        className={`absolute bottom-6 right-4 z-50 w-13 h-13 rounded-full shadow-lg flex items-center justify-center cursor-pointer transition-all active:scale-90 ${
-          fabOpen
-            ? 'bg-white text-gray-700 border border-gray-200 rotate-45'
-            : 'bg-neutral-900 hover:bg-neutral-800 text-white'
-        }`}
-        style={{ width: 52, height: 52 }}
-        title={fabOpen ? '收起' : '新建 / 上传'}
-      >
-        <Plus className="w-6 h-6 stroke-[2.2]" />
-      </button>
+      {/* Floating + Button（写权限角色才显示；体验用户/成员只读） */}
+      {canWrite && (
+        <button
+          onClick={() => setFabOpen((v) => !v)}
+          className={`absolute bottom-6 right-4 z-50 w-13 h-13 rounded-full shadow-lg flex items-center justify-center cursor-pointer transition-all active:scale-90 ${
+            fabOpen
+              ? 'bg-white text-gray-700 border border-gray-200 rotate-45'
+              : 'bg-neutral-900 hover:bg-neutral-800 text-white'
+          }`}
+          style={{ width: 52, height: 52 }}
+          title={fabOpen ? '收起' : '新建 / 上传'}
+        >
+          <Plus className="w-6 h-6 stroke-[2.2]" />
+        </button>
+      )}
 
       {/* Modal for Creating / Editing Folder */}
       <KnowledgeBaseModal

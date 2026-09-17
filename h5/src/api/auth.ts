@@ -104,6 +104,10 @@ export function getAuthHeader(): Record<string, string> {
 
 export type AuthMode = 'builtin' | 'casdoor';
 
+/** OAuth 回调落地路径：H5 部署在 console.zerone.life/static/h5/ 时，callback 落 /static/h5/?token=...
+ *  ProfileView 的 SSO 按钮与 App 的 goLogin 统一引用，避免魔法字符串重复。 */
+export const OAUTH_REDIRECT_PATH = '/h5/';
+
 /**
  * 探测后端认证模式（GET /auth/mode，免鉴权）。
  * builtin = 账号密码 + 邀请码注册；casdoor = SSO OAuth，无密码登录/注册接口。

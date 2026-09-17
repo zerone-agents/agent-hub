@@ -29,6 +29,8 @@ interface HomeChatViewProps {
   onSelectAgent: (agent: Agent) => void;
   onSaveMessageToKnowledge: (content: string, title?: string) => void;
   onNavigateToTab: (tab: 'chat' | 'agents' | 'knowledge' | 'profile') => void;
+  /** 点「去登录」：线上直接跳 Casdoor SSO（不经过中间引导页），本地 mock 落到「我的」页 */
+  onGoLogin?: () => void;
 }
 
 export const HomeChatView: React.FC<HomeChatViewProps> = ({
@@ -42,6 +44,7 @@ export const HomeChatView: React.FC<HomeChatViewProps> = ({
   onSelectAgent,
   onSaveMessageToKnowledge,
   onNavigateToTab,
+  onGoLogin,
 }) => {
   const [inputText, setInputText] = useState('');
   const [scenarioOffset, setScenarioOffset] = useState(0);
@@ -109,10 +112,10 @@ export const HomeChatView: React.FC<HomeChatViewProps> = ({
           登录或注册账号，即可与你可用的 Agent 开始对话
         </p>
         <button
-          onClick={() => onNavigateToTab('profile')}
+          onClick={() => (onGoLogin ? onGoLogin() : onNavigateToTab('profile'))}
           className="px-8 py-2.5 rounded-full bg-neutral-900 text-white text-sm font-semibold shadow-sm cursor-pointer transition-all active:scale-95"
         >
-          去登录 / 注册
+          使用 Zerone 账号登录
         </button>
       </div>
     );
