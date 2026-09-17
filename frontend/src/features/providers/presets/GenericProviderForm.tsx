@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Form, Input, Select, Spin, message, Checkbox, Button } from 'antd'
 import { XIcon, PlusIcon, TrashIcon, PlugIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -13,7 +14,7 @@ import {
   useProviderAttrRules,
 } from '@/queries/useProviders'
 import { identifierFormRules } from '@/utils/identifier'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   modalHead: css`
@@ -88,13 +89,13 @@ const useStyles = createStyles(({ css }) => ({
     gap: 6px;
     padding: 6px 12px;
     border: 1px dashed color-mix(in srgb, var(--foreground) 15%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     background: transparent;
     color: var(--text-tertiary);
-    font-size: ${t.textSm};
+    font-size: ${tk.textSm};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { border-color: ${t.ink}; color: ${t.ink}; }
+    &:hover { border-color: ${tk.ink}; color: ${tk.ink}; }
   `,
   removeBtn: css`
     width: 28px;
@@ -104,11 +105,11 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   builtinRow: css`
     display: flex;
@@ -163,6 +164,7 @@ const PROTOCOL_OPTIONS = [
 ]
 
 export default function GenericProviderForm({ open, editingProvider, onClose }: GenericProviderFormProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const createProvider = useCreateProvider()
@@ -286,14 +288,14 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result?.success) {
-          message.success(`连接成功 · ${result.latencyMs}ms`)
+          message.success(t('providers.connectSuccess', { ms: result.latencyMs }))
         } else {
-          message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
+          message.error(t('providers.connectFail', { error: result?.error ?? t('providers.unknownError') }))
         }
       } else {
         const values = await form.validateFields(['baseUrl', 'lockedApiKey', 'protocol', 'authStyle'])
         if (!values.baseUrl) {
-          message.warning('请先填写 Base URL')
+          message.warning(t('providers.form.baseUrlFirst'))
           return
         }
         const res = await probeConfig.mutateAsync({
@@ -305,9 +307,9 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         })
         const result2 = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
         if (result2?.success) {
-          message.success(`连接成功 · ${result2.latencyMs}ms`)
+          message.success(t('providers.connectSuccess', { ms: result2.latencyMs }))
         } else {
-          message.error(`连接失败 · ${result2?.error ?? '未知错误'}`)
+          message.error(t('providers.connectFail', { error: result2?.error ?? t('providers.unknownError') }))
         }
       }
     } finally {
@@ -372,7 +374,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
       destroyOnHidden
     >
       <div className={styles.modalHead}>
-        <div className={styles.modalTitle}>{isEdit ? '编辑 Provider' : '新建 Provider'}</div>
+        <div className={styles.modalTitle}>{isEdit ? t('providers.form.editTitle') : t('providers.create')}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
           <XIcon size={18} />
         </button>
@@ -384,43 +386,43 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         className={styles.modalBody}
         requiredMark={(label, { required }) => (
           <span>
-            {required && <span style={{ color: t.danger, marginInlineEnd: 4 }}>*</span>}
+            {required && <span style={{ color: tk.danger, marginInlineEnd: 4 }}>*</span>}
             {label}
             {!required && (
-              <span style={{ color: t.textMuted, fontSize: 12, marginInlineStart: 4 }}>（选填）</span>
+              <span style={{ color: tk.textMuted, fontSize: 12, marginInlineStart: 4 }}>{t('providers.form.optional')}</span>
             )}
           </span>
         )}
       >
         {/* Provider */}
         <div className={styles.sectionTitle} style={{ marginTop: 0 }}>Provider</div>
-        <Form.Item label="Protocol" name="protocol" rules={[{ required: true, message: '请选择协议' }]}>
+        <Form.Item label="Protocol" name="protocol" rules={[{ required: true, message: t('providers.form.protocolRequired') }]}>
           <Select
             options={PROTOCOL_OPTIONS}
-            placeholder="选择协议"
+            placeholder={t('providers.form.protocolPlaceholder')}
           />
         </Form.Item>
 
         {/* 基本信息 */}
-        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>基本信息</div>
-        <Form.Item label="Key（唯一标识）" name="key" rules={identifierFormRules('Key')}>
+        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('providers.form.basicSection')}</div>
+        <Form.Item label={t('providers.form.keyLabel')} name="key" rules={identifierFormRules(t('providers.form.keyLabel'))}>
           <Input placeholder="e.g. glm-cn" disabled={isEdit} />
         </Form.Item>
-        <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
+        <Form.Item label={t('providers.form.nameLabel')} name="name" rules={[{ required: true, message: t('providers.form.nameRequired') }]}>
           <Input placeholder="e.g. GLM Coding Plan" />
         </Form.Item>
-        <Form.Item label="中文描述" name="description">
-          <Input.TextArea placeholder="e.g. 智谱 GLM Anthropic 兼容编码服务" rows={2} />
+        <Form.Item label={t('providers.form.zhDescLabel')} name="description">
+          <Input.TextArea placeholder={t('providers.form.zhDescPlaceholder')} rows={2} />
         </Form.Item>
-        <Form.Item label="英文描述" name="descriptionEn">
+        <Form.Item label={t('providers.form.enDescLabel')} name="descriptionEn">
           <Input.TextArea placeholder="e.g. Zhipu GLM Anthropic-compatible coding service" rows={2} />
         </Form.Item>
-        <Form.Item label="图标 Key" name="iconKey">
+        <Form.Item label={t('providers.form.iconKeyLabel')} name="iconKey">
           <Input placeholder="e.g. anthropic, zhipu, kimi, openai" />
         </Form.Item>
 
         {/* 协议配置 */}
-        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>协议配置</div>
+        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('providers.form.protocolSection')}</div>
         <Form.Item label="Base URL" name="baseUrl">
           <Input placeholder="https://api.example.com/v1" />
         </Form.Item>
@@ -433,21 +435,21 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             ]}
           />
         </Form.Item>
-        <Form.Item label="内置 Provider" name="builtin" valuePropName="checked">
-          <Checkbox>标记为内置（使用 Locked API Key，用户无需自行填写）</Checkbox>
+        <Form.Item label={t('providers.form.builtinLabel')} name="builtin" valuePropName="checked">
+          <Checkbox>{t('providers.form.builtinCheckbox')}</Checkbox>
         </Form.Item>
         <Form.Item label="Locked API Key" name="lockedApiKey">
           <Input placeholder="sk-..." />
         </Form.Item>
 
         {/* 默认模型 */}
-        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>默认模型</div>
+        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('providers.form.modelsSection')}</div>
         {defaultModels.length > 0 && (
           <div className={`${styles.editorHeader} ${isOcr ? styles.modelRowOcr : styles.modelRow}`}>
             <span>Model ID</span>
-            <span>显示名称</span>
-            <span>类型</span>
-            {!isOcr && <span>上下文</span>}
+            <span>{t('providers.form.modelTitle')}</span>
+            <span>{t('providers.form.modelType')}</span>
+            {!isOcr && <span>{t('providers.form.modelContext')}</span>}
             {!isOcr && <span>Effort</span>}
             <span />
           </div>
@@ -492,11 +494,11 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddModel}>
-          <PlusIcon size={14} /> 添加模型
+          <PlusIcon size={14} /> {t('providers.form.addModel')}
         </button>
 
         {/* 表单字段定义 */}
-        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>表单字段定义</div>
+        <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('providers.form.fieldsSection')}</div>
         {fields.map((field, i) => (
           <div key={i} className={`${styles.editorRow} ${styles.fieldRow}`}>
             <Select
@@ -512,10 +514,10 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
             <Input size="small" value={field.label} disabled />
             <Input size="small" value={field.labelEn} disabled />
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#6B7280', cursor: 'default' }}>
-              必填 <Checkbox checked={field.required} disabled />
+              {t('providers.form.fieldRequired')} <Checkbox checked={field.required} disabled />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#6B7280', cursor: 'default' }}>
-              密钥 <Checkbox checked={field.secret} disabled />
+              {t('providers.form.fieldSecret')} <Checkbox checked={field.secret} disabled />
             </label>
             <button type="button" className={styles.removeBtn} onClick={() => { handleRemoveField(i); }}>
               <TrashIcon size={13} />
@@ -523,14 +525,14 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
           </div>
         ))}
         <button type="button" className={styles.addBtn} onClick={handleAddField}>
-          <PlusIcon size={14} /> 添加字段
+          <PlusIcon size={14} /> {t('providers.form.addField')}
         </button>
 
         {/* 动态属性（按 protocol + attr-rules 渲染） */}
         {activeRules.length > 0 && (
           <>
             <div className={styles.sectionTitle} style={{ marginTop: 20 }}>
-              协议属性（{protocol}）
+              {t('providers.form.protoAttrs', { protocol })}
             </div>
             {activeRules.map((rule) => {
               const current = attributes[rule.key]
@@ -591,12 +593,12 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
           onClick={handleTestConnection}
           loading={probing}
         >
-          测试连接
+          {t('providers.form.testBtn')}
         </Button>
         <div className={styles.footRight}>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
           <PrimaryButton onClick={handleSubmit} loading={submitting}>
-            {isEdit ? '更新' : '创建'}
+            {isEdit ? t('scenes.update') : t('scenes.createSubmit')}
           </PrimaryButton>
         </div>
       </div>
