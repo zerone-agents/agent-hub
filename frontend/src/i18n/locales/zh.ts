@@ -11,7 +11,103 @@ const zh = {
     totalItems: '共 {{total}} 条',
     brandSubtitle: 'AI Agent 管理平台',
     logout: '退出登录',
-    loading: '加载中...'
+    loading: '加载中...',
+    download: '下载',
+    form: {
+      required: '请输入{{label}}',
+      maxLength: '{{label}}长度不能超过 {{max}} 个字符',
+      identifierCharset: '{{label}}只能包含字母、数字、点、下划线和横线',
+      agentCharset: '{{label}}只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾'
+    }
+  },
+  apiErrors: {
+    requestFailed: '请求失败',
+    unauthorized: '登录已过期，请重新登录',
+    forbidden: '没有权限执行此操作',
+    notFound: '资源不存在或已被删除',
+    serverBusy: '服务器繁忙，请稍后重试',
+    timeout: '请求超时，请检查网络',
+    networkError: '网络连接失败',
+    operationFailed: '操作失败，请重试',
+    uploadFailed: '上传失败'
+  },
+  time: {
+    justNow: '刚刚',
+    minutesAgo: '{{n}} 分钟前',
+    hoursAgo: '{{n}} 小时前',
+    daysAgo: '{{n}} 天前'
+  },
+  // antd Form validateMessages：值保留 antd 的 ${label}/${min} 语法——
+  // i18next 默认插值为 {{}}，${} 原样透传给 antd 替换。
+  validate: {
+    default: '字段校验失败',
+    required: '请输入${label}',
+    enum: '${label} 必须是 [${enum}] 中的一个',
+    whitespace: '${label} 不能为空白字符',
+    types: {
+      email: '${label} 格式不正确',
+      url: '${label} 格式不正确'
+    },
+    string: {
+      len: '${label} 长度必须为 ${len}',
+      min: '${label} 至少 ${min} 字符',
+      max: '${label} 最多 ${max}'
+    },
+    number: {
+      min: '${label} 不能小于 ${min}',
+      max: '${label} 不能大于 ${max}'
+    }
+  },
+  nav: {
+    home: '首页',
+    settings: '设置',
+    detail: '详情',
+    settingsLabels: {
+      aigc: 'AIGC 标识配置',
+      users: '用户管理',
+      auditLogs: '审计日志'
+    },
+    dashboard: '仪表盘',
+    agents: 'Agent管理',
+    tools: '工具管理',
+    mcps: 'MCP配置',
+    skills: '技能管理',
+    providers: '模型管理',
+    knowledge: '知识库管理',
+    scenes: '场景管理',
+    chat: '聊天记录'
+  },
+  agentIcons: {
+    chat: '通用对话',
+    chart: '数据分析',
+    shield: '安全合规',
+    crosshair: '精准定位',
+    userCircle: '用户管理',
+    terminal: '终端运维',
+    robot: '智能助手',
+    lightbulb: '创意灵感',
+    cpu: '计算处理',
+    detective: '调查分析',
+    compass: '导航指引',
+    rocket: '高速执行',
+    gear: '工程配置',
+    code: '编程开发',
+    education: '教育学习',
+    globe: '全球化',
+    puzzle: '集成连接',
+    eye: '监控观测',
+    megaphone: '营销推广',
+    notebook: '知识管理',
+    firstAid: '健康医疗',
+    scales: '法务平衡',
+    presentation: '商业展示',
+    clipboard: '任务管理',
+    headset: '客户服务',
+    wrench: '维修工具',
+    lightning: '快速响应',
+    finance: '财务金融',
+    brain: 'AI 智能',
+    magic: 'AI 生成'
   },
   components: {
     confirmDelete: {
@@ -139,6 +235,10 @@ const zh = {
       lastUsed: '最后使用',
       expiresAt: '过期时间',
       actions: '操作'
+    },
+    toast: {
+      created: 'Token 已创建',
+      revoked: 'Token 已撤销'
     }
   },
   dashboard: {
@@ -210,7 +310,392 @@ const zh = {
     clearTitle: '确认清除配置？',
     clearDesc: '清除后部署 Agent 将不再携带 AIGC 标识。',
     clear: '清除',
-    clearConfig: '清除配置'
+    clearConfig: '清除配置',
+    toast: {
+      saved: 'AIGC 标识配置已保存',
+      keyRegenerated: '签名密钥已重新生成',
+      cleared: 'AIGC 标识配置已清除'
+    }
+  },
+  tools: {
+    pageTitle: '工具管理',
+    pageSub: '管理内置工具与租户自定义工具',
+    upload: '上传自定义工具',
+    searchPlaceholder: '搜索工具名称',
+    artifactMissing: '缺少文件',
+    artifactUploaded: '已上传',
+    noDescription: '暂无描述',
+    uploadFile: '补传文件',
+    replaceFile: '替换文件',
+    builtinSection: '内置工具',
+    customSection: '自定义工具',
+    defaultBadge: '默认',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirm: '删除 "{{name}}"？此操作不可撤销。被 Agent 挂载时将无法删除。',
+    empty: {
+      noMatch: '未找到匹配的工具',
+      none: '暂无工具',
+      noMatchHint: '请尝试其他关键词',
+      noneHint: '上传您的第一个自定义工具以开始使用'
+    },
+    form: {
+      fileRequired: '请选择工具文件',
+      basicSection: '基本信息',
+      nameKey: '工具标识',
+      displaySection: '显示设置',
+      titleLabel: '中文名称',
+      titlePlaceholder: '中文名称',
+      descLabel: '功能描述',
+      descPlaceholder: '描述此工具的功能用途',
+      selectFile: '选择 .ts / .mts / .js / .mjs 文件',
+      hint1: '工具标识必须与文件内默认导出的 name 一致，部署时由 Runtime 最终校验',
+      hint2: '仅支持 Node.js 内置模块、@zerone-agent/agent-runtime/tools 与 zod，不安装 npm 依赖',
+      hint3: '工具将在 Agent Runtime 进程中执行并拥有完整 Node.js 权限，仅上传可信代码',
+      uploadTitle: '上传自定义工具',
+      uploadSubmit: '上传',
+      toolFileSection: '工具文件',
+      editToolTitle: '编辑工具',
+      updateSubmit: '更新',
+      replaceFileOptional: '替换文件（可选）',
+      keepFile: '留空则保留原文件，选择新文件将替换',
+      repairTitle: '补传/替换工具文件',
+      repairSubmit: '补传',
+      uploadHint: '支持 .ts / .mts / .js / .mjs 文件，最大 5MB',
+      fileTypeError: '仅支持 .ts / .mts / .js / .mjs 文件',
+      fileEmpty: '文件不能为空',
+      fileTooBig: '文件大小不能超过 5MB'
+    },
+    toast: {
+      uploaded: '自定义工具已上传',
+      fileUpdated: '工具文件已更新',
+      updated: '工具已更新',
+      deleted: '工具已删除'
+    }
+  },
+  agents: {
+    toast: {
+      knowledgeUpdated: '知识库已更新',
+      agentCreated: '代理已创建',
+      agentUpdated: '代理已更新',
+      agentDeleted: '代理已删除',
+      subagentUpdated: '子代理已更新',
+      toolsUpdated: '工具已更新',
+      skillsUpdated: '技能已更新'
+    }
+  },
+  knowledge: {
+    toast: {
+      created: '知识库已创建',
+      updated: '知识库已更新',
+      deleted: '知识库已删除',
+      docUpdated: '文档已更新',
+      docDeleted: '文档已删除',
+      docsUploaded: '已上传 {{n}} 个文档',
+      parseQueued: '已加入解析队列',
+      parseStopped: '已停止解析',
+      chunkAdded: '分块已新增',
+      chunkSaved: '分块已保存',
+      chunkDeleted: '分块已删除'
+    }
+  },
+  mcps: {
+    pageTitle: 'MCP 配置',
+    pageSub: '管理外部 MCP 服务器配置，供 Agent 绑定使用',
+    create: '新建 MCP',
+    searchPlaceholder: '搜索 MCP 名称',
+    builtinBadge: '内置',
+    noDescription: '暂无描述',
+    builtinToolsCount: '{{n}} 个内置 tools',
+    probedToolsCount: '{{n}} 个 tools · 上次探测 {{time}}',
+    probeFailed: '探测失败',
+    notProbed: '未探测',
+    probe: '探测',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirm: '删除 "{{name}}"？已被 Agent 绑定的 MCP 无法删除，请先解除绑定。',
+    empty: {
+      noMatch: '未找到匹配的 MCP',
+      none: '暂无 MCP 配置',
+      noMatchHint: '请尝试其他关键词',
+      noneHint: '添加您的第一个 MCP 服务器以开始使用'
+    },
+    form: {
+      editTitle: '编辑 MCP',
+      basicSection: '基本信息',
+      nameLabel: '标识（name）',
+      nameRequired: '请输入标识',
+      titleLabel: '展示名',
+      titleRequired: '请输入展示名',
+      titlePlaceholder: 'e.g. 文件系统',
+      descLabel: '描述',
+      descPlaceholder: '描述此 MCP 服务器的用途',
+      transportSection: '传输协议',
+      typeLabel: '类型',
+      urlRequired: '请输入 URL',
+      headersSection: '请求头（headers）',
+      headersHint: '通常用于 Authorization 等认证头。',
+      builtinVarHint: '内置 MCP 支持变量：使用 $agent_runtime_token 表示 Agent Runtime Token，由部署时自动替换。',
+      addHeader: '添加请求头',
+      retrySection: '重试策略（可选）',
+      retryHint: '留空表示由客户端使用全局默认值。',
+      retryMaxLabel: '最大重试次数',
+      retryMaxPlaceholder: '默认 1',
+      timeoutLabel: '超时（毫秒）',
+      timeoutPlaceholder: '默认 5000',
+      probeSection: '探测连接',
+      probeSuccess: '✓ 连接成功',
+      foundTools: '，发现 {{n}} 个工具',
+      probeErrorFallback: '连接失败',
+      toolsListHint: '点击"探测连接"获取 tools 列表'
+    },
+    toast: {
+      created: 'MCP 已创建',
+      updated: 'MCP 已更新',
+      deleted: 'MCP 已删除',
+      agentsUpdated: 'Agent MCP 关系已更新',
+      probeDone: '探测完成',
+      probeFailed: '探测失败'
+    }
+  },
+  skills: {
+    pageTitle: '技能管理',
+    pageSub: '管理 AI 技能包，上传 zip 文件并关联到 Agent',
+    create: '新建技能',
+    searchPlaceholder: '搜索技能名称',
+    uploaded: '已上传',
+    noFile: '无文件',
+    noDescription: '暂无描述',
+    downloadFail: '获取下载链接失败',
+    expertSection: '专家技能',
+    communitySection: '社区技能',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirm: '删除 "{{name}}"？此操作不可撤销。',
+    empty: {
+      noMatch: '未找到匹配的技能',
+      none: '暂无技能',
+      noMatchHint: '请尝试其他关键词',
+      noneHint: '创建您的第一个技能包以开始使用'
+    },
+    form: {
+      zipOnly: '仅支持 .zip 格式文件',
+      filenameCharset: '文件名只能包含字母、数字、点、下划线和横线',
+      tooLarge: '文件大小不能超过 50MB',
+      parseFail: '解析 SKILL.md 失败',
+      zipRequired: '请选择要上传的 .zip 文件',
+      editTitle: '编辑技能',
+      basicSection: '基本信息',
+      nameKey: '技能标识',
+      typeLabel: '技能类型',
+      typeExpert: '专家 (Expert)',
+      typeCommunity: '社区 (Community)',
+      displaySection: '显示设置',
+      titleLabel: '展示名称',
+      titlePlaceholder: '技能名称',
+      descLabel: '功能描述',
+      descPlaceholder: '描述此技能的功能用途',
+      uploadSection: '上传文件',
+      selectFile: '选择 .zip 文件',
+      keepFileHint: '留空则保留原文件，选择新文件将替换',
+      zipHint: 'ZIP 包内须包含 SKILL.md（位于根目录或子目录均可），最大 50MB',
+      previewTitle: 'SKILL.md 预览',
+      previewPlaceholder: '选择 zip 文件后预览'
+    },
+    skillMdMissing: '该 zip 包中未找到 SKILL.md',
+    toast: {
+      created: '技能已创建',
+      updated: '技能已更新',
+      deleted: '技能已删除'
+    }
+  },
+  providers: {
+    pageTitle: '模型管理',
+    pageSub: '管理 Vendor Preset 配置和模型列表',
+    create: '新建 Provider',
+    searchPlaceholder: '搜索 Provider 名称',
+    otherSection: '其他',
+    builtinBadge: '内置',
+    modelFieldCount: '{{models}} 个模型 · {{fields}} 个表单字段',
+    testConnection: '测试连接',
+    connectSuccess: '连接成功 · {{ms}}ms',
+    connectFail: '连接失败 · {{error}}',
+    unknownError: '未知错误',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirm: '删除 "{{name}}"？此操作不可撤销。',
+    empty: {
+      noMatch: '未找到匹配的 Provider',
+      none: '暂无 Provider',
+      noMatchHint: '请尝试其他关键词',
+      noneHint: '添加您的第一个 Provider 配置'
+    },
+    form: {
+      editTitle: '编辑 Provider',
+      optional: '（选填）',
+      protocolRequired: '请选择协议',
+      protocolPlaceholder: '选择协议',
+      basicSection: '基本信息',
+      keyLabel: 'Key（唯一标识）',
+      nameLabel: '名称',
+      nameRequired: '请输入名称',
+      zhDescLabel: '中文描述',
+      zhDescPlaceholder: 'e.g. 智谱 GLM Anthropic 兼容编码服务',
+      enDescLabel: '英文描述',
+      iconKeyLabel: '图标 Key',
+      protocolSection: '协议配置',
+      builtinLabel: '内置 Provider',
+      builtinCheckbox: '标记为内置（使用 Locked API Key，用户无需自行填写）',
+      modelsSection: '默认模型',
+      modelTitle: '显示名称',
+      modelType: '类型',
+      modelContext: '上下文',
+      addModel: '添加模型',
+      fieldsSection: '表单字段定义',
+      fieldRequired: '必填',
+      fieldSecret: '密钥',
+      addField: '添加字段',
+      protoAttrs: '协议属性（{{protocol}}）',
+      testBtn: '测试连接',
+      baseUrlFirst: '请先填写 Base URL',
+      fieldName: '名称',
+      fieldApiUrl: 'API 地址',
+      fieldApiKey: 'API 密钥'
+    },
+    effort: {
+      notApplicable: '不涉及',
+      configuredCount: '已配置 {{n}} 档',
+      add: '添加 effort',
+      remove: '删除 {{effort}}'
+    },
+    toast: {
+      created: 'Provider 已创建',
+      updated: 'Provider 已更新',
+      deleted: 'Provider 已删除'
+    }
+  },
+  chat: {
+    sessions: '聊天记录',
+    searchPlaceholder: '搜索会话...',
+    noMatch: '未找到匹配会话',
+    empty: '暂无聊天记录',
+    untitled: '未命名会话',
+    deleteConfirmTitle: '确认删除？',
+    deleteConfirmDesc: '所有消息将被永久删除',
+    noMessages: '该会话暂无消息',
+    backToList: '返回会话列表',
+    pickTitle: '选择一个会话',
+    pickDesc: '从左侧列表中选择会话以查看对话内容',
+    parts: {
+      file: '文件',
+      expired: '临时文件已不可用',
+      metaOnly: '仅元数据',
+      downloadAria: '下载 {{name}}'
+    },
+    toolCall: {
+      input: '输入',
+      pending: '等待结果…',
+      emptyOutput: '（无输出）'
+    },
+    msg: {
+      roleUser: '用户',
+      roleAssistant: '助手',
+      roleSystem: '系统',
+      roleTool: '工具',
+      hidden: '已隐藏'
+    },
+    legacyResult: '结果',
+    thinking: '思考过程',
+    errorFallback: '发生错误',
+    toolPreparing: '工具调用准备中',
+    toast: {
+      sessionDeleted: '会话已删除'
+    }
+  },
+  users: {
+    pageTitle: '用户管理',
+    pageSub: '邀请用户、管理角色与账号状态。仅管理员可见。',
+    toast: { updated: '已更新', revoked: '已撤销' },
+    columns: {
+      username: '用户名',
+      nickname: '昵称',
+      role: '角色',
+      status: '状态',
+      createdAt: '创建时间',
+      actions: '操作',
+      note: '备注'
+    },
+    status: { pending: '待审批', active: '启用', disabled: '禁用' },
+    disable: '禁用',
+    enable: '启用',
+    disableConfirmTitle: '确认禁用该用户？',
+    disableConfirmDesc: '用户将立即下线。',
+    reset: '重置',
+    resetPassword: '重置密码',
+    resetConfirmTitle: '确认重置密码？',
+    resetConfirmDesc: '将为 "{{name}}" 生成随机新密码，原密码立即失效，所有会话下线。',
+    revoke: '撤销',
+    expiresAt: '过期时间',
+    inviteRevokeTitle: '确认撤销该邀请？',
+    inviteRevokeDesc: '撤销后该邀请链接立即失效，无法用于注册。',
+    loginLink: '登录链接',
+    createInvite: '创建邀请',
+    sectionUsers: '用户',
+    sectionInvites: '邀请记录',
+    resetSuccessTitle: '重置密码成功',
+    resetSuccessHint: '新密码仅显示这一次，请立即复制并安全送达被重置的用户：',
+    copy: '复制',
+    copyFail: '复制失败，请手动选择复制',
+    changePassword: {
+      mismatch: '两次输入的新密码不一致',
+      rule: '新密码至少 8 位，且需包含字母和数字',
+      done: '密码已更新',
+      title: '修改密码',
+      ok: '更新密码',
+      current: '当前密码',
+      next: '新密码（至少 8 位，含字母和数字）',
+      confirm: '确认新密码'
+    },
+    invite: {
+      roleMember: '成员（member，只读使用）',
+      roleMaintainer: '维护者（maintainer，可管资源）',
+      roleAdmin: '管理员（admin，可邀请+管用户）',
+      copied: '邀请链接已复制',
+      createdTitle: '邀请创建成功',
+      createTitle: '创建邀请链接',
+      done: '完成',
+      create: '创建',
+      close: '关闭',
+      onceHint: '链接仅显示这一次，请立即复制保存。关闭后无法再获取该链接（如丢失只能撤销重建）。',
+      roleLabel: '角色',
+      noteLabel: '备注（可选）',
+      notePlaceholder: '例如：给张三',
+      ttlLabel: '有效期（天，1-30）'
+    },
+    loginLinkModal: {
+      copied: '登录链接已复制',
+      title: '登录链接',
+      done: '完成',
+      close: '关闭',
+      hint: '将此链接发给新用户，通过 Casdoor 完成登录（未注册的账号可在登录页注册）后回到本页即可看到该用户。',
+      generating: '生成中…'
+    }
+  },
+  login: {
+    orgError: '组织不存在或未注册，请检查后重试',
+    modeErrorTitle: '无法获取登录方式',
+    modeErrorSub: '请稍后重试，或联系平台管理员',
+    retry: '重试',
+    welcome: '欢迎回来',
+    casdoorHint: '使用 Zerone 统一账号认证登录',
+    builtinHint: '使用账号登录',
+    orgConfirmHint: '请使用下方「确认」按钮以应用所填组织',
+    submit: '登录 Agent Hub',
+    collapse: '收起',
+    expand: '更多',
+    orgPlaceholder: '留空使用默认组织',
+    orgLabel: '组织',
+    confirm: '确认',
+    usernamePlaceholder: '用户名',
+    passwordPlaceholder: '密码',
+    submitShort: '登录',
+    foot: '由 Zerone 认证服务保障安全'
   },
   scenes: {
     pageTitle: '场景管理',
@@ -239,6 +724,11 @@ const zh = {
       promptSection: '提示词配置',
       promptPlaceholder: '输入该场景的提示词，定义 Agent 的行为和角色',
       enabled: '启用状态'
+    },
+    toast: {
+      created: '场景已创建',
+      updated: '场景已更新',
+      deleted: '场景已删除'
     }
   }
 }

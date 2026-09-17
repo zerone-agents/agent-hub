@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { PaperclipIcon, DownloadIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
@@ -51,8 +52,9 @@ interface PartFileProps {
 }
 
 export default function PartFile({ part, buildAttachmentUrl }: PartFileProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
-  const name = typeof part.name === 'string' && part.name ? part.name : (typeof part.path === 'string' && part.path ? part.path : '文件')
+  const name = typeof part.name === 'string' && part.name ? part.name : (typeof part.path === 'string' && part.path ? part.path : t('chat.parts.file'))
   const mime = typeof part.mime === 'string' ? part.mime : ''
   const size = typeof part.size === 'number' ? part.size : undefined
   const path = typeof part.path === 'string' ? part.path : ''
@@ -111,7 +113,7 @@ export default function PartFile({ part, buildAttachmentUrl }: PartFileProps) {
         <PaperclipIcon size={12} />
         <span>
           {name}
-          {size !== undefined ? ` · ${formatBytes(size)}` : ''} · 临时文件已不可用
+          {size !== undefined ? ` · ${formatBytes(size)}` : ''} · {t('chat.parts.expired')}
         </span>
       </div>
     )
@@ -137,13 +139,13 @@ export default function PartFile({ part, buildAttachmentUrl }: PartFileProps) {
           className={styles.action}
           onClick={() => { void download(); }}
           disabled={downloading}
-          title="下载"
-          aria-label={`下载 ${name}`}
+          title={t('common.download')}
+          aria-label={t('chat.parts.downloadAria', { name })}
         >
           <DownloadIcon size={14} />
         </button>
       ) : (
-        <span className={styles.size}>仅元数据</span>
+        <span className={styles.size}>{t('chat.parts.metaOnly')}</span>
       )}
     </div>
   )

@@ -1,4 +1,5 @@
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 import { tokens as t } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
@@ -46,12 +47,13 @@ export interface LegacyToolResultProps {
  * messages age out of the database.
  */
 export default function LegacyToolResult({ content }: LegacyToolResultProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const body = safeStringify(content ?? '')
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <span className={styles.tag}>结果</span>
+        <span className={styles.tag}>{t('chat.legacyResult')}</span>
         <span>tool_result (legacy)</span>
       </div>
       {body && <pre className={styles.body}>{body}</pre>}

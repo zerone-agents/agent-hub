@@ -7,6 +7,7 @@ import type { Agent, AgentConfig } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
+import { useTranslation } from 'react-i18next'
 import { getIconComponent, lightenHex } from '@/utils/icons'
 
 interface ToggleItemProps {
@@ -109,6 +110,9 @@ interface FormValues {
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
   const { styles } = useStyles()
+  // P3 最小侵入：仅为 agent-icons key 化的消费处提供 t()（AgentForm 其余
+  // 文案抽取属 P4 大域批次，勿在本批扩散）。
+  const { t } = useTranslation()
   const [form] = Form.useForm<FormValues>()
   const createAgent = useCreateAgent()
   const updateAgent = useUpdateAgent()
@@ -303,7 +307,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
                     backgroundColor: activeBg,
                     borderColor: activeColor
                   } : {}}
-                  title={opt.label}
+                  title={t(opt.label)}
                   onClick={(e) => { e.stopPropagation(); selectIcon(opt.name) }}
                 >
                   <IconCmp size={18} weight="duotone" color={active ? activeColor : '#9CA3AF'} />

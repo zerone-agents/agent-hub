@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Popconfirm, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, PencilSimpleIcon, TrashIcon, ClockIcon, PlugIcon, SquaresFourIcon } from '@phosphor-icons/react'
@@ -9,7 +10,7 @@ import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Provider } from '@/api/providers'
 import type { ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
 import CardGrid from '@/components/CardGrid'
 import ProviderForm from './ProviderForm'
@@ -35,16 +36,16 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl};
+    font-size: ${tk.text3xl};
     font-weight: 700;
-    color: ${t.text};
+    color: ${tk.text};
     letter-spacing: -0.03em;
     line-height: 1.15;
   `,
   pageSub: css`
     margin-top: 4px;
-    font-size: ${t.textBase};
-    color: ${t.textTertiary};
+    font-size: ${tk.textBase};
+    color: ${tk.textTertiary};
   `,
   loadingWrap: css`
     display: flex;
@@ -57,24 +58,24 @@ const useStyles = createStyles(({ css }) => ({
   `,
   emptyIcon: css`margin-bottom: 20px;`,
   emptyTitle: css`
-    font-size: ${t.textLg};
+    font-size: ${tk.textLg};
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     margin-bottom: 6px;
   `,
   emptyDesc: css`
-    color: ${t.textTertiary};
-    font-size: ${t.textSm};
+    color: ${tk.textTertiary};
+    font-size: ${tk.textSm};
   `,
   providerMeta: css`
-    font-size: ${t.textXs};
-    color: ${t.textTertiary};
+    font-size: ${tk.textXs};
+    color: ${tk.textTertiary};
     line-height: 1.6;
   `,
   baseUrl: css`
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 11px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -87,9 +88,9 @@ const useStyles = createStyles(({ css }) => ({
     padding: 2px 8px;
     border-radius: 3px;
     font-size: 11px;
-    font-family: ${t.fontMono};
-    background: ${t.inkSubtle};
-    color: ${t.textSecondary};
+    font-family: ${tk.fontMono};
+    background: ${tk.inkSubtle};
+    color: ${tk.textSecondary};
   `,
   actBtn: css`
     width: 30px;
@@ -99,14 +100,14 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted};
+    border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
@@ -120,12 +121,12 @@ const useStyles = createStyles(({ css }) => ({
   `,
   sectionTitle: css`
     display: flex; align-items: center; gap: 8px;
-    color: ${t.text}; font-size: ${t.textBase}; font-weight: 600;
+    color: ${tk.text}; font-size: ${tk.textBase}; font-weight: 600;
   `,
   sectionCount: css`
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 24px; height: 24px; padding: 0 8px;
-    background: ${t.inkSubtle}; color: ${t.ink}; border-radius: 12px;
+    background: ${tk.inkSubtle}; color: ${tk.ink}; border-radius: 12px;
     font-size: 12px; font-weight: 600;
   `,
 }))
@@ -157,18 +158,19 @@ const protocolBgColor = (protocol: string) => {
   if (protocol === 'openai') return 'rgba(5, 150, 105, 0.08)'
   if (protocol === 'mineru') return 'rgba(99, 102, 241, 0.08)'
   if (protocol === 'paddleocr') return 'rgba(59, 130, 246, 0.08)'
-  return t.inkLight
+  return tk.inkLight
 }
 
 const protocolTextColor = (protocol: string) => {
-  if (protocol === 'anthropic') return t.warning
-  if (protocol === 'openai') return t.success
+  if (protocol === 'anthropic') return tk.warning
+  if (protocol === 'openai') return tk.success
   if (protocol === 'mineru') return '#6366f1'
   if (protocol === 'paddleocr') return '#3b82f6'
-  return t.ink
+  return tk.ink
 }
 
 export default function ProviderListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data: providers = [], isLoading } = useProviders()
   const canWrite = useCanWrite()
@@ -223,9 +225,9 @@ export default function ProviderListPage() {
       const envelope = res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>
       const result = envelope.data
       if (result?.success) {
-        message.success(`连接成功 · ${result.latencyMs}ms`)
+        message.success(t('providers.connectSuccess', { ms: result.latencyMs }))
       } else {
-        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
+        message.error(t('providers.connectFail', { error: result?.error ?? t('providers.unknownError') }))
       }
     } finally {
       setProbingId(null)
@@ -273,8 +275,8 @@ export default function ProviderListPage() {
                     borderRadius: 3,
                     fontSize: 10,
                     fontWeight: 600,
-                    background: t.inkLight,
-                    color: t.ink
+                    background: tk.inkLight,
+                    color: tk.ink
                   }}
                 >
                   {TYPE_LABELS[cap] || cap}
@@ -288,11 +290,11 @@ export default function ProviderListPage() {
                     borderRadius: 3,
                     fontSize: 10,
                     fontWeight: 600,
-                    background: t.inkLight,
-                    color: t.ink
+                    background: tk.inkLight,
+                    color: tk.ink
                   }}
                 >
-                  内置
+                  {t('providers.builtinBadge')}
                 </span>
               )}
             </div>
@@ -302,7 +304,7 @@ export default function ProviderListPage() {
           <div className={styles.providerMeta}>
             <div className={styles.baseUrl}>{provider.baseUrl || '—'}</div>
             <div className={styles.modelStats}>
-              {provider.defaultModels.length} 个模型 · {provider.fields.length} 个表单字段
+              {t('providers.modelFieldCount', { models: provider.defaultModels.length, fields: provider.fields.length })}
             </div>
             {visibleModels.length > 0 && (
               <div className={styles.modelChips}>
@@ -330,7 +332,7 @@ export default function ProviderListPage() {
               <button
                 type="button"
                 className={styles.actBtn}
-                title="测试连接"
+                title={t('providers.testConnection')}
                 onClick={() => handleProbe(provider.id)}
                 disabled={probingId === provider.id}
               >
@@ -339,23 +341,23 @@ export default function ProviderListPage() {
               <button
                 type="button"
                 className={styles.actBtn}
-                title="编辑"
+                title={t('common.edit')}
                 onClick={() => { showEdit(provider); }}
               >
                 <PencilSimpleIcon size={14} />
               </button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除 "${provider.name}"？此操作不可撤销。`}
-                okText="删除"
+                title={t('providers.deleteConfirmTitle')}
+                description={t('providers.deleteConfirm', { name: provider.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => handleDelete(provider.id)}
               >
                 <button
                   type="button"
                   className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                  title="删除"
+                  title={t('common.delete')}
                 >
                   <TrashIcon size={14} />
                 </button>
@@ -384,19 +386,19 @@ export default function ProviderListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>模型管理</div>
-          <div className={styles.pageSub}>管理 Vendor Preset 配置和模型列表</div>
+          <div className={styles.pageTitle}>{t('providers.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('providers.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-            新建 Provider
+            {t('providers.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
           <NameSearch
-            placeholder="搜索 Provider 名称"
+            placeholder={t('providers.searchPlaceholder')}
             onSearch={setKeywords}
             realtime
           />
@@ -409,16 +411,16 @@ export default function ProviderListPage() {
       ) : filteredProviders.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <PlugIcon size={48} weight="thin" color={t.textMuted} />
+            <PlugIcon size={48} weight="thin" color={tk.textMuted} />
           </div>
-          <div className={styles.emptyTitle}>{keywords ? '未找到匹配的 Provider' : '暂无 Provider'}</div>
-          <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '添加您的第一个 Provider 配置'}</div>
+          <div className={styles.emptyTitle}>{keywords ? t('providers.empty.noMatch') : t('providers.empty.none')}</div>
+          <div className={styles.emptyDesc}>{keywords ? t('providers.empty.noMatchHint') : t('providers.empty.noneHint')}</div>
         </div>
       ) : (
         <>
           {renderSection(<><AnthropicBrand size={18} style={{ marginRight: 6 }} />Anthropic</>, anthropicProviders)}
           {renderSection(<><OpenAIBrand size={18} style={{ marginRight: 6 }} />OpenAI</>, openaiProviders)}
-          {renderSection(<><SquaresFourIcon size={18} weight="duotone" style={{ marginRight: 6 }} />其他</>, otherProviders)}
+          {renderSection(<><SquaresFourIcon size={18} weight="duotone" style={{ marginRight: 6 }} />{t('providers.otherSection')}</>, otherProviders)}
         </>
       )}
 

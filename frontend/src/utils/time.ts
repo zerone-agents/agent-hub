@@ -1,3 +1,5 @@
+import i18next from '@/i18n'
+
 /**
  * Format an ISO timestamp as a human-friendly relative string.
  * Examples: "刚刚", "5 分钟前", "3 小时前", "2 天前", fallback to YYYY-MM-DD.
@@ -14,10 +16,10 @@ export function formatTime(input: string | number | Date | undefined | null): st
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
-  if (seconds < 60) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  if (hours < 24) return `${hours} 小时前`
-  if (days < 30) return `${days} 天前`
+  if (seconds < 60) return i18next.t('time.justNow')
+  if (minutes < 60) return i18next.t('time.minutesAgo', { n: minutes })
+  if (hours < 24) return i18next.t('time.hoursAgo', { n: hours })
+  if (days < 30) return i18next.t('time.daysAgo', { n: days })
 
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')

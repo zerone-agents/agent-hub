@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { sceneApi, type Scene, type SceneCreatePayload, type SceneUpdatePayload } from '@/api/scenes'
 import { parseApiError, unwrapResponse } from '@/api/client'
+import { useTranslation } from 'react-i18next'
 
 export function useScenes() {
   return useQuery<Scene[]>({
@@ -12,37 +13,40 @@ export function useScenes() {
 }
 
 export function useCreateScene() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: SceneCreatePayload) => sceneApi.create(data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['scenes'] })
-      message.success('场景已创建')
+      message.success(t('scenes.toast.created'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useUpdateScene() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ name, data }: { name: string; data: SceneUpdatePayload }) =>
       sceneApi.update(name, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['scenes'] })
-      message.success('场景已更新')
+      message.success(t('scenes.toast.updated'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useDeleteScene() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (name: string) => sceneApi.delete(name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['scenes'] })
-      message.success('场景已删除')
+      message.success(t('scenes.toast.deleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })

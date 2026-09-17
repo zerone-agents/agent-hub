@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CaretRightIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { tokens as t } from '@/styles/tokens'
@@ -88,6 +89,7 @@ export function PartReasoning({
   reasoning?: string
   duration?: number
 }) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [open, setOpen] = useState(false)
   const preview = reasoning.slice(0, 120)
@@ -96,7 +98,7 @@ export function PartReasoning({
     <div className={styles.reasoningWrap}>
       <div className={styles.reasoningToggle} onClick={() => { setOpen(!open); }}>
         {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
-        <span>思考过程{duration ? ` · ${duration}s` : ''}</span>
+        <span>{t('chat.thinking')}{duration ? ` · ${duration}s` : ''}</span>
       </div>
       <div style={{ marginTop: 4 }}>
         {open ? (
@@ -110,8 +112,9 @@ export function PartReasoning({
 }
 
 export function PartError({ message }: { message?: string }) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
-  return <div className={styles.errorWrap}>{message ?? '发生错误'}</div>
+  return <div className={styles.errorWrap}>{message ?? t('chat.errorFallback')}</div>
 }
 
 type PairablePart =
@@ -165,6 +168,7 @@ export function ContentParts({ parts, enableStream, buildAttachmentUrl }: {
   enableStream?: boolean
   buildAttachmentUrl?: AttachmentUrlBuilder
 }) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const paired = pairParts(parts)
   return (
@@ -212,7 +216,7 @@ export function ContentParts({ parts, enableStream, buildAttachmentUrl }: {
         if (p.kind === 'pending_use') {
           return (
             <div key={i} className={styles.pendingToolUse}>
-              工具调用准备中{p.part.name ? `：${p.part.name}` : ''}…
+              {t('chat.toolPreparing')}{p.part.name ? `：${p.part.name}` : ''}…
             </div>
           )
         }

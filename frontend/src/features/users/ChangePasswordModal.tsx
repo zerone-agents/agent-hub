@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, message } from 'antd'
 import PasswordInput from '@/components/PasswordInput'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
@@ -16,6 +17,7 @@ interface ChangePasswordModalProps {
  * session stays logged in.
  */
 export default function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
+  const { t } = useTranslation()
   const primaryBtnCls = usePrimaryButtonStyle()
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -38,18 +40,18 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
   const handleSubmit = async () => {
     setError('')
     if (newPassword !== confirm) {
-      setError('两次输入的新密码不一致')
+      setError(t('users.changePassword.mismatch'))
       return
     }
     if (newPassword.length < 8) {
-      setError('新密码至少 8 位，且需包含字母和数字')
+      setError(t('users.changePassword.rule'))
       return
     }
     setLoading(true)
     try {
       const pair = await authApi.changePassword(oldPassword, newPassword)
       setTokens(pair.accessToken, pair.refreshToken)
-      message.success('密码已更新')
+      message.success(t('users.changePassword.done'))
       reset()
       onClose()
     } catch (err) {
@@ -61,12 +63,12 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
 
   return (
     <Modal
-      title="修改密码"
+      title={t('users.changePassword.title')}
       open={open}
       onOk={handleSubmit}
       onCancel={handleClose}
-      okText="更新密码"
-      cancelText="取消"
+      okText={t('users.changePassword.ok')}
+      cancelText={t('common.cancel')}
       okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
       destroyOnHidden
@@ -75,7 +77,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
       <form noValidate autoComplete="off" onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }}>
         <div style={{ marginBottom: 12 }}>
           <PasswordInput
-            placeholder="当前密码"
+            placeholder={t('users.changePassword.current')}
             name="currentPassword"
             value={oldPassword}
             onChange={(e) => { setOldPassword(e.target.value); }}
@@ -84,7 +86,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
         </div>
         <div style={{ marginBottom: 12 }}>
           <PasswordInput
-            placeholder="新密码（至少 8 位，含字母和数字）"
+            placeholder={t('users.changePassword.next')}
             name="newPassword"
             value={newPassword}
             onChange={(e) => { setNewPassword(e.target.value); }}
@@ -93,7 +95,7 @@ export default function ChangePasswordModal({ open, onClose }: ChangePasswordMod
         </div>
         <div>
           <PasswordInput
-            placeholder="确认新密码"
+            placeholder={t('users.changePassword.confirm')}
             name="confirmPassword"
             value={confirm}
             onChange={(e) => { setConfirm(e.target.value); }}

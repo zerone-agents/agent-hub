@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { mcpApi, type Mcp, type McpDetail, type McpInput, type McpProbeInput, type McpProbeResult } from '@/api/mcps'
 import { parseApiError, unwrapResponse } from '@/api/client'
+import { useTranslation } from 'react-i18next'
 
 export function useMcps() {
   return useQuery<Mcp[]>({
@@ -23,37 +24,40 @@ export function useMcp(name: string | null) {
 }
 
 export function useCreateMcp() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: McpInput) => mcpApi.create(data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['mcps'] })
-      message.success('MCP 已创建')
+      message.success(t('mcps.toast.created'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useUpdateMcp() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ name, data }: { name: string; data: McpInput }) =>
       mcpApi.update(name, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['mcps'] })
-      message.success('MCP 已更新')
+      message.success(t('mcps.toast.updated'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useDeleteMcp() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (name: string) => mcpApi.delete(name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['mcps'] })
-      message.success('MCP 已删除')
+      message.success(t('mcps.toast.deleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
@@ -72,6 +76,7 @@ export function useAgentMcps(agentName: string | null) {
 }
 
 export function useUpdateAgentMcps() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ agentName, mcpNames }: { agentName: string; mcpNames: string[] }) =>
@@ -82,13 +87,14 @@ export function useUpdateAgentMcps() {
       // 默认前缀匹配：['agents'] 同时覆盖 ['agents', name, 'detail']（chat 页
       // AgentDetailBar）——不必再显式失效 detail，否则触发重复 refetch。
       void qc.invalidateQueries({ queryKey: ['agents'] })
-      message.success('Agent MCP 关系已更新')
+      message.success(t('mcps.toast.agentsUpdated'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useProbeMcp() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ name, config }: { name?: string; config?: McpProbeInput }) => {
@@ -100,9 +106,9 @@ export function useProbeMcp() {
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ['mcps'] })
       if (data.status === 'success') {
-        message.success('探测完成')
+        message.success(t('mcps.toast.probeDone'))
       } else {
-        message.error(data.error ?? '探测失败')
+        message.error(data.error ?? t('mcps.toast.probeFailed'))
       }
     },
     onError: (err) => message.error(parseApiError(err))

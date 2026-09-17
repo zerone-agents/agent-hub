@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Popconfirm, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import {
@@ -12,7 +13,7 @@ import { useCanWrite } from '@/hooks/useCanWrite'
 import { toolApi, type Tool } from '@/api/tools'
 import { parseApiError, type ApiEnvelope } from '@/api/client'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
 import CardGrid from '@/components/CardGrid'
 import ToolForm, { type ToolFormMode } from './ToolForm'
@@ -36,16 +37,16 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl};
+    font-size: ${tk.text3xl};
     font-weight: 700;
-    color: ${t.text};
+    color: ${tk.text};
     letter-spacing: -0.03em;
     line-height: 1.15;
   `,
   pageSub: css`
     margin-top: 4px;
-    font-size: ${t.textBase};
-    color: ${t.textTertiary};
+    font-size: ${tk.textBase};
+    color: ${tk.textTertiary};
   `,
   loadingWrap: css`
     display: flex;
@@ -60,14 +61,14 @@ const useStyles = createStyles(({ css }) => ({
     margin-bottom: 20px;
   `,
   emptyTitle: css`
-    font-size: ${t.textLg};
+    font-size: ${tk.textLg};
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     margin-bottom: 6px;
   `,
   emptyDesc: css`
-    color: ${t.textTertiary};
-    font-size: ${t.textSm};
+    color: ${tk.textTertiary};
+    font-size: ${tk.textSm};
   `,
   section: css`
     margin-bottom: 40px;
@@ -84,8 +85,8 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
-    color: ${t.text};
-    font-size: ${t.textBase};
+    color: ${tk.text};
+    font-size: ${tk.textBase};
     font-weight: 600;
   `,
   sectionCount: css`
@@ -95,8 +96,8 @@ const useStyles = createStyles(({ css }) => ({
     min-width: 24px;
     height: 24px;
     padding: 0 8px;
-    background: ${t.inkSubtle};
-    color: ${t.ink};
+    background: ${tk.inkSubtle};
+    color: ${tk.ink};
     border-radius: 12px;
     font-size: 12px;
     font-weight: 600;
@@ -118,7 +119,7 @@ const useStyles = createStyles(({ css }) => ({
   `,
   fileMeta: css`
     font-size: 11px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
   `,
   actBtn: css`
     width: 30px;
@@ -128,14 +129,14 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted};
+    border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
@@ -151,6 +152,7 @@ const formatFileSize = (bytes?: number): string => {
 }
 
 export default function ToolListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data: tools = [], isLoading } = useTools()
   const deleteTool = useDeleteTool()
@@ -221,15 +223,15 @@ export default function ToolListPage() {
         headerExtra={
           missing ? (
             <span className={`${styles.artifactBadge} ${styles.artifactBadgeMissing}`}>
-              <WarningCircleIcon size={11} weight="fill" /> 缺少文件
+              <WarningCircleIcon size={11} weight="fill" /> {t('tools.artifactMissing')}
             </span>
           ) : (
-            <span className={styles.artifactBadge}>已上传</span>
+            <span className={styles.artifactBadge}>{t('tools.artifactUploaded')}</span>
           )
         }
         description={
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- D2: empty EN string must also fall back to CN, `??` would pass it through
-          tool.descriptionEn || tool.description || '暂无描述'
+          tool.descriptionEn || tool.description || t('tools.noDescription')
         }
         bodyExtra={
           <div className={styles.fileMeta}>
@@ -245,7 +247,7 @@ export default function ToolListPage() {
                 <button
                   type="button"
                   className={styles.actBtn}
-                  title="下载"
+                  title={t('common.download')}
                   onClick={() => { void handleDownload(tool) }}
                 >
                   <DownloadSimpleIcon size={14} />
@@ -255,7 +257,7 @@ export default function ToolListPage() {
                 <button
                   type="button"
                   className={styles.actBtn}
-                  title="编辑"
+                  title={t('common.edit')}
                   onClick={() => { openForm('edit', tool) }}
                 >
                   <PencilSimpleIcon size={14} />
@@ -264,23 +266,23 @@ export default function ToolListPage() {
               <button
                 type="button"
                 className={styles.actBtn}
-                title={missing ? '补传文件' : '替换文件'}
+                title={missing ? t('tools.uploadFile') : t('tools.replaceFile')}
                 onClick={() => { openForm('upload', tool) }}
               >
                 <UploadSimpleIcon size={14} />
               </button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除 "${tool.name}"？此操作不可撤销。被 Agent 挂载时将无法删除。`}
-                okText="删除"
+                title={t('tools.deleteConfirmTitle')}
+                description={t('tools.deleteConfirm', { name: tool.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => { deleteTool.mutate(tool.name) }}
               >
                 <button
                   type="button"
                   className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                  title="删除"
+                  title={t('common.delete')}
                 >
                   <TrashIcon size={14} />
                 </button>
@@ -296,22 +298,22 @@ export default function ToolListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>工具管理</div>
-          <div className={styles.pageSub}>管理内置工具与租户自定义工具</div>
+          <div className={styles.pageTitle}>{t('tools.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('tools.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton
             icon={<UploadSimpleIcon size={16} weight="bold" />}
             onClick={() => { openForm('create', null) }}
           >
-            上传自定义工具
+            {t('tools.upload')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
         <NameSearch
-          placeholder="搜索工具名称"
+          placeholder={t('tools.searchPlaceholder')}
           onSearch={setKeywords}
           realtime
         />
@@ -324,14 +326,14 @@ export default function ToolListPage() {
       ) : filteredTools.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <WrenchIcon size={48} weight="thin" color={t.textMuted} />
+            <WrenchIcon size={48} weight="thin" color={tk.textMuted} />
           </div>
-          <div className={styles.emptyTitle}>{keywords ? '未找到匹配的工具' : '暂无工具'}</div>
-          <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '上传您的第一个自定义工具以开始使用'}</div>
+          <div className={styles.emptyTitle}>{keywords ? t('tools.empty.noMatch') : t('tools.empty.none')}</div>
+          <div className={styles.emptyDesc}>{keywords ? t('tools.empty.noMatchHint') : t('tools.empty.noneHint')}</div>
         </div>
       ) : (
         <>
-          {renderSection('内置工具', builtinList,
+          {renderSection(t('tools.builtinSection'), builtinList,
             <CardGrid>
               {builtinList.map((tool) => (
                 <EntityCard
@@ -339,17 +341,17 @@ export default function ToolListPage() {
                   icon={tool.name[0].toUpperCase()}
                   title={tool.title || tool.name}
                   subtitle={tool.name}
-                  headerExtra={tool.isDefault ? <span className={styles.artifactBadge}>默认</span> : null}
+                  headerExtra={tool.isDefault ? <span className={styles.artifactBadge}>{t('tools.defaultBadge')}</span> : null}
                   description={
                     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- D2: empty EN string must also fall back to CN, `??` would pass it through
-                    tool.descriptionEn || tool.description || '暂无描述'
+                    tool.descriptionEn || tool.description || t('tools.noDescription')
                   }
                   footerLeft={formatTime(tool.createdAt)}
                 />
               ))}
             </CardGrid>
           )}
-          {renderSection('自定义工具', customList,
+          {renderSection(t('tools.customSection'), customList,
             <CardGrid>
               {customList.map(renderCustomCard)}
             </CardGrid>

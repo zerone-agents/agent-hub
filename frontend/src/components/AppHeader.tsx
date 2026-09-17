@@ -236,7 +236,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
             <ListIcon size={22} weight="bold" />
           </button>
 
-          {/* 当前页面路径 */}
+          {/* 当前页面路径（getBreadcrumbs 已内部翻译，勿再包 t()——见 nav.ts 注释） */}
           <Breadcrumb
             className={styles.breadcrumb}
             items={breadcrumbs.map((item) => ({
@@ -267,7 +267,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
                 onClick={async () => { await handleNavClick(item.path); }}
               >
                 <IconComp size={18} />
-                {item.label}
+                {t(item.label)}
               </button>
             )
           })}

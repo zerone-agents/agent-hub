@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CaretRightIcon, CaretDownIcon, CheckCircleIcon, XCircleIcon, SpinnerIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import {
   getToolSummary,
   buildToolInputMarkdown,
@@ -14,7 +15,7 @@ const useStyles = createStyles(({ css }) => ({
   card: css`
     border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
     border-radius: 6px;
-    background: ${t.surface};
+    background: ${tk.surface};
     overflow: hidden;
     max-width: 100%;
     box-sizing: border-box;
@@ -33,10 +34,10 @@ const useStyles = createStyles(({ css }) => ({
     &:hover { background: rgba(220, 38, 38, 0.08); }
   `,
   toolName: css`
-    font-family: ${t.fontMono}; font-weight: 600; color: ${t.text};
+    font-family: ${tk.fontMono}; font-weight: 600; color: ${tk.text};
   `,
   summary: css`
-    color: ${t.textSecondary}; font-size: 12px;
+    color: ${tk.textSecondary}; font-size: 12px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     flex: 1; min-width: 0;
   `,
@@ -47,7 +48,7 @@ const useStyles = createStyles(({ css }) => ({
     box-sizing: border-box;
   `,
   sectionLabel: css`
-    font-size: 11px; font-weight: 700; color: ${t.textTertiary};
+    font-size: 11px; font-weight: 700; color: ${tk.textTertiary};
     text-transform: uppercase; letter-spacing: 0.04em;
     margin-bottom: 4px;
   `,
@@ -56,21 +57,21 @@ const useStyles = createStyles(({ css }) => ({
   `,
   resultSection: css`
     padding-top: 8px;
-    border-top: 1px solid ${t.inkLighter};
+    border-top: 1px solid ${tk.inkLighter};
     margin-top: 8px;
   `,
   pendingPlaceholder: css`
-    font-size: 12px; color: ${t.textMuted}; font-style: italic;
+    font-size: 12px; color: ${tk.textMuted}; font-style: italic;
   `,
   emptyPlaceholder: css`
-    font-size: 12px; color: ${t.textMuted};
+    font-size: 12px; color: ${tk.textMuted};
   `,
   showMoreBtn: css`
     margin-top: 6px;
     background: transparent; border: none; cursor: pointer;
-    font-size: 12px; color: ${t.textTertiary};
+    font-size: 12px; color: ${tk.textTertiary};
     padding: 2px 4px;
-    &:hover { color: ${t.ink}; }
+    &:hover { color: ${tk.ink}; }
   `
 }))
 
@@ -104,6 +105,7 @@ export default function ToolCallBlock({
   result,
   status
 }: ToolCallBlockProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
 
   const summary = getToolSummary(toolName, input)
@@ -135,9 +137,9 @@ export default function ToolCallBlock({
         onClick={handleClick}
       >
         {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
-        {status === 'pending' && <SpinnerIcon size={12} color={t.textMuted} />}
-        {status === 'success' && <CheckCircleIcon size={12} color={t.success} weight="fill" />}
-        {status === 'error' && <XCircleIcon size={12} color={t.danger} weight="fill" />}
+        {status === 'pending' && <SpinnerIcon size={12} color={tk.textMuted} />}
+        {status === 'success' && <CheckCircleIcon size={12} color={tk.success} weight="fill" />}
+        {status === 'error' && <XCircleIcon size={12} color={tk.danger} weight="fill" />}
         <span className={styles.toolName}>{toolName}</span>
         {summary && <span className={styles.summary}>{summary}</span>}
       </div>
@@ -145,16 +147,16 @@ export default function ToolCallBlock({
         <div className={styles.body}>
           {inputMd && (
             <div className={styles.inputSection}>
-              <div className={styles.sectionLabel}>输入</div>
+              <div className={styles.sectionLabel}>{t('chat.toolCall.input')}</div>
               <ChatMarkdown content={inputMd} />
             </div>
           )}
           <div className={styles.resultSection}>
             <div className={styles.sectionLabel}>Result</div>
             {status === 'pending' ? (
-              <div className={styles.pendingPlaceholder}>等待结果…</div>
+              <div className={styles.pendingPlaceholder}>{t('chat.toolCall.pending')}</div>
             ) : resultStr === '' ? (
-              <div className={styles.emptyPlaceholder}>（无输出）</div>
+              <div className={styles.emptyPlaceholder}>{t('chat.toolCall.emptyOutput')}</div>
             ) : (
               <>
                 <ChatMarkdown content={resultMd} />

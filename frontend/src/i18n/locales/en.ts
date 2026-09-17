@@ -13,7 +13,103 @@ const en = {
     totalItems: '{{total}} items in total',
     brandSubtitle: 'AI Agent Management Platform',
     logout: 'Log Out',
-    loading: 'Loading...'
+    loading: 'Loading...',
+    download: 'Download',
+    form: {
+      required: 'Please enter {{label}}',
+      maxLength: '{{label}} must be at most {{max}} characters',
+      identifierCharset: '{{label}} can only contain letters, digits, dots, underscores and hyphens',
+      agentCharset: '{{label}} can only contain lowercase letters, digits and hyphens, must start with a letter, and hyphens must not be consecutive or at either end'
+    }
+  },
+  apiErrors: {
+    requestFailed: 'Request failed',
+    unauthorized: 'Session expired, please sign in again',
+    forbidden: 'You do not have permission to perform this action',
+    notFound: 'Resource does not exist or has been deleted',
+    serverBusy: 'Server is busy, please try again later',
+    timeout: 'Request timed out, please check your network',
+    networkError: 'Network connection failed',
+    operationFailed: 'Operation failed, please retry',
+    uploadFailed: 'Upload failed'
+  },
+  time: {
+    justNow: 'just now',
+    minutesAgo: '{{n}} minutes ago',
+    hoursAgo: '{{n}} hours ago',
+    daysAgo: '{{n}} days ago'
+  },
+  // antd Form validateMessages: values keep antd's ${label}/${min} syntax —
+  // i18next interpolation is {{}} by default; ${} passes through to antd.
+  validate: {
+    default: 'Validation failed',
+    required: 'Please enter ${label}',
+    enum: '${label} must be one of [${enum}]',
+    whitespace: '${label} cannot be whitespace only',
+    types: {
+      email: '${label} is not a valid email',
+      url: '${label} is not a valid url'
+    },
+    string: {
+      len: '${label} must be exactly ${len} characters',
+      min: '${label} must be at least ${min} characters',
+      max: '${label} must be at most ${max} characters'
+    },
+    number: {
+      min: '${label} cannot be less than ${min}',
+      max: '${label} cannot be greater than ${max}'
+    }
+  },
+  nav: {
+    home: 'Home',
+    settings: 'Settings',
+    detail: 'Details',
+    settingsLabels: {
+      aigc: 'AIGC Labeling',
+      users: 'Users',
+      auditLogs: 'Audit Logs'
+    },
+    dashboard: 'Dashboard',
+    agents: 'Agents',
+    tools: 'Tools',
+    mcps: 'MCP Configs',
+    skills: 'Skills',
+    providers: 'Models',
+    knowledge: 'Knowledge Bases',
+    scenes: 'Scenes',
+    chat: 'Chat History'
+  },
+  agentIcons: {
+    chat: 'General Chat',
+    chart: 'Data Analysis',
+    shield: 'Security & Compliance',
+    crosshair: 'Precision Targeting',
+    userCircle: 'User Management',
+    terminal: 'Terminal Ops',
+    robot: 'Smart Assistant',
+    lightbulb: 'Creative Ideas',
+    cpu: 'Computing',
+    detective: 'Investigation',
+    compass: 'Navigation',
+    rocket: 'Fast Execution',
+    gear: 'Engineering Config',
+    code: 'Development',
+    education: 'Education',
+    globe: 'Globalization',
+    puzzle: 'Integration',
+    eye: 'Monitoring',
+    megaphone: 'Marketing',
+    notebook: 'Knowledge Management',
+    firstAid: 'Healthcare',
+    scales: 'Legal',
+    presentation: 'Business Presentation',
+    clipboard: 'Task Management',
+    headset: 'Customer Service',
+    wrench: 'Repair Tools',
+    lightning: 'Rapid Response',
+    finance: 'Finance',
+    brain: 'AI Intelligence',
+    magic: 'AI Generated'
   },
   components: {
     confirmDelete: {
@@ -141,6 +237,10 @@ const en = {
       lastUsed: 'Last Used',
       expiresAt: 'Expires At',
       actions: 'Actions'
+    },
+    toast: {
+      created: 'Token created',
+      revoked: 'Token revoked'
     }
   },
   dashboard: {
@@ -212,7 +312,392 @@ const en = {
     clearTitle: 'Clear the configuration?',
     clearDesc: 'After clearing, deployed agents will no longer carry AIGC labels.',
     clear: 'Clear',
-    clearConfig: 'Clear Configuration'
+    clearConfig: 'Clear Configuration',
+    toast: {
+      saved: 'AIGC labeling configuration saved',
+      keyRegenerated: 'Signing key regenerated',
+      cleared: 'AIGC labeling configuration cleared'
+    }
+  },
+  tools: {
+    pageTitle: 'Tools',
+    pageSub: 'Manage built-in and tenant-custom tools',
+    upload: 'Upload Custom Tool',
+    searchPlaceholder: 'Search tool name',
+    artifactMissing: 'Missing file',
+    artifactUploaded: 'Uploaded',
+    noDescription: 'No description',
+    uploadFile: 'Upload File',
+    replaceFile: 'Replace File',
+    builtinSection: 'Built-in Tools',
+    customSection: 'Custom Tools',
+    defaultBadge: 'Default',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirm: 'Delete "{{name}}"? This cannot be undone. Tools mounted by an agent cannot be deleted.',
+    empty: {
+      noMatch: 'No matching tools',
+      none: 'No tools yet',
+      noMatchHint: 'Try other keywords',
+      noneHint: 'Upload your first custom tool to get started'
+    },
+    form: {
+      fileRequired: 'Please select a tool file',
+      basicSection: 'Basics',
+      nameKey: 'Tool ID',
+      displaySection: 'Display',
+      titleLabel: 'Chinese Name',
+      titlePlaceholder: 'Chinese name',
+      descLabel: 'Description',
+      descPlaceholder: 'Describe what this tool does',
+      selectFile: 'Select a .ts / .mts / .js / .mjs file',
+      hint1: 'The tool ID must match the default export name in the file; verified by the Runtime at deploy time',
+      hint2: 'Only Node.js built-in modules, @zerone-agent/agent-runtime/tools and zod are supported; no npm dependencies',
+      hint3: 'Tools run inside the Agent Runtime process with full Node.js privileges — upload trusted code only',
+      uploadTitle: 'Upload Custom Tool',
+      uploadSubmit: 'Upload',
+      toolFileSection: 'Tool File',
+      editToolTitle: 'Edit Tool',
+      updateSubmit: 'Update',
+      replaceFileOptional: 'Replace File (optional)',
+      keepFile: 'Leave empty to keep the original file; selecting a new file replaces it',
+      repairTitle: 'Upload/Replace Tool File',
+      repairSubmit: 'Upload',
+      uploadHint: 'Supports .ts / .mts / .js / .mjs files, max 5MB',
+      fileTypeError: 'Only .ts / .mts / .js / .mjs files are supported',
+      fileEmpty: 'File cannot be empty',
+      fileTooBig: 'File size cannot exceed 5MB'
+    },
+    toast: {
+      uploaded: 'Custom tool uploaded',
+      fileUpdated: 'Tool file updated',
+      updated: 'Tool updated',
+      deleted: 'Tool deleted'
+    }
+  },
+  agents: {
+    toast: {
+      knowledgeUpdated: 'Knowledge bases updated',
+      agentCreated: 'Agent created',
+      agentUpdated: 'Agent updated',
+      agentDeleted: 'Agent deleted',
+      subagentUpdated: 'Subagent updated',
+      toolsUpdated: 'Tools updated',
+      skillsUpdated: 'Skills updated'
+    }
+  },
+  knowledge: {
+    toast: {
+      created: 'Knowledge base created',
+      updated: 'Knowledge base updated',
+      deleted: 'Knowledge base deleted',
+      docUpdated: 'Document updated',
+      docDeleted: 'Document deleted',
+      docsUploaded: '{{n}} documents uploaded',
+      parseQueued: 'Queued for parsing',
+      parseStopped: 'Parsing stopped',
+      chunkAdded: 'Chunk added',
+      chunkSaved: 'Chunk saved',
+      chunkDeleted: 'Chunk deleted'
+    }
+  },
+  mcps: {
+    pageTitle: 'MCP Configs',
+    pageSub: 'Manage external MCP server configs for agent binding',
+    create: 'New MCP',
+    searchPlaceholder: 'Search MCP name',
+    builtinBadge: 'Built-in',
+    noDescription: 'No description',
+    builtinToolsCount: '{{n}} built-in tools',
+    probedToolsCount: '{{n}} tools · last probed {{time}}',
+    probeFailed: 'Probe failed',
+    notProbed: 'Not probed',
+    probe: 'Probe',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirm: 'Delete "{{name}}"? MCPs bound to an agent cannot be deleted. Unbind first.',
+    empty: {
+      noMatch: 'No matching MCPs',
+      none: 'No MCP configs yet',
+      noMatchHint: 'Try other keywords',
+      noneHint: 'Add your first MCP server to get started'
+    },
+    form: {
+      editTitle: 'Edit MCP',
+      basicSection: 'Basics',
+      nameLabel: 'ID (name)',
+      nameRequired: 'Please enter an ID',
+      titleLabel: 'Display Name',
+      titleRequired: 'Please enter a display name',
+      titlePlaceholder: 'e.g. File System',
+      descLabel: 'Description',
+      descPlaceholder: 'Describe what this MCP server does',
+      transportSection: 'Transport',
+      typeLabel: 'Type',
+      urlRequired: 'Please enter a URL',
+      headersSection: 'Headers',
+      headersHint: 'Usually used for auth headers such as Authorization.',
+      builtinVarHint: 'Built-in MCP supports variables: use $agent_runtime_token for the Agent Runtime Token, replaced automatically at deploy time.',
+      addHeader: 'Add Header',
+      retrySection: 'Retry Policy (optional)',
+      retryHint: 'Leave empty to use the client global defaults.',
+      retryMaxLabel: 'Max Retries',
+      retryMaxPlaceholder: 'Default 1',
+      timeoutLabel: 'Timeout (ms)',
+      timeoutPlaceholder: 'Default 5000',
+      probeSection: 'Probe Connection',
+      probeSuccess: '✓ Connected',
+      foundTools: ', {{n}} tools found',
+      probeErrorFallback: 'Connection failed',
+      toolsListHint: 'Click "Probe Connection" to fetch the tools list'
+    },
+    toast: {
+      created: 'MCP created',
+      updated: 'MCP updated',
+      deleted: 'MCP deleted',
+      agentsUpdated: 'Agent MCP relations updated',
+      probeDone: 'Probe finished',
+      probeFailed: 'Probe failed'
+    }
+  },
+  skills: {
+    pageTitle: 'Skills',
+    pageSub: 'Manage AI skill packages, upload zips and bind them to agents',
+    create: 'New Skill',
+    searchPlaceholder: 'Search skill name',
+    uploaded: 'Uploaded',
+    noFile: 'No file',
+    noDescription: 'No description',
+    downloadFail: 'Failed to get download link',
+    expertSection: 'Expert Skills',
+    communitySection: 'Community Skills',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirm: 'Delete "{{name}}"? This cannot be undone.',
+    empty: {
+      noMatch: 'No matching skills',
+      none: 'No skills yet',
+      noMatchHint: 'Try other keywords',
+      noneHint: 'Create your first skill package to get started'
+    },
+    form: {
+      zipOnly: 'Only .zip files are supported',
+      filenameCharset: 'File names can only contain letters, digits, dots, underscores and hyphens',
+      tooLarge: 'File size cannot exceed 50MB',
+      parseFail: 'Failed to parse SKILL.md',
+      zipRequired: 'Please select a .zip file to upload',
+      editTitle: 'Edit Skill',
+      basicSection: 'Basics',
+      nameKey: 'Skill ID',
+      typeLabel: 'Skill Type',
+      typeExpert: 'Expert',
+      typeCommunity: 'Community',
+      displaySection: 'Display',
+      titleLabel: 'Display Name',
+      titlePlaceholder: 'Skill name',
+      descLabel: 'Description',
+      descPlaceholder: 'Describe what this skill does',
+      uploadSection: 'Upload File',
+      selectFile: 'Select a .zip file',
+      keepFileHint: 'Leave empty to keep the original file; selecting a new file replaces it',
+      zipHint: 'The ZIP must contain SKILL.md (root or any subdirectory), max 50MB',
+      previewTitle: 'SKILL.md Preview',
+      previewPlaceholder: 'Preview after selecting a zip file'
+    },
+    skillMdMissing: 'SKILL.md not found in this zip',
+    toast: {
+      created: 'Skill created',
+      updated: 'Skill updated',
+      deleted: 'Skill deleted'
+    }
+  },
+  providers: {
+    pageTitle: 'Models',
+    pageSub: 'Manage vendor preset configs and model lists',
+    create: 'New Provider',
+    searchPlaceholder: 'Search provider name',
+    otherSection: 'Others',
+    builtinBadge: 'Built-in',
+    modelFieldCount: '{{models}} models · {{fields}} form fields',
+    testConnection: 'Test Connection',
+    connectSuccess: 'Connected · {{ms}}ms',
+    connectFail: 'Connection failed · {{error}}',
+    unknownError: 'Unknown error',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirm: 'Delete "{{name}}"? This cannot be undone.',
+    empty: {
+      noMatch: 'No matching providers',
+      none: 'No providers yet',
+      noMatchHint: 'Try other keywords',
+      noneHint: 'Add your first provider config'
+    },
+    form: {
+      editTitle: 'Edit Provider',
+      optional: '(optional)',
+      protocolRequired: 'Please select a protocol',
+      protocolPlaceholder: 'Select a protocol',
+      basicSection: 'Basics',
+      keyLabel: 'Key (unique ID)',
+      nameLabel: 'Name',
+      nameRequired: 'Please enter a name',
+      zhDescLabel: 'Chinese Description',
+      zhDescPlaceholder: 'e.g. Zhipu GLM Anthropic-compatible coding service',
+      enDescLabel: 'English Description',
+      iconKeyLabel: 'Icon Key',
+      protocolSection: 'Protocol Config',
+      builtinLabel: 'Built-in Provider',
+      builtinCheckbox: 'Mark as built-in (uses a locked API key; users do not need to fill it in)',
+      modelsSection: 'Default Models',
+      modelTitle: 'Display Name',
+      modelType: 'Type',
+      modelContext: 'Context',
+      addModel: 'Add Model',
+      fieldsSection: 'Form Field Definitions',
+      fieldRequired: 'Required',
+      fieldSecret: 'Secret',
+      addField: 'Add Field',
+      protoAttrs: 'Protocol attributes ({{protocol}})',
+      testBtn: 'Test Connection',
+      baseUrlFirst: 'Please fill in the Base URL first',
+      fieldName: 'Name',
+      fieldApiUrl: 'API URL',
+      fieldApiKey: 'API Key'
+    },
+    effort: {
+      notApplicable: 'N/A',
+      configuredCount: '{{n}} levels configured',
+      add: 'Add effort',
+      remove: 'Remove {{effort}}'
+    },
+    toast: {
+      created: 'Provider created',
+      updated: 'Provider updated',
+      deleted: 'Provider deleted'
+    }
+  },
+  chat: {
+    sessions: 'Chat History',
+    searchPlaceholder: 'Search sessions...',
+    noMatch: 'No matching sessions',
+    empty: 'No chat history yet',
+    untitled: 'Untitled session',
+    deleteConfirmTitle: 'Confirm deletion?',
+    deleteConfirmDesc: 'All messages will be permanently deleted',
+    noMessages: 'No messages in this session',
+    backToList: 'Back to session list',
+    pickTitle: 'Pick a session',
+    pickDesc: 'Select a session from the list on the left to view the conversation',
+    parts: {
+      file: 'File',
+      expired: 'Temporary file no longer available',
+      metaOnly: 'Metadata only',
+      downloadAria: 'Download {{name}}'
+    },
+    toolCall: {
+      input: 'Input',
+      pending: 'Waiting for result…',
+      emptyOutput: '(no output)'
+    },
+    msg: {
+      roleUser: 'User',
+      roleAssistant: 'Assistant',
+      roleSystem: 'System',
+      roleTool: 'Tool',
+      hidden: 'Hidden'
+    },
+    legacyResult: 'Result',
+    thinking: 'Thinking',
+    errorFallback: 'An error occurred',
+    toolPreparing: 'Preparing tool call',
+    toast: {
+      sessionDeleted: 'Session deleted'
+    }
+  },
+  users: {
+    pageTitle: 'Users',
+    pageSub: 'Invite users, manage roles and account status. Admin only.',
+    toast: { updated: 'Updated', revoked: 'Revoked' },
+    columns: {
+      username: 'Username',
+      nickname: 'Nickname',
+      role: 'Role',
+      status: 'Status',
+      createdAt: 'Created At',
+      actions: 'Actions',
+      note: 'Note'
+    },
+    status: { pending: 'Pending', active: 'Enabled', disabled: 'Disabled' },
+    disable: 'Disable',
+    enable: 'Enable',
+    disableConfirmTitle: 'Disable this user?',
+    disableConfirmDesc: 'The user will be signed out immediately.',
+    reset: 'Reset',
+    resetPassword: 'Reset Password',
+    resetConfirmTitle: 'Reset the password?',
+    resetConfirmDesc: 'A new random password will be generated for "{{name}}"; the old one stops working and all sessions are signed out.',
+    revoke: 'Revoke',
+    expiresAt: 'Expires At',
+    inviteRevokeTitle: 'Revoke this invitation?',
+    inviteRevokeDesc: 'Once revoked, the invitation link stops working immediately and cannot be used for sign-up.',
+    loginLink: 'Login Link',
+    createInvite: 'Create Invite',
+    sectionUsers: 'Users',
+    sectionInvites: 'Invitations',
+    resetSuccessTitle: 'Password Reset',
+    resetSuccessHint: 'The new password is shown only once. Copy it now and deliver it securely to the user:',
+    copy: 'Copy',
+    copyFail: 'Copy failed. Please select and copy manually',
+    changePassword: {
+      mismatch: 'The two new passwords do not match',
+      rule: 'New password must be at least 8 characters and contain letters and numbers',
+      done: 'Password updated',
+      title: 'Change Password',
+      ok: 'Update Password',
+      current: 'Current password',
+      next: 'New password (at least 8 characters, letters and numbers)',
+      confirm: 'Confirm new password'
+    },
+    invite: {
+      roleMember: 'Member (read-only)',
+      roleMaintainer: 'Maintainer (manage resources)',
+      roleAdmin: 'Admin (invite + manage users)',
+      copied: 'Invitation link copied',
+      createdTitle: 'Invitation Created',
+      createTitle: 'Create Invitation Link',
+      done: 'Done',
+      create: 'Create',
+      close: 'Close',
+      onceHint: 'This link is shown only once. Copy and save it now — it cannot be retrieved after closing (if lost, revoke and recreate).',
+      roleLabel: 'Role',
+      noteLabel: 'Note (optional)',
+      notePlaceholder: 'e.g. for Zhang San',
+      ttlLabel: 'Validity (days, 1-30)'
+    },
+    loginLinkModal: {
+      copied: 'Login link copied',
+      title: 'Login Link',
+      done: 'Done',
+      close: 'Close',
+      hint: 'Send this link to the new user. After signing in via Casdoor (unregistered accounts can sign up on the login page), the user will appear on this page.',
+      generating: 'Generating…'
+    }
+  },
+  login: {
+    orgError: 'Organization does not exist or is not registered. Please check and retry',
+    modeErrorTitle: 'Unable to load sign-in mode',
+    modeErrorSub: 'Please retry later, or contact the platform administrator',
+    retry: 'Retry',
+    welcome: 'Welcome back',
+    casdoorHint: 'Sign in with your Zerone unified account',
+    builtinHint: 'Sign in with your account',
+    orgConfirmHint: 'Use the Confirm button below to apply the entered organization',
+    submit: 'Sign in to Agent Hub',
+    collapse: 'Collapse',
+    expand: 'More',
+    orgPlaceholder: 'Leave empty to use the default organization',
+    orgLabel: 'Organization',
+    confirm: 'Confirm',
+    usernamePlaceholder: 'Username',
+    passwordPlaceholder: 'Password',
+    submitShort: 'Sign In',
+    foot: 'Secured by Zerone authentication'
   },
   scenes: {
     pageTitle: 'Scenes',
@@ -241,6 +726,11 @@ const en = {
       promptSection: 'Prompt Configuration',
       promptPlaceholder: "Define the agent's behavior and role for this scene",
       enabled: 'Enabled'
+    },
+    toast: {
+      created: 'Scene created',
+      updated: 'Scene updated',
+      deleted: 'Scene deleted'
     }
   }
 } satisfies typeof zh

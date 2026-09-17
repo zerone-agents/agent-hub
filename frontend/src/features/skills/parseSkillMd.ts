@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import i18next from '@/i18n'
 
 /**
  * One SKILL.md discovered inside a zip.
@@ -41,7 +42,7 @@ export async function parseSkillMd(file: File): Promise<SkillMdEntry[]> {
   })
 
   if (candidates.length === 0) {
-    throw new Error('该 zip 包中未找到 SKILL.md')
+    throw new Error(i18next.t('skills.skillMdMissing'))
   }
 
   // Sort by path for stable order — matches backend FindAllSkillMd.

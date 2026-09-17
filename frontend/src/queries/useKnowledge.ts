@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { message } from 'antd'
 import { parseApiError } from '@/api/client'
 import {
@@ -85,18 +86,20 @@ export function useKnowledgeDetail(id: string) {
 }
 
 export function useCreateKnowledge() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: DatasetFormInput) => knowledgeApi.datasets.create(input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
-      message.success('知识库已创建')
+      message.success(t('knowledge.toast.created'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useUpdateKnowledge() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: DatasetFormInput }) =>
@@ -104,19 +107,20 @@ export function useUpdateKnowledge() {
     onSuccess: (_res, variables) => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasetDetail(variables.id) })
-      message.success('知识库已更新')
+      message.success(t('knowledge.toast.updated'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useDeleteKnowledge() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => knowledgeApi.datasets.remove([id]),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
-      message.success('知识库已删除')
+      message.success(t('knowledge.toast.deleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
@@ -135,63 +139,68 @@ export function useDocuments(datasetId: string, params: DocumentListParams = {})
 }
 
 export function useUploadDocuments(datasetId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (files: File[]) => knowledgeApi.documents.upload(datasetId, files),
     onSuccess: (docs) => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
-      message.success(`已上传 ${docs.length} 个文档`)
+      message.success(t('knowledge.toast.docsUploaded', { n: docs.length }))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useUpdateDocument(datasetId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ documentId, patch }: { documentId: string; patch: Record<string, unknown> }) =>
       knowledgeApi.documents.update(datasetId, documentId, patch),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success('文档已更新')
+      message.success(t('knowledge.toast.docUpdated'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useDeleteDocuments(datasetId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.remove(datasetId, documentIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
-      message.success('文档已删除')
+      message.success(t('knowledge.toast.docDeleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useParseDocuments(datasetId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.parse(datasetId, documentIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success('已加入解析队列')
+      message.success(t('knowledge.toast.parseQueued'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useStopParsingDocuments(datasetId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.stopParse(datasetId, documentIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success('已停止解析')
+      message.success(t('knowledge.toast.parseStopped'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
@@ -210,39 +219,42 @@ export function useChunks(datasetId: string, documentId: string, params: ChunkLi
 }
 
 export function useCreateChunk(datasetId: string, documentId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: ChunkFormInput) => knowledgeApi.chunks.create(datasetId, documentId, input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success('分块已新增')
+      message.success(t('knowledge.toast.chunkAdded'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useUpdateChunk(datasetId: string, documentId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ chunkId, input }: { chunkId: string; input: ChunkFormInput }) =>
       knowledgeApi.chunks.update(datasetId, documentId, chunkId, input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
-      message.success('分块已保存')
+      message.success(t('knowledge.toast.chunkSaved'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
 }
 
 export function useDeleteChunks(datasetId: string, documentId: string) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (chunkIds: string[]) => knowledgeApi.chunks.remove(datasetId, documentId, chunkIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success('分块已删除')
+      message.success(t('knowledge.toast.chunkDeleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })

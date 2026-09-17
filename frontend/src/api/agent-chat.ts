@@ -1,4 +1,5 @@
 import apiClient, { unwrapResponse } from './client'
+import i18next from '@/i18n'
 
 export interface AgentChatSession {
   id: string
@@ -117,7 +118,7 @@ export const agentChatApi = {
     }
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cross-boundary JSON: runtime may omit data.files
     if (!body.success || !body.data?.files?.length) {
-      throw new ApiError(body.error ?? '上传失败', resp.status)
+      throw new ApiError(body.error ?? i18next.t('apiErrors.uploadFailed'), resp.status)
     }
     return body.data.files
   },
