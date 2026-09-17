@@ -12,7 +12,9 @@ export const DEFAULT_LANGUAGE: AppLanguage = 'zh'
 /**
  * 语言归一化（唯一映射来源）：仅 'en' 为有效英文，其余（含无效值/
  * 未设置/null/undefined）一律归 'zh'。useLanguage / LanguageSwitch /
- * readStoredLanguage 共用，禁止在别处再写三元映射。
+ * readStoredLanguage 共用；新的**语言值归一**一律走本函数，勿再写
+ * 'en' ? 'en' : 'zh' 三元（语言值域以外的选择三元——如 antd locale
+ * 对象选择——不在此约束内）。
  */
 export function normalizeLanguage(
   lang: string | undefined | null
