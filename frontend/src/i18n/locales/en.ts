@@ -234,6 +234,10 @@ const en = {
       lastUsed: 'Last Used',
       expiresAt: 'Expires At',
       actions: 'Actions'
+    },
+    toast: {
+      created: 'Token created',
+      revoked: 'Token revoked'
     }
   },
   dashboard: {
@@ -305,7 +309,75 @@ const en = {
     clearTitle: 'Clear the configuration?',
     clearDesc: 'After clearing, deployed agents will no longer carry AIGC labels.',
     clear: 'Clear',
-    clearConfig: 'Clear Configuration'
+    clearConfig: 'Clear Configuration',
+    toast: {
+      saved: 'AIGC labeling configuration saved',
+      keyRegenerated: 'Signing key regenerated',
+      cleared: 'AIGC labeling configuration cleared'
+    }
+  },
+  tools: {
+    toast: {
+      uploaded: 'Custom tool uploaded',
+      fileUpdated: 'Tool file updated',
+      updated: 'Tool updated',
+      deleted: 'Tool deleted'
+    }
+  },
+  agents: {
+    toast: {
+      knowledgeUpdated: 'Knowledge bases updated',
+      agentCreated: 'Agent created',
+      agentUpdated: 'Agent updated',
+      agentDeleted: 'Agent deleted',
+      subagentUpdated: 'Subagent updated',
+      toolsUpdated: 'Tools updated',
+      skillsUpdated: 'Skills updated'
+    }
+  },
+  knowledge: {
+    toast: {
+      created: 'Knowledge base created',
+      updated: 'Knowledge base updated',
+      deleted: 'Knowledge base deleted',
+      docUpdated: 'Document updated',
+      docDeleted: 'Document deleted',
+      docsUploaded: '{{n}} documents uploaded',
+      parseQueued: 'Queued for parsing',
+      parseStopped: 'Parsing stopped',
+      chunkAdded: 'Chunk added',
+      chunkSaved: 'Chunk saved',
+      chunkDeleted: 'Chunk deleted'
+    }
+  },
+  mcps: {
+    toast: {
+      created: 'MCP created',
+      updated: 'MCP updated',
+      deleted: 'MCP deleted',
+      agentsUpdated: 'Agent MCP relations updated',
+      probeDone: 'Probe finished',
+      probeFailed: 'Probe failed'
+    }
+  },
+  skills: {
+    toast: {
+      created: 'Skill created',
+      updated: 'Skill updated',
+      deleted: 'Skill deleted'
+    }
+  },
+  providers: {
+    toast: {
+      created: 'Provider created',
+      updated: 'Provider updated',
+      deleted: 'Provider deleted'
+    }
+  },
+  chat: {
+    toast: {
+      sessionDeleted: 'Session deleted'
+    }
   },
   scenes: {
     pageTitle: 'Scenes',
@@ -334,6 +406,11 @@ const en = {
       promptSection: 'Prompt Configuration',
       promptPlaceholder: "Define the agent's behavior and role for this scene",
       enabled: 'Enabled'
+    },
+    toast: {
+      created: 'Scene created',
+      updated: 'Scene updated',
+      deleted: 'Scene deleted'
     }
   }
 } satisfies typeof zh

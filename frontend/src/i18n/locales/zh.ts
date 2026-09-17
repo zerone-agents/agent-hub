@@ -232,6 +232,10 @@ const zh = {
       lastUsed: '最后使用',
       expiresAt: '过期时间',
       actions: '操作'
+    },
+    toast: {
+      created: 'Token 已创建',
+      revoked: 'Token 已撤销'
     }
   },
   dashboard: {
@@ -303,7 +307,75 @@ const zh = {
     clearTitle: '确认清除配置？',
     clearDesc: '清除后部署 Agent 将不再携带 AIGC 标识。',
     clear: '清除',
-    clearConfig: '清除配置'
+    clearConfig: '清除配置',
+    toast: {
+      saved: 'AIGC 标识配置已保存',
+      keyRegenerated: '签名密钥已重新生成',
+      cleared: 'AIGC 标识配置已清除'
+    }
+  },
+  tools: {
+    toast: {
+      uploaded: '自定义工具已上传',
+      fileUpdated: '工具文件已更新',
+      updated: '工具已更新',
+      deleted: '工具已删除'
+    }
+  },
+  agents: {
+    toast: {
+      knowledgeUpdated: '知识库已更新',
+      agentCreated: '代理已创建',
+      agentUpdated: '代理已更新',
+      agentDeleted: '代理已删除',
+      subagentUpdated: '子代理已更新',
+      toolsUpdated: '工具已更新',
+      skillsUpdated: '技能已更新'
+    }
+  },
+  knowledge: {
+    toast: {
+      created: '知识库已创建',
+      updated: '知识库已更新',
+      deleted: '知识库已删除',
+      docUpdated: '文档已更新',
+      docDeleted: '文档已删除',
+      docsUploaded: '已上传 {{n}} 个文档',
+      parseQueued: '已加入解析队列',
+      parseStopped: '已停止解析',
+      chunkAdded: '分块已新增',
+      chunkSaved: '分块已保存',
+      chunkDeleted: '分块已删除'
+    }
+  },
+  mcps: {
+    toast: {
+      created: 'MCP 已创建',
+      updated: 'MCP 已更新',
+      deleted: 'MCP 已删除',
+      agentsUpdated: 'Agent MCP 关系已更新',
+      probeDone: '探测完成',
+      probeFailed: '探测失败'
+    }
+  },
+  skills: {
+    toast: {
+      created: '技能已创建',
+      updated: '技能已更新',
+      deleted: '技能已删除'
+    }
+  },
+  providers: {
+    toast: {
+      created: 'Provider 已创建',
+      updated: 'Provider 已更新',
+      deleted: 'Provider 已删除'
+    }
+  },
+  chat: {
+    toast: {
+      sessionDeleted: '会话已删除'
+    }
   },
   scenes: {
     pageTitle: '场景管理',
@@ -332,6 +404,11 @@ const zh = {
       promptSection: '提示词配置',
       promptPlaceholder: '输入该场景的提示词，定义 Agent 的行为和角色',
       enabled: '启用状态'
+    },
+    toast: {
+      created: '场景已创建',
+      updated: '场景已更新',
+      deleted: '场景已删除'
     }
   }
 }

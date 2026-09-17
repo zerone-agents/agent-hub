@@ -4,6 +4,7 @@ import { message } from 'antd'
 import { chatApi, type ChatSession, type ChatMessage } from '@/api/chat'
 import type { PaginatedData } from '@/types/api'
 import { parseApiError, unwrapResponse } from '@/api/client'
+import { useTranslation } from 'react-i18next'
 
 export function useChatSessions() {
   const [page, setPage] = useState(1)
@@ -37,12 +38,13 @@ export function useChatMessages(sessionId: string | null) {
 }
 
 export function useDeleteChatSession() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => chatApi.deleteSession(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['chat-sessions'] })
-      message.success('会话已删除')
+      message.success(t('chat.toast.sessionDeleted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })
