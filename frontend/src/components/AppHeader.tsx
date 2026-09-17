@@ -240,7 +240,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
           <Breadcrumb
             className={styles.breadcrumb}
             items={breadcrumbs.map((item) => ({
-              title: item.path ? <Link to={item.path}>{item.label}</Link> : item.label
+              title: item.path ? <Link to={item.path}>{t(item.label)}</Link> : t(item.label)
             }))}
           />
         </div>
@@ -267,7 +267,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
                 onClick={async () => { await handleNavClick(item.path); }}
               >
                 <IconComp size={18} />
-                {item.label}
+                {t(item.label)}
               </button>
             )
           })}

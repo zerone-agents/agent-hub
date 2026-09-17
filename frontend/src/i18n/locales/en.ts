@@ -13,7 +13,100 @@ const en = {
     totalItems: '{{total}} items in total',
     brandSubtitle: 'AI Agent Management Platform',
     logout: 'Log Out',
-    loading: 'Loading...'
+    loading: 'Loading...',
+    form: {
+      required: 'Please enter {{label}}',
+      maxLength: '{{label}} must be at most {{max}} characters',
+      identifierCharset: '{{label}} can only contain letters, digits, dots, underscores and hyphens',
+      agentCharset: '{{label}} can only contain lowercase letters, digits and hyphens, must start with a letter, and hyphens must not be consecutive or at either end'
+    }
+  },
+  apiErrors: {
+    requestFailed: 'Request failed',
+    unauthorized: 'Session expired, please sign in again',
+    forbidden: 'You do not have permission to perform this action',
+    notFound: 'Resource does not exist or has been deleted',
+    serverBusy: 'Server is busy, please try again later',
+    timeout: 'Request timed out, please check your network',
+    networkError: 'Network connection failed',
+    operationFailed: 'Operation failed, please retry',
+    uploadFailed: 'Upload failed'
+  },
+  time: {
+    justNow: 'just now',
+    minutesAgo: '{{n}} minutes ago',
+    hoursAgo: '{{n}} hours ago',
+    daysAgo: '{{n}} days ago'
+  },
+  // antd Form validateMessages: values keep antd's ${label}/${min} syntax —
+  // i18next interpolation is {{}} by default; ${} passes through to antd.
+  validate: {
+    default: 'Validation failed',
+    required: 'Please enter ${label}',
+    enum: '${label} must be one of [${enum}]',
+    whitespace: '${label} cannot be whitespace only',
+    types: {
+      email: '${label} is not a valid email',
+      url: '${label} is not a valid url'
+    },
+    string: {
+      len: '${label} must be exactly ${len} characters',
+      min: '${label} must be at least ${min} characters',
+      max: '${label} must be at most ${max} characters'
+    },
+    number: {
+      min: '${label} cannot be less than ${min}',
+      max: '${label} cannot be greater than ${max}'
+    }
+  },
+  nav: {
+    home: 'Home',
+    settings: 'Settings',
+    detail: 'Details',
+    settingsLabels: {
+      aigc: 'AIGC Labeling',
+      users: 'Users',
+      auditLogs: 'Audit Logs'
+    },
+    dashboard: 'Dashboard',
+    agents: 'Agents',
+    tools: 'Tools',
+    mcps: 'MCP Configs',
+    skills: 'Skills',
+    providers: 'Models',
+    knowledge: 'Knowledge Bases',
+    scenes: 'Scenes',
+    chat: 'Chat History'
+  },
+  agentIcons: {
+    chat: 'General Chat',
+    chart: 'Data Analysis',
+    shield: 'Security & Compliance',
+    crosshair: 'Precision Targeting',
+    userCircle: 'User Management',
+    terminal: 'Terminal Ops',
+    robot: 'Smart Assistant',
+    lightbulb: 'Creative Ideas',
+    cpu: 'Computing',
+    detective: 'Investigation',
+    compass: 'Navigation',
+    rocket: 'Fast Execution',
+    gear: 'Engineering Config',
+    code: 'Development',
+    education: 'Education',
+    globe: 'Globalization',
+    puzzle: 'Integration',
+    eye: 'Monitoring',
+    megaphone: 'Marketing',
+    notebook: 'Knowledge Management',
+    firstAid: 'Healthcare',
+    scales: 'Legal',
+    presentation: 'Business Presentation',
+    clipboard: 'Task Management',
+    headset: 'Customer Service',
+    wrench: 'Repair Tools',
+    lightning: 'Rapid Response',
+    finance: 'Finance'
   },
   components: {
     confirmDelete: {

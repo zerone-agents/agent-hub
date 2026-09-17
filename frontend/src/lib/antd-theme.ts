@@ -108,22 +108,5 @@ export function createAntdTheme(
 // Stable default retained for isolated component tests.
 export const antdTheme = createAntdTheme(getTheme(defaultThemeId), 'light')
 
-export const formValidateMessages = {
-  default: '字段校验失败',
-  required: '请输入${label}',
-  enum: '${label} 必须是 [${enum}] 中的一个',
-  whitespace: '${label} 不能为空白字符',
-  types: {
-    email: '${label} 格式不正确',
-    url: '${label} 格式不正确'
-  },
-  string: {
-    len: '${label} 长度必须为 ${len}',
-    min: '${label} 至少 ${min} 字符',
-    max: '${label} 最多 ${max}'
-  },
-  number: {
-    min: '${label} 不能小于 ${min}',
-    max: '${label} 不能大于 ${max}'
-  }
-} as const
+// Form validateMessages 已迁至 i18n 资源（validate.* key，值保留 antd 的
+// ${label} 语法），由 App.tsx 内 t() 构造——语言切换时随 ConfigProvider 重渲染。

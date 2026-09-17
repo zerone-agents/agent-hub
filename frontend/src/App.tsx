@@ -9,12 +9,13 @@ import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import { router } from '@/routes'
 import { queryClient } from '@/lib/query-client'
-import { createAntdTheme, formValidateMessages } from '@/lib/antd-theme'
+import { createAntdTheme } from '@/lib/antd-theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ManualCopyHost } from '@/components/ManualCopyDialog'
 import { consumeAuthParams } from '@/lib/consume-auth-params'
 import { useLanguage } from '@/hooks/useLanguage'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
+import { useTranslation } from 'react-i18next'
 import { getTheme, type ThemeColors } from '@/styles/themes'
 import { useThemeStore } from '@/stores/theme'
 
@@ -80,6 +81,28 @@ export default function App() {
     (state) => state.syncSystemAppearance
   )
   const { language } = useLanguage()
+  const { t } = useTranslation()
+  // antd Form 校验消息：值保留 antd 的 ${label} 语法（资源侧注释有说明），
+  // 语言切换时 ConfigProvider 随 language 重渲染、消息随之切换。
+  const validateMessages = {
+    default: t('validate.default'),
+    required: t('validate.required'),
+    enum: t('validate.enum'),
+    whitespace: t('validate.whitespace'),
+    types: {
+      email: t('validate.types.email'),
+      url: t('validate.types.url')
+    },
+    string: {
+      len: t('validate.string.len'),
+      min: t('validate.string.min'),
+      max: t('validate.string.max')
+    },
+    number: {
+      min: t('validate.number.min'),
+      max: t('validate.number.max')
+    }
+  }
   const selectedTheme = getTheme(themeId)
   const antdTheme = useMemo(
     () => createAntdTheme(selectedTheme, appearance),
@@ -109,13 +132,13 @@ export default function App() {
       <LobeThemeProvider
         appearance={appearance}
         theme={antdTheme}
-        customFonts={[t.fontSans, t.fontMono]}
+        customFonts={[tk.fontSans, tk.fontMono]}
       >
         <StyleThemeProvider theme={antdTheme}>
           <ConfigProvider
             locale={language === 'zh' ? zhCN : enUS}
             theme={antdTheme}
-            form={{ validateMessages: formValidateMessages }}
+            form={{ validateMessages }}
           >
             <AntdApp>
               <QueryClientProvider client={queryClient}>

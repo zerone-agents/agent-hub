@@ -11,7 +11,100 @@ const zh = {
     totalItems: '共 {{total}} 条',
     brandSubtitle: 'AI Agent 管理平台',
     logout: '退出登录',
-    loading: '加载中...'
+    loading: '加载中...',
+    form: {
+      required: '请输入{{label}}',
+      maxLength: '{{label}}长度不能超过 {{max}} 个字符',
+      identifierCharset: '{{label}}只能包含字母、数字、点、下划线和横线',
+      agentCharset: '{{label}}只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾'
+    }
+  },
+  apiErrors: {
+    requestFailed: '请求失败',
+    unauthorized: '登录已过期，请重新登录',
+    forbidden: '没有权限执行此操作',
+    notFound: '资源不存在或已被删除',
+    serverBusy: '服务器繁忙，请稍后重试',
+    timeout: '请求超时，请检查网络',
+    networkError: '网络连接失败',
+    operationFailed: '操作失败，请重试',
+    uploadFailed: '上传失败'
+  },
+  time: {
+    justNow: '刚刚',
+    minutesAgo: '{{n}} 分钟前',
+    hoursAgo: '{{n}} 小时前',
+    daysAgo: '{{n}} 天前'
+  },
+  // antd Form validateMessages：值保留 antd 的 ${label}/${min} 语法——
+  // i18next 默认插值为 {{}}，${} 原样透传给 antd 替换。
+  validate: {
+    default: '字段校验失败',
+    required: '请输入${label}',
+    enum: '${label} 必须是 [${enum}] 中的一个',
+    whitespace: '${label} 不能为空白字符',
+    types: {
+      email: '${label} 格式不正确',
+      url: '${label} 格式不正确'
+    },
+    string: {
+      len: '${label} 长度必须为 ${len}',
+      min: '${label} 至少 ${min} 字符',
+      max: '${label} 最多 ${max}'
+    },
+    number: {
+      min: '${label} 不能小于 ${min}',
+      max: '${label} 不能大于 ${max}'
+    }
+  },
+  nav: {
+    home: '首页',
+    settings: '设置',
+    detail: '详情',
+    settingsLabels: {
+      aigc: 'AIGC 标识配置',
+      users: '用户管理',
+      auditLogs: '审计日志'
+    },
+    dashboard: '仪表盘',
+    agents: 'Agent管理',
+    tools: '工具管理',
+    mcps: 'MCP配置',
+    skills: '技能管理',
+    providers: '模型管理',
+    knowledge: '知识库管理',
+    scenes: '场景管理',
+    chat: '聊天记录'
+  },
+  agentIcons: {
+    chat: '通用对话',
+    chart: '数据分析',
+    shield: '安全合规',
+    crosshair: '精准定位',
+    userCircle: '用户管理',
+    terminal: '终端运维',
+    robot: '智能助手',
+    lightbulb: '创意灵感',
+    cpu: '计算处理',
+    detective: '调查分析',
+    compass: '导航指引',
+    rocket: '高速执行',
+    gear: '工程配置',
+    code: '编程开发',
+    education: '教育学习',
+    globe: '全球化',
+    puzzle: '集成连接',
+    eye: '监控观测',
+    megaphone: '营销推广',
+    notebook: '知识管理',
+    firstAid: '健康医疗',
+    scales: '法务平衡',
+    presentation: '商业展示',
+    clipboard: '任务管理',
+    headset: '客户服务',
+    wrench: '维修工具',
+    lightning: '快速响应',
+    finance: '财务金融'
   },
   components: {
     confirmDelete: {

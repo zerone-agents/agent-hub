@@ -1,5 +1,6 @@
 import apiClient from "./client";
 import type { AxiosResponse } from "axios";
+import i18next from "@/i18n";
 
 /**
  * Knowledge base API client + field anti-corruption layer.
@@ -435,7 +436,7 @@ async function unwrap<T>(
   const body = res.data;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- axios res.data typed as Envelope<T> but runtime may be undefined for empty/error responses
   if (body && !body.success) {
-    throw new Error(body.error ?? body.message ?? "请求失败");
+    throw new Error(body.error ?? body.message ?? i18next.t("apiErrors.requestFailed"));
   }
   return body.data;
 }
