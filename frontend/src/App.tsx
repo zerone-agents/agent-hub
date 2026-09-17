@@ -5,12 +5,15 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider as LobeThemeProvider } from '@lobehub/ui'
 import { ThemeProvider as StyleThemeProvider } from 'antd-style'
 import { App as AntdApp } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
+import enUS from 'antd/locale/en_US'
 import { router } from '@/routes'
 import { queryClient } from '@/lib/query-client'
 import { createAntdTheme, formValidateMessages } from '@/lib/antd-theme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ManualCopyHost } from '@/components/ManualCopyDialog'
 import { consumeAuthParams } from '@/lib/consume-auth-params'
+import { useLanguage } from '@/hooks/useLanguage'
 import { tokens as t } from '@/styles/tokens'
 import { getTheme, type ThemeColors } from '@/styles/themes'
 import { useThemeStore } from '@/stores/theme'
@@ -76,6 +79,7 @@ export default function App() {
   const syncSystemAppearance = useThemeStore(
     (state) => state.syncSystemAppearance
   )
+  const { language } = useLanguage()
   const selectedTheme = getTheme(themeId)
   const antdTheme = useMemo(
     () => createAntdTheme(selectedTheme, appearance),
@@ -109,6 +113,7 @@ export default function App() {
       >
         <StyleThemeProvider theme={antdTheme}>
           <ConfigProvider
+            locale={language === 'zh' ? zhCN : enUS}
             theme={antdTheme}
             form={{ validateMessages: formValidateMessages }}
           >
