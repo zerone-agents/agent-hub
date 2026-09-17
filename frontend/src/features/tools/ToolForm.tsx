@@ -33,38 +33,38 @@ interface ToolFormModeConfig {
 
 const TOOL_FORM_MODES: Record<ToolFormMode, ToolFormModeConfig> = {
   create: {
-    title: '上传自定义工具',
-    submitText: '上传',
+    title: 'tools.form.uploadTitle',
+    submitText: 'tools.form.uploadSubmit',
     showMetadata: true,
     showNameField: true,
     nameEditable: true,
     fileRequired: true,
-    fileSectionTitle: '工具文件',
+    fileSectionTitle: 'tools.form.toolFileSection',
     fileHint: '',
     showTrustHints: true,
     prefillFromTool: false
   },
   edit: {
-    title: '编辑工具',
-    submitText: '更新',
+    title: 'tools.form.editToolTitle',
+    submitText: 'tools.form.updateSubmit',
     showMetadata: true,
     showNameField: true,
     nameEditable: false,
     fileRequired: false,
-    fileSectionTitle: '替换文件（可选）',
-    fileHint: '留空则保留原文件，选择新文件将替换',
+    fileSectionTitle: 'tools.form.replaceFileOptional',
+    fileHint: 'tools.form.keepFile',
     showTrustHints: false,
     prefillFromTool: true
   },
   upload: {
-    title: '补传/替换工具文件',
-    submitText: '补传',
+    title: 'tools.form.repairTitle',
+    submitText: 'tools.form.repairSubmit',
     showMetadata: false,
     showNameField: false,
     nameEditable: false,
     fileRequired: true,
-    fileSectionTitle: '工具文件',
-    fileHint: '支持 .ts / .mts / .js / .mjs 文件，最大 5MB',
+    fileSectionTitle: 'tools.form.toolFileSection',
+    fileHint: 'tools.form.uploadHint',
     showTrustHints: false,
     prefillFromTool: true
   }
@@ -212,17 +212,17 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       // 校验失败必须同时清掉已持有的文件，否则按钮仍显示旧文件名、提交会带上旧文件
       setSelectedFile(null)
-      setUploadError('仅支持 .ts / .mts / .js / .mjs 文件')
+      setUploadError(t('tools.form.fileTypeError'))
       return Upload.LIST_IGNORE
     }
     if (file.size === 0) {
       setSelectedFile(null)
-      setUploadError('文件不能为空')
+      setUploadError(t('tools.form.fileEmpty'))
       return Upload.LIST_IGNORE
     }
     if (file.size > MAX_FILE_SIZE) {
       setSelectedFile(null)
-      setUploadError('文件大小不能超过 5MB')
+      setUploadError(t('tools.form.fileTooBig'))
       return Upload.LIST_IGNORE
     }
     setUploadError('')
@@ -282,7 +282,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
       destroyOnHidden
     >
       <div className={styles.modalHead}>
-        <div className={styles.modalTitle}>{cfg.title}</div>
+        <div className={styles.modalTitle}>{t(cfg.title)}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
           <XIcon size={18} />
         </button>
@@ -318,7 +318,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         )}
 
         <div className={styles.sectionTitle} style={{ marginTop: cfg.showMetadata ? 20 : 0 }}>
-          {cfg.fileSectionTitle}
+          {t(cfg.fileSectionTitle)}
         </div>
         <Upload beforeUpload={beforeUpload} showUploadList={false} accept=".ts,.mts,.js,.mjs" maxCount={1}>
           <button type="button" className={styles.uploadBtn}>
@@ -328,7 +328,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
         </Upload>
         {uploadError && <div className={styles.uploadError}>{uploadError}</div>}
         {cfg.fileHint && !uploadError && (
-          <div className={styles.uploadHint}>{cfg.fileHint}</div>
+          <div className={styles.uploadHint}>{t(cfg.fileHint)}</div>
         )}
         {cfg.showTrustHints && (
           <div className={styles.hintBlock}>
@@ -342,7 +342,7 @@ export default function ToolForm({ open, mode, editingTool, onClose }: ToolFormP
       <div className={styles.modalFoot}>
         <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {cfg.submitText}
+          {t(cfg.submitText)}
         </PrimaryButton>
       </div>
     </Modal>

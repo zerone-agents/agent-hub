@@ -105,7 +105,9 @@ const zh = {
     headset: '客户服务',
     wrench: '维修工具',
     lightning: '快速响应',
-    finance: '财务金融'
+    finance: '财务金融',
+    brain: 'AI 智能',
+    magic: 'AI 生成'
   },
   components: {
     confirmDelete: {
@@ -348,7 +350,20 @@ const zh = {
       selectFile: '选择 .ts / .mts / .js / .mjs 文件',
       hint1: '工具标识必须与文件内默认导出的 name 一致，部署时由 Runtime 最终校验',
       hint2: '仅支持 Node.js 内置模块、@zerone-agent/agent-runtime/tools 与 zod，不安装 npm 依赖',
-      hint3: '工具将在 Agent Runtime 进程中执行并拥有完整 Node.js 权限，仅上传可信代码'
+      hint3: '工具将在 Agent Runtime 进程中执行并拥有完整 Node.js 权限，仅上传可信代码',
+      uploadTitle: '上传自定义工具',
+      uploadSubmit: '上传',
+      toolFileSection: '工具文件',
+      editToolTitle: '编辑工具',
+      updateSubmit: '更新',
+      replaceFileOptional: '替换文件（可选）',
+      keepFile: '留空则保留原文件，选择新文件将替换',
+      repairTitle: '补传/替换工具文件',
+      repairSubmit: '补传',
+      uploadHint: '支持 .ts / .mts / .js / .mjs 文件，最大 5MB',
+      fileTypeError: '仅支持 .ts / .mts / .js / .mjs 文件',
+      fileEmpty: '文件不能为空',
+      fileTooBig: '文件大小不能超过 5MB'
     },
     toast: {
       uploaded: '自定义工具已上传',
@@ -586,6 +601,9 @@ const zh = {
       hidden: '已隐藏'
     },
     legacyResult: '结果',
+    thinking: '思考过程',
+    errorFallback: '发生错误',
+    toolPreparing: '工具调用准备中',
     toast: {
       sessionDeleted: '会话已删除'
     }
@@ -613,6 +631,9 @@ const zh = {
     resetConfirmTitle: '确认重置密码？',
     resetConfirmDesc: '将为 "{{name}}" 生成随机新密码，原密码立即失效，所有会话下线。',
     revoke: '撤销',
+    expiresAt: '过期时间',
+    inviteRevokeTitle: '确认撤销该邀请？',
+    inviteRevokeDesc: '撤销后该邀请链接立即失效，无法用于注册。',
     loginLink: '登录链接',
     createInvite: '创建邀请',
     sectionUsers: '用户',

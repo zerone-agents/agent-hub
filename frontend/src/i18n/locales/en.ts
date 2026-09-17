@@ -107,7 +107,9 @@ const en = {
     headset: 'Customer Service',
     wrench: 'Repair Tools',
     lightning: 'Rapid Response',
-    finance: 'Finance'
+    finance: 'Finance',
+    brain: 'AI Intelligence',
+    magic: 'AI Generated'
   },
   components: {
     confirmDelete: {
@@ -350,7 +352,20 @@ const en = {
       selectFile: 'Select a .ts / .mts / .js / .mjs file',
       hint1: 'The tool ID must match the default export name in the file; verified by the Runtime at deploy time',
       hint2: 'Only Node.js built-in modules, @zerone-agent/agent-runtime/tools and zod are supported; no npm dependencies',
-      hint3: 'Tools run inside the Agent Runtime process with full Node.js privileges — upload trusted code only'
+      hint3: 'Tools run inside the Agent Runtime process with full Node.js privileges — upload trusted code only',
+      uploadTitle: 'Upload Custom Tool',
+      uploadSubmit: 'Upload',
+      toolFileSection: 'Tool File',
+      editToolTitle: 'Edit Tool',
+      updateSubmit: 'Update',
+      replaceFileOptional: 'Replace File (optional)',
+      keepFile: 'Leave empty to keep the original file; selecting a new file replaces it',
+      repairTitle: 'Upload/Replace Tool File',
+      repairSubmit: 'Upload',
+      uploadHint: 'Supports .ts / .mts / .js / .mjs files, max 5MB',
+      fileTypeError: 'Only .ts / .mts / .js / .mjs files are supported',
+      fileEmpty: 'File cannot be empty',
+      fileTooBig: 'File size cannot exceed 5MB'
     },
     toast: {
       uploaded: 'Custom tool uploaded',
@@ -588,6 +603,9 @@ const en = {
       hidden: 'Hidden'
     },
     legacyResult: 'Result',
+    thinking: 'Thinking',
+    errorFallback: 'An error occurred',
+    toolPreparing: 'Preparing tool call',
     toast: {
       sessionDeleted: 'Session deleted'
     }
@@ -615,6 +633,9 @@ const en = {
     resetConfirmTitle: 'Reset the password?',
     resetConfirmDesc: 'A new random password will be generated for "{{name}}"; the old one stops working and all sessions are signed out.',
     revoke: 'Revoke',
+    expiresAt: 'Expires At',
+    inviteRevokeTitle: 'Revoke this invitation?',
+    inviteRevokeDesc: 'Once revoked, the invitation link stops working immediately and cannot be used for sign-up.',
     loginLink: 'Login Link',
     createInvite: 'Create Invite',
     sectionUsers: 'Users',

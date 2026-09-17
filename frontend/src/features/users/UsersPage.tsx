@@ -215,7 +215,7 @@ export default function UsersPage() {
       render: (s: string) => <Tag color={inviteStatusColor(s)}>{s}</Tag>
     },
     {
-      title: '过期时间',
+      title: t('users.expiresAt'),
       dataIndex: 'expiresAt',
       key: 'expiresAt',
       width: 180,
@@ -228,8 +228,8 @@ export default function UsersPage() {
       render: (_, record) =>
         record.status === 'pending' ? (
           <Popconfirm
-            title="确认撤销该邀请？"
-            description="撤销后该邀请链接立即失效，无法用于注册。"
+            title={t('users.inviteRevokeTitle')}
+            description={t('users.inviteRevokeDesc')}
             okText={t('users.revoke')}
             okButtonProps={{ danger: true }}
             cancelText={t('common.cancel')}
