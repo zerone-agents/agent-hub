@@ -42,13 +42,13 @@ func (TemplateDefinition) TableName() string { return "template_definitions" }
 // TemplateVersion 是模板的一个不可变 spec 版本；同一 (template_id, version)
 // 的内容必须一致（内容寻址），重复提交相同内容按幂等返回既有版本。
 type TemplateVersion struct {
-	ID         uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	TemplateID uint64    `gorm:"not null;uniqueIndex:uk_template_versions,priority:1;index" json:"templateId"`
-	Version    string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_template_versions,priority:2" json:"version"`
-	Spec       string    `gorm:"type:longtext;not null" json:"spec"`
-	ContentHash string   `gorm:"type:char(64);not null;index" json:"contentHash"`
-	CreatedBy  string    `gorm:"type:varchar(160);not null;default:''" json:"createdBy"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	TemplateID  uint64    `gorm:"not null;uniqueIndex:uk_template_versions,priority:1;index" json:"templateId"`
+	Version     string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_template_versions,priority:2" json:"version"`
+	Spec        string    `gorm:"type:longtext;not null" json:"spec"`
+	ContentHash string    `gorm:"type:char(64);not null;index" json:"contentHash"`
+	CreatedBy   string    `gorm:"type:varchar(160);not null;default:''" json:"createdBy"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 func (TemplateVersion) TableName() string { return "template_versions" }
@@ -57,15 +57,15 @@ func (TemplateVersion) TableName() string { return "template_versions" }
 // 至多一行；同 key 同 mapping_hash 重试直接返回首次 result，同 key 不同
 // mapping 报 409。并发安装靠唯一索引保证只有一个写入成功。
 type TemplateInstall struct {
-	ID           uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	TenantID     string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_template_installs_key,priority:1;index" json:"-"`
-	TemplateID   uint64    `gorm:"not null;index" json:"templateId"`
-	TemplateName string    `gorm:"type:varchar(253);not null" json:"templateName"`
-	Version      string    `gorm:"type:varchar(64);not null" json:"version"`
-	MappingHash  string    `gorm:"type:char(64);not null" json:"mappingHash"`
-	IdempotencyKey string  `gorm:"column:idempotency_key;type:varchar(191);not null;uniqueIndex:uk_template_installs_key,priority:2" json:"idempotencyKey"`
-	Result       string    `gorm:"type:longtext;not null" json:"result"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID             uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID       string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_template_installs_key,priority:1;index" json:"-"`
+	TemplateID     uint64    `gorm:"not null;index" json:"templateId"`
+	TemplateName   string    `gorm:"type:varchar(253);not null" json:"templateName"`
+	Version        string    `gorm:"type:varchar(64);not null" json:"version"`
+	MappingHash    string    `gorm:"type:char(64);not null" json:"mappingHash"`
+	IdempotencyKey string    `gorm:"column:idempotency_key;type:varchar(191);not null;uniqueIndex:uk_template_installs_key,priority:2" json:"idempotencyKey"`
+	Result         string    `gorm:"type:longtext;not null" json:"result"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 func (TemplateInstall) TableName() string { return "template_installs" }

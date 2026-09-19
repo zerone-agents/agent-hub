@@ -149,13 +149,13 @@ func (h *TemplateAdminHandler) GetVersion(c *gin.Context) {
 }
 
 type templateInstallRequest struct {
-	Version        string                 `json:"version,omitempty"`
+	Version        string                   `json:"version,omitempty"`
 	Mapping        services.TemplateMapping `json:"mapping"`
-	Sections       []string               `json:"sections,omitempty"`
-	Strategy       string                 `json:"strategy,omitempty"`
-	Force          bool                   `json:"force,omitempty"`
-	IdempotencyKey string                 `json:"idempotencyKey,omitempty"`
-	TargetRunID    string                 `json:"targetRunId,omitempty"`
+	Sections       []string                 `json:"sections,omitempty"`
+	Strategy       string                   `json:"strategy,omitempty"`
+	Force          bool                     `json:"force,omitempty"`
+	IdempotencyKey string                   `json:"idempotencyKey,omitempty"`
+	TargetRunID    string                   `json:"targetRunId,omitempty"`
 }
 
 // Preview 安装预览：body 同 install（idempotencyKey/targetRunId 忽略），

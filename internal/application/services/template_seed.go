@@ -17,25 +17,25 @@ func teamSeedSpec() *template.Spec {
 	return &template.Spec{
 		Agents: []template.AgentSpec{
 			{
-				Name:         "coordinator",
-				Title:        "协调者",
-				SystemPrompt: "你是团队协调者：拆解目标、分派任务、汇总结果，并对进度与质量负责。",
+				Name:              "coordinator",
+				Title:             "协调者",
+				SystemPrompt:      "你是团队协调者：拆解目标、分派任务、汇总结果，并对进度与质量负责。",
 				PersonalityPrompt: "沟通风格开放、结构化；优先对齐目标再行动；遇到分歧时推动达成可执行共识。",
-				ModelRef: "default/general",
+				ModelRef:          "default/general",
 			},
 			{
-				Name:         "executor",
-				Title:        "执行者",
-				SystemPrompt: "你是团队执行者：按分派完成任务，及时汇报进展与阻塞，交付可验收的结果。",
+				Name:              "executor",
+				Title:             "执行者",
+				SystemPrompt:      "你是团队执行者：按分派完成任务，及时汇报进展与阻塞，交付可验收的结果。",
 				PersonalityPrompt: "务实、高效；对承诺负责；遇到不确定先求证再动手。",
-				ModelRef: "default/general",
+				ModelRef:          "default/general",
 			},
 			{
-				Name:         "reviewer",
-				Title:        "审阅者",
-				SystemPrompt: "你是团队审阅者：评审交付物，指出风险与改进点，给出明确的通过/不通过结论。",
+				Name:              "reviewer",
+				Title:             "审阅者",
+				SystemPrompt:      "你是团队审阅者：评审交付物，指出风险与改进点，给出明确的通过/不通过结论。",
 				PersonalityPrompt: "严谨、直率；对事不对人；评审意见附带理由与建议。",
-				ModelRef: "default/general",
+				ModelRef:          "default/general",
 			},
 		},
 		Groups: []template.GroupSpec{
@@ -126,13 +126,13 @@ func seedTemplates() []seedTemplate {
 		{
 			name: "io.zerone.team.basic", displayName: "通用团队",
 			description: "三人通用岗位团队：协调者、执行者、审阅者，含群组与汇报/顾问关系，开箱即用。",
-			category: template.CategoryTeam, icon: "users-three", version: "1.0.0",
+			category:    template.CategoryTeam, icon: "users-three", version: "1.0.0",
 			spec: teamSeedSpec(),
 		},
 		{
 			name: "io.zerone.speeding.sample-crew", displayName: "Speeding 示例车队",
 			description: "Speeding 示例游戏角色包：车手/策略师/老将三人组（人物设定在人格提示词中，垂直字段由能力包提供）。",
-			category: template.CategoryGame, icon: "flag", version: "1.0.0",
+			category:    template.CategoryGame, icon: "flag", version: "1.0.0",
 			spec: speedingSeedSpec(),
 		},
 	}

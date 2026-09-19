@@ -52,8 +52,8 @@ type RelationSpec struct {
 
 // WorkflowSpec 声明一个工作流（结构对齐 workflow.Definition/Version/Step）。
 type WorkflowSpec struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
 	Steps       []WorkflowStepSpec `json:"steps"`
 }
 

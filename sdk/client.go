@@ -65,10 +65,10 @@ func (e *APIError) Is(target error) bool {
 // 预定义错误类别，errors.As 匹配 *APIError 后按 StatusCode 分支，
 // 或直接 errors.Is(err, sdk.ErrNotFound)。
 var (
-	ErrNotFound    = &APIError{StatusCode: 404, Message: "资源不存在"}
-	ErrConflict    = &APIError{StatusCode: 409, Message: "资源冲突"}
-	ErrValidation  = &APIError{StatusCode: 400, Message: "请求校验失败"}
-	ErrPermission  = &APIError{StatusCode: 403, Message: "权限不足"}
+	ErrNotFound     = &APIError{StatusCode: 404, Message: "资源不存在"}
+	ErrConflict     = &APIError{StatusCode: 409, Message: "资源冲突"}
+	ErrValidation   = &APIError{StatusCode: 400, Message: "请求校验失败"}
+	ErrPermission   = &APIError{StatusCode: 403, Message: "权限不足"}
 	ErrUnauthorized = &APIError{StatusCode: 401, Message: "未认证"}
 )
 

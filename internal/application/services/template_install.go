@@ -696,15 +696,15 @@ func (s *TemplateService) Install(tenantID string, templateID uint64, opts Insta
 					continue
 				}
 				_, err := s.run.InitializeState(tenantID, opts.TargetRunID, InitializeStateInput{
-					Namespace:     sd.Namespace,
-					SchemaName:    ss.Name,
-					SchemaVersion: ss.Version,
-					SubjectType:   sd.SubjectType,
-					SubjectID:     sd.SubjectID,
-					Data:          sd.Data,
+					Namespace:      sd.Namespace,
+					SchemaName:     ss.Name,
+					SchemaVersion:  ss.Version,
+					SubjectType:    sd.SubjectType,
+					SubjectID:      sd.SubjectID,
+					Data:           sd.Data,
 					IdempotencyKey: fmt.Sprintf("template-install:%s:%s:%d", def.Name, ver.Version, i),
-					Reason:        "模板安装种子数据",
-					Source:        "template-install",
+					Reason:         "模板安装种子数据",
+					Source:         "template-install",
 				})
 				if err != nil {
 					result.Skipped = append(result.Skipped, fmt.Sprintf("sampleData[%d]：写入失败：%v", i, err))
@@ -728,4 +728,3 @@ func sha256Hex(raw []byte) string {
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:])
 }
-

@@ -40,22 +40,24 @@ func TestAllMethodsHappyPath(t *testing.T) {
 		fmt.Fprint(w, `{"success":true,"data":{"ok":true}}`)
 	}
 	client, hits := fakeServer(t, map[string]func(http.ResponseWriter, *http.Request){
-		"POST /api/v1/admin/extensions":              ok,
-		"GET /api/v1/admin/extensions":               ok,
-		"GET /api/v1/admin/extensions/1":             ok,
-		"POST /api/v1/admin/extensions/1/install":    ok,
-		"POST /api/v1/admin/extensions/1/enable":     ok,
-		"POST /api/v1/admin/extensions/1/disable":    ok,
-		"POST /api/v1/admin/extensions/1/upgrade":    ok,
-		"POST /api/v1/admin/extensions/1/rollback":   ok,
-		"DELETE /api/v1/admin/extensions/1/uninstall": ok,
-		"GET /api/v1/admin/extensions/1/impact":      ok,
+		"POST /api/v1/admin/extensions":                 ok,
+		"GET /api/v1/admin/extensions":                  ok,
+		"GET /api/v1/admin/extensions/1":                ok,
+		"POST /api/v1/admin/extensions/1/install":       ok,
+		"POST /api/v1/admin/extensions/1/enable":        ok,
+		"POST /api/v1/admin/extensions/1/disable":       ok,
+		"POST /api/v1/admin/extensions/1/upgrade":       ok,
+		"POST /api/v1/admin/extensions/1/rollback":      ok,
+		"DELETE /api/v1/admin/extensions/1/uninstall":   ok,
+		"GET /api/v1/admin/extensions/1/impact":         ok,
 		"GET /api/v1/admin/extensions/1/versions/1.0.0": ok,
 	})
 
 	manifest := json.RawMessage(`{"apiVersion":"agenthub.extension/v1alpha1","name":"io.zerone.t","version":"1.0.0","displayName":"t","description":"t"}`)
 	steps := []func() (json.RawMessage, error){
-		func() (json.RawMessage, error) { return client.Register(RegisterInput{Manifest: manifest, Source: "upload"}) },
+		func() (json.RawMessage, error) {
+			return client.Register(RegisterInput{Manifest: manifest, Source: "upload"})
+		},
 		func() (json.RawMessage, error) { return client.List("", "", 1, 20) },
 		func() (json.RawMessage, error) { return client.Get(1) },
 		func() (json.RawMessage, error) { return client.Install(1, "1.0.0") },

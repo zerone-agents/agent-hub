@@ -42,17 +42,17 @@ func (Extension) TableName() string { return "extensions" }
 // Version 是扩展的一个不可变版本；同一 (extension_id, version) 的内容
 // 必须一致，重复提交相同内容按幂等返回既有版本。
 type Version struct {
-	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	ExtensionID uint64    `gorm:"not null;uniqueIndex:uk_extension_versions,priority:1;index" json:"extensionId"`
-	Version     string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_extension_versions,priority:2" json:"version"`
-	Manifest    string    `gorm:"type:longtext;not null" json:"manifest"`
-	ContentHash string    `gorm:"type:char(64);not null;index" json:"contentHash"`
-	Changelog   string    `gorm:"type:text;not null" json:"changelog"`
+	ID          uint64 `gorm:"primaryKey;autoIncrement" json:"id"`
+	ExtensionID uint64 `gorm:"not null;uniqueIndex:uk_extension_versions,priority:1;index" json:"extensionId"`
+	Version     string `gorm:"type:varchar(64);not null;uniqueIndex:uk_extension_versions,priority:2" json:"version"`
+	Manifest    string `gorm:"type:longtext;not null" json:"manifest"`
+	ContentHash string `gorm:"type:char(64);not null;index" json:"contentHash"`
+	Changelog   string `gorm:"type:text;not null" json:"changelog"`
 	// SignedBy 是验签通过后的发布者公钥指纹（sha256 前 16 字节 hex）；
 	// 未签名的历史版本为空串（H7.6）。
-	SignedBy string `gorm:"type:char(32);not null;default:''" json:"signedBy"`
-	CreatedBy   string    `gorm:"type:varchar(160);not null;default:''" json:"createdBy"`
-	CreatedAt   time.Time `json:"createdAt"`
+	SignedBy  string    `gorm:"type:char(32);not null;default:''" json:"signedBy"`
+	CreatedBy string    `gorm:"type:varchar(160);not null;default:''" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 func (Version) TableName() string { return "extension_versions" }

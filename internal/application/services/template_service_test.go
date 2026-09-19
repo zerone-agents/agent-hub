@@ -157,8 +157,8 @@ func TestTemplateServiceResolvePreviewAndMapping(t *testing.T) {
 
 func installTestTemplate(t *testing.T, svc *TemplateService, tenantID string, id uint64, key string) (*TemplateInstallResult, error) {
 	return svc.Install(tenantID, id, InstallOptions{
-		Version: "1.0.0",
-		Mapping: TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
+		Version:  "1.0.0",
+		Mapping:  TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
 		Strategy: StrategyFail, Force: true,
 		IdempotencyKey: key,
 		Actor:          "admin-1",
@@ -246,7 +246,7 @@ func TestTemplateServiceInstallConflictsFailAndRename(t *testing.T) {
 	// fail 策略：全部同名 → 409 且带冲突列表
 	_, err = svc.Install("tenant-a", res.Template.ID, InstallOptions{
 		Version: "1.0.0", Force: true,
-		Mapping: TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
+		Mapping:  TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
 		Strategy: StrategyFail,
 	})
 	require.Error(t, err)
@@ -259,7 +259,7 @@ func TestTemplateServiceInstallConflictsFailAndRename(t *testing.T) {
 	// rename 策略：自动 -2 后缀
 	result, err := svc.Install("tenant-a", res.Template.ID, InstallOptions{
 		Version: "1.0.0", Force: true,
-		Mapping: TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
+		Mapping:  TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
 		Strategy: StrategyRename, IdempotencyKey: "key-2",
 	})
 	require.NoError(t, err)
@@ -274,7 +274,7 @@ func TestTemplateServiceInstallSectionsPartial(t *testing.T) {
 
 	result, err := svc.Install("tenant-a", res.Template.ID, InstallOptions{
 		Version: "1.0.0", Strategy: StrategyFail, Force: true,
-		Mapping: TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
+		Mapping:  TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
 		Sections: []string{"agents", "groups"},
 	})
 	require.NoError(t, err)
@@ -286,7 +286,7 @@ func TestTemplateServiceInstallSectionsPartial(t *testing.T) {
 	// relations 依赖 agents：只选 relations → 400
 	_, err = svc.Install("tenant-a", res.Template.ID, InstallOptions{
 		Version: "1.0.0", Strategy: StrategyFail, Force: true,
-		Mapping: TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
+		Mapping:  TemplateMapping{ModelRefs: map[string]string{"default/general": "gpt-4o"}},
 		Sections: []string{"relations"},
 	})
 	require.Error(t, err)

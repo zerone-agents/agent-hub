@@ -124,10 +124,10 @@ func cmdCreate(g globalFlags, args []string) error {
 		displayName = parts[len(parts)-1]
 	}
 	files := map[string]string{
-		"extension.yaml":        fmt.Sprintf(extensionManifestTemplate, name, displayName, name),
-		"README.md":             fmt.Sprintf(extensionReadmeTemplate, name),
-		"ui/card.yaml":          uiCardExample,
-		"migrations/v2.yaml":    migrationExample,
+		"extension.yaml":     fmt.Sprintf(extensionManifestTemplate, name, displayName, name),
+		"README.md":          fmt.Sprintf(extensionReadmeTemplate, name),
+		"ui/card.yaml":       uiCardExample,
+		"migrations/v2.yaml": migrationExample,
 	}
 	for rel, content := range files {
 		p := filepath.Join(root, rel)

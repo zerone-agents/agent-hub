@@ -35,9 +35,9 @@ const (
 
 // AlertRule 取值：内置告警规则。
 const (
-	RuleBudgetPct       = "budget_pct"        // 预算用量达到 threshold%
-	RuleErrorRateSpike  = "error_rate_spike"  // 错误率达到 threshold%（0-100）
-	RuleHealthRed       = "health_red"        // 系统健康状态转红
+	RuleBudgetPct      = "budget_pct"       // 预算用量达到 threshold%
+	RuleErrorRateSpike = "error_rate_spike" // 错误率达到 threshold%（0-100）
+	RuleHealthRed      = "health_red"       // 系统健康状态转红
 )
 
 // UsageRecord 是一条用量事件。Tokens / Cost / Bytes / Latency 均为可空：

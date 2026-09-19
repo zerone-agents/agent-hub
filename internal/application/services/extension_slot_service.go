@@ -139,7 +139,7 @@ func (s *ExtensionSlotService) SetVisible(tenantID, extName, slot, component str
 		UpdatedBy:     strings.TrimSpace(actor),
 	}
 	err := s.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "tenant_id"}, {Name: "extension_name"}, {Name: "slot"}, {Name: "component"}},
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "extension_name"}, {Name: "slot"}, {Name: "component"}},
 		DoUpdates: clause.AssignmentColumns([]string{"visible", "updated_by", "updated_at"}),
 	}).Create(&ov).Error
 	if err != nil {
