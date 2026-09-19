@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 // TestMySQLMigrationSmoke 在真实 MySQL 上冒烟完整迁移链（CI 只有 sqlite，
@@ -21,16 +19,9 @@ func TestMySQLMigrationSmoke(t *testing.T) {
 		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 冒烟")
 	}
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-
-	// 干净起点：DROP 旧库重建（该 DSN 必须指向专用冒烟库）
-	require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_smoke").Error)
-	require.NoError(t, db.Exec("CREATE DATABASE hub_smoke").Error)
-	require.NoError(t, db.Exec("USE hub_smoke").Error)
+	// 每条池连接都必须明确指向冒烟库；USE 只影响当前会话，迁移锁促使
+	// GORM 另开连接时会回到原 DSN 的默认库，造成“迁移成功但跑错库”。
+	db := openMySQLTestDatabase(t, dsn, "hub_smoke")
 
 	// 旧 schema（Phase 3 之前）：核心三表缺 tenant_id，agents 带旧全局唯一索引
 	for _, stmt := range []string{
