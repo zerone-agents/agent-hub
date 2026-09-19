@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	drivermysql "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -24,18 +25,10 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 迁移测试")
 	}
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	// 单连接：USE 语句生效于池内全部操作（信息查询均显式限定库名，双保险）
-	sqlDB.SetMaxOpenConns(1)
-
-	// 专用冒烟库
-	require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_fk_upgrade").Error)
-	require.NoError(t, db.Exec("CREATE DATABASE hub_fk_upgrade").Error)
-	require.NoError(t, db.Exec("USE hub_fk_upgrade").Error)
+	// 使用显式指向隔离库的 DSN。不能用“单连接 + USE”：AutoMigrate 会
+	// 用一条专用连接持有 MySQL GET_LOCK，若连接池上限为 1，后续迁移查询
+	// 会永久等待唯一连接，直到 go test 超时。
+	db := openMySQLTestDatabase(t, dsn, "hub_fk_upgrade")
 
 	// 旧 schema（存量多租户形态）：绑定表资源侧 FK 为 CASCADE + 存量绑定数据
 	for _, stmt := range []string{
@@ -89,7 +82,7 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 		require.NoError(t, db.Raw(`SELECT rc.DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS rc
 			JOIN information_schema.KEY_COLUMN_USAGE kcu
 			  ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-			WHERE rc.CONSTRAINT_SCHEMA = 'hub_fk_upgrade' AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?`, table, col).Scan(&rule).Error)
+			WHERE rc.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?`, table, col).Scan(&rule).Error)
 		return rule
 	}
 
@@ -109,7 +102,7 @@ func TestMySQLBindingFKRESTRICTUpgrade(t *testing.T) {
 	require.Equal(t, "CASCADE", deleteRule("audit_skill_events", "skill_id"), "无关表的同名列外键不得被迁移改写")
 
 	// 断言 2：绕过守卫直接删除被拒 + 资源与绑定行均保留（并发竞态闭环）
-	err = db.Exec("DELETE FROM skills WHERE id = 1").Error
+	err := db.Exec("DELETE FROM skills WHERE id = 1").Error
 	require.Error(t, err, "存量数据下技能删除必须被 RESTRICT 拒绝")
 	var skillCnt, skillBindCnt int64
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM skills WHERE id = 1").Scan(&skillCnt).Error)
@@ -132,18 +125,10 @@ func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
 		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 迁移测试")
 	}
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	sqlDB.SetMaxOpenConns(1)
-
 	oldDB, oldBackfill := DB, backfillTenantID
 	t.Cleanup(func() { DB, backfillTenantID = oldDB, oldBackfill })
-	DB = db
 
-	deleteRule := func(table, col string) string {
+	deleteRule := func(db *gorm.DB, table, col string) string {
 		var rule string
 		require.NoError(t, db.Raw(`SELECT rc.DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS rc
 			JOIN information_schema.KEY_COLUMN_USAGE kcu
@@ -151,7 +136,7 @@ func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
 			WHERE rc.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?`, table, col).Scan(&rule).Error)
 		return rule
 	}
-	referencedCol := func(table, col string) string {
+	referencedCol := func(db *gorm.DB, table, col string) string {
 		var refCol string
 		require.NoError(t, db.Raw(`SELECT kcu.REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE kcu
 			WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = ? AND kcu.COLUMN_NAME = ?
@@ -160,9 +145,8 @@ func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
 	}
 
 	t.Run("parent column is not id", func(t *testing.T) {
-		require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_fk_drift_a").Error)
-		require.NoError(t, db.Exec("CREATE DATABASE hub_fk_drift_a").Error)
-		require.NoError(t, db.Exec("USE hub_fk_drift_a").Error)
+		db := openMySQLTestDatabase(t, dsn, "hub_fk_drift_a")
+		DB = db
 		require.NoError(t, db.Exec("CREATE TABLE skills (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, uid BIGINT UNSIGNED NOT NULL, UNIQUE KEY uk_uid (uid))").Error)
 		require.NoError(t, db.Exec(`CREATE TABLE agent_skills (
 			agent_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL,
@@ -173,14 +157,13 @@ func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
 		require.Error(t, err, "父列非 id 时迁移必须拒绝")
 		require.Contains(t, err.Error(), "refusing to rewrite")
 		// 原约束纹丝不动：DELETE_RULE 与引用列均保持
-		require.Equal(t, "CASCADE", deleteRule("agent_skills", "skill_id"))
-		require.Equal(t, "uid", referencedCol("agent_skills", "skill_id"))
+		require.Equal(t, "CASCADE", deleteRule(db, "agent_skills", "skill_id"))
+		require.Equal(t, "uid", referencedCol(db, "agent_skills", "skill_id"))
 	})
 
 	t.Run("composite foreign key", func(t *testing.T) {
-		require.NoError(t, db.Exec("DROP DATABASE IF EXISTS hub_fk_drift_b").Error)
-		require.NoError(t, db.Exec("CREATE DATABASE hub_fk_drift_b").Error)
-		require.NoError(t, db.Exec("USE hub_fk_drift_b").Error)
+		db := openMySQLTestDatabase(t, dsn, "hub_fk_drift_b")
+		DB = db
 		require.NoError(t, db.Exec("CREATE TABLE mcp_servers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, kind VARCHAR(32) NOT NULL, UNIQUE KEY uk_id_kind (id, kind))").Error)
 		require.NoError(t, db.Exec(`CREATE TABLE agent_mcp_servers (
 			agent_id BIGINT UNSIGNED NOT NULL, mcp_server_id BIGINT UNSIGNED NOT NULL, kind VARCHAR(32) NOT NULL,
@@ -191,6 +174,33 @@ func TestMySQLBindingFKRESTRICT_DriftRefuses(t *testing.T) {
 		require.Error(t, err, "复合外键时迁移必须拒绝")
 		require.Contains(t, err.Error(), "composite")
 		// 复合约束整体保持（单列重建不得发生）
-		require.Equal(t, "CASCADE", deleteRule("agent_mcp_servers", "mcp_server_id"))
+		require.Equal(t, "CASCADE", deleteRule(db, "agent_mcp_servers", "mcp_server_id"))
 	})
+}
+
+// openMySQLTestDatabase recreates a fixed, test-only schema and returns a pool
+// whose DSN names that schema. Explicit DBName keeps every pooled connection in
+// the same schema, including the extra connection reserved for migration locks.
+func openMySQLTestDatabase(t *testing.T, dsn, databaseName string) *gorm.DB {
+	t.Helper()
+	cfg, err := drivermysql.ParseDSN(dsn)
+	require.NoError(t, err)
+
+	adminCfg := cfg
+	adminCfg.DBName = ""
+	admin, err := gorm.Open(mysql.New(mysql.Config{DSN: adminCfg.FormatDSN()}), &gorm.Config{})
+	require.NoError(t, err)
+	adminSQL, err := admin.DB()
+	require.NoError(t, err)
+	require.NoError(t, admin.Exec("DROP DATABASE IF EXISTS `"+databaseName+"`").Error)
+	require.NoError(t, admin.Exec("CREATE DATABASE `"+databaseName+"`").Error)
+	require.NoError(t, adminSQL.Close())
+
+	cfg.DBName = databaseName
+	db, err := gorm.Open(mysql.New(mysql.Config{DSN: cfg.FormatDSN()}), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return db
 }
