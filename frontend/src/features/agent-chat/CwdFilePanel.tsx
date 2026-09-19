@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import { FolderSimpleIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { useDirEntries } from '@/queries/useAgentFiles'
 import type { FileEntry } from '@/api/agent-files'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import CwdFileTree from './CwdFileTree'
 import CwdFilePreview from './CwdFilePreview'
 
@@ -13,8 +14,8 @@ const useStyles = createStyles(({ css }) => ({
     flex: 0 0 280px;
     display: flex;
     flex-direction: column;
-    border-left: 1px solid ${t.inkLighter};
-    background: ${t.surface};
+    border-left: 1px solid ${tk.inkLighter};
+    background: ${tk.surface};
     overflow: hidden;
     @media (max-width: 768px) {
       display: none;
@@ -26,13 +27,13 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     align-items: center;
     justify-content: center;
-    border-left: 1px solid ${t.inkLighter};
-    background: ${t.surface};
+    border-left: 1px solid ${tk.inkLighter};
+    background: ${tk.surface};
     cursor: pointer;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     &:hover {
-      background: ${t.surfaceHover};
-      color: ${t.text};
+      background: ${tk.surfaceHover};
+      color: ${tk.text};
     }
     @media (max-width: 768px) {
       display: none;
@@ -43,10 +44,10 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     padding: 10px 12px;
-    border-bottom: 1px solid ${t.inkLighter};
+    border-bottom: 1px solid ${tk.inkLighter};
     font-size: 12px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
   `,
   headerTitle: css`
     flex: 1;
@@ -54,15 +55,15 @@ const useStyles = createStyles(({ css }) => ({
   collapseBtn: css`
     display: inline-flex;
     align-items: center;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     cursor: pointer;
     border: none;
     background: transparent;
     padding: 2px;
     border-radius: 2px;
     &:hover {
-      background: ${t.inkLight};
-      color: ${t.text};
+      background: ${tk.inkLight};
+      color: ${tk.text};
     }
   `,
   treeWrap: css`
@@ -92,6 +93,7 @@ function writeExpanded(agentName: string, expanded: boolean) {
 }
 
 export default function CwdFilePanel({ agentName }: Props) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [expanded, setExpanded] = useState<boolean>(() => readExpanded(agentName))
   const [selected, setSelected] = useState<{ path: string; entry: FileEntry } | null>(null)
@@ -119,8 +121,8 @@ export default function CwdFilePanel({ agentName }: Props) {
       <div
         className={styles.collapsed}
         role="button"
-        aria-label="展开 Agent 工作区"
-        title="展开 Agent 工作区"
+        aria-label={t('agentChat.expandWorkspace')}
+        title={t('agentChat.expandWorkspace')}
         onClick={() => {
           const next = true
           writeExpanded(agentName, next)
@@ -142,12 +144,12 @@ export default function CwdFilePanel({ agentName }: Props) {
     <div className={styles.expanded}>
       <div className={styles.header}>
         <FolderSimpleIcon size={14} />
-        <span className={styles.headerTitle}>Agent 工作区</span>
+        <span className={styles.headerTitle}>{t('agentChat.workspace')}</span>
         <button
           type="button"
           className={styles.collapseBtn}
-          aria-label="折叠 Agent 工作区"
-          title="折叠"
+          aria-label={t('agentChat.collapseWorkspace')}
+          title={t('agentChat.collapse')}
           onClick={handleToggle}
         >
           <SidebarSimpleIcon size={14} />

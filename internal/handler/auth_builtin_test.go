@@ -10,7 +10,9 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
+	repository "control-panel/internal/infrastructure/persistence"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -25,13 +27,14 @@ func newBuiltinTestEnv(t *testing.T) (*gin.Engine, *services.UserService, *servi
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}); err != nil {
+	if err := db.AutoMigrate(&authdom.User{}, &authdom.Invite{}, &authdom.RefreshToken{}, &audit.Log{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	p := builtin.New(db, builtinTestSecret)
 	users := services.NewUserService(db)
 	invites := services.NewInviteService(db)
-	h := NewBuiltinAuthHandler(p, users, invites)
+	ar := services.NewAuditRecorder(repository.NewAuditRepository(db)) // 真实 recorder over 测试 db
+	h := NewBuiltinAuthHandler(p, users, invites, ar)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

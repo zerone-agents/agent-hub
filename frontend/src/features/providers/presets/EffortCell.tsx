@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Input } from 'antd'
 import type { InputRef } from 'antd'
 import { XIcon, PlusIcon } from '@phosphor-icons/react'
@@ -74,6 +75,7 @@ interface EffortCellProps {
 }
 
 export default function EffortCell({ value, onChange }: EffortCellProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [draft, setDraft] = useState('')
   const [active, setActive] = useState(false)
@@ -99,7 +101,7 @@ export default function EffortCell({ value, onChange }: EffortCellProps) {
   // 用真实 antd Input 保证与同行其他输入框尺寸完全一致
   if (!active) {
     const empty = efforts.length === 0
-    const label = empty ? '不涉及' : `已配置 ${efforts.length} 档`
+    const label = empty ? t('providers.effort.notApplicable') : t('providers.effort.configuredCount', { n: efforts.length })
     return (
       <div className={styles.wrap}>
         <Input
@@ -131,7 +133,7 @@ export default function EffortCell({ value, onChange }: EffortCellProps) {
             type="button"
             className={styles.addInline}
             onClick={add}
-            aria-label="添加 effort"
+            aria-label={t('providers.effort.add')}
             style={{ visibility: draft.trim() ? 'visible' : 'hidden' }}
           >
             <PlusIcon size={12} weight="bold" />
@@ -150,7 +152,7 @@ export default function EffortCell({ value, onChange }: EffortCellProps) {
               <button
                 type="button"
                 className={styles.chipX}
-                aria-label={`删除 ${effort}`}
+                aria-label={t('providers.effort.remove', { effort })}
                 onClick={() => { onChange(efforts.filter((e) => e !== effort)); }}
               >
                 <XIcon size={10} />

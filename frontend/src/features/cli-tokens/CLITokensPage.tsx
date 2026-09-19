@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Button, Popconfirm, Spin } from 'antd'
 import { PlusIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { ColumnsType } from 'antd/es/table'
 import { useCLITokens, useRevokeCLIToken } from '@/queries/useCLITokens'
 import type { CLIToken } from '@/api/cli-tokens'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import BorderedTable from '@/components/BorderedTable'
 import CreateTokenModal from './CreateTokenModal'
 
@@ -21,59 +22,61 @@ const useStyles = createStyles(({ css }) => ({
     @media (max-width: 768px) { flex-direction: column; gap: 16px; }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl}; font-weight: 700; color: ${t.text}; letter-spacing: -0.03em; line-height: 1.15;
+    font-size: ${tk.text3xl}; font-weight: 700; color: ${tk.text}; letter-spacing: -0.03em; line-height: 1.15;
   `,
-  pageSub: css`margin-top: 4px; font-size: ${t.textBase}; color: ${t.textTertiary};`,
+  pageSub: css`margin-top: 4px; font-size: ${tk.textBase}; color: ${tk.textTertiary};`,
   loadingWrap: css`display: flex; justify-content: center; padding: 80px 0;`
 }))
 
-const columns: ColumnsType<CLIToken> = [
-  {
-    title: '名称',
-    dataIndex: 'name',
-    key: 'name'
-  },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    key: 'createdAt',
-    render: (v: string) => formatTime(v)
-  },
-  {
-    title: '最后使用',
-    dataIndex: 'lastUsedAt',
-    key: 'lastUsedAt',
-    render: (v: string | null | undefined) => (v ? formatTime(v) : '从未使用')
-  },
-  {
-    title: '过期时间',
-    dataIndex: 'expiresAt',
-    key: 'expiresAt',
-    render: (v: string) => formatTime(v)
-  }
-]
-
 export default function CLITokensPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
+
+  // columns 的列名走 t()（i18n），必须在组件内构造——模块级常量拿不到 hook。
+  const columns: ColumnsType<CLIToken> = [
+    {
+      title: t('cliTokens.columns.name'),
+      dataIndex: 'name',
+      key: 'name'
+    },
+    {
+      title: t('cliTokens.columns.createdAt'),
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      render: (v: string) => formatTime(v)
+    },
+    {
+      title: t('cliTokens.columns.lastUsed'),
+      dataIndex: 'lastUsedAt',
+      key: 'lastUsedAt',
+      render: (v: string | null | undefined) => (v ? formatTime(v) : t('cliTokens.neverUsed'))
+    },
+    {
+      title: t('cliTokens.columns.expiresAt'),
+      dataIndex: 'expiresAt',
+      key: 'expiresAt',
+      render: (v: string) => formatTime(v)
+    }
+  ]
   const { data: tokens = [], isLoading } = useCLITokens()
   const revokeToken = useRevokeCLIToken()
   const [modalOpen, setModalOpen] = useState(false)
 
   const actionColumn: ColumnsType<CLIToken>[0] = {
-    title: '操作',
+    title: t('cliTokens.columns.actions'),
     key: 'action',
     width: 100,
     render: (_: unknown, record: CLIToken) => (
       <Popconfirm
-        title="确认撤销？"
-        description={`撤销 "${record.name}" 后，使用该 Token 的 CLI 将无法继续认证。`}
-        okText="撤销"
+        title={t('cliTokens.revokeTitle')}
+        description={t('cliTokens.revokeConfirm', { name: record.name })}
+        okText={t('cliTokens.revoke')}
         okButtonProps={{ danger: true }}
-        cancelText="取消"
+        cancelText={t('common.cancel')}
         onConfirm={() => { revokeToken.mutate(record.id); }}
       >
         <Button type="link" danger size="small">
-          撤销
+          {t('cliTokens.revoke')}
         </Button>
       </Popconfirm>
     )
@@ -85,11 +88,11 @@ export default function CLITokensPage() {
         <div>
           <div className={styles.pageTitle}>CLI Tokens</div>
           <div className={styles.pageSub}>
-            管理 CLI 认证 Token，用于 zhub CLI 工具的长期身份验证
+            {t('cliTokens.pageSub')}
           </div>
         </div>
         <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setModalOpen(true); }}>
-          创建 CLI Token
+          {t('cliTokens.create')}
         </PrimaryButton>
       </div>
 
@@ -103,7 +106,7 @@ export default function CLITokensPage() {
           dataSource={tokens}
           rowKey="id"
           pagination={false}
-          locale={{ emptyText: '暂无 Token，点击上方按钮创建' }}
+          locale={{ emptyText: t('cliTokens.empty') }}
         />
       )}
 

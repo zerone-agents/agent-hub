@@ -3,6 +3,7 @@ import RequireAuth from './RequireAuth'
 import MainLayout from '@/layouts/MainLayout'
 import NotFound from '@/components/NotFound'
 import AgentChatPage from '@/features/agent-chat/AgentChatPage'
+import ChatHomePage from '@/features/agent-chat/ChatHomePage'
 
 export const router = createBrowserRouter(
   [
@@ -19,9 +20,17 @@ export const router = createBrowserRouter(
       lazy: () => import('@/features/register/RegisterPage').then((m) => ({ Component: m.default }))
     },
     {
+      path: '/agents/chat',
+      element: (
+        <RequireAuth allowGuest>
+          <ChatHomePage />
+        </RequireAuth>
+      )
+    },
+    {
       path: '/agents/:name/chat',
       element: (
-        <RequireAuth>
+        <RequireAuth allowGuest>
           <AgentChatPage />
         </RequireAuth>
       )
@@ -190,6 +199,11 @@ export const router = createBrowserRouter(
         {
           path: 'settings/users',
           lazy: () => import('@/features/users/UsersPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'settings/audit-logs',
+          lazy: () =>
+            import('@/features/audit/AuditLogsPage').then((m) => ({ Component: m.default }))
         }
       ]
     },

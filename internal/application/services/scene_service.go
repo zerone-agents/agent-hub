@@ -1,10 +1,13 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
 	"control-panel/internal/domain/scene"
 	repository "control-panel/internal/infrastructure/persistence"
+
+	"gorm.io/gorm"
 )
 
 // SceneService provides business logic for managing scenes.
@@ -68,7 +71,7 @@ func (s *SceneService) List(tenantID string, agentID uint64) ([]*SceneDTO, error
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("获取场景列表失败: %w", err)
+		return nil, fmt.Errorf("list scenes failed: %w", err)
 	}
 
 	result := make([]*SceneDTO, 0, len(scenes))
@@ -83,11 +86,40 @@ func (s *SceneService) ListAll(tenantID string) ([]*SceneDTO, error) {
 	return s.List(tenantID, 0)
 }
 
+// ListGuestVisible returns only scenes whose agent is guest-enabled
+// (spec 4.3；防 guest 经公开场景列表探测未开放 Agent 的场景名).
+func (s *SceneService) ListGuestVisible(tenantID string) ([]*SceneDTO, error) {
+	agents, err := s.agentRepo.ListAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents for guest scene filter failed: %w", err)
+	}
+	visible := make(map[uint64]struct{}, len(agents))
+	for _, a := range agents {
+		if a.GuestEnabled {
+			visible[a.ID] = struct{}{}
+		}
+	}
+	scenes, err := s.repo.ListAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list scenes failed: %w", err)
+	}
+	result := make([]*SceneDTO, 0, len(scenes))
+	for _, sc := range scenes {
+		if _, ok := visible[sc.AgentID]; ok {
+			result = append(result, s.sceneToDTO(tenantID, sc))
+		}
+	}
+	return result, nil
+}
+
 // GetScene returns a single scene by name.
 func (s *SceneService) GetScene(tenantID, name string) (*SceneDTO, error) {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, scene.ErrSceneNotFound
+		}
+		return nil, fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 	return s.sceneToDTO(tenantID, sc), nil
 }
@@ -106,7 +138,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查场景存在性失败: %w", err)
+		return nil, fmt.Errorf("check scene existence failed: %w", err)
 	}
 	if exists {
 		return nil, scene.ErrSceneExists
@@ -114,7 +146,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 
 	agentExists, err := s.agentRepo.Exists(tenantID, input.AgentID)
 	if err != nil {
-		return nil, fmt.Errorf("检查 Agent 存在性失败: %w", err)
+		return nil, fmt.Errorf("check agent existence failed: %w", err)
 	}
 	if !agentExists {
 		return nil, scene.ErrAgentNotFound
@@ -131,7 +163,7 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 	}
 
 	if err := s.repo.Create(tenantID, sc); err != nil {
-		return nil, fmt.Errorf("创建场景失败: %w", err)
+		return nil, fmt.Errorf("create scene failed: %w", err)
 	}
 
 	return s.sceneToDTO(tenantID, sc), nil
@@ -141,7 +173,10 @@ func (s *SceneService) CreateScene(tenantID string, input *CreateSceneInput) (*S
 func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInput) (*SceneDTO, error) {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, scene.ErrSceneNotFound
+		}
+		return nil, fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 
 	if err := s.validateAndUpdateSceneFields(tenantID, sc, input); err != nil {
@@ -149,7 +184,7 @@ func (s *SceneService) UpdateScene(tenantID, name string, input *UpdateSceneInpu
 	}
 
 	if err := s.repo.Update(tenantID, sc); err != nil {
-		return nil, fmt.Errorf("更新场景失败: %w", err)
+		return nil, fmt.Errorf("update scene failed: %w", err)
 	}
 
 	return s.sceneToDTO(tenantID, sc), nil
@@ -160,7 +195,7 @@ func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.S
 	if input.AgentID != nil {
 		agentExists, err := s.agentRepo.Exists(tenantID, *input.AgentID)
 		if err != nil {
-			return fmt.Errorf("检查 Agent 存在性失败: %w", err)
+			return fmt.Errorf("check agent existence failed: %w", err)
 		}
 		if !agentExists {
 			return scene.ErrAgentNotFound
@@ -198,11 +233,14 @@ func (s *SceneService) validateAndUpdateSceneFields(tenantID string, sc *scene.S
 func (s *SceneService) DeleteScene(tenantID, name string) error {
 	sc, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return scene.ErrSceneNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return scene.ErrSceneNotFound
+		}
+		return fmt.Errorf("get scene %s failed: %w", name, err)
 	}
 
 	if err := s.repo.Delete(tenantID, sc.ID); err != nil {
-		return fmt.Errorf("删除场景失败: %w", err)
+		return fmt.Errorf("delete scene failed: %w", err)
 	}
 
 	return nil

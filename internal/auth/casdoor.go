@@ -35,6 +35,28 @@ type OAuthSession struct {
 	State        string
 	CodeVerifier string
 	Org          string
+	Redirect     string // 登录回源路径（已 sanitize；默认 "/"）
+}
+
+// SanitizeRedirect 校验回源路径：必须以单个 "/" 开头、无反斜杠、长度 ≤512；
+// 其余一律回退 "/"（防开放重定向，spec 7）。
+func SanitizeRedirect(p string) string {
+	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") ||
+		strings.Contains(p, "\\") || len(p) > 512 {
+		return "/"
+	}
+	return p
+}
+
+// StoreSession 播种一条 OAuth state 会话（GetLoginURL 内部使用；导出供
+// handler 测试直接播种，避免测试走网络取 loginURL）。
+func StoreSession(state, codeVerifier, org, redirect string) {
+	oauthSessionsMu.Lock()
+	defer oauthSessionsMu.Unlock()
+	oauthSessions[state] = &OAuthSession{
+		State: state, CodeVerifier: codeVerifier, Org: org,
+		Redirect: SanitizeRedirect(redirect),
+	}
 }
 
 // TenantClientCreds 是某个组织（casdoor organization）对应的 OAuth client
@@ -226,12 +248,12 @@ func GenerateLoginURL(org string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return GetLoginURL(org, state, codeVerifier)
+	return GetLoginURL(org, state, codeVerifier, "")
 }
 
 // GetLoginURL builds the Casdoor authorization URL for the given org and
-// stores the OAuth session (with Org) for the callback.
-func GetLoginURL(org, state, codeVerifier string) (string, error) {
+// stores the OAuth session (with Org and sanitized Redirect) for the callback.
+func GetLoginURL(org, state, codeVerifier, redirect string) (string, error) {
 	creds, err := resolveClientCreds(org)
 	if err != nil {
 		return "", err
@@ -248,13 +270,7 @@ func GetLoginURL(org, state, codeVerifier string) (string, error) {
 	}
 	loginURL := cfg.AuthCodeURL(state, opts...)
 
-	oauthSessionsMu.Lock()
-	oauthSessions[state] = &OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		Org:          org,
-	}
-	oauthSessionsMu.Unlock()
+	StoreSession(state, codeVerifier, org, redirect)
 
 	log.Printf("[OAuth] Stored session: state=%s, org=%q, sessions count=%d", state, org, len(oauthSessions))
 

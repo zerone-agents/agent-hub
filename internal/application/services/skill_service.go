@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"control-panel/internal/domain/skill"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/pkg/oss"
+
+	"gorm.io/gorm"
 )
 
 // SkillService provides business logic for managing skills and their file uploads.
@@ -87,7 +90,7 @@ func (s *SkillService) ListAll(tenantID, skillType string) ([]*SkillDTO, error) 
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("获取技能列表失败: %w", err)
+		return nil, fmt.Errorf("list skills failed: %w", err)
 	}
 
 	result := make([]*SkillDTO, 0, len(skills))
@@ -101,7 +104,10 @@ func (s *SkillService) ListAll(tenantID, skillType string) ([]*SkillDTO, error) 
 func (s *SkillService) GetSkill(tenantID, name string) (*SkillDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	return s.toDTO(sk), nil
@@ -122,10 +128,10 @@ func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*S
 
 	exists, err := s.repo.ExistsByName(tenantID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("检查技能存在性失败: %w", err)
+		return nil, fmt.Errorf("check skill existence failed: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("技能 '%s' 已存在", input.Name)
+		return nil, skill.NewValidationErrorf("技能 '%s' 已存在", input.Name)
 	}
 
 	const maxFileSize = 50 * 1024 * 1024
@@ -149,7 +155,7 @@ func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*S
 	ctx := context.Background()
 	fileHash, err := s.uploader.Upload(ctx, ossKey, bytes.NewReader(validatedBytes), int64(len(validatedBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("上传文件失败: %w", err)
+		return nil, fmt.Errorf("upload skill file failed: %w", err)
 	}
 
 	sk := &skill.Skill{
@@ -166,7 +172,7 @@ func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*S
 
 	if err := s.repo.Create(tenantID, sk); err != nil {
 		_ = s.uploader.Delete(ctx, ossKey)
-		return nil, fmt.Errorf("创建技能失败: %w", err)
+		return nil, fmt.Errorf("create skill failed: %w", err)
 	}
 
 	return s.toDTO(sk), nil
@@ -176,7 +182,10 @@ func (s *SkillService) CreateSkill(tenantID string, input *CreateSkillInput) (*S
 func (s *SkillService) UpdateSkill(tenantID, name string, input *UpdateSkillInput) (*SkillDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	s.updateSkillFields(sk, input)
@@ -188,7 +197,7 @@ func (s *SkillService) UpdateSkill(tenantID, name string, input *UpdateSkillInpu
 	}
 
 	if err := s.repo.Update(tenantID, sk); err != nil {
-		return nil, fmt.Errorf("更新技能失败: %w", err)
+		return nil, fmt.Errorf("update skill failed: %w", err)
 	}
 
 	return s.toDTO(sk), nil
@@ -231,12 +240,12 @@ func (s *SkillService) updateSkillFile(sk *skill.Skill, input *UpdateSkillInput)
 	ctx := context.Background()
 	fileHash, err := s.uploader.Upload(ctx, ossKey, bytes.NewReader(validatedBytes), int64(len(validatedBytes)))
 	if err != nil {
-		return fmt.Errorf("上传文件失败: %w", err)
+		return fmt.Errorf("upload skill file failed: %w", err)
 	}
 
 	if oldKey != "" && oldKey != ossKey {
 		if err := s.uploader.Delete(ctx, oldKey); err != nil {
-			log.Printf("删除旧 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, oldKey, err)
+			log.Printf("delete old OSS file failed (skill=%s, key=%s): %v", sk.Name, oldKey, err)
 		}
 	}
 
@@ -250,12 +259,15 @@ func (s *SkillService) updateSkillFile(sk *skill.Skill, input *UpdateSkillInput)
 func (s *SkillService) DeleteSkill(tenantID, name string) error {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return skill.ErrSkillNotFound
+		}
+		return fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	own, foreign, err := s.repo.GetSkillBindingsScoped(tenantID, sk.ID)
 	if err != nil {
-		return fmt.Errorf("查询技能绑定失败: %w", err)
+		return fmt.Errorf("query skill bindings failed: %w", err)
 	}
 	if len(own) > 0 || foreign {
 		return &agent.SkillInUseError{SkillName: sk.Name, Agents: own, Foreign: foreign}
@@ -270,14 +282,14 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 				return &agent.SkillInUseError{SkillName: sk.Name, Agents: own, Foreign: foreign}
 			}
 		}
-		return fmt.Errorf("删除技能失败: %w", err)
+		return fmt.Errorf("delete skill failed: %w", err)
 	}
 
 	// 行已删成功：残留对象只是无引用方的孤立对象，删除失败无害，仅记日志。
 	if sk.URL != "" && s.uploader != nil {
 		ctx := context.Background()
 		if err := s.uploader.Delete(ctx, sk.URL); err != nil {
-			log.Printf("删除 OSS 文件失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
+			log.Printf("delete OSS file failed (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
 		}
 	}
 
@@ -290,7 +302,10 @@ func (s *SkillService) DeleteSkill(tenantID, name string) error {
 func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	if sk.URL == "" {
@@ -307,7 +322,7 @@ func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
 	ctx := context.Background()
 	url, err := s.uploader.GetPresignedURL(ctx, sk.URL)
 	if err != nil {
-		return nil, fmt.Errorf("生成下载链接失败: %w", err)
+		return nil, fmt.Errorf("generate presigned download URL failed: %w", err)
 	}
 
 	return &DownloadDTO{
@@ -329,7 +344,10 @@ func (s *SkillService) Download(tenantID, name string) (*DownloadDTO, error) {
 func (s *SkillService) GetSkillMd(tenantID, name string) ([]SkillMdEntry, error) {
 	sk, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, skill.ErrSkillNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, skill.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get skill %s failed: %w", name, err)
 	}
 
 	if sk.URL == "" {
@@ -339,18 +357,18 @@ func (s *SkillService) GetSkillMd(tenantID, name string) ([]SkillMdEntry, error)
 	ctx := context.Background()
 	rc, err := s.uploader.Download(ctx, sk.URL)
 	if err != nil {
-		return nil, fmt.Errorf("下载技能文件失败: %w", err)
+		return nil, fmt.Errorf("download skill file failed: %w", err)
 	}
 	defer rc.Close()
 
 	buf, err := io.ReadAll(rc)
 	if err != nil {
-		return nil, fmt.Errorf("读取技能文件失败: %w", err)
+		return nil, fmt.Errorf("read skill file failed: %w", err)
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
 	if err != nil {
-		return nil, fmt.Errorf("解析 zip 文件失败: %w", err)
+		return nil, fmt.Errorf("parse zip file failed: %w", err)
 	}
 
 	// Re-validate path safety even though the file was checked at upload time;
@@ -383,7 +401,7 @@ func (s *SkillService) resolveURL(sk *skill.Skill) string {
 	ctx := context.Background()
 	url, err := s.uploader.GetPresignedURL(ctx, sk.URL)
 	if err != nil {
-		log.Printf("生成预签名 URL 失败 (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
+		log.Printf("generate presigned URL failed (skill=%s, key=%s): %v", sk.Name, sk.URL, err)
 		return ""
 	}
 	return url
@@ -423,7 +441,10 @@ func (s *SkillService) GetAgentSkills(tenantID, agentName string) ([]string, err
 	agentRepo := repository.NewAgentRepository()
 	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return nil, fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w", agent.ErrAgentNotFound)
+		}
+		return nil, fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 	return s.repo.GetAgentSkills(agentCfg.ID)
 }
@@ -435,14 +456,20 @@ func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames 
 	toolRepo := repository.NewToolRepository()
 	agentCfg, err := agentRepo.GetByName(tenantID, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent '%s' 不存在", agentName)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return skill.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		}
+		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
 	skillIDs := make([]uint64, 0, len(skillNames))
 	for _, name := range skillNames {
 		sk, err := s.repo.GetByName(tenantID, name)
 		if err != nil {
-			return fmt.Errorf("Skill '%s' 不存在", name)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return skill.NewValidationErrorf("Skill '%s' 不存在", name)
+			}
+			return fmt.Errorf("get skill %s failed: %w", name, err)
 		}
 		skillIDs = append(skillIDs, sk.ID)
 	}
@@ -452,15 +479,15 @@ func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames 
 
 	skillTool, err := toolRepo.GetByName(tenantID, "Skill")
 	if err != nil {
-		return fmt.Errorf("内置 Skill tool 不存在: %w", err)
+		return fmt.Errorf("builtin Skill tool not found: %w", err)
 	}
 	if len(skillNames) > 0 {
 		if err := agentRepo.EnsureAgentToolBinding(agentCfg.ID, skillTool.ID); err != nil {
-			return fmt.Errorf("挂载 Skill tool 失败: %w", err)
+			return fmt.Errorf("mount Skill tool failed: %w", err)
 		}
 	} else {
 		if err := agentRepo.RemoveAgentToolBinding(agentCfg.ID, skillTool.ID); err != nil {
-			return fmt.Errorf("卸载 Skill tool 失败: %w", err)
+			return fmt.Errorf("unmount Skill tool failed: %w", err)
 		}
 	}
 	return nil

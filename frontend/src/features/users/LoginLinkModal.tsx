@@ -1,4 +1,5 @@
 import { Modal, Input, Typography, message, Space, Button } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { CopyIcon } from '@phosphor-icons/react'
 import { usePrimaryButtonStyle } from '@/components/PrimaryButton'
 import { copyOrManual } from '@/utils/clipboard'
@@ -18,35 +19,36 @@ interface LoginLinkModalProps {
  * Application 上——与 builtin 的一次性邀请链接不同，这里无本地记录。
  */
 export default function LoginLinkModal({ open, loginUrl, loading = false, onClose }: LoginLinkModalProps) {
+  const { t } = useTranslation()
   const primaryBtnCls = usePrimaryButtonStyle()
   const copyURL = async () => {
     if (!loginUrl) return
     const result = await copyOrManual(loginUrl)
     if (result === 'copied') {
-      message.success('登录链接已复制')
+      message.success(t('users.loginLinkModal.copied'))
     } else if (result === 'failed') {
-      message.error('复制失败，请手动选择复制')
+      message.error(t('users.copyFail'))
     }
   }
 
   return (
     <Modal
-      title="登录链接"
+      title={t('users.loginLinkModal.title')}
       open={open}
       onOk={onClose}
       onCancel={onClose}
-      okText="完成"
-      cancelText="关闭"
+      okText={t('users.loginLinkModal.done')}
+      cancelText={t('users.loginLinkModal.close')}
       okButtonProps={{ className: primaryBtnCls.root }}
       destroyOnHidden
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        将此链接发给新用户，通过 Casdoor 完成登录（未注册的账号可在登录页注册）后回到本页即可看到该用户。
+        {t('users.loginLinkModal.hint')}
       </Typography.Paragraph>
       <Space.Compact style={{ width: '100%' }}>
-        <Input value={loginUrl ?? ''} readOnly placeholder={loading ? '生成中…' : undefined} />
+        <Input value={loginUrl ?? ''} readOnly placeholder={loading ? t('users.loginLinkModal.generating') : undefined} />
         <Button icon={<CopyIcon size={16} />} onClick={() => void copyURL()} disabled={loading || !loginUrl}>
-          复制
+          {t('users.copy')}
         </Button>
       </Space.Compact>
     </Modal>

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Form, Input, Select, Spin, InputNumber, List, Button } from 'antd'
 import { XIcon, PlusIcon, TrashIcon, PlugsConnectedIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Mcp, McpTransportType, McpProbeResult } from '@/api/mcps'
 import { useCreateMcp, useUpdateMcp, useMcp, useProbeMcp } from '@/queries/useMcps'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   modalHead: css`
@@ -75,13 +76,13 @@ const useStyles = createStyles(({ css }) => ({
     gap: 6px;
     padding: 6px 12px;
     border: 1px dashed color-mix(in srgb, var(--foreground) 15%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     background: transparent;
     color: var(--text-tertiary);
-    font-size: ${t.textSm};
+    font-size: ${tk.textSm};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { border-color: ${t.ink}; color: ${t.ink}; }
+    &:hover { border-color: ${tk.ink}; color: ${tk.ink}; }
   `,
   removeBtn: css`
     width: 28px;
@@ -91,11 +92,11 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   toolsBox: css`
     margin-top: 16px;
@@ -146,6 +147,7 @@ interface KvPair {
 }
 
 export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [form] = Form.useForm<FormValues>()
   const createMcp = useCreateMcp()
@@ -271,7 +273,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
       destroyOnHidden
     >
       <div className={styles.modalHead}>
-        <div className={styles.modalTitle}>{isEdit ? '编辑 MCP' : '新建 MCP'}</div>
+        <div className={styles.modalTitle}>{isEdit ? t('mcps.form.editTitle') : t('mcps.create')}</div>
         <button type="button" className={styles.modalClose} onClick={onClose}>
           <XIcon size={18} />
         </button>
@@ -285,20 +287,20 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
         ) : (
           <>
             {/* 基本信息 */}
-            <div className={styles.sectionTitle}>基本信息</div>
-            <Form.Item label="标识（name）" name="name" rules={[{ required: true, message: '请输入标识' }]}>
+            <div className={styles.sectionTitle}>{t('mcps.form.basicSection')}</div>
+            <Form.Item label={t('mcps.form.nameLabel')} name="name" rules={[{ required: true, message: t('mcps.form.nameRequired') }]}>
               <Input placeholder="e.g. filesystem" disabled={isEdit} />
             </Form.Item>
-            <Form.Item label="展示名" name="title" rules={[{ required: true, message: '请输入展示名' }]}>
-              <Input placeholder="e.g. 文件系统" />
+            <Form.Item label={t('mcps.form.titleLabel')} name="title" rules={[{ required: true, message: t('mcps.form.titleRequired') }]}>
+              <Input placeholder={t('mcps.form.titlePlaceholder')} />
             </Form.Item>
-            <Form.Item label="描述" name="description">
-              <Input.TextArea placeholder="描述此 MCP 服务器的用途" rows={2} />
+            <Form.Item label={t('mcps.form.descLabel')} name="description">
+              <Input.TextArea placeholder={t('mcps.form.descPlaceholder')} rows={2} />
             </Form.Item>
 
             {/* 传输配置 */}
-            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>传输协议</div>
-            <Form.Item label="类型" name="transportType" rules={[{ required: true }]}>
+            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('mcps.form.transportSection')}</div>
+            <Form.Item label={t('mcps.form.typeLabel')} name="transportType" rules={[{ required: true }]}>
               <Select
                 options={[
                   { label: 'SSE', value: 'sse' },
@@ -311,15 +313,15 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
               <Form.Item
                 label="URL"
                 name="url"
-                rules={[{ required: true, message: '请输入 URL' }]}
+                rules={[{ required: true, message: t('mcps.form.urlRequired') }]}
               >
                 <Input placeholder={transportType === 'sse' ? 'https://mcp.example.com/sse' : 'https://mcp.example.com/mcp'} />
               </Form.Item>
 
-              <div className={styles.sectionTitle} style={{ marginTop: 20 }}>请求头（headers）</div>
-              <div className={styles.hint}>通常用于 Authorization 等认证头。</div>
+              <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('mcps.form.headersSection')}</div>
+              <div className={styles.hint}>{t('mcps.form.headersHint')}</div>
               {editingMcp?.isBuiltin && (
-                <div className={styles.hint}>内置 MCP 支持变量：使用 $agent_runtime_token 表示 Agent Runtime Token，由部署时自动替换。</div>
+                <div className={styles.hint}>{t('mcps.form.builtinVarHint')}</div>
               )}
               {headerPairs.length > 0 && (
                 <div className={`${styles.editorHeader} ${styles.kvRow}`}>
@@ -348,19 +350,19 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
                 </div>
               ))}
               <button type="button" className={styles.addBtn} onClick={handleAddHeader}>
-                <PlusIcon size={14} /> 添加请求头
+                <PlusIcon size={14} /> {t('mcps.form.addHeader')}
               </button>
             </>
 
             {/* 重试策略 */}
-            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>重试策略（可选）</div>
-            <div className={styles.hint}>留空表示由客户端使用全局默认值。</div>
+            <div className={styles.sectionTitle} style={{ marginTop: 20 }}>{t('mcps.form.retrySection')}</div>
+            <div className={styles.hint}>{t('mcps.form.retryHint')}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Form.Item label="最大重试次数" name="retryMaxRetries">
-                <InputNumber min={0} max={10} placeholder="默认 1" style={{ width: '100%' }} />
+              <Form.Item label={t('mcps.form.retryMaxLabel')} name="retryMaxRetries">
+                <InputNumber min={0} max={10} placeholder={t('mcps.form.retryMaxPlaceholder')} style={{ width: '100%' }} />
               </Form.Item>
-              <Form.Item label="超时（毫秒）" name="retryTimeoutMs">
-                <InputNumber min={1000} max={120000} step={1000} placeholder="默认 5000" style={{ width: '100%' }} />
+              <Form.Item label={t('mcps.form.timeoutLabel')} name="retryTimeoutMs">
+                <InputNumber min={1000} max={120000} step={1000} placeholder={t('mcps.form.timeoutPlaceholder')} style={{ width: '100%' }} />
               </Form.Item>
             </div>
 
@@ -371,16 +373,16 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
                 onClick={handleProbe}
                 loading={probing}
               >
-                探测连接
+                {t('mcps.form.probeSection')}
               </Button>
               {probedResult?.status === 'success' && (
-                <span style={{ marginLeft: 8, fontSize: 12, color: t.success }}>
-                  ✓ 连接成功{probedResult.tools ? `，发现 ${probedResult.tools.length} 个工具` : ''}
+                <span style={{ marginLeft: 8, fontSize: 12, color: tk.success }}>
+                  {t('mcps.form.probeSuccess')}{probedResult.tools ? t('mcps.form.foundTools', { n: probedResult.tools.length }) : ''}
                 </span>
               )}
               {probedResult?.status === 'failed' && (
-                <span style={{ marginLeft: 8, fontSize: 12, color: t.danger }}>
-                  ✗ {probedResult.error ?? '连接失败'}
+                <span style={{ marginLeft: 8, fontSize: 12, color: tk.danger }}>
+                  ✗ {probedResult.error ?? t('mcps.form.probeErrorFallback')}
                 </span>
               )}
             </div>
@@ -403,7 +405,7 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
                 />
               ) : (
                 <div className={styles.toolsEmpty}>
-                  点击"探测连接"获取 tools 列表
+                  {t('mcps.form.toolsListHint')}
                 </div>
               )}
             </div>
@@ -412,9 +414,9 @@ export default function McpForm({ open, editingMcp, onClose }: McpFormProps) {
       </Form>
 
       <div className={styles.modalFoot}>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting} disabled={isEdit && detailLoading}>
-          {isEdit ? '更新' : '创建'}
+          {isEdit ? t('scenes.update') : t('scenes.createSubmit')}
         </PrimaryButton>
       </div>
     </Modal>

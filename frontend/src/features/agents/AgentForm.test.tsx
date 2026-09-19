@@ -195,3 +195,25 @@ describe('AgentForm personality library selection', { timeout: 15000 }, () => {
     expect(screen.getByText('重事实与公共责任')).toBeInTheDocument()
   })
 })
+
+describe('AgentForm guestEnabled', { timeout: 15000 }, () => {
+  beforeEach(() => {
+    createAgent.mockReset()
+    updateAgent.mockReset()
+  })
+
+  it('提交包含 guestEnabled 开关值', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    await user.type(screen.getByLabelText('代理标识'), 'guest-agent')
+    // 与禁用工具用例同款定位：经 Form.Item 容器找受控开关
+    const guestItem = screen.getByText('对体验用户开放').closest<HTMLElement>('.ant-form-item')
+    await user.click(within(guestItem!).getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { guestEnabled?: boolean }
+    expect(payload.guestEnabled).toBe(true)
+  })
+})

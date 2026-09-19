@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/domain/chat"
 	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/tenant"
@@ -69,8 +70,31 @@ func (h *AgentChatHandler) recordModelCall(tenantID, runID string, latency time.
 	})
 }
 
+// blockGuestInvisibleAgent: guest 访问未开放 Agent 时写中性 404（与
+// agent 不存在同形，防枚举）并返回 true（调用方直接 return）。AgentGuestVisible
+// 对 not-found 返回 (false, nil)，因此 guest 访问真不存在的 agent 与未开放
+// 的 agent 得到逐字节相同的响应；infra 故障落 500 中性，绝不伪装 not-found。
+func (h *AgentChatHandler) blockGuestInvisibleAgent(c *gin.Context, agentName string) bool {
+	if !jwtutil.IsGuest(c) {
+		return false
+	}
+	visible, err := h.svc.AgentGuestVisible(tenant.GetTenantID(c), agentName)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "internal error")
+		return true
+	}
+	if !visible {
+		respondError(c, http.StatusNotFound, "agent not found")
+		return true
+	}
+	return false
+}
+
 func (h *AgentChatHandler) ListSessions(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	userID := c.MustGet("user_id").(string)
 	source := c.Query("source")
 
@@ -92,6 +116,9 @@ type createSessionReq struct {
 
 func (h *AgentChatHandler) CreateSession(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	userID := c.MustGet("user_id").(string)
 	userName, _ := c.Get("user_name")
 	displayName, _ := c.Get("display_name")
@@ -115,11 +142,15 @@ func (h *AgentChatHandler) CreateSession(c *gin.Context) {
 }
 
 func (h *AgentChatHandler) ListMessages(c *gin.Context) {
+	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 
 	page, pageSize := parsePagination(c, 1, 50)
-	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, sessionID, page, pageSize)
+	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, agentName, sessionID, page, pageSize)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
@@ -131,10 +162,14 @@ func (h *AgentChatHandler) ListMessages(c *gin.Context) {
 }
 
 func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
+	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 
-	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, sessionID); err != nil {
+	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, agentName, sessionID); err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
@@ -146,6 +181,9 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 // attachmentExpectedGeneration, runtime >= 2.7.0).
 func (h *AgentChatHandler) Capabilities(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	ok := h.svc.AttachmentsAvailable(c.Request.Context(), tenant.GetTenantID(c), agentName)
 	respondSuccess(c, gin.H{"attachmentsEnabled": ok})
 }
@@ -167,6 +205,9 @@ type runRequestBody struct {
 // SendMessage is the SSE streaming endpoint.
 func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	agentName := services.NormalizeAgentName(c.Param("name"))
+	if h.blockGuestInvisibleAgent(c, agentName) {
+		return
+	}
 	sessionID := c.Param("id")
 	userID := c.MustGet("user_id").(string)
 	tenantID := tenant.GetTenantID(c)

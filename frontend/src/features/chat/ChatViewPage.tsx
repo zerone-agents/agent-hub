@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChatCircleDotsIcon, ArrowLeftIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import SessionListPanel from './SessionListPanel'
 import MessageViewer from './MessageViewer'
 
@@ -13,7 +14,7 @@ const useStyles = createStyles(({ css }) => ({
     margin: -24px -32px -24px;
     padding-top: 0;
     box-sizing: border-box;
-    background: ${t.surface};
+    background: ${tk.surface};
     animation: fadeIn 0.3s ease;
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @media (max-width: 768px) {
@@ -30,8 +31,8 @@ const useStyles = createStyles(({ css }) => ({
       display: none;
     }
   `,
-  emptyTitle: css`font-size: 16px; font-weight: 600; color: ${t.text};`,
-  emptyDesc: css`font-size: 13px; color: ${t.textMuted};`,
+  emptyTitle: css`font-size: 16px; font-weight: 600; color: ${tk.text};`,
+  emptyDesc: css`font-size: 13px; color: ${tk.textMuted};`,
   mobileBack: css`
     display: none;
     @media (max-width: 768px) {
@@ -39,9 +40,9 @@ const useStyles = createStyles(({ css }) => ({
       align-items: center;
       gap: 6px;
       padding: 12px 16px;
-      font-size: ${t.textSm};
+      font-size: ${tk.textSm};
       font-weight: 500;
-      color: ${t.ink};
+      color: ${tk.ink};
       background: transparent;
       border: none;
       border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -49,7 +50,7 @@ const useStyles = createStyles(({ css }) => ({
       width: 100%;
       transition: background 0.15s;
       &:hover {
-        background: ${t.inkSubtle};
+        background: ${tk.inkSubtle};
       }
     }
   `,
@@ -69,6 +70,7 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 export default function ChatViewPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null)
 
@@ -87,15 +89,15 @@ export default function ChatViewPage() {
             onClick={() => { setSelectedSession(null); }}
           >
             <ArrowLeftIcon size={16} />
-            返回会话列表
+            {t('chat.backToList')}
           </button>
           <MessageViewer session={selectedSession} />
         </div>
       ) : (
         <div className={styles.emptyPane}>
-          <ChatCircleDotsIcon size={56} weight="thin" color={t.textMuted} />
-          <div className={styles.emptyTitle}>选择一个会话</div>
-          <div className={styles.emptyDesc}>从左侧列表中选择会话以查看对话内容</div>
+          <ChatCircleDotsIcon size={56} weight="thin" color={tk.textMuted} />
+          <div className={styles.emptyTitle}>{t('chat.pickTitle')}</div>
+          <div className={styles.emptyDesc}>{t('chat.pickDesc')}</div>
         </div>
       )}
     </div>

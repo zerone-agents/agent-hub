@@ -244,7 +244,8 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	repo.uploads["f-1"] = &chat.UploadRecord{
 		ID: "f-1", TenantID: "tenant-a", SessionID: sess.ID, Path: ".zerone-uploads/a.txt",
 	}
-	if err := svc.DeleteSession("tenant-a", "u1", sess.ID); err != nil {
+	// CreateSession 归属 "coder"——绑定校验要求 :name 与会话 AgentID 一致。
+	if err := svc.DeleteSession("tenant-a", "u1", "coder", sess.ID); err != nil {
 		t.Fatalf("DeleteSession failed: %v", err)
 	}
 	if _, ok := repo.sessions[sess.ID]; ok {
@@ -253,6 +254,21 @@ func TestDeleteSession_DelegatesToRepo(t *testing.T) {
 	// issue #94 review R2 F3：上传记录（授权锚点）随会话在删除事务内一并清除。
 	if len(repo.uploads) != 0 {
 		t.Errorf("upload records still present after delete: %d", len(repo.uploads))
+	}
+}
+
+func TestDeleteSession_AgentBindingMismatch(t *testing.T) {
+	repo := newMockChatRepo()
+	agentRepo := &mockAgentRepoForChat{cfg: &agent.AgentConfig{Name: "coder"}}
+	svc := &AgentChatService{chatRepo: repo, agentRepo: agentRepo}
+
+	sess, _ := svc.CreateSession("tenant-a", "u1", "coder", "", "", "")
+	// 跨 Agent URL（PR #151 review P1）：:name 与会话归属不一致 → not-found 同形，会话保留。
+	if err := svc.DeleteSession("tenant-a", "u1", "other-agent", sess.ID); err == nil {
+		t.Fatal("DeleteSession with mismatched agent binding should fail")
+	}
+	if _, ok := repo.sessions[sess.ID]; !ok {
+		t.Error("session must survive a cross-agent delete attempt")
 	}
 }
 

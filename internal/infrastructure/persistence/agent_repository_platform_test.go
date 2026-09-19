@@ -38,6 +38,7 @@ func setupPlatformTestDB(t *testing.T) *gorm.DB {
 		source VARCHAR(16) NOT NULL DEFAULT 'remote',
 		desktop_enabled INTEGER NOT NULL DEFAULT 0,
 		mobile_enabled INTEGER NOT NULL DEFAULT 0,
+		guest_enabled INTEGER NOT NULL DEFAULT 0,
 		is_default INTEGER DEFAULT 0,
 		group_name VARCHAR(64) DEFAULT '',
 		behavior_profile JSON,

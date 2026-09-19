@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Button, Form, Input, Popconfirm, Spin, Tag, Typography } from 'antd'
 import { createStyles } from 'antd-style'
@@ -10,7 +11,7 @@ import {
   useRotateAigcKey,
   useClearAigcConfig
 } from '@/queries/useAigcConfig'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 
 const USCC_PATTERN = /^[0-9A-HJ-NPQRTUWXY]{18}$/
@@ -27,22 +28,22 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl};
+    font-size: ${tk.text3xl};
     font-weight: 700;
-    color: ${t.text};
+    color: ${tk.text};
     letter-spacing: -0.03em;
   `,
   pageSub: css`
     margin-top: 4px;
     margin-bottom: 32px;
-    font-size: ${t.textBase};
-    color: ${t.textTertiary};
+    font-size: ${tk.textBase};
+    color: ${tk.textTertiary};
   `,
   statusCard: css`
     margin-top: 32px;
     padding: 20px;
     border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
-    border-radius: ${t.radiusSm}px;
+    border-radius: ${tk.radiusSm}px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -54,8 +55,8 @@ const useStyles = createStyles(({ css }) => ({
     flex-wrap: wrap;
   `,
   statusLabel: css`
-    font-size: ${t.textSm};
-    color: ${t.textTertiary};
+    font-size: ${tk.textSm};
+    color: ${tk.textTertiary};
     min-width: 112px;
   `,
   actions: css`
@@ -71,6 +72,7 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 export default function AigcConfigPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data, isLoading } = useAigcConfig()
   const save = useSaveAigcConfig()
@@ -94,9 +96,9 @@ export default function AigcConfigPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageTitle}>AIGC 标识配置</div>
+      <div className={styles.pageTitle}>{t('aigcConfig.pageTitle')}</div>
       <div className={styles.pageSub}>
-        依据 GB 45438-2025，配置后部署 Agent 将自动携带 AI 生成内容标识；签名密钥由后端自动生成并保管。
+        {t('aigcConfig.pageSub')}
       </div>
 
       <Form
@@ -106,71 +108,71 @@ export default function AigcConfigPage() {
       >
         <Form.Item
           name="uscc"
-          label="统一社会信用代码"
+          label={t('aigcConfig.usccLabel')}
           rules={[
-            { required: true, message: '请输入 18 位统一社会信用代码' },
-            { pattern: USCC_PATTERN, message: '须为 18 位数字与大写字母（不含 I/O/S/V/Z）' }
+            { required: true, message: t('aigcConfig.usccRequired') },
+            { pattern: USCC_PATTERN, message: t('aigcConfig.usccPattern') }
           ]}
         >
-          <Input placeholder="18 位统一社会信用代码" maxLength={18} />
+          <Input placeholder={t('aigcConfig.usccPlaceholder')} maxLength={18} />
         </Form.Item>
         <Form.Item
           name="companyName"
-          label="公司完整名称"
-          rules={[{ required: true, whitespace: true, message: '请输入公司完整名称' }]}
+          label={t('aigcConfig.companyLabel')}
+          rules={[{ required: true, whitespace: true, message: t('aigcConfig.companyRequired') }]}
         >
-          <Input placeholder="与营业执照一致的公司全称" />
+          <Input placeholder={t('aigcConfig.companyPlaceholder')} />
         </Form.Item>
         <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} htmlType="submit" loading={save.isPending}>
-          保存配置
+          {t('aigcConfig.save')}
         </PrimaryButton>
       </Form>
 
       {data?.configured && (
         <div className={styles.statusCard}>
           <div className={styles.statusRow}>
-            <span className={styles.statusLabel}>服务提供者编码</span>
+            <span className={styles.statusLabel}>{t('aigcConfig.producerCode')}</span>
             <Typography.Text copyable code>
               {data.contentProducer}
             </Typography.Text>
           </div>
           <div className={styles.statusRow}>
-            <span className={styles.statusLabel}>签名密钥</span>
+            <span className={styles.statusLabel}>{t('aigcConfig.signingKey')}</span>
             {data.signingKeyConfigured ? (
-              <Tag color="green">已配置（由后端保管）</Tag>
+              <Tag color="green">{t('aigcConfig.keyConfigured')}</Tag>
             ) : (
-              <Tag>未配置</Tag>
+              <Tag>{t('aigcConfig.keyMissing')}</Tag>
             )}
           </div>
           <div className={styles.statusRow}>
-            <span className={styles.statusLabel}>模型 AIGC 码</span>
+            <span className={styles.statusLabel}>{t('aigcConfig.modelCodes')}</span>
             <span>
-              模型 AIGC 码在
-              <Link to="/providers">模型管理</Link>
-              中按模型自动分配
+              {t('aigcConfig.modelCodesHint1')}
+              <Link to="/providers">{t('aigcConfig.providersLink')}</Link>
+              {t('aigcConfig.modelCodesHint2')}
             </span>
           </div>
           <div className={styles.actions}>
             <Popconfirm
-              title="确认重新生成签名密钥？"
-              description="重新生成后，历史内容的签名将无法用新密钥验签。"
-              okText="重新生成"
+              title={t('aigcConfig.regenerateTitle')}
+              description={t('aigcConfig.regenerateDesc')}
+              okText={t('aigcConfig.regenerate')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('common.cancel')}
               onConfirm={() => { rotate.mutate(); }}
             >
-              <Button danger>重新生成密钥</Button>
+              <Button danger>{t('aigcConfig.regenerateKey')}</Button>
             </Popconfirm>
             <Popconfirm
-              title="确认清除配置？"
-              description="清除后部署 Agent 将不再携带 AIGC 标识。"
-              okText="清除"
+              title={t('aigcConfig.clearTitle')}
+              description={t('aigcConfig.clearDesc')}
+              okText={t('aigcConfig.clear')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('common.cancel')}
               onConfirm={() => { clear.mutate(); }}
             >
               <Button danger type="text">
-                清除配置
+                {t('aigcConfig.clearConfig')}
               </Button>
             </Popconfirm>
           </div>

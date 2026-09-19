@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { useTranslation } from 'react-i18next'
+// 组件外纯函数：直调 i18next
+import i18next from '@/i18n'
+import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
+import { useAuthMode } from '@/features/login/useAuthMode'
+import { useUserInfo } from '@/queries/useUserInfo'
+import { isGuestUser } from '@/lib/auth-guest'
 import { attachmentContentUrl, type AgentChatSession, type AttachmentDesc } from '@/api/agent-chat'
 import type { ChatMessage } from '@/api/chat'
 import { useAgentChatCapabilities, useAgentChatMessages } from '@/queries/useAgentChat'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import MessageBubble from '@/features/chat/MessageBubble'
 import ChatSessionList from './ChatSessionList'
 import ChatInput, { type ChatInputHandle } from './ChatInput'
@@ -18,14 +24,9 @@ import AigcHint from './AigcHint'
 import { useChatStream } from './useChatStream'
 import { useAttachments } from './useAttachments'
 import CwdFilePanel from './CwdFilePanel'
+import ChatLayout from './ChatLayout'
 
 const useStyles = createStyles(({ css }) => ({
-  page: css`
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: ${t.surface};
-  `,
   body: css`
     flex: 1;
     display: flex;
@@ -66,9 +67,9 @@ const useStyles = createStyles(({ css }) => ({
       align-items: center;
       gap: 6px;
       padding: 12px 16px;
-      font-size: ${t.textSm};
+      font-size: ${tk.textSm};
       font-weight: 500;
-      color: ${t.ink};
+      color: ${tk.ink};
       background: transparent;
       border: none;
       border-bottom: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -77,7 +78,7 @@ const useStyles = createStyles(({ css }) => ({
       flex-shrink: 0;
       transition: background 0.15s;
       &:hover {
-        background: ${t.inkSubtle};
+        background: ${tk.inkSubtle};
       }
     }
   `,
@@ -92,10 +93,10 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     padding: 6px 16px;
-    border: 1px solid ${t.danger};
+    border: 1px solid ${tk.danger};
     border-radius: 20px;
     background: var(--card);
-    color: ${t.danger};
+    color: ${tk.danger};
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -108,7 +109,7 @@ const useStyles = createStyles(({ css }) => ({
     margin: 0 16px;
     padding: 6px 10px;
     font-size: 12px;
-    color: ${t.danger};
+    color: ${tk.danger};
     background: rgba(220, 38, 38, 0.06);
     border-radius: 6px;
   `
@@ -122,23 +123,27 @@ import { ArrowLeftIcon } from '@phosphor-icons/react'
 function sendErrorMessage(errorCode: string | undefined, fallback: string | null): string | null {
   switch (errorCode) {
     case 'attachment_missing':
-      return '附件已过期（Runtime 已重建），本地文件已恢复，可直接重试发送'
+      return i18next.t('agentChat.attachExpiredRebuilt')
     case 'generation_mismatch':
-      return '附件已过期（Runtime 已更新），本地文件已恢复，可直接重试发送'
+      return i18next.t('agentChat.attachExpiredUpdated')
     case 'generation_unavailable':
-      return 'Runtime 部署状态异常，请稍后重试'
+      return i18next.t('agentChat.runtimeUnhealthy')
     case 'runtime_attachment_unsupported':
-      return '当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）'
+      return i18next.t('agentChat.runtimeNoAttach')
     default:
       return fallback
   }
 }
 
-export default function AgentChatPage() {
+function AgentChatInner({ name }: { name: string }) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
-  const { name = '' } = useParams<{ name: string }>()
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('runId') ?? undefined
+  const navigate = useNavigate()
+  const { data: mode } = useAuthMode()
+  const { data: user } = useUserInfo()
+  const guest = isGuestUser(user, mode?.mode)
   const [selected, setSelected] = useState<AgentChatSession | null>(null)
   const { data: msgData } = useAgentChatMessages(name, selected?.id ?? null)
   const stream = useChatStream()
@@ -325,7 +330,7 @@ export default function AgentChatPage() {
       try {
         descriptors = await attachments.upload(name, selected.id)
       } catch (err) {
-        setUploadError(`附件上传失败：${err instanceof Error ? err.message : '未知错误'}`)
+        setUploadError(t('agentChat.uploadFail', { error: err instanceof Error ? err.message : t('agentChat.unknownError') }))
         return false
       }
     }
@@ -369,9 +374,23 @@ export default function AgentChatPage() {
   }
 
   return (
-    <div className={styles.page}>
-      <AgentDetailBar agentName={name} />
-
+    <ChatLayout
+      fill
+      left={
+        <>
+          <button
+            type="button"
+            onClick={() => { void Promise.resolve(navigate('/agents/chat')) }}
+            aria-label={t('agentChat.backToAgents')}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <ArrowLeftIcon size={16} />
+          </button>
+          {/* Agent 概要内嵌页眉，点击向下浮层展开详情 */}
+          <AgentDetailBar agentName={name} />
+        </>
+      }
+    >
       <div className={styles.body}>
         <ChatSessionList
           agentName={name}
@@ -393,7 +412,7 @@ export default function AgentChatPage() {
                 onClick={() => { setSelected(null); }}
               >
                 <ArrowLeftIcon size={16} />
-                返回会话列表
+                {t('agentChat.backToSessions')}
               </button>
               <div className={styles.messages} ref={scrollRef} onScroll={handleScroll}>
                 {displayMessages.length === 0 && !isStreaming ? (
@@ -436,7 +455,7 @@ export default function AgentChatPage() {
               {isStreaming && (
                 <div className={styles.stopBar}>
                   <button type="button" className={styles.stopBtn} onClick={() => { stream.reset(); }}>
-                    <StopIcon size={12} weight="fill" /> 停止回复
+                    <StopIcon size={12} weight="fill" /> {t('agentChat.stopReply')}
                   </button>
                 </div>
               )}
@@ -459,13 +478,19 @@ export default function AgentChatPage() {
             </>
           ) : (
             <div className={styles.emptyPane}>
-              <Empty description="选择左侧会话或新建会话开始对话" />
+              <Empty description={t('agentChat.pickSession')} />
             </div>
           )}
         </div>
 
-        <CwdFilePanel agentName={name} />
+        {!guest && <CwdFilePanel agentName={name} />}
       </div>
-    </div>
+    </ChatLayout>
   )
+}
+
+/** URL name 段变化 → key 重挂载：切换 Agent 即全新状态（中断流、清空会话/输入）。 */
+export default function AgentChatPage() {
+  const { name = '' } = useParams<{ name: string }>()
+  return <AgentChatInner key={name} name={name} />
 }

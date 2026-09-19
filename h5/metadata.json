@@ -1,0 +1,6 @@
+{
+  "name": "WorkBuddy 协同办公",
+  "description": "类似WorkBuddy的移动端协同办公应用，提供AI场景对话、专家Agent工坊、资料库知识库管理及个人中心演示。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

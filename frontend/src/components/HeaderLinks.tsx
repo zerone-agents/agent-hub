@@ -1,6 +1,7 @@
 import { GithubLogoIcon, GlobeIcon } from '@phosphor-icons/react'
 import { Tooltip } from 'antd'
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 
 const GITHUB_REPO_URL = 'https://github.com/zerone-agents/agent-hub'
 const OFFICIAL_SITE_URL = 'https://www.zerone.run/'
@@ -47,23 +48,24 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 const LINKS = [
-  { href: GITHUB_REPO_URL, label: 'GitHub 仓库', Icon: GithubLogoIcon },
-  { href: OFFICIAL_SITE_URL, label: '官方网站', Icon: GlobeIcon }
+  { href: GITHUB_REPO_URL, label: 'components.headerLinks.github', Icon: GithubLogoIcon },
+  { href: OFFICIAL_SITE_URL, label: 'components.headerLinks.site', Icon: GlobeIcon }
 ]
 
 export default function HeaderLinks() {
   const { styles } = useStyles()
+  const { t } = useTranslation()
 
   return (
-    <div className={styles.links} aria-label="相关链接">
+    <div className={styles.links} aria-label={t('components.headerLinks.ariaLabel')}>
       {LINKS.map(({ href, label, Icon }) => (
-        <Tooltip key={href} title={label}>
+        <Tooltip key={href} title={t(label)}>
           <a
             href={href}
             target="_blank"
             rel="noopener noreferrer"
             className={styles.link}
-            aria-label={label}
+            aria-label={t(label)}
           >
             <Icon size={18} />
           </a>

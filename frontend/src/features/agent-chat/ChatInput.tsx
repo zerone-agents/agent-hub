@@ -1,9 +1,10 @@
 // frontend/src/features/agent-chat/ChatInput.tsx
 import { useState, useImperativeHandle, type ClipboardEvent, type DragEvent, type KeyboardEvent, type Ref } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Input, Upload } from 'antd'
 import { PaperPlaneRightIcon, PaperclipIcon, XIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import PrimaryButton from '@/components/PrimaryButton'
 import { formatBytes } from '@/utils/format'
 import type { AttachmentItem } from './useAttachments'
@@ -15,11 +16,11 @@ const useStyles = createStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 8px;
-    background: ${t.surface};
+    background: ${tk.paper};
     transition: border-color 0.15s;
     &.dragover {
-      border-top-color: ${t.ink};
-      box-shadow: inset 0 2px 0 ${t.ink};
+      border-top-color: ${tk.ink};
+      box-shadow: inset 0 2px 0 ${tk.ink};
     }
   `,
   row: css`
@@ -35,7 +36,7 @@ const useStyles = createStyles(({ css }) => ({
     border: none;
     background: transparent;
     cursor: pointer;
-    color: ${t.textSecondary};
+    color: ${tk.textSecondary};
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -45,7 +46,7 @@ const useStyles = createStyles(({ css }) => ({
     flex-shrink: 0;
     align-self: flex-end;
     margin-bottom: 1px;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
     &:disabled { opacity: 0.4; cursor: default; }
   `,
   tray: css`
@@ -58,11 +59,11 @@ const useStyles = createStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
-    border: 1px solid ${t.inkLighter};
+    border: 1px solid ${tk.inkLighter};
     border-radius: 8px;
     font-size: 12px;
-    color: ${t.textSecondary};
-    background: ${t.surface};
+    color: ${tk.textSecondary};
+    background: ${tk.surface};
     max-width: 260px;
   `,
   thumb: css`
@@ -83,13 +84,13 @@ const useStyles = createStyles(({ css }) => ({
     cursor: pointer;
     display: inline-flex;
     padding: 2px;
-    color: ${t.textMuted};
-    &:hover { color: ${t.danger}; }
+    color: ${tk.textMuted};
+    &:hover { color: ${tk.danger}; }
     &:disabled { opacity: 0.4; cursor: default; }
   `,
   attachError: css`
     font-size: 12px;
-    color: ${t.danger};
+    color: ${tk.danger};
   `,
 }))
 
@@ -119,6 +120,7 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({ ref, disabled, onSend, attachments }: ChatInputProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [value, setValue] = useState('')
   const [attachError, setAttachError] = useState<string | null>(null)
@@ -193,14 +195,14 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
               )}
               <span className={styles.chipName}>{item.file.name}</span>
               <span>{formatBytes(item.file.size)}</span>
-              {item.status === 'uploading' && <span>上传中…</span>}
-              {item.status === 'uploaded' && <span style={{ color: t.ink }}>✓</span>}
+              {item.status === 'uploading' && <span>{t('agentChat.uploading')}</span>}
+              {item.status === 'uploaded' && <span style={{ color: tk.ink }}>✓</span>}
               <button
                 type="button"
                 className={styles.chipRemove}
                 onClick={() => { attachments.remove(item.id); }}
                 disabled={attachments.uploading}
-                aria-label={`移除 ${item.file.name}`}
+                aria-label={t('agentChat.removeAria', { name: item.file.name })}
               >
                 <XIcon size={12} />
               </button>
@@ -223,8 +225,8 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
               type="button"
               className={styles.attachBtn}
               disabled={inputDisabled || attachments.uploading}
-              aria-label="添加附件"
-              title="添加附件（支持拖拽 / 粘贴）"
+              aria-label={t('agentChat.addAttachment')}
+              title={t('agentChat.addAttachmentTitle')}
             >
               <PaperclipIcon size={16} />
             </button>
@@ -232,7 +234,7 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
         )}
         <Input.TextArea
           className={styles.textarea}
-          placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+          placeholder={t('agentChat.inputPh')}
           autoSize={{ minRows: 1, maxRows: 6 }}
           value={value}
           onChange={(e) => { setValue(e.target.value); }}
@@ -245,7 +247,7 @@ export default function ChatInput({ ref, disabled, onSend, attachments }: ChatIn
           disabled={inputDisabled || (attachments?.uploading ?? false) || (!value.trim() && !hasAttachments)}
           onClick={() => { void submit(); }}
         >
-          发送
+          {t('agentChat.send')}
         </PrimaryButton>
       </div>
     </div>

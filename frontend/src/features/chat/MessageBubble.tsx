@@ -1,9 +1,10 @@
 import { useState, memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { UserIcon, RobotIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import type { ChatMessage } from '@/api/chat'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import ChatMarkdown from './ChatMarkdown'
 import { ContentParts, parseContent } from './parts'
 
@@ -21,7 +22,7 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; align-items: center; justify-content: center;
     color: var(--primary-foreground);
   `,
-  avatarUser: css`background: ${t.ink};`,
+  avatarUser: css`background: ${tk.ink};`,
   avatarAssistant: css`background: #059669;`,
   avatarSystem: css`background: #6B7280;`,
   avatarTool: css`background: #D97706;`,
@@ -29,41 +30,41 @@ const useStyles = createStyles(({ css }) => ({
   contentUser: css`
     display: flex; flex-direction: column; align-items: flex-end;
   `,
-  role: css`font-size: 11px; font-weight: 600; color: ${t.textTertiary}; margin-bottom: 3px; text-transform: capitalize;`,
+  role: css`font-size: 11px; font-weight: 600; color: ${tk.textTertiary}; margin-bottom: 3px; text-transform: capitalize;`,
   bubble: css`
-    background: ${t.surface}; border-radius: 0 8px 8px 8px;
-    padding: 12px 14px; box-shadow: ${t.elevation1};
+    background: ${tk.surface}; border-radius: 0 8px 8px 8px;
+    padding: 12px 14px; box-shadow: ${tk.elevation1};
     display: block; width: 85%; max-width: 85%;
     box-sizing: border-box;
   `,
   bubbleUser: css`
-    background: ${t.softAccent}; border-radius: 8px 0 8px 8px;
+    background: ${tk.softAccent}; border-radius: 8px 0 8px 8px;
     display: inline-block; width: auto; max-width: 85%;
   `,
   footer: css`
     display: flex; align-items: center; gap: 8px; margin-top: 5px;
-    font-size: 11px; color: ${t.textMuted};
+    font-size: 11px; color: ${tk.textMuted};
   `,
   footerUser: css`
     flex-direction: row-reverse;
   `,
   rawToggle: css`
     border: none; background: transparent; cursor: pointer;
-    font-size: 11px; color: ${t.textTertiary};
-    &:hover { color: ${t.ink}; }
+    font-size: 11px; color: ${tk.textTertiary};
+    &:hover { color: ${tk.ink}; }
   `,
   hiddenTag: css`
     padding: 1px 5px; border-radius: 2px; font-size: 10px;
-    background: rgba(220, 38, 38, 0.08); color: ${t.danger};
+    background: rgba(220, 38, 38, 0.08); color: ${tk.danger};
   `,
   raw: css`
-    margin: 0; font-family: ${t.fontMono}; font-size: 12px;
-    white-space: pre-wrap; word-break: break-word; color: ${t.text};
+    margin: 0; font-family: ${tk.fontMono}; font-size: 12px;
+    white-space: pre-wrap; word-break: break-word; color: ${tk.text};
   `
 }))
 
 const ROLE_LABELS: Record<string, string> = {
-  user: '用户', assistant: '助手', system: '系统', tool: '工具'
+  user: 'chat.msg.roleUser', assistant: 'chat.msg.roleAssistant', system: 'chat.msg.roleSystem', tool: 'chat.msg.roleTool'
 }
 
 /**
@@ -110,6 +111,7 @@ interface MessageBubbleProps {
 }
 
 function MessageBubbleInner({ message: msg, enableStream, buildAttachmentUrl }: MessageBubbleProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [raw, setRaw] = useState(false)
 
@@ -123,7 +125,7 @@ function MessageBubbleInner({ message: msg, enableStream, buildAttachmentUrl }: 
         {isUser ? <UserIcon size={14} weight="bold" /> : <RobotIcon size={14} weight="bold" />}
       </div>
       <div className={`${styles.content} ${isUser ? styles.contentUser : ''}`}>
-        <div className={styles.role}>{ROLE_LABELS[msg.role] || msg.role}</div>
+        <div className={styles.role}>{t(ROLE_LABELS[msg.role] || msg.role)}</div>
         <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : ''}`}>
           {raw ? (
             <pre className={styles.raw}>
@@ -144,7 +146,7 @@ function MessageBubbleInner({ message: msg, enableStream, buildAttachmentUrl }: 
         </div>
         <div className={`${styles.footer} ${isUser ? styles.footerUser : ''}`}>
           <span>{formatTime(msg.created_at)}</span>
-          {msg.hidden && <span className={styles.hiddenTag}>已隐藏</span>}
+          {msg.hidden && <span className={styles.hiddenTag}>{t('chat.msg.hidden')}</span>}
           {msg.token_usage && <span>{formatTokenUsage(msg.token_usage)}</span>}
           <button type="button" className={styles.rawToggle} onClick={() => { setRaw(!raw); }}>
             {raw ? 'Markdown' : 'Raw'}

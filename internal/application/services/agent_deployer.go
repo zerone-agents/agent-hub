@@ -701,7 +701,10 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	// Load agent from DB
 	agentCfg, err := s.agentRepo.GetByName(tenantID, name)
 	if err != nil {
-		return nil, fmt.Errorf("agent not found: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", agent.ErrAgentNotFound, name)
+		}
+		return nil, fmt.Errorf("load agent %s failed: %w", name, err)
 	}
 
 	// Deployer calls use the tenant-scoped deploy key.
@@ -709,8 +712,25 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	ctx := context.Background()
 	statusResp, err := s.client.GetAgent(ctx, key)
 	if err != nil {
-		// If deployer says not found, return not_found status
-		return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		// Fail-closed（bulk-ops spec §3.1）：仅 deployer 明确 404（容器不存在）
+		// 才映射为 not_found；其余错误（5xx/网络/超时）如实传播。此前任何错误
+		// 都伪装成 not_found，Delete handler 的活跃部署 409 检查会被绕过，
+		// deployer 故障时会误删仍有容器在跑的 Agent 配置（孤儿容器）。
+		var httpErr *deployer.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			// 容器已不存在：把 DB 中残留的部署状态收敛（线上案例：Agent 部署
+			// 成功后容器被外部清理，DB 残留 "running"——聊天视图按
+			// deployment_status='running' 过滤，未部署 Agent 因此出现在聊天页）。
+			// 仅当 DB 残留非空且非 archived（归档容器本就该显示 not_found）
+			// 时写回，避免每次查询重复写库。
+			if agentCfg.DeploymentStatus != "" && agentCfg.DeploymentStatus != "archived" {
+				if err := s.updateStatus(tenantID, agentCfg, "not_found", 0, agentCfg.DeployedAt); err != nil {
+					log.Printf("GetStatus: failed to converge deployment status for agent %s: %v", name, err)
+				}
+			}
+			return s.toDTO(tenantID, name, "not_found", "", "", "", 0, agentCfg.DeployedAt, "未部署或已被清理"), nil
+		}
+		return nil, fmt.Errorf("get agent status: %w", err)
 	}
 
 	// If status is running, also query health
@@ -1101,7 +1121,7 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 
 	rootDef, rootSubNames, err := s.buildAgentDefinition(ctx, tenantID, rootCfg, definitionOpts{isRoot: true})
 	if err != nil {
-		return nil, fmt.Errorf("构造根 Agent 定义失败: %w", err)
+		return nil, fmt.Errorf("build root agent definition failed: %w", err)
 	}
 	defs := []deployer.AgentDefinition{*rootDef}
 
@@ -1121,7 +1141,7 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 		}
 		subDef, subSubNames, err := s.buildAgentDefinition(ctx, tenantID, sub, definitionOpts{})
 		if err != nil {
-			return nil, fmt.Errorf("构造子 Agent %q 定义失败: %w", subName, err)
+			return nil, fmt.Errorf("build sub agent %q definition failed: %w", subName, err)
 		}
 		for _, grand := range subSubNames {
 			if grand == rootCfg.Name {

@@ -14,6 +14,9 @@ const useStyles = createStyles(({ css, token }) => ({
   `,
   extra: css`
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   `
 }))
 

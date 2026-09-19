@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Spin, Popconfirm, Tooltip } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, PencilSimpleIcon, TrashIcon, PlugsConnectedIcon } from '@phosphor-icons/react'
@@ -8,7 +9,7 @@ import { useMcps, useDeleteMcp, useProbeMcp } from '@/queries/useMcps'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import type { Mcp } from '@/api/mcps'
 import { formatTime } from '@/utils/time'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
 import CardGrid from '@/components/CardGrid'
 import McpForm from './McpForm'
@@ -32,34 +33,34 @@ const useStyles = createStyles(({ css }) => ({
     }
   `,
   pageTitle: css`
-    font-size: ${t.text3xl};
+    font-size: ${tk.text3xl};
     font-weight: 700;
-    color: ${t.text};
+    color: ${tk.text};
     letter-spacing: -0.03em;
     line-height: 1.15;
   `,
   pageSub: css`
     margin-top: 4px;
-    font-size: ${t.textBase};
-    color: ${t.textTertiary};
+    font-size: ${tk.textBase};
+    color: ${tk.textTertiary};
   `,
   loadingWrap: css`display: flex; justify-content: center; padding: 80px 0;`,
   emptyState: css`text-align: center; padding: 80px 0;`,
   emptyIcon: css`margin-bottom: 20px;`,
   emptyTitle: css`
-    font-size: ${t.textLg};
+    font-size: ${tk.textLg};
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     margin-bottom: 6px;
   `,
   emptyDesc: css`
-    color: ${t.textTertiary};
-    font-size: ${t.textSm};
+    color: ${tk.textTertiary};
+    font-size: ${tk.textSm};
   `,
   metaLine: css`
-    font-family: ${t.fontMono};
+    font-family: ${tk.fontMono};
     font-size: 11px;
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     word-break: break-all;
   `,
   actBtn: css`
@@ -70,14 +71,14 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
     border: none;
     background: transparent;
-    border-radius: ${t.radiusSm}px;
-    color: ${t.textMuted};
+    border-radius: ${tk.radiusSm}px;
+    color: ${tk.textMuted};
     cursor: pointer;
     transition: all 0.15s;
-    &:hover { background: ${t.inkSubtle}; color: ${t.ink}; }
+    &:hover { background: ${tk.inkSubtle}; color: ${tk.ink}; }
   `,
   actBtnDanger: css`
-    &:hover { background: rgba(220, 38, 38, 0.06); color: ${t.danger}; }
+    &:hover { background: rgba(220, 38, 38, 0.06); color: ${tk.danger}; }
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
@@ -125,9 +126,9 @@ function ToolTag({ name }: { name: string }) {
       padding: '2px 8px',
       borderRadius: 3,
       fontSize: 11,
-      fontFamily: t.fontMono,
-      background: t.inkSubtle,
-      color: t.textSecondary,
+      fontFamily: tk.fontMono,
+      background: tk.inkSubtle,
+      color: tk.textSecondary,
     }}>
       {name}
     </span>
@@ -135,6 +136,7 @@ function ToolTag({ name }: { name: string }) {
 }
 
 export default function McpListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data: mcps = [], isLoading } = useMcps()
   const deleteMcp = useDeleteMcp()
@@ -190,19 +192,19 @@ export default function McpListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>MCP 配置</div>
-          <div className={styles.pageSub}>管理外部 MCP 服务器配置，供 Agent 绑定使用</div>
+          <div className={styles.pageTitle}>{t('mcps.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('mcps.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-            新建 MCP
+            {t('mcps.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
           <NameSearch
-            placeholder="搜索 MCP 名称"
+            placeholder={t('mcps.searchPlaceholder')}
             onSearch={setKeywords}
             realtime
           />
@@ -215,10 +217,10 @@ export default function McpListPage() {
       ) : filteredMcps.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>
-            <PlugsConnectedIcon size={48} weight="thin" color={t.textMuted} />
+            <PlugsConnectedIcon size={48} weight="thin" color={tk.textMuted} />
           </div>
-          <div className={styles.emptyTitle}>{keywords ? '未找到匹配的 MCP' : '暂无 MCP 配置'}</div>
-          <div className={styles.emptyDesc}>{keywords ? '请尝试其他关键词' : '添加您的第一个 MCP 服务器以开始使用'}</div>
+          <div className={styles.emptyTitle}>{keywords ? t('mcps.empty.noMatch') : t('mcps.empty.none')}</div>
+          <div className={styles.emptyDesc}>{keywords ? t('mcps.empty.noMatchHint') : t('mcps.empty.noneHint')}</div>
         </div>
       ) : (
         <CardGrid>
@@ -235,24 +237,24 @@ export default function McpListPage() {
                   </span>
                   {mcp.isBuiltin && (
                     <span style={{ color: '#3b82f6' }}>
-                      <Badge label="内置" color="rgba(59, 130, 246, 0.08)" />
+                      <Badge label={t('mcps.builtinBadge')} color="rgba(59, 130, 246, 0.08)" />
                     </span>
                   )}
                 </div>
               }
-              description={mcp.description || '暂无描述'}
+              description={mcp.description || t('mcps.noDescription')}
               bodyExtra={
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div className={styles.metaLine}>{mcp.url}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
                       {mcp.isBuiltin
-                        ? `${mcp.tools?.length ?? 0} 个内置 tools`
+                        ? t('mcps.builtinToolsCount', { n: mcp.tools?.length ?? 0 })
                         : mcp.probeStatus === 'success'
-                        ? `${mcp.tools?.length ?? 0} 个 tools · 上次探测 ${formatTime(mcp.lastProbedAt)}`
+                        ? t('mcps.probedToolsCount', { n: mcp.tools?.length ?? 0, time: formatTime(mcp.lastProbedAt) })
                         : mcp.probeStatus === 'failed'
-                        ? '探测失败'
-                        : '未探测'}
+                        ? t('mcps.probeFailed')
+                        : t('mcps.notProbed')}
                     </div>
                     {mcp.tools && mcp.tools.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -277,7 +279,7 @@ export default function McpListPage() {
                       <button
                         type="button"
                         className={styles.actBtn}
-                        title="探测"
+                        title={t('mcps.probe')}
                         disabled={probingName === mcp.name}
                         onClick={() => handleProbe(mcp)}
                       >
@@ -291,24 +293,24 @@ export default function McpListPage() {
                     <button
                       type="button"
                       className={styles.actBtn}
-                      title="编辑"
+                      title={t('common.edit')}
                       onClick={() => { showEdit(mcp); }}
                     >
                       <PencilSimpleIcon size={14} />
                     </button>
                     {!mcp.isBuiltin && (
                       <Popconfirm
-                        title="确认删除？"
-                        description={`删除 "${mcp.name}"？已被 Agent 绑定的 MCP 无法删除，请先解除绑定。`}
-                        okText="删除"
+                        title={t('mcps.deleteConfirmTitle')}
+                        description={t('mcps.deleteConfirm', { name: mcp.name })}
+                        okText={t('common.delete')}
                         okButtonProps={{ danger: true }}
-                        cancelText="取消"
+                        cancelText={t('common.cancel')}
                         onConfirm={() => handleDelete(mcp.name)}
                       >
                         <button
                           type="button"
                           className={`${styles.actBtn} ${styles.actBtnDanger}`}
-                          title="删除"
+                          title={t('common.delete')}
                         >
                           <TrashIcon size={14} />
                         </button>

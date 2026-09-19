@@ -38,13 +38,15 @@ export function isValidAgentIdentifier(value: string): boolean {
  * (e.g. "技能标识只能包含...").
  *
  * Usage:
- *   <Form.Item label="技能标识" name="name" rules={identifierFormRules('技能标识')}>
+ *   <Form.Item label={t('...')} name="name" rules={identifierFormRules(t('...'))}>
  */
+import i18next from '@/i18n'
+
 export function identifierFormRules(label: string) {
   return [
-    { required: true, message: `请输入${label}` },
-    { max: IDENTIFIER_MAX_LENGTH, message: `${label}长度不能超过 ${IDENTIFIER_MAX_LENGTH} 个字符` },
-    { pattern: IDENTIFIER_PATTERN, message: `${label}只能包含字母、数字、点、下划线和横线` }
+    { required: true, message: i18next.t('common.form.required', { label }) },
+    { max: IDENTIFIER_MAX_LENGTH, message: i18next.t('common.form.maxLength', { label, max: IDENTIFIER_MAX_LENGTH }) },
+    { pattern: IDENTIFIER_PATTERN, message: i18next.t('common.form.identifierCharset', { label }) }
   ]
 }
 
@@ -57,8 +59,8 @@ export function identifierFormRules(label: string) {
  */
 export function agentIdentifierFormRules(label: string) {
   return [
-    { required: true, message: `请输入${label}` },
-    { max: IDENTIFIER_MAX_LENGTH, message: `${label}长度不能超过 ${IDENTIFIER_MAX_LENGTH} 个字符` },
-    { pattern: AGENT_IDENTIFIER_PATTERN, message: `${label}只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾` }
+    { required: true, message: i18next.t('common.form.required', { label }) },
+    { max: IDENTIFIER_MAX_LENGTH, message: i18next.t('common.form.maxLength', { label, max: IDENTIFIER_MAX_LENGTH }) },
+    { pattern: AGENT_IDENTIFIER_PATTERN, message: i18next.t('common.form.agentCharset', { label }) }
   ]
 }

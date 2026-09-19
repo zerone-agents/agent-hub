@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/audit"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,11 +13,12 @@ import (
 // CLITokenHandler exposes the CLI token lifecycle: issue / list / revoke.
 // All endpoints operate on c.MustGet("user_id") set by the auth middleware.
 type CLITokenHandler struct {
-	svc *services.CLITokenService
+	svc   *services.CLITokenService
+	audit *services.AuditRecorder
 }
 
-func NewCLITokenHandler(svc *services.CLITokenService) *CLITokenHandler {
-	return &CLITokenHandler{svc: svc}
+func NewCLITokenHandler(svc *services.CLITokenService, ar *services.AuditRecorder) *CLITokenHandler {
+	return &CLITokenHandler{svc: svc, audit: ar}
 }
 
 type issueTokenReq struct {
@@ -37,6 +39,8 @@ func (h *CLITokenHandler) Issue(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Target 记 token 名而非值：明文 token 只在响应体出现一次（spec §3）。
+	h.audit.Simple(c, audit.ActionCliTokenIssue, audit.TargetToken, "", req.Name)
 	respondCreated(c, result)
 }
 
@@ -64,5 +68,6 @@ func (h *CLITokenHandler) Revoke(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "token not found")
 		return
 	}
+	h.audit.Simple(c, audit.ActionCliTokenRevoke, audit.TargetToken, idStr, "")
 	respondMessage(c, http.StatusOK, "token revoked")
 }

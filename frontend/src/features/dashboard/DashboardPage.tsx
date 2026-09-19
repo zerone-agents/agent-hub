@@ -1,4 +1,5 @@
 import { useState, type ComponentType } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   BooksIcon,
   CpuIcon,
@@ -544,7 +545,7 @@ const typeLabel: Record<ActivityItem['type'], string> = {
   scene: 'Scene',
   provider: 'Provider',
   mcp: 'MCP',
-  knowledge: '知识库'
+  knowledge: 'dashboard.activityType.knowledge'
 }
 
 const typeIcon: Record<ActivityItem['type'], ComponentType<{ size?: number; weight?: 'fill' | 'regular' | 'bold' | 'light' | 'thin' | 'duotone' }>> = {
@@ -607,6 +608,7 @@ function donutArcPath(
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const navigate = useNavigate()
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
@@ -628,7 +630,7 @@ export default function DashboardPage() {
   }
 
   if (isError) {
-    return <div className={styles.empty}>仪表盘数据加载失败，请稍后刷新重试</div>
+    return <div className={styles.empty}>{t('dashboard.loadError')}</div>
   }
 
   const modelCount = providers.reduce((sum, provider) => sum + (provider.defaultModels.length), 0)
@@ -636,13 +638,13 @@ export default function DashboardPage() {
   const chunkCount = knowledgeDatasets.reduce((sum, dataset) => sum + dataset.chunk_num, 0)
   const resources: ResourceItem[] = [
     { label: 'Agent', value: agents.length, icon: RobotIcon, path: '/agents', color: 'var(--chart-1)' },
-    { label: '工具', value: tools.length, icon: WrenchIcon, path: '/tools', color: 'var(--chart-2)' },
-    { label: 'MCP 配置', value: mcps.length, icon: PlugsConnectedIcon, path: '/mcps', color: 'var(--primary)' },
-    { label: '技能', value: skills.length, icon: SparkleIcon, path: '/skills', color: 'var(--chart-3)' },
-    { label: '提供方', value: providers.length, icon: CpuIcon, path: '/providers', color: 'var(--chart-5)' },
-    { label: '模型', value: modelCount, icon: CubeIcon, path: '/providers', color: 'var(--chart-1)' },
-    { label: '知识库', value: knowledgeDatasets.length, icon: BooksIcon, path: '/knowledge', color: 'var(--chart-2)' },
-    { label: '场景', value: scenes.length, icon: FilmSlateIcon, path: '/scenes', color: 'var(--chart-4)' }
+    { label: t('dashboard.stats.tools'), value: tools.length, icon: WrenchIcon, path: '/tools', color: 'var(--chart-2)' },
+    { label: t('dashboard.stats.mcps'), value: mcps.length, icon: PlugsConnectedIcon, path: '/mcps', color: 'var(--primary)' },
+    { label: t('dashboard.stats.skills'), value: skills.length, icon: SparkleIcon, path: '/skills', color: 'var(--chart-3)' },
+    { label: t('dashboard.stats.providers'), value: providers.length, icon: CpuIcon, path: '/providers', color: 'var(--chart-5)' },
+    { label: t('dashboard.stats.models'), value: modelCount, icon: CubeIcon, path: '/providers', color: 'var(--chart-1)' },
+    { label: t('dashboard.stats.knowledge'), value: knowledgeDatasets.length, icon: BooksIcon, path: '/knowledge', color: 'var(--chart-2)' },
+    { label: t('dashboard.stats.scenes'), value: scenes.length, icon: FilmSlateIcon, path: '/scenes', color: 'var(--chart-4)' }
   ]
   const resourceActivities: ActivityItem[] = [
     ...agents.map((item: Agent) => ({ title: item.config.title?.zh ?? item.name, time: item.createdAt ?? '', type: 'agent' as const })),
@@ -673,61 +675,61 @@ export default function DashboardPage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.headerTitle}>仪表盘</h1>
-          <div className={styles.headerSub}>查看智能体资源、配置健康度与最近变化。</div>
+          <h1 className={styles.headerTitle}>{t('dashboard.pageTitle')}</h1>
+          <div className={styles.headerSub}>{t('dashboard.pageSub')}</div>
         </div>
-        <div className={styles.status}><span className={styles.statusDot} /> 数据已同步</div>
+        <div className={styles.status}><span className={styles.statusDot} /> {t('dashboard.synced')}</div>
       </header>
 
-      <section className={styles.heroGrid} aria-label="系统总览">
+      <section className={styles.heroGrid} aria-label={t('dashboard.overviewLabel')}>
         <article className={styles.heroCard}>
           <div className={styles.heroPattern} />
           <div className={styles.heroContent}>
             <div>
-              <div className={styles.heroLabel}>已接入资源</div>
+              <div className={styles.heroLabel}>{t('dashboard.heroLabel')}</div>
               <div className={styles.heroNumberRow}>
                 <span className={styles.heroNumber}>{total}</span>
-                <span className={styles.heroUnit}>项配置</span>
+                <span className={styles.heroUnit}>{t('dashboard.heroUnit')}</span>
               </div>
             </div>
             <div className={styles.heroBottom}>
               <div className={styles.heroMetric}>
                 <div className={styles.heroMetricValue}>{desktopAgents}/{agents.length}</div>
-                <div className={styles.heroMetricLabel}>桌面端代理</div>
+                <div className={styles.heroMetricLabel}>{t('dashboard.metric.desktopAgents')}</div>
               </div>
               <div className={styles.heroMetric}>
                 <div className={styles.heroMetricValue}>{modelCount}/{providers.length}</div>
-                <div className={styles.heroMetricLabel}>模型 / 提供方</div>
+                <div className={styles.heroMetricLabel}>{t('dashboard.metric.modelsProviders')}</div>
               </div>
               <div className={styles.heroMetric}>
                 <div className={styles.heroMetricValue}>{documentCount}/{chunkCount}</div>
-                <div className={styles.heroMetricLabel}>知识文档 / 切块</div>
+                <div className={styles.heroMetricLabel}>{t('dashboard.metric.knowledgeChunks')}</div>
               </div>
               <div className={styles.heroMetric}>
                 <div className={styles.heroMetricValue}>{chatSessionTotal}</div>
-                <div className={styles.heroMetricLabel}><ChatsIcon size={11} /> 聊天会话</div>
+                <div className={styles.heroMetricLabel}><ChatsIcon size={11} /> {t('dashboard.metric.chatSessions')}</div>
               </div>
             </div>
           </div>
         </article>
 
         <article className={styles.readinessCard}>
-          <div className={styles.cardKicker}>配置健康度</div>
+          <div className={styles.cardKicker}>{t('dashboard.healthTitle')}</div>
           <div className={styles.readinessBody}>
             <div className={styles.ring} style={{ '--progress': `${readiness * 3.6}deg` } as React.CSSProperties}>
               <span className={styles.ringValue}>{readiness}%</span>
             </div>
             <div className={styles.readinessList}>
-              <div className={styles.readinessItem}><span>桌面端代理</span><span className={styles.readinessValue}>{desktopAgents}/{agents.length}</span></div>
-              <div className={styles.readinessItem}><span>Provider 接入</span><span className={styles.readinessValue}>{providers.length}</span></div>
-              <div className={styles.readinessItem}><span>MCP 正常</span><span className={styles.readinessValue}>{healthyMcps}/{mcps.length}</span></div>
+              <div className={styles.readinessItem}><span>{t('dashboard.readiness.desktopAgents')}</span><span className={styles.readinessValue}>{desktopAgents}/{agents.length}</span></div>
+              <div className={styles.readinessItem}><span>{t('dashboard.readiness.providers')}</span><span className={styles.readinessValue}>{providers.length}</span></div>
+              <div className={styles.readinessItem}><span>{t('dashboard.readiness.mcps')}</span><span className={styles.readinessValue}>{healthyMcps}/{mcps.length}</span></div>
             </div>
           </div>
-          <div className={styles.readinessNote}>基于桌面端代理占比、模型提供方接入和 MCP 探测结果综合计算。</div>
+          <div className={styles.readinessNote}>{t('dashboard.healthNote')}</div>
         </article>
       </section>
 
-      <section className={styles.statsGrid} aria-label="资源统计">
+      <section className={styles.statsGrid} aria-label={t('dashboard.statsLabel')}>
         {resources.map((item) => {
           const Icon = item.icon
           return (
@@ -747,12 +749,12 @@ export default function DashboardPage() {
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <div className={styles.panelTitle}>资源增长</div>
-                <div className={styles.panelSub}>按七天聚合的新增配置</div>
+                <div className={styles.panelTitle}>{t('dashboard.growthTitle')}</div>
+                <div className={styles.panelSub}>{t('dashboard.growthSub')}</div>
               </div>
               <div className={styles.cardKicker}>8 WEEKS</div>
             </div>
-            <div className={styles.trendChart} role="img" aria-label="最近八周资源新增趋势">
+            <div className={styles.trendChart} role="img" aria-label={t('dashboard.trendLabel')}>
               {trend.map((item) => (
                 <div className={styles.barGroup} key={item.label}>
                   <div className={styles.barValue}>{item.value}</div>
@@ -766,8 +768,8 @@ export default function DashboardPage() {
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <div className={styles.panelTitle}>资源构成</div>
-                <div className={styles.panelSub}>当前工作空间的能力分布</div>
+                <div className={styles.panelTitle}>{t('dashboard.compositionTitle')}</div>
+                <div className={styles.panelSub}>{t('dashboard.compositionSub')}</div>
               </div>
             </div>
             <div className={styles.composition}>
@@ -829,13 +831,13 @@ export default function DashboardPage() {
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <div className={styles.panelTitle}>最近活动</div>
-                <div className={styles.panelSub}>跨资源的最新配置记录</div>
+                <div className={styles.panelTitle}>{t('dashboard.activityTitle')}</div>
+                <div className={styles.panelSub}>{t('dashboard.activitySub')}</div>
               </div>
             </div>
             <div className={styles.feed}>
               {resourceActivities.length === 0 ? (
-                <div className={styles.empty}>暂无最近活动</div>
+                <div className={styles.empty}>{t('dashboard.noActivity')}</div>
               ) : (
                 resourceActivities.slice(0, 8).map((activity, index) => (
                   <div className={styles.activity} key={`${activity.type}-${activity.title}-${index}`}>
@@ -847,7 +849,7 @@ export default function DashboardPage() {
                     </span>
                     <span>
                       <div className={styles.activityTitle}>{activity.title}</div>
-                      <div className={styles.activityMeta}>{typeLabel[activity.type]}</div>
+                      <div className={styles.activityMeta}>{t(typeLabel[activity.type])}</div>
                     </span>
                     <span className={styles.activityTime}>{formatTime(activity.time)}</span>
                   </div>

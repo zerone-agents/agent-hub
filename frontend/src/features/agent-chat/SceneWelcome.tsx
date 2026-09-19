@@ -1,8 +1,9 @@
 import { Spin, Tooltip } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createStyles } from 'antd-style'
 import type { Scene } from '@/api/scenes'
 import { useAgentScenes } from '@/queries/useScenes'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
   wrap: css`
@@ -21,11 +22,11 @@ const useStyles = createStyles(({ css }) => ({
     height: 100%;
   `,
   hint: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 14px;
   `,
   head: css`
-    color: ${t.textSecondary};
+    color: ${tk.textSecondary};
     font-size: 14px;
     font-weight: 500;
     text-align: center;
@@ -39,15 +40,15 @@ const useStyles = createStyles(({ css }) => ({
   `,
   card: css`
     padding: 16px;
-    border: 1px solid ${t.inkLighter};
-    border-radius: ${t.radius}px;
-    background: ${t.surface};
+    border: 1px solid ${tk.inkLighter};
+    border-radius: ${tk.radius}px;
+    background: ${tk.surface};
     cursor: pointer;
     transition: all 0.15s ease;
     text-align: left;
     &:hover {
       border-color: color-mix(in srgb, var(--foreground) 30%, transparent);
-      box-shadow: ${t.elevation1};
+      box-shadow: ${tk.elevation1};
       transform: translateY(-1px);
     }
     &:active {
@@ -61,12 +62,12 @@ const useStyles = createStyles(({ css }) => ({
   cardTitle: css`
     font-weight: 600;
     font-size: 14px;
-    color: ${t.text};
+    color: ${tk.text};
     margin-bottom: 6px;
   `,
   cardPreview: css`
     font-size: 12px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     line-height: 1.5;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -74,7 +75,7 @@ const useStyles = createStyles(({ css }) => ({
     overflow: hidden;
   `,
   footerHint: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 12px;
   `,
   promptTip: css`
@@ -94,6 +95,7 @@ interface SceneWelcomeProps {
 }
 
 export default function SceneWelcome({ agentName, onPick, disabled }: SceneWelcomeProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const { data: scenes, isLoading } = useAgentScenes(agentName)
 
@@ -108,14 +110,14 @@ export default function SceneWelcome({ agentName, onPick, disabled }: SceneWelco
   if (!scenes || scenes.length === 0) {
     return (
       <div className={styles.wrap}>
-        <div className={styles.hint}>直接输入消息开始对话</div>
+        <div className={styles.hint}>{t('agentChat.sceneHint')}</div>
       </div>
     )
   }
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.head}>你可以试试以下场景：</div>
+      <div className={styles.head}>{t('agentChat.sceneTry')}</div>
       <div className={styles.grid}>
         {scenes.map((scene) => (
           <Tooltip
@@ -134,7 +136,7 @@ export default function SceneWelcome({ agentName, onPick, disabled }: SceneWelco
           </Tooltip>
         ))}
       </div>
-      <div className={styles.footerHint}>（也可直接在下方输入）</div>
+      <div className={styles.footerHint}>{t('agentChat.sceneFooter')}</div>
     </div>
   )
 }

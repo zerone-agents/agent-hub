@@ -1,8 +1,9 @@
 import { Tooltip } from 'antd'
 import { useNavigate, useLocation } from 'react-router'
 import { createStyles } from 'antd-style'
+import { useTranslation } from 'react-i18next'
 import { NAV_ITEMS } from '@/lib/nav'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import BrandMark from '@/components/BrandMark'
 import ExtensionSidebarSection from '@/components/extensions/ExtensionSidebarSection'
 
@@ -40,7 +41,7 @@ const useStyles = createStyles(({ css }) => ({
     justify-content: center;
   `,
   logoText: css`
-    font-size: ${t.textXl};
+    font-size: ${tk.textXl};
     font-weight: 700;
     letter-spacing: -0.02em;
     line-height: 1;
@@ -62,7 +63,7 @@ const useStyles = createStyles(({ css }) => ({
     font-size: 14px;
     font-weight: 500;
     color: color-mix(in srgb, var(--sidebar-foreground) 66%, transparent);
-    border-radius: ${t.radius}px;
+    border-radius: ${tk.radius}px;
     cursor: pointer;
     transition: color 0.2s ease, background 0.2s ease;
     border: none;
@@ -96,6 +97,7 @@ interface AppSidebarProps {
 
 export default function AppSidebar({ collapsed }: AppSidebarProps) {
   const { styles, cx } = useStyles()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -114,7 +116,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
             <button
               key={item.id}
               type="button"
-              aria-label={collapsed ? item.label : undefined}
+              aria-label={collapsed ? t(item.label) : undefined}
               aria-current={active ? 'page' : undefined}
               className={cx(
                 styles.navLink,
@@ -124,11 +126,11 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
               onClick={async () => { await navigate(item.path); }}
             >
               <IconComp size={18} weight={active ? 'fill' : 'regular'} />
-              {!collapsed && item.label}
+              {!collapsed && t(item.label)}
             </button>
           )
           return collapsed ? (
-            <Tooltip key={item.id} title={item.label} placement="right">
+            <Tooltip key={item.id} title={t(item.label)} placement="right">
               {button}
             </Tooltip>
           ) : (

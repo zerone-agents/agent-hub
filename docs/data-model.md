@@ -30,6 +30,8 @@ auth.TenantOAuthClient (tenant_oauth_clients)  # 多组织登录：org → Casdo
 auth.CLIToken (cli_tokens) / auth.Invite (invites) / auth.RefreshToken (refresh_tokens) / auth.User (users)
 
 aigc.Config (aigc_configs)            # 纯 per-tenant：每运营主体一行
+
+audit.Log (audit_logs)                # 审计日志：append-only 增长表，应用层只读、永不自动清理
 ```
 
 `internal/domain/tenant/` contains only `context.go` (gin tenant context helpers, `DefaultID = "default"`) — there is no tenant.Tenant/User/ServiceDeployment/Resource entity. `internal/domain/knowledge/` defines gateway DTO types only (no local tables; datasets/documents live in multirag).
@@ -61,6 +63,25 @@ Both carry `tenant_id` (two-level isolation: tenant → user). Composite PKs (`u
 ### aigc.Config (`aigc_configs`)
 
 Per-tenant AIGC content-labeling config (GB 45438-2025), one row per tenant (`uk_tenant_id`, no shared fallback): USCC, company name, 27-char ContentProducer code, and `signing_key_encrypted` (never exposed via API).
+
+### audit.Log (`audit_logs`)
+
+Append-only audit trail (auth / user / invite / provider / agent lifecycle / CLI token / AIGC writes; query API see api-reference.md → Audit Logs). Retention: never auto-purged, no update/delete API — the application layer is read-only, so plan capacity as a growth table.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, auto-increment PK | uint64; the API layer renders it as a decimal string (JS-safe) |
+| `tenant_id` | VARCHAR(64) | tenant scoping (`default` in builtin mode) |
+| `user_id` / `user_name` | VARCHAR(64) | actor identity, denormalized at write time |
+| `category` | VARCHAR(32) | `auth` / `user` / `invite` / `provider` / `agent` / `token` / `aigc` |
+| `action` | VARCHAR(64) | e.g. `user.update_role` |
+| `target_type` / `target_id` / `target_name` | VARCHAR(32) / VARCHAR(64) / VARCHAR(128) | affected resource, pure-ID snapshot (no FK) |
+| `status` | VARCHAR(16) | `success` / `failure` / `partial` |
+| `detail` | TEXT | JSON object from a strongly-typed per-action allowlist |
+| `remote_ip` / `user_agent` | VARCHAR(45) / VARCHAR(256) | request context (trusted-proxy aware, see deployment.md) |
+| `created_at` | DATETIME(6) | write time |
+
+Composite index `idx_audit_tenant_created` (`tenant_id`, `created_at`, `id`): list queries filter by tenant and sort `created_at DESC, id DESC` — a never-purged growth table needs one index covering both filter and sort. `category` / `action` carry auxiliary single-column indexes.
 
 ### Auth-adjacent tables
 

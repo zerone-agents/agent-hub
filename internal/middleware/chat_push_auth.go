@@ -20,7 +20,7 @@ import (
 //     不注入任何用户身份（user_id/roles/tenant 缺失，归属由请求 body 的
 //     user_name/org 决定）。
 //  2. 不带该 header → 复用标准 JWT/CLI 鉴权（jwtutil.Authenticate）+
-//     PendingApprovalGuard，语义与原先挂在 v1group 下完全一致。注意不能
+//     GuestGuard，语义与原先挂在 v1group 下完全一致。注意不能
 //     直接调 AuthMiddlewareWithCLI——其成功路径内部 c.Next() 会先执行
 //     handler 再回来补 guard，待审批用户会漏拦（有测试锁定此顺序）。
 //
@@ -49,6 +49,6 @@ func ChatPushAuth(pushKey string, cliSvc *services.CLITokenService, p auth.Provi
 		if c.IsAborted() {
 			return
 		}
-		jwtutil.PendingApprovalGuard()(c)
+		jwtutil.GuestGuard()(c)
 	}
 }

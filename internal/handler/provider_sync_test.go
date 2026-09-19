@@ -76,7 +76,7 @@ func setupProviderSyncRouter(t *testing.T, seedProvider bool, client provider.Mu
 	if !ok {
 		stub = &stubMultiRAGClient{}
 	}
-	h := NewProviderHandler(svc, stub)
+	h := NewProviderHandler(svc, stub, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -113,7 +113,7 @@ func TestProviderHandler_SyncToMultiRAG_NilClientReturns503(t *testing.T) {
 	}).Error)
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, nil) // nil client → server admin didn't configure MultiRAG.
+	h := NewProviderHandler(svc, nil, newHandlerTestAuditRecorder(t)) // nil client → server admin didn't configure MultiRAG.
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

@@ -1,5 +1,8 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { loginRedirectUrl } from '@/lib/redirect'
+// 非组件上下文（axios 拦截器/纯函数）：语言切换后下一次生成生效
+import i18next from '@/i18n'
 
 const TOKEN_KEY = 'access_token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
@@ -57,14 +60,14 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest && !isCredentialCheck) {
       if (originalRequest.headers['X-Refresh-Attempt']) {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
 
       const refreshToken = getRefreshToken()
       if (!refreshToken) {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
 
@@ -84,7 +87,7 @@ apiClient.interceptors.response.use(
         }
       } catch {
         clearTokens()
-        window.location.href = '/static/login'
+        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
         return Promise.reject(error)
       }
     }
@@ -114,13 +117,13 @@ export interface ApiEnvelope<T = unknown> {
 export function unwrapResponse<T>(res: { data: unknown }): T {
   const body = res.data as ApiEnvelope<T>
   if (!body.success) {
-    throw new Error(body.error ?? body.message ?? '请求失败')
+    throw new Error(body.error ?? body.message ?? i18next.t('apiErrors.requestFailed'))
   }
   return body.data as T
 }
 
 /**
- * Convert any thrown value into a user-facing zh-CN message.
+ * Convert any thrown value into a user-facing localized message.
  * Used as the global mutation onError handler in QueryClient.
  *
  * Backend error envelope is `{ success: false, error: "..." }`. We also
@@ -137,13 +140,13 @@ export function parseApiError(err: unknown): string {
     if (data?.error) return data.error
     if (data?.message) return data.message
 
-    if (status === 401) return '登录已过期，请重新登录'
-    if (status === 403) return '没有权限执行此操作'
-    if (status === 404) return '资源不存在或已被删除'
-    if (status && status >= 500) return '服务器繁忙，请稍后重试'
-    if (err.code === 'ECONNABORTED') return '请求超时，请检查网络'
-    if (!err.response) return '网络连接失败'
+    if (status === 401) return i18next.t('apiErrors.unauthorized')
+    if (status === 403) return i18next.t('apiErrors.forbidden')
+    if (status === 404) return i18next.t('apiErrors.notFound')
+    if (status && status >= 500) return i18next.t('apiErrors.serverBusy')
+    if (err.code === 'ECONNABORTED') return i18next.t('apiErrors.timeout')
+    if (!err.response) return i18next.t('apiErrors.networkError')
   }
   if (err instanceof Error) return err.message
-  return '操作失败，请重试'
+  return i18next.t('apiErrors.operationFailed')
 }

@@ -38,7 +38,7 @@ func TestProviderHandler_ListInternalError500Neutral(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -66,7 +66,7 @@ func TestProviderHandler_GetNotFound404(t *testing.T) {
 	t.Cleanup(func() { database.DB = previousDB })
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -130,7 +130,7 @@ func TestProviderHandler_Create_DBFailure500Neutral(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -163,7 +163,7 @@ func TestProviderHandler_Create_ValidationKey400(t *testing.T) {
 	t.Cleanup(func() { database.DB = previousDB })
 
 	svc := services.NewProviderService(providerSyncTestKey)
-	h := NewProviderHandler(svc, &stubMultiRAGClient{})
+	h := NewProviderHandler(svc, &stubMultiRAGClient{}, newHandlerTestAuditRecorder(t))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

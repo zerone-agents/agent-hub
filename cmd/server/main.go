@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -58,7 +59,8 @@ var staticFiles embed.FS
 // sent — without these headers, users keep running stale JS after upgrades.
 func staticCacheHeaders(c *gin.Context) {
 	p := c.Request.URL.Path
-	if strings.HasPrefix(p, "/static/assets/") {
+	// /static/h5/assets/ 为移动端 h5 的 content-hashed 资源，同 frontend
+	if strings.HasPrefix(p, "/static/assets/") || strings.HasPrefix(p, "/static/h5/assets/") {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	} else if p == "/static" || strings.HasPrefix(p, "/static/") {
 		c.Header("Cache-Control", "no-cache")
@@ -136,13 +138,18 @@ func main() {
 	var builtinAuthHandler *handler.BuiltinAuthHandler
 	var adminUserHandler *handler.AdminUserHandler
 
+	// 审计写入侧（Task 10）：auth 端点埋点在两种模式下都消费 recorder，须先于
+	// 认证装配创建；查询侧（auditQuerier）在下方 Audit 领域区复用同一 repo。
+	auditRepo := repository.NewAuditRepository(database.GetDB())
+	auditRecorder := services.NewAuditRecorder(auditRepo)
+
 	if cfg.Auth.IsBuiltin() {
 		userSvc := services.NewUserService(database.GetDB())
 		inviteSvc := services.NewInviteService(database.GetDB())
 		builtinProvider := builtin.New(database.GetDB(), cfg.Auth.JWTSecret)
 		authProvider = builtinProvider
-		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc)
-		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider)
+		builtinAuthHandler = handler.NewBuiltinAuthHandler(builtinProvider, userSvc, inviteSvc, auditRecorder)
+		adminUserHandler = handler.NewAdminUserHandler(userSvc, inviteSvc, builtinProvider, auditRecorder)
 		log.Println("Auth mode: builtin")
 	} else {
 		if err := auth.InitCasdoor(&cfg.Casdoor); err != nil {
@@ -159,7 +166,7 @@ func main() {
 		}, membershipStore)
 		// 登录链接按请求租户生成 OAuth 授权 URL（各 org 解析自己的
 		// tenant_oauth_clients 凭证），这里注入生成函数。
-		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL)
+		casdoorUserHandler = handler.NewCasdoorUserHandler(casdoorDir, auth.GenerateLoginURL, auditRecorder)
 		log.Println("Auth mode: casdoor")
 	}
 
@@ -176,6 +183,12 @@ func main() {
 
 	r := gin.Default()
 	r.MaxMultipartMemory = 50 << 20
+
+	// 审计 RemoteIP 信任边界（spec §5.2）：非法 CIDR 即终止启动——错误配置后的
+	// 信任状态不可保证；fatal 属内部错误，按 CONTRIBUTING 带 stack。
+	if err := middleware.ApplyTrustedProxies(r, cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("invalid server.trusted_proxies config: %v\n%s", err, debug.Stack())
+	}
 
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
@@ -221,7 +234,7 @@ func main() {
 	knowledgeService := services.NewKnowledgeService(knowledgeEngine, providerService)
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
-	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc)
+	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
 		Client:            deployerClient,
 		PublicHost:        cfg.Deployer.PublicHost,
@@ -239,7 +252,7 @@ func main() {
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
-	agentHandler := handler.NewAgentHandler(agentService, deployerService)
+	agentHandler := handler.NewAgentHandler(agentService, deployerService, auditRecorder)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
 	runtimeClient := runtime.NewClient()
@@ -399,7 +412,7 @@ func main() {
 		multiragSync = c
 		multiragMyLLMs = c
 	}
-	providerHandler := handler.NewProviderHandler(providerService, multiragSync)
+	providerHandler := handler.NewProviderHandler(providerService, multiragSync, auditRecorder)
 
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeService, multiragMyLLMs)
 
@@ -407,7 +420,7 @@ func main() {
 	// Backed by GORM directly (no repository layer needed) — service tests use
 	// sqlite for isolation.
 	cliTokenSvc := services.NewCLITokenService(database.GetDB())
-	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc)
+	cliTokenHandler := handler.NewCLITokenHandler(cliTokenSvc, auditRecorder)
 
 	// 首次启动时插入种子数据
 	if err := providerService.SeedIfEmpty(); err != nil {
@@ -525,20 +538,23 @@ func main() {
 			authGroup.GET("/mode", rlMode, orgCheckHandler.CasdoorMode)
 			authGroup.GET("/org-check", rl, orgCheckHandler.OrgCheck)
 			authGroup.GET("/login", rl, handler.Login)
-			authGroup.GET("/callback", handler.Callback(casdoorProvider))
+			authGroup.GET("/callback", rl, handler.Callback(casdoorProvider, auditRecorder))
 			authGroup.GET("/userinfo", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), handler.UserInfo)
-			authGroup.POST("/logout", middleware.JWTAuth(authProvider), handler.Logout)
+			authGroup.POST("/logout", middleware.JWTAuth(authProvider), func(c *gin.Context) {
+				handler.Logout(c, auditRecorder)
+			})
 			authGroup.POST("/refresh", rl, handler.RefreshToken)
 		}
 	}
 
-	// PendingApprovalGuard 紧跟鉴权中间件挂载（同一链）：casdoor 待审批用户
-	// （角色为空）除既有白名单（/auth/userinfo、/auth/logout、/health*）与
-	// issue #132 配置读取端点（GET /api/v1/providers[/runtime-config]、
-	// /api/v1/agents[/manifest|/{name}]、/api/v1/skills[/{name}[/download]]）
-	// 外一律 403，前端据此渲染等待审批页；桌面 App 依赖这些端点完成
-	// 模型/Agent/SKILL 配置同步（未审批用户仅可读配置，不可写）。
-	// builtin 用户必有角色，guard 直接放行，行为零变化。
+	// GuestGuard 紧跟鉴权中间件挂载（同一链）：有效 guest（显式 guest 角色，
+	// 或空角色的 casdoor/cli 用户）除既有白名单（/auth/userinfo、/auth/logout、
+	// /health*）、issue #132 配置读取端点（GET /api/v1/providers[/runtime-config]、
+	// /api/v1/agents[/manifest|/{name}]、/api/v1/skills[/{name}[/download]]）、
+	// GET /api/v1/scenes 与聊天端点树（/api/v1/agents/{name}/chat/**，全 method）
+	// 外一律 403，前端据 PENDING_APPROVAL 前缀引导至 Agent 聊天页；桌面 App
+	// 依赖配置端点完成模型/Agent/SKILL 配置同步（guest 仅可读配置，不可写）。
+	// 正式角色用户 guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
 	// Extension identity is evaluated before human authentication. A verified
 	// extension uses its own credential and never needs a reusable admin JWT.
@@ -547,7 +563,7 @@ func main() {
 	v1group := r.Group("/api/v1",
 		middleware.ExtensionIdentity(extensionIdentityService),
 		middleware.JWTAuthWithCLIOrExtension(cliTokenSvc, authProvider),
-		jwtutil.PendingApprovalGuard(),
+		jwtutil.GuestGuard(),
 		middleware.ExtensionAPIGuard(extensionAuthzService))
 	// H7.4（P0）扩展身份认证：挂在 v1group 上，先于一切授权判定。带
 	// X-Extension-Name / X-Extension-Token 的请求先验证凭据（Hub 签发），
@@ -668,6 +684,13 @@ func main() {
 		adminRead.Group("", middleware.ExtensionAuthz(extensionAuthzService, "workflow", "read", nil)),
 		workflowHandler)
 	handler.RegisterDecisionRoutes(adminWrite, adminRead, decisionHandler)
+
+	// ---------- Audit 领域 ----------
+	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。
+	// （auditRepo/auditRecorder 已在认证装配区创建——auth 埋点写入侧先于路由装配。）
+	auditQuerier := services.NewAuditQuerier(auditRepo)
+	auditHandler := handler.NewAuditHandler(auditQuerier)
+	v1group.Group("/admin", middleware.RequireAdmin()).GET("/audit-logs", auditHandler.List)
 
 	// ---------- Agent 领域 ----------
 	// 公开接口

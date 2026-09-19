@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from 'react-i18next'
+// 组件外纯函数：直调 i18next
+import i18next from '@/i18n'
 import type { Key } from "react";
 import {
   Tag,
@@ -169,12 +172,14 @@ const useStyles = createStyles(({ css }) => ({
 
 const PAGE_SIZE = 10;
 
+// 筛选选项 label 存 i18n key，消费处 map t()——模块级 i18next.t() 会在首次
+// import 时烘焙语言，运行期切换不生效（PR #172 review 阻塞项 2）。
 const STATUS_OPTIONS = [
-  { label: "解析中", value: "1" },
-  { label: "已取消", value: "2" },
-  { label: "已完成", value: "3" },
-  { label: "失败", value: "4" },
-  { label: "未解析", value: "0" },
+  { label: 'knowledge.docs.runParsing', value: "1" },
+  { label: 'knowledge.docs.runCancelled', value: "2" },
+  { label: 'knowledge.docs.runDone', value: "3" },
+  { label: 'knowledge.docs.runFailed', value: "4" },
+  { label: 'knowledge.docs.runUnparsed', value: "0" },
 ];
 
 const SUFFIX_OPTIONS = [
@@ -208,12 +213,12 @@ function statusMeta(doc: KnowledgeDocument): {
   percent: number;
 } {
   const percent = Math.round((doc.progress) * 100);
-  if (doc.run === "1") return { label: "解析中", color: "processing", percent };
+  if (doc.run === "1") return { label: i18next.t('knowledge.docs.runParsing'), color: "processing", percent };
   if (doc.run === "3" || percent >= 100)
-    return { label: "已完成", color: "success", percent: 100 };
-  if (doc.run === "4") return { label: "失败", color: "error", percent };
-  if (doc.run === "2") return { label: "已取消", color: "warning", percent };
-  return { label: "未解析", color: "default", percent };
+    return { label: i18next.t('knowledge.docs.runDone'), color: "success", percent: 100 };
+  if (doc.run === "4") return { label: i18next.t('knowledge.docs.runFailed'), color: "error", percent };
+  if (doc.run === "2") return { label: i18next.t('knowledge.docs.runCancelled'), color: "warning", percent };
+  return { label: i18next.t('knowledge.docs.runUnparsed'), color: "default", percent };
 }
 
 function metadataSummary(doc: KnowledgeDocument): string {
@@ -224,10 +229,10 @@ function metadataSummary(doc: KnowledgeDocument): string {
   const names = fields
     .map((item) => pickStr(item.name ?? item.key ?? item.field).trim())
     .filter(Boolean);
-  if (names.length === 0) return `${fields.length} 项`;
+  if (names.length === 0) return i18next.t('knowledge.docs.metaCount', { n: fields.length });
   return (
     names.slice(0, 2).join("、") +
-    (names.length > 2 ? ` 等 ${names.length} 项` : "")
+    (names.length > 2 ? i18next.t('knowledge.docs.metaMore', { n: names.length }) : "")
   );
 }
 
@@ -265,6 +270,7 @@ interface UploadModalProps {
 }
 
 function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
+  const { t } = useTranslation()
   const { styles } = useStyles();
   const [files, setFiles] = useState<File[]>([]);
   const [autoParse, setAutoParse] = useState(true);
@@ -292,7 +298,7 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 
   const submit = async () => {
     if (files.length === 0) {
-      setError("请先选择要上传的文件");
+      setError(i18next.t('knowledge.docs.chooseFirst'));
       return;
     }
     try {
@@ -305,13 +311,13 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 
   return (
     <Modal
-      title="上传文档"
+      title={i18next.t('knowledge.docs.uploadTitle')}
       open={open}
       onOk={submit}
       onCancel={onClose}
       confirmLoading={uploading}
-      okText={error ? "重试上传" : "开始上传"}
-      cancelText="取消"
+      okText={error ? i18next.t('knowledge.docs.retryUpload') : i18next.t('knowledge.docs.startUpload')}
+      cancelText={t('common.cancel')}
       width={680}
       destroyOnHidden
     >
@@ -331,17 +337,17 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
           <p className="ant-upload-drag-icon">
             <UploadSimpleIcon size={26} />
           </p>
-          <p className="ant-upload-text">拖入文件，或点击选择</p>
+          <p className="ant-upload-text">{i18next.t('knowledge.docs.dragText')}</p>
           <p className="ant-upload-hint">
-            队列会在确认后统一上传，避免误触即提交。
+            i18next.t('knowledge.docs.queueHint')
           </p>
         </Upload.Dragger>
 
         <Switch
           checked={autoParse}
           onChange={setAutoParse}
-          checkedChildren="上传后解析"
-          unCheckedChildren="仅上传"
+          checkedChildren={i18next.t('knowledge.docs.parseAfterUpload')}
+          unCheckedChildren={i18next.t('knowledge.docs.uploadOnly')}
         />
 
         {error ? (
@@ -350,7 +356,7 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 
         <div className={styles.queueList}>
           {files.length === 0 ? (
-            <div className={styles.queueEmpty}>队列为空</div>
+            <div className={styles.queueEmpty}>{i18next.t('knowledge.docs.queueEmpty')}</div>
           ) : (
             files.map((file) => (
               <div className={styles.queueItem} key={queueKey(file)}>
@@ -383,6 +389,7 @@ function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
 }
 
 export default function KnowledgeDocumentsPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles();
   const navigate = useNavigate();
   const { id = "" } = useParams();
@@ -477,7 +484,7 @@ export default function KnowledgeDocumentsPage() {
       ),
     );
     setSelectedRowKeys([]);
-    message.success(enabled ? "已批量启用文档" : "已批量停用文档");
+    message.success(enabled ? t('knowledge.docs.bulkEnabled') : t('knowledge.docs.bulkDisabled'));
   };
 
   const bulkParse = () => {
@@ -503,7 +510,7 @@ export default function KnowledgeDocumentsPage() {
 
   const columns: ColumnsType<KnowledgeDocument> = [
     {
-      title: "文档",
+      title: t('knowledge.docs.docCol'),
       dataIndex: "name",
       key: "name",
       width: 280,
@@ -515,7 +522,7 @@ export default function KnowledgeDocumentsPage() {
           </span>
           <span className={styles.nameText}>
             <Tooltip title={value} placement="topLeft">
-              <span className={styles.primaryText}>{value || "未命名"}</span>
+              <span className={styles.primaryText}>{value || t('knowledge.docs.unnamed')}</span>
             </Tooltip>
             <span className={styles.secondaryText}>
               {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: API may omit suffix */}
@@ -528,7 +535,7 @@ export default function KnowledgeDocumentsPage() {
       ),
     },
     {
-      title: "解析方法",
+      title: t('knowledge.docs.parserCol'),
       key: "parser_id",
       width: 120,
       render: (_, record) => (
@@ -547,14 +554,14 @@ export default function KnowledgeDocumentsPage() {
       ),
     },
     {
-      title: "分块",
+      title: t('knowledge.docs.chunkCol'),
       dataIndex: "chunk_num",
       key: "chunk_num",
       width: 80,
       align: "right",
     },
     {
-      title: "解析状态",
+      title: t('knowledge.docs.statusCol'),
       key: "status",
       width: 170,
       render: (_, record) => {
@@ -563,7 +570,7 @@ export default function KnowledgeDocumentsPage() {
           <button
             type="button"
             className={styles.statusButton}
-            aria-label={`查看解析状态：${meta.label}`}
+            aria-label={t('knowledge.docs.viewStatusAria', { label: meta.label })}
             onClick={() => { setStatusDoc(record); }}
           >
             <Space orientation="vertical" size={3} style={{ width: "100%" }}>
@@ -585,7 +592,7 @@ export default function KnowledgeDocumentsPage() {
       },
     },
     {
-      title: "启用",
+      title: t('knowledge.docs.enabledCol'),
       key: "enabled",
       width: 76,
       render: (_, record) =>
@@ -602,19 +609,19 @@ export default function KnowledgeDocumentsPage() {
           />
         ) : (
           <Tag color={record.enabled ? "success" : "default"}>
-            {record.enabled ? "启用" : "停用"}
+            {record.enabled ? t('knowledge.docs.enabled') : t('knowledge.docs.disabled')}
           </Tag>
         ),
     },
     {
-      title: "创建时间",
+      title: t('knowledge.docs.createdAt'),
       key: "create_time",
       width: 136,
       render: (_, record) =>
         formatTime(record.create_time ?? record.create_date),
     },
     {
-      title: "操作",
+      title: t('knowledge.docs.actions'),
       key: "action",
       width: 270,
       fixed: "right",
@@ -625,21 +632,21 @@ export default function KnowledgeDocumentsPage() {
               <Button
                 type="link"
                 size="small"
-                aria-label={`停止解析 ${record.name}`}
+                aria-label={t('knowledge.docs.stopParseAria', { name: record.name })}
                 icon={<StopIcon size={14} />}
                 onClick={() => { stopParsing.mutate([record.id]); }}
               >
-                停止
+                {t('knowledge.docs.stop')}
               </Button>
             ) : (
               <Button
                 type="link"
                 size="small"
-                aria-label={`解析文档 ${record.name}`}
+                aria-label={t('knowledge.docs.parseDocAria', { name: record.name })}
                 icon={<PlayIcon size={14} />}
                 onClick={() => { parseDocuments.mutate([record.id]); }}
               >
-                解析
+                {t('knowledge.docs.parse')}
               </Button>
             ))}
           <Button
@@ -650,17 +657,17 @@ export default function KnowledgeDocumentsPage() {
               { await navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
             }
           >
-            切片
+            {t('knowledge.docs.chunkNav')}
           </Button>
           <Button
             type="link"
             size="small"
-            aria-label={`下载 ${record.name}`}
+            aria-label={t('knowledge.docs.downloadAria', { name: record.name })}
             icon={<DownloadSimpleIcon size={14} />}
             loading={downloadingId === record.id}
             onClick={() => void handleDownload(record)}
           >
-            下载
+            {t('common.download')}
           </Button>
           {canWrite && (
             <>
@@ -673,18 +680,18 @@ export default function KnowledgeDocumentsPage() {
                   setRenameValue(record.name);
                 }}
               >
-                重命名
+                {t('knowledge.docs.rename')}
               </Button>
               <Popconfirm
-                title="确认删除？"
-                description={`删除文档 "${record.name}"？`}
-                okText="删除"
+                title={t('scenes.deleteConfirmTitle')}
+                description={t('knowledge.docs.deleteDesc', { name: record.name })}
+                okText={t('common.delete')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() => { deleteDocuments.mutate([record.id]); }}
               >
                 <Button type="link" size="small" danger>
-                  删除
+                  {t('common.delete')}
                 </Button>
               </Popconfirm>
             </>
@@ -699,7 +706,7 @@ export default function KnowledgeDocumentsPage() {
       <div className={styles.toolbar}>
         <div className={styles.filters}>
           <Input.Search
-            placeholder="搜索文档名称"
+            placeholder={t('knowledge.docs.searchPh')}
             allowClear
             style={{ width: 260 }}
             onSearch={(value) => {
@@ -711,9 +718,9 @@ export default function KnowledgeDocumentsPage() {
             mode="multiple"
             allowClear
             maxTagCount="responsive"
-            placeholder="解析状态"
+            placeholder={t('knowledge.docs.statusPh')}
             style={{ minWidth: 160 }}
-            options={STATUS_OPTIONS}
+            options={STATUS_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
             value={runFilter}
             onChange={(value) => {
               setRunFilter(value);
@@ -724,7 +731,7 @@ export default function KnowledgeDocumentsPage() {
             mode="multiple"
             allowClear
             maxTagCount="responsive"
-            placeholder="文件类型"
+            placeholder={t('knowledge.docs.fileTypePh')}
             style={{ minWidth: 160 }}
             options={SUFFIX_OPTIONS.map((value) => ({
               label: value.toUpperCase(),
@@ -745,7 +752,7 @@ export default function KnowledgeDocumentsPage() {
               setPage(1);
             }}
           >
-            重置
+            {t('knowledge.docs.reset')}
           </Button>
         </div>
         <div className={styles.actions}>
@@ -754,14 +761,14 @@ export default function KnowledgeDocumentsPage() {
             loading={query.isFetching}
             onClick={() => query.refetch()}
           >
-            刷新
+            {t('knowledge.docs.refresh')}
           </Button>
           {canWrite && (
             <PrimaryButton
               icon={<UploadSimpleIcon size={16} />}
               onClick={() => { setUploadOpen(true); }}
             >
-              上传文档
+              {t('knowledge.docs.uploadBtn')}
             </PrimaryButton>
           )}
         </div>
@@ -770,49 +777,49 @@ export default function KnowledgeDocumentsPage() {
       {canWrite && selectedIds.length > 0 ? (
         <div className={styles.bulkBar}>
           <Typography.Text strong>
-            已选择 {selectedIds.length} 个文档
+            {t('knowledge.docs.selectedN', { n: selectedIds.length })}
           </Typography.Text>
           <Space wrap>
             <Button
               size="small"
-              aria-label="批量启用文档"
+              aria-label={t('knowledge.docs.bulkEnableAria')}
               onClick={() => void bulkSwitch(true)}
             >
-              启用
+              {t('knowledge.docs.enabled')}
             </Button>
             <Button
               size="small"
-              aria-label="批量停用文档"
+              aria-label={t('knowledge.docs.bulkDisableAria')}
               onClick={() => void bulkSwitch(false)}
             >
-              停用
+              {t('knowledge.docs.disabled')}
             </Button>
             <Button
               size="small"
-              aria-label="批量解析文档"
+              aria-label={t('knowledge.docs.bulkParseAria')}
               icon={<PlayIcon size={14} />}
               onClick={bulkParse}
             >
-              解析
+              {t('knowledge.docs.parse')}
             </Button>
             <Button
               size="small"
-              aria-label="批量停止解析文档"
+              aria-label={t('knowledge.docs.bulkStopParseAria')}
               icon={<StopIcon size={14} />}
               onClick={bulkStop}
             >
-              停止
+              {t('knowledge.docs.stop')}
             </Button>
             <Popconfirm
-              title="确认删除选中文档？"
-              description={`将删除 ${selectedIds.length} 个文档。`}
-              okText="删除"
+              title={t('knowledge.docs.deleteSelectedTitle')}
+              description={t('knowledge.docs.deleteSelectedDesc', { n: selectedIds.length })}
+              okText={t('common.delete')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('common.cancel')}
               onConfirm={bulkDelete}
             >
               <Button size="small" danger icon={<TrashIcon size={14} />}>
-                删除
+                {t('common.delete')}
               </Button>
             </Popconfirm>
             <Button
@@ -820,7 +827,7 @@ export default function KnowledgeDocumentsPage() {
               type="text"
               onClick={() => { setSelectedRowKeys([]); }}
             >
-              清除选择
+              {t('knowledge.docs.clearSelection')}
             </Button>
           </Space>
         </div>
@@ -839,10 +846,10 @@ export default function KnowledgeDocumentsPage() {
             <Empty
               description={
                 keywords
-                  ? "未找到匹配的文档"
+                  ? t('knowledge.docs.emptyNoMatch')
                   : canWrite
-                    ? "还没有文档，点击上传"
-                    : "暂无文档"
+                    ? t('knowledge.docs.emptyNoUpload')
+                    : t('knowledge.docs.emptyNone')
               }
             />
           ),
@@ -851,7 +858,7 @@ export default function KnowledgeDocumentsPage() {
           current: page,
           pageSize: PAGE_SIZE,
           total,
-          showTotal: (count) => `共 ${count} 条`,
+          showTotal: (count) => t('common.totalItems', { total: count }),
           onChange: (next) => { setPage(next); },
         }}
       />
@@ -864,10 +871,10 @@ export default function KnowledgeDocumentsPage() {
       />
 
       <Modal
-        title="解析状态"
+        title={t('knowledge.docs.statusCol')}
         open={!!statusDoc}
         onCancel={() => { setStatusDoc(null); }}
-        footer={<Button onClick={() => { setStatusDoc(null); }}>关闭</Button>}
+        footer={<Button onClick={() => { setStatusDoc(null); }}>{t('knowledge.docs.close')}</Button>}
         width={640}
         destroyOnHidden
       >
@@ -882,33 +889,33 @@ export default function KnowledgeDocumentsPage() {
               status={statusDoc.run === "4" ? "exception" : undefined}
             />
             <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="文档">
+              <Descriptions.Item label={t('knowledge.docs.statusDocCol')}>
                 {statusDoc.name}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label={t('knowledge.docs.statusColState')}>
                 {statusMeta(statusDoc).label}
               </Descriptions.Item>
-              <Descriptions.Item label="进度消息">
+              <Descriptions.Item label={t('knowledge.docs.progressMsg')}>
                 {statusDoc.progress_msg || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="分块数">
+              <Descriptions.Item label={t('knowledge.docs.statusChunkCount')}>
                 {statusDoc.chunk_num}
               </Descriptions.Item>
-              <Descriptions.Item label="耗时">
+              <Descriptions.Item label={t('knowledge.docs.elapsed')}>
                 {statusDoc.process_duration
                   ? `${statusDoc.process_duration}s`
                   : "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="开始时间">
+              <Descriptions.Item label={t('knowledge.docs.startTime')}>
                 {formatTime(
                   statusDoc.process_begin_at ??
                     statusDoc.create_time ??
                     statusDoc.create_date,
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="错误摘要">
+              <Descriptions.Item label={t('knowledge.docs.errorSummary')}>
                 {statusDoc.run === "4"
-                  ? statusDoc.progress_msg || "解析失败"
+                  ? statusDoc.progress_msg || t('knowledge.docs.parseFail')
                   : "-"}
               </Descriptions.Item>
             </Descriptions>
@@ -917,20 +924,20 @@ export default function KnowledgeDocumentsPage() {
       </Modal>
 
       <Modal
-        title="重命名文档"
+        title={t('knowledge.docs.renameTitle')}
         open={!!renaming}
         onOk={submitRename}
         onCancel={() => { setRenaming(null); }}
         confirmLoading={updateDocument.isPending}
-        okText="保存"
-        cancelText="取消"
+        okText={t('knowledge.docs.saveBtn')}
+        cancelText={t('common.cancel')}
         destroyOnHidden
       >
         <Input
           value={renameValue}
           onChange={(event) => { setRenameValue(event.target.value); }}
           onPressEnter={submitRename}
-          placeholder="输入新的文档名称"
+          placeholder={t('knowledge.docs.renamePh')}
           style={{ marginTop: 8 }}
         />
       </Modal>

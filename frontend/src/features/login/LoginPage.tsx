@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Input, Spin } from 'antd'
 import { createStyles } from 'antd-style'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import PasswordInput from '@/components/PasswordInput'
 import { authApi } from '@/api/auth'
 import { getAccessToken, parseApiError } from '@/api/client'
+import { sanitizeRedirect } from '@/lib/redirect'
 import { useUserInfo } from '@/queries/useUserInfo'
 import { useAuthStore } from '@/stores/auth'
 import LoadingState from '@/components/LoadingState'
@@ -150,6 +152,7 @@ const useStyles = createStyles(({ css }) => ({
 }))
 
 export default function LoginPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -160,6 +163,9 @@ export default function LoginPage() {
   const [orgError, setOrgError] = useState('')
   const [orgChecking, setOrgChecking] = useState(false)
   const navigate = useNavigate()
+  // 登录回源：读取即 sanitize，非法回退 '/'（协议相对/绝对 URL/反斜杠/超长）。
+  const [searchParams] = useSearchParams()
+  const redirect = sanitizeRedirect(searchParams.get('redirect'))
   const token = getAccessToken()
   const { data: user, isLoading } = useUserInfo({ enabled: !!token })
   const { data: mode, isLoading: modeLoading, isError: modeError, refetch: refetchMode } = useAuthMode()
@@ -167,9 +173,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (token && !isLoading && user) {
-      void Promise.resolve(navigate('/', { replace: true }))
+      void Promise.resolve(navigate(redirect, { replace: true }))
     }
-  }, [token, isLoading, user, navigate])
+  }, [token, isLoading, user, navigate, redirect])
 
   // builtin mode + uninitialized → force the setup flow
   useEffect(() => {
@@ -183,7 +189,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await loginWithPassword(username, password)
-      void Promise.resolve(navigate('/', { replace: true }))
+      void Promise.resolve(navigate(redirect, { replace: true }))
     } catch (err) {
       setError(parseApiError(err))
     } finally {
@@ -193,7 +199,7 @@ export default function LoginPage() {
 
   const handleCasdoorLogin = () => {
     setLoading(true)
-    authApi.login()
+    authApi.login(undefined, redirect)
   }
 
   // 多组织确认：空 → 默认组织直接跳转；非空 → 先预检，未注册就地报错不跳转。
@@ -202,16 +208,16 @@ export default function LoginPage() {
     setOrgError('')
     if (!value) {
       setLoading(true)
-      authApi.login()
+      authApi.login(undefined, redirect)
       return
     }
     setOrgChecking(true)
     try {
       await authApi.checkOrg(value)
       setLoading(true)
-      authApi.login(value)
+      authApi.login(value, redirect)
     } catch {
-      setOrgError('组织不存在或未注册，请检查后重试')
+      setOrgError(t('login.orgError'))
     } finally {
       setOrgChecking(false)
     }
@@ -233,15 +239,15 @@ export default function LoginPage() {
       <div className={styles.page}>
         <div className={styles.card}>
           <div className={styles.body}>
-            <div className={styles.bodyTitle}>无法获取登录方式</div>
-            <div className={styles.bodySubtitle}>请稍后重试，或联系平台管理员</div>
+            <div className={styles.bodyTitle}>{t('login.modeErrorTitle')}</div>
+            <div className={styles.bodySubtitle}>{t('login.modeErrorSub')}</div>
             {error && <div className={styles.error}>{error}</div>}
             <button
               type="button"
               className={styles.loginBtn}
               onClick={() => { void refetchMode() }}
             >
-              重试
+              {t('login.retry')}
             </button>
           </div>
         </div>
@@ -263,12 +269,12 @@ export default function LoginPage() {
             <BrandMark size={56} />
           </div>
           <div className={styles.brandTitle}>Zerone Agent Hub</div>
-          <div className={styles.brandSubtitle}>AI Agent 管理平台</div>
+          <div className={styles.brandSubtitle}>{t('common.brandSubtitle')}</div>
         </div>
         <div className={styles.body}>
-          <div className={styles.bodyTitle}>欢迎回来</div>
+          <div className={styles.bodyTitle}>{t('login.welcome')}</div>
           <div className={styles.bodySubtitle}>
-            {isCasdoor ? '使用 Zerone 统一账号认证登录' : '使用账号登录'}
+            {isCasdoor ? t('login.casdoorHint') : t('login.builtinHint')}
           </div>
           {error && <div className={styles.error}>{error}</div>}
           {isCasdoor ? (
@@ -278,9 +284,9 @@ export default function LoginPage() {
                 className={styles.loginBtn}
                 onClick={handleCasdoorLogin}
                 disabled={loading || showOrg}
-                title={showOrg ? '请使用下方「确认」按钮以应用所填组织' : undefined}
+                title={showOrg ? t('login.orgConfirmHint') : undefined}
               >
-                {loading ? <Spin size="small" /> : '登录 Agent Hub'}
+                {loading ? <Spin size="small" /> : t('login.submit')}
               </button>
               {mode.multiOrg === true && (
                 <div className={styles.moreSection}>
@@ -289,16 +295,16 @@ export default function LoginPage() {
                     className={styles.moreLink}
                     onClick={() => { setShowOrg((v) => !v); setOrgError('') }}
                   >
-                    {showOrg ? '收起' : '更多'}
+                    {showOrg ? t('login.collapse') : t('login.expand')}
                   </button>
                   {showOrg && (
                     <div className={styles.field} style={{ marginTop: 12 }}>
                       <Input
-                        placeholder="留空使用默认组织"
+                        placeholder={t('login.orgPlaceholder')}
                         value={org}
                         onChange={(e) => { setOrg(e.target.value); setOrgError('') }}
                         size="large"
-                        aria-label="组织"
+                        aria-label={t('login.orgLabel')}
                       />
                       {orgError && <div className={styles.error}>{orgError}</div>}
                       <button
@@ -308,7 +314,7 @@ export default function LoginPage() {
                         onClick={() => { void handleOrgConfirm() }}
                         disabled={orgChecking}
                       >
-                        {orgChecking ? <Spin size="small" /> : '确认'}
+                        {orgChecking ? <Spin size="small" /> : t('login.confirm')}
                       </button>
                     </div>
                   )}
@@ -319,7 +325,7 @@ export default function LoginPage() {
             <form noValidate onSubmit={(e) => { e.preventDefault(); void handleBuiltinLogin(); }}>
               <div className={styles.field}>
                 <Input
-                  placeholder="用户名"
+                  placeholder={t('login.usernamePlaceholder')}
                   name="username"
                   value={username}
                   onChange={(e) => { setUsername(e.target.value); }}
@@ -329,7 +335,7 @@ export default function LoginPage() {
               </div>
               <div className={styles.field}>
                 <PasswordInput
-                  placeholder="密码"
+                  placeholder={t('login.passwordPlaceholder')}
                   name="password"
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); }}
@@ -342,12 +348,12 @@ export default function LoginPage() {
                 className={styles.loginBtn}
                 disabled={loading || !username || !password}
               >
-                {loading ? <Spin size="small" /> : '登录'}
+                {loading ? <Spin size="small" /> : t('login.submitShort')}
               </button>
             </form>
           )}
         </div>
-        <div className={styles.foot}>由 Zerone 认证服务保障安全</div>
+        <div className={styles.foot}>{t('login.foot')}</div>
       </div>
     </div>
   )

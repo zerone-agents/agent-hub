@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Spin, Transfer, Button } from 'antd'
 import type { TransferProps } from 'antd'
 import { BooksIcon } from '@phosphor-icons/react'
@@ -44,6 +45,7 @@ const useStyles = createStyles(({ css }) => ({
 
 export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: AgentKnowledgeModalProps) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const name = agent?.name ?? ''
 
   const { data: boundIds = [], isLoading: isLoadingBound } = useAgentKnowledgeDatasets(name)
@@ -59,7 +61,7 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
   const dataSource: TransferItem[] = useMemo(() => {
     const items = (listData?.datasets ?? []).map((ds) => ({
       key: ds.id,
-      title: ds.name || '未命名',
+      title: ds.name || t('agents.knowledgeModal.unnamed'),
       description: ds.description || ''
     }))
     if (listComplete) {
@@ -70,14 +72,14 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
         if (!liveKeys.has(id)) {
           items.push({
             key: id,
-            title: `已删除的知识库（${id.slice(0, 8)}…）`,
-            description: '绑定指向的知识库已不存在，左移移除后保存即可恢复部署'
+            title: t('agents.knowledgeModal.deletedKb', { id: id.slice(0, 8) }),
+            description: t('agents.knowledgeModal.deletedKbDesc')
           })
         }
       }
     }
     return items
-  }, [listData, boundIds, listComplete])
+  }, [t, listData, boundIds, listComplete])
 
   useEffect(() => {
     if (open) {
@@ -103,7 +105,7 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
   const titleNode = (
     <div className={styles.head}>
       <BooksIcon size={20} weight="duotone" />
-      <span>{agent ? `配置知识库：${agent.config.title?.zh ?? agent.name}` : '配置知识库'}</span>
+      <span>{agent ? t('agents.knowledgeModal.configureFor', { name: agent.config.title?.zh ?? agent.name }) : t('agents.knowledgeModal.configure')}</span>
     </div>
   )
 
@@ -118,9 +120,9 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
       destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <Button onClick={handleCancel}>取消</Button>
+          <Button onClick={handleCancel}>{t('common.cancel')}</Button>
           {canWrite && (
-            <PrimaryButton onClick={handleOk} loading={updateMutation.isPending}>保存</PrimaryButton>
+            <PrimaryButton onClick={handleOk} loading={updateMutation.isPending}>{t('agents.knowledgeModal.save')}</PrimaryButton>
           )}
         </div>
       }
@@ -135,7 +137,7 @@ export default function AgentKnowledgeModal({ open, agent, canWrite, onClose }: 
           dataSource={dataSource}
           targetKeys={targetKeys}
           onChange={handleChange}
-          titles={['可选知识库', '已绑定']}
+          titles={[t('agents.knowledgeModal.source'), t('agents.knowledgeModal.target')]}
           render={(item) => item.title}
           disabled={!canWrite}
           styles={{ section: { width: 280, height: 360 } }}

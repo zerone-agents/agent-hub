@@ -126,3 +126,30 @@ func TestChatPushAuth_BothHeaders_PushKeyWins(t *testing.T) {
 	require.Contains(t, w.Body.String(), "chat_push_key")
 	require.Contains(t, w.Body.String(), `"has_user_id":false`)
 }
+
+// TestChatPushAuth_ExplicitGuest_PushAllowed 显式 guest 角色（builtin 模式）经
+// JWT 通道调生产路径 POST /api/v1/chat/push 应放行至业务 handler（#155：
+// /api/v1/chat/push 已入 GuestGuard 白名单）。
+// 注意：测试 rig 必须注册并请求生产路径（/api/v1/chat/push）——白名单
+// matchesChatPushPath 只匹配该精确路径，短路径 /push 会继续 403。
+func TestChatPushAuth_ExplicitGuest_PushAllowed(t *testing.T) {
+	handlerCalled := false
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/v1/chat/push", ChatPushAuth("secret", nil, &stubProvider{
+		user: &auth.AuthUser{ID: "8", Username: "guest-user", Roles: []string{"guest"}, TenantID: "default"},
+		mode: "builtin",
+	}), func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/push", nil)
+	req.Header.Set("Authorization", "Bearer guest")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, handlerCalled)
+	require.NotContains(t, w.Body.String(), "PENDING_APPROVAL")
+}

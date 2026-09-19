@@ -1,45 +1,44 @@
 import { Tooltip } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { CaretDownIcon, CaretUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 
 const useStyles = createStyles(({ css }) => ({
+  // 内嵌页眉的紧凑形态（原整行 bar 改为页眉内联胶囊）：宽度自适应、无底边框、
+  // 透明背景 + hover 提示可点；详情面板由 AgentDetailBar 以页眉下缘浮层展开。
   bar: css`
     all: unset;
-    width: 100%;
-    min-height: 48px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 20px;
+    gap: 10px;
+    padding: 6px 10px;
     box-sizing: border-box;
     text-align: left;
     font-family: inherit;
     font-size: inherit;
-    border-bottom: 1px solid ${t.inkLighter};
-    background: ${t.surface};
+    border-radius: var(--radius);
     cursor: pointer;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-width: 0;
     user-select: none;
+    transition: background 0.15s;
     &:hover {
-      background: ${t.surfaceHover};
+      background: ${tk.surfaceHover};
     }
     &:focus-visible {
-      outline: 2px solid ${t.ink};
+      outline: 2px solid ${tk.ink};
       outline-offset: -2px;
     }
     @media (max-width: 768px) {
-      gap: 8px;
-      padding: 10px 16px;
+      gap: 6px;
+      padding: 6px 8px;
     }
-  `,
-  barExpanded: css`
-    border-bottom: none;
   `,
   name: css`
     font-size: 15px;
     font-weight: 600;
-    color: ${t.text};
+    color: ${tk.text};
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -49,13 +48,13 @@ const useStyles = createStyles(({ css }) => ({
     min-width: 0;
   `,
   warning: css`
-    color: ${t.danger};
+    color: ${tk.danger};
     display: inline-flex;
     align-items: center;
   `,
   modelPill: css`
-    background: ${t.inkLight};
-    color: ${t.text};
+    background: ${tk.inkLight};
+    color: ${tk.text};
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 13px;
@@ -64,7 +63,7 @@ const useStyles = createStyles(({ css }) => ({
     flex-shrink: 0;
   `,
   separator: css`
-    color: ${t.textMuted};
+    color: ${tk.textMuted};
     font-size: 13px;
   `,
   countWrapper: css`
@@ -77,16 +76,16 @@ const useStyles = createStyles(({ css }) => ({
   `,
   count: css`
     font-size: 13px;
-    color: ${t.textTertiary};
+    color: ${tk.textTertiary};
     & > b {
-      color: ${t.text};
+      color: ${tk.text};
       font-weight: 500;
       margin-left: 2px;
     }
   `,
   chevron: css`
-    margin-left: auto;
-    color: ${t.textTertiary};
+    margin-left: 4px;
+    color: ${tk.textTertiary};
     display: inline-flex;
     align-items: center;
   `,
@@ -117,7 +116,8 @@ export default function AgentDetailSummary({
   expanded,
   onToggle,
 }: Props) {
-  const { styles, cx } = useStyles()
+  const { t } = useTranslation()
+  const { styles } = useStyles()
   const Chevron = expanded ? CaretUpIcon : CaretDownIcon
 
   const countEntries: [string, number][] = [
@@ -131,14 +131,14 @@ export default function AgentDetailSummary({
   return (
     <button
       type="button"
-      className={cx(styles.bar, expanded && styles.barExpanded)}
+      className={styles.bar}
       onClick={onToggle}
       aria-expanded={expanded}
     >
       <span className={styles.name}>
         {name}
         {status === 'unavailable' && (
-          <Tooltip title="Agent 配置解析失败，可能无法调用">
+          <Tooltip title={t('agentChat.configParseFail')}>
             <span className={styles.warning} data-testid="status-warning">
               <WarningCircleIcon size={14} weight="fill" />
             </span>

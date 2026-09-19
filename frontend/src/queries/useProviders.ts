@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { providerApi, type Provider, type ProbeConfig, type AttrRules, type CatalogModel } from '@/api/providers'
 import { parseApiError, unwrapResponse } from '@/api/client'
+import { useTranslation } from 'react-i18next'
 
 export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat') {
   return useQuery<Provider[]>({
@@ -21,37 +22,40 @@ export function useProviderAttrRules() {
 }
 
 export function useCreateProvider() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: Partial<Provider>) => providerApi.create(data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['providers'] })
-      message.success('Provider 已创建')
+      message.success(t('providers.toast.created'))
     },
     onError: (err) => message.error(parseApiError(err)),
   })
 }
 
 export function useUpdateProvider() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<Provider> }) =>
       providerApi.update(id, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['providers'] })
-      message.success('Provider 已更新')
+      message.success(t('providers.toast.updated'))
     },
     onError: (err) => message.error(parseApiError(err)),
   })
 }
 
 export function useDeleteProvider() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => providerApi.delete(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['providers'] })
-      message.success('Provider 已删除')
+      message.success(t('providers.toast.deleted'))
     },
     onError: (err) => message.error(parseApiError(err)),
   })

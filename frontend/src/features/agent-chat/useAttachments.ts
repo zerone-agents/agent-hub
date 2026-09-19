@@ -1,5 +1,6 @@
 // frontend/src/features/agent-chat/useAttachments.ts
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { agentChatApi, type AttachmentDesc } from '@/api/agent-chat'
 
 /** 客户端提前拦截的限额（与服务端 10 / 20MB / 50MB 同值）。 */
@@ -20,6 +21,7 @@ export interface AttachmentItem {
 }
 
 export function useAttachments() {
+  const { t } = useTranslation()
   const [items, setItems] = useState<AttachmentItem[]>([])
   const [uploading, setUploading] = useState(false)
   // ref 是同步真值来源：add() 需要立读当前队列做累计校验
@@ -47,21 +49,21 @@ export function useAttachments() {
   const add = useCallback(
     (files: File[]): string | null => {
       if (files.length === 0) return null
-      if (uploadingRef.current) return '上传进行中，请稍候再添加'
+      if (uploadingRef.current) return t('agentChat.uploadBusy')
       const current = itemsRef.current
       const merged = [...current.map((i) => i.file), ...files]
       if (merged.length > ATTACHMENT_LIMITS.maxFiles) {
-        return `附件最多 ${ATTACHMENT_LIMITS.maxFiles} 个`
+        return t('agentChat.maxFiles', { n: ATTACHMENT_LIMITS.maxFiles })
       }
       let total = 0
       for (const f of merged) {
         if (f.size > ATTACHMENT_LIMITS.maxFileBytes) {
-          return `「${f.name}」超过单文件 20MB 上限`
+          return t('agentChat.fileTooBig', { name: f.name })
         }
         total += f.size
       }
       if (total > ATTACHMENT_LIMITS.maxTotalBytes) {
-        return '附件总大小超过 50MB 上限'
+        return t('agentChat.totalTooBig')
       }
       commit([
         ...current,
@@ -74,7 +76,7 @@ export function useAttachments() {
       ])
       return null
     },
-    [commit]
+    [t, commit]
   )
 
   const remove = useCallback(
@@ -109,7 +111,7 @@ export function useAttachments() {
    */
   const upload = useCallback(
     async (agentName: string, sessionId: string): Promise<AttachmentDesc[]> => {
-      if (uploadingRef.current) throw new Error('上传进行中，请稍候')
+      if (uploadingRef.current) throw new Error(t('agentChat.uploadWait'))
       const current = itemsRef.current
       if (current.length === 0) return []
       // 不变式：status==='uploaded' 必然带 descriptor；用类型谓词收窄（repo lint 同时禁 as 去空与 !）
@@ -128,7 +130,7 @@ export function useAttachments() {
         // 描述符数量必须与提交数一一对应（runtime 按 multipart 流序返回）。
         // 数量异常若不拦截，多余条目会静默丢附件。
         if (descs.length !== current.length) {
-          throw new Error(`上传响应异常：期望 ${current.length} 个附件描述，得到 ${descs.length} 个`)
+          throw new Error(t('agentChat.uploadRespMismatch', { expect: current.length, got: descs.length }))
         }
         commit(current.map((i, idx) => ({ ...i, status: 'uploaded' as const, descriptor: descs[idx] })))
         return descs
@@ -140,7 +142,7 @@ export function useAttachments() {
         setUploading(false)
       }
     },
-    [commit]
+    [t, commit]
   )
 
   return { items, uploading, add, remove, clearAll, invalidate, upload }

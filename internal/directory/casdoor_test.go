@@ -10,6 +10,7 @@ import (
 	authdom "control-panel/internal/domain/auth"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	"github.com/stretchr/testify/require"
 )
 
 // ===================== fakes =====================
@@ -227,7 +228,7 @@ func TestUpdateRoleMemberIsLocalOnly(t *testing.T) {
 	}}
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMaintainer, "actor-9"); err != nil {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleMaintainer, "actor-9"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fc.updates) != 0 {
@@ -255,7 +256,7 @@ func TestUpdateRoleToAdminWritesCasdoorFirst(t *testing.T) {
 		fc.log, fs.log = &events, &events
 		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-		if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); err != nil {
+		if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); err != nil {
 			t.Fatal(err)
 		}
 		if len(events) != 2 || events[0] != "casdoor:update" || events[1] != "store:setrole" {
@@ -282,7 +283,7 @@ func TestUpdateRoleToAdminWritesCasdoorFirst(t *testing.T) {
 		}
 		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-		if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
+		if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 			t.Fatalf("got %v, want ErrUpdateRejected", err)
 		}
 		if len(fs.setCalls) != 0 {
@@ -305,7 +306,7 @@ func TestDemoteAdminWritesCasdoorFirst(t *testing.T) {
 	fc.log, fs.log = &events, &events
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 2 || events[0] != "casdoor:update" || events[1] != "store:setrole" {
@@ -333,7 +334,7 @@ func TestUpdateRolePendingUserBecomesActive(t *testing.T) {
 	}}
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "3", authdom.RoleMember, "actor-9"); err != nil {
+	if _, err := d.UpdateRole("tenant-a", "3", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs.setCalls) != 1 {
@@ -367,7 +368,7 @@ func TestDemoteCasdoorConsoleAdminWritesCasdoorFirst(t *testing.T) {
 	fc.log, fs.log = &events, &events
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fc.updates) != 1 {
@@ -395,7 +396,7 @@ func TestDemoteCasdoorConsoleAdminRejectedLocalUntouched(t *testing.T) {
 	}
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleMember, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("got %v, want ErrUpdateRejected", err)
 	}
 	if len(fs.setCalls) != 0 {
@@ -410,17 +411,17 @@ func TestUpdateRoleRejectsSelfAndInvalid(t *testing.T) {
 	fc := &fakeClient{}
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "1"); !errors.Is(err, ErrSelfOperation) {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "1"); !errors.Is(err, ErrSelfOperation) {
 		t.Fatalf("self: %v", err)
 	}
-	if err := d.UpdateRole("tenant-a", "1", "superuser", "actor"); !errors.Is(err, ErrInvalidRole) {
+	if _, err := d.UpdateRole("tenant-a", "1", "superuser", "actor"); !errors.Is(err, ErrInvalidRole) {
 		t.Fatalf("invalid role: %v", err)
 	}
-	if err := d.UpdateRole("tenant-a", "missing", authdom.RoleAdmin, "actor"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := d.UpdateRole("tenant-a", "missing", authdom.RoleAdmin, "actor"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
 	// 本地记录属于 tenant-b，跨租户操作视为不存在
-	if err := d.UpdateRole("tenant-a", "7", authdom.RoleAdmin, "actor"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := d.UpdateRole("tenant-a", "7", authdom.RoleAdmin, "actor"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("cross-tenant: %v", err)
 	}
 	if len(fs.setCalls) != 0 || len(fc.updates) != 0 {
@@ -439,10 +440,10 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		}}
 		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-		if err := d.SetDisabled("tenant-a", "1", true, "1"); !errors.Is(err, ErrSelfOperation) {
+		if _, err := d.SetDisabled("tenant-a", "1", true, "1"); !errors.Is(err, ErrSelfOperation) {
 			t.Fatalf("self disable: %v", err)
 		}
-		if err := d.SetDisabled("tenant-a", "1", true, "actor-9"); err != nil {
+		if _, err := d.SetDisabled("tenant-a", "1", true, "actor-9"); err != nil {
 			t.Fatal(err)
 		}
 		if len(fc.updates) != 1 || !fc.updates[0].user.IsForbidden || fc.updates[0].columns[0] != "is_forbidden" {
@@ -462,7 +463,7 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		}}
 		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-		if err := d.SetDisabled("tenant-a", "3", true, "actor-9"); err != nil {
+		if _, err := d.SetDisabled("tenant-a", "3", true, "actor-9"); err != nil {
 			t.Fatalf("pending 用户禁用不应报错: %v", err)
 		}
 		if rec := fs.rec("3"); rec.Status != authdom.StatusPending {
@@ -477,7 +478,7 @@ func TestSetDisabledStillPassthrough(t *testing.T) {
 		}}
 		d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-		if err := d.SetDisabled("tenant-a", "ghost", true, "actor-9"); !errors.Is(err, ErrUserNotFound) {
+		if _, err := d.SetDisabled("tenant-a", "ghost", true, "actor-9"); !errors.Is(err, ErrUserNotFound) {
 			t.Fatalf("got %v, want ErrUserNotFound", err)
 		}
 		if len(fc.updates) != 0 || fc.getByIDCalls != 0 {
@@ -527,7 +528,7 @@ func TestSDKErrorsPropagate(t *testing.T) {
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
 	// UpdateRole 在分支判断前先经 GetUserByUserId 核对 IsAdmin，错误同样透传
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, sentinel) {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, sentinel) {
 		t.Fatalf("UpdateRole: got %v, want sentinel", err)
 	}
 	if len(fs.setCalls) != 0 {
@@ -535,7 +536,7 @@ func TestSDKErrorsPropagate(t *testing.T) {
 	}
 
 	// SetDisabled / ResetPassword 直通路径同样透传
-	if err := d.SetDisabled("tenant-a", "1", true, "actor-9"); !errors.Is(err, sentinel) {
+	if _, err := d.SetDisabled("tenant-a", "1", true, "actor-9"); !errors.Is(err, sentinel) {
 		t.Fatalf("SetDisabled: got %v, want sentinel", err)
 	}
 	if _, err := d.ResetPassword("tenant-a", "1", "actor-9"); !errors.Is(err, sentinel) {
@@ -553,13 +554,13 @@ func TestWriteOpsUpdateRejected(t *testing.T) {
 	}
 	d := NewCasdoorDirectory(staticResolver(fc), fs)
 
-	if err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
+	if _, err := d.UpdateRole("tenant-a", "1", authdom.RoleAdmin, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("UpdateRole: got %v, want ErrUpdateRejected", err)
 	}
 	if len(fs.setCalls) != 0 {
 		t.Fatalf("被拒后本地必须零写入, got %d", len(fs.setCalls))
 	}
-	if err := d.SetDisabled("tenant-a", "1", true, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
+	if _, err := d.SetDisabled("tenant-a", "1", true, "actor-9"); !errors.Is(err, ErrUpdateRejected) {
 		t.Fatalf("SetDisabled: got %v, want ErrUpdateRejected", err)
 	}
 	if _, err := d.ResetPassword("tenant-a", "1", "actor-9"); !errors.Is(err, ErrUpdateRejected) {
@@ -582,7 +583,7 @@ func TestCasdoorDirectoryResolvesClientByTenant(t *testing.T) {
 	if _, err := d.ListUsers("tenant-b"); err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
-	if err := d.SetDisabled("tenant-b", "1", true, "actor-9"); err != nil {
+	if _, err := d.SetDisabled("tenant-b", "1", true, "actor-9"); err != nil {
 		t.Fatalf("SetDisabled: %v", err)
 	}
 	for i, want := range []string{"tenant-b", "tenant-b", "tenant-b"} {
@@ -594,4 +595,102 @@ func TestCasdoorDirectoryResolvesClientByTenant(t *testing.T) {
 	if len(gotTenants) != 3 {
 		t.Fatalf("resolver 调用次数: got %d, want 3", len(gotTenants))
 	}
+}
+
+// ===================== MutationReceipt（审计回执，spec §3.2） =====================
+
+func TestUpdateRoleReceiptImplicitApproval(t *testing.T) {
+	// 本地 pending + 远端 forbidden（投影为 disabled）→ receipt 如实给出：
+	// StatusBefore=pending / StatusAfter=active（隐藏 pending 不漏审，spec §3.2），
+	// EffectiveStatus 前后均为 disabled——分配角色不触碰 is_forbidden，投影不变。
+	fs := newFakeStore()
+	fs.seed("u1", "t1", "u1", authdom.RoleMember, authdom.StatusPending)
+	fc := &fakeClient{users: []*casdoorsdk.User{
+		{Id: "u1", Name: "u1", Owner: "t1", IsAdmin: false, IsForbidden: true},
+	}}
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
+
+	rcpt, err := d.UpdateRole("t1", "u1", authdom.RoleMaintainer, "actor1")
+	require.NoError(t, err)
+	require.Equal(t, authdom.Role("member"), rcpt.RoleBefore)
+	require.Equal(t, authdom.Role("maintainer"), rcpt.RoleAfter)
+	require.Equal(t, authdom.UserStatus("pending"), rcpt.StatusBefore)
+	require.Equal(t, authdom.UserStatus("active"), rcpt.StatusAfter)
+	require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusBefore) // 远端 forbidden 投影
+	require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusAfter)
+	require.True(t, rcpt.RemoteApplied) // 非 admin 路径无远端变更，视为已生效
+	require.True(t, rcpt.LocalApplied)
+}
+
+func TestUpdateRolePartialRemoteAppliedLocalFailed(t *testing.T) {
+	// casdoor is_admin 写入成功后 store.SetRole 失败 →
+	// receipt(RemoteApplied=true, LocalApplied=false) + err（partial 信号，
+	// spec §3.2 规则 3）。
+	fs := newFakeStore()
+	fs.seed("u1", "t1", "u1", authdom.RoleMember, authdom.StatusActive)
+	fs.setErr = errors.New("db boom")
+	fc := &fakeClient{users: []*casdoorsdk.User{
+		{Id: "u1", Name: "u1", Owner: "t1", IsAdmin: false},
+	}}
+	d := NewCasdoorDirectory(staticResolver(fc), fs)
+
+	rcpt, err := d.UpdateRole("t1", "u1", authdom.RoleAdmin, "actor1")
+	require.Error(t, err)
+	require.NotNil(t, rcpt) // partial 信号（spec §3.2 规则 3）
+	require.True(t, rcpt.RemoteApplied)
+	require.False(t, rcpt.LocalApplied)
+}
+
+func TestSetDisabledReceiptEffectiveTransitions(t *testing.T) {
+	// 远端单写（无两阶段窗口）：Role/Status 字段取本地 rec 原值不变，
+	// EffectiveStatus 前后由「casdoor IsForbidden 前后值 + rec.Status」合成。
+	t.Run("active→disabled", func(t *testing.T) {
+		fs := newFakeStore()
+		fs.seed("u1", "t1", "u1", authdom.RoleMember, authdom.StatusActive)
+		fc := &fakeClient{users: []*casdoorsdk.User{
+			{Id: "u1", Name: "u1", Owner: "t1", IsForbidden: false},
+		}}
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
+
+		rcpt, err := d.SetDisabled("t1", "u1", true, "actor1")
+		require.NoError(t, err)
+		require.Equal(t, authdom.UserStatus("active"), rcpt.EffectiveStatusBefore)
+		require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusAfter)
+		require.Equal(t, authdom.Role("member"), rcpt.RoleBefore)
+		require.Equal(t, authdom.Role("member"), rcpt.RoleAfter)
+		require.Equal(t, authdom.UserStatus("active"), rcpt.StatusBefore)
+		require.Equal(t, authdom.UserStatus("active"), rcpt.StatusAfter)
+		require.True(t, rcpt.RemoteApplied)
+		require.True(t, rcpt.LocalApplied) // 远端单写，无两阶段窗口
+	})
+
+	t.Run("disabled→active", func(t *testing.T) {
+		fs := newFakeStore()
+		fs.seed("u1", "t1", "u1", authdom.RoleMember, authdom.StatusActive)
+		fc := &fakeClient{users: []*casdoorsdk.User{
+			{Id: "u1", Name: "u1", Owner: "t1", IsForbidden: true},
+		}}
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
+
+		rcpt, err := d.SetDisabled("t1", "u1", false, "actor1")
+		require.NoError(t, err)
+		require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusBefore)
+		require.Equal(t, authdom.UserStatus("active"), rcpt.EffectiveStatusAfter)
+	})
+
+	t.Run("pending→disabled", func(t *testing.T) {
+		fs := newFakeStore()
+		fs.seed("u1", "t1", "u1", "", authdom.StatusPending)
+		fc := &fakeClient{users: []*casdoorsdk.User{
+			{Id: "u1", Name: "u1", Owner: "t1", IsForbidden: false},
+		}}
+		d := NewCasdoorDirectory(staticResolver(fc), fs)
+
+		rcpt, err := d.SetDisabled("t1", "u1", true, "actor1")
+		require.NoError(t, err)
+		require.Equal(t, authdom.UserStatus("pending"), rcpt.EffectiveStatusBefore)
+		require.Equal(t, authdom.UserStatus("disabled"), rcpt.EffectiveStatusAfter)
+		require.Equal(t, authdom.UserStatus("pending"), rcpt.StatusBefore)
+		require.Equal(t, authdom.UserStatus("pending"), rcpt.StatusAfter)
+	})
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal, Select, Input, InputNumber, Typography, message, Space, Button } from 'antd'
 import { CopyIcon } from '@phosphor-icons/react'
 import { usersApi, type UserRole, type CreatedInvite } from '@/api/users'
@@ -13,9 +14,9 @@ interface CreateInviteModalProps {
 }
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: 'member', label: '成员（member，只读使用）' },
-  { value: 'maintainer', label: '维护者（maintainer，可管资源）' },
-  { value: 'admin', label: '管理员（admin，可邀请+管用户）' }
+  { value: 'member', label: 'users.invite.roleMember' },
+  { value: 'maintainer', label: 'users.invite.roleMaintainer' },
+  { value: 'admin', label: 'users.invite.roleAdmin' }
 ]
 
 /**
@@ -23,6 +24,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
  * rendered as a copyable registration URL; closing the modal discards it.
  */
 export default function CreateInviteModal({ open, onClose }: CreateInviteModalProps) {
+  const { t } = useTranslation()
   const primaryBtnCls = usePrimaryButtonStyle()
   const [role, setRole] = useState<UserRole>('member')
   const [note, setNote] = useState('')
@@ -64,20 +66,20 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
     if (!inviteURL) return
     const result = await copyOrManual(inviteURL)
     if (result === 'copied') {
-      message.success('邀请链接已复制')
+      message.success(t('users.invite.copied'))
     } else if (result === 'failed') {
-      message.error('复制失败，请手动选择复制')
+      message.error(t('users.copyFail'))
     }
   }
 
   return (
     <Modal
-      title={created ? '邀请创建成功' : '创建邀请链接'}
+      title={created ? t('users.invite.createdTitle') : t('users.invite.createTitle')}
       open={open}
       onOk={created ? handleClose : handleSubmit}
       onCancel={handleClose}
-      okText={created ? '完成' : '创建'}
-      cancelText="关闭"
+      okText={created ? t('users.invite.done') : t('users.invite.create')}
+      cancelText={t('users.invite.close')}
       okButtonProps={{ className: primaryBtnCls.root }}
       confirmLoading={loading}
       destroyOnHidden
@@ -85,37 +87,37 @@ export default function CreateInviteModal({ open, onClose }: CreateInviteModalPr
       {created ? (
         <>
           <Typography.Paragraph type="warning" style={{ marginBottom: 12 }}>
-            链接仅显示这一次，请立即复制保存。关闭后无法再获取该链接（如丢失只能撤销重建）。
+            {t('users.invite.onceHint')}
           </Typography.Paragraph>
           <Space.Compact style={{ width: '100%' }}>
             <Input value={inviteURL} readOnly />
             <Button icon={<CopyIcon size={16} />} onClick={() => void copyURL()}>
-              复制
+              {t('users.copy')}
             </Button>
           </Space.Compact>
         </>
       ) : (
         <>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 6 }}>角色</div>
+            <div style={{ marginBottom: 6 }}>{t('users.invite.roleLabel')}</div>
             <Select
               style={{ width: '100%' }}
               value={role}
               onChange={(v) => { setRole(v); }}
-              options={ROLE_OPTIONS}
+              options={ROLE_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
             />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 6 }}>备注（可选）</div>
+            <div style={{ marginBottom: 6 }}>{t('users.invite.noteLabel')}</div>
             <Input
-              placeholder="例如：给张三"
+              placeholder={t('users.invite.notePlaceholder')}
               value={note}
               onChange={(e) => { setNote(e.target.value); }}
               maxLength={128}
             />
           </div>
           <div>
-            <div style={{ marginBottom: 6 }}>有效期（天，1-30）</div>
+            <div style={{ marginBottom: 6 }}>{t('users.invite.ttlLabel')}</div>
             <InputNumber
               min={1}
               max={30}

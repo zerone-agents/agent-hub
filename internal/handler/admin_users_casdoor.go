@@ -4,7 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"control-panel/internal/application/services"
 	"control-panel/internal/directory"
+	"control-panel/internal/domain/audit"
+	authdom "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +16,8 @@ import (
 // UserDirectory is the user-management surface for casdoor mode.
 type UserDirectory interface {
 	ListUsers(tenantID string) ([]directory.ManagedUser, error)
-	UpdateRole(tenantID, userID, role, actorID string) error
-	SetDisabled(tenantID, userID string, disabled bool, actorID string) error
+	UpdateRole(tenantID, userID, role, actorID string) (*authdom.MutationReceipt, error)
+	SetDisabled(tenantID, userID string, disabled bool, actorID string) (*authdom.MutationReceipt, error)
 	ResetPassword(tenantID, userID, actorID string) (string, error)
 }
 
@@ -28,12 +31,13 @@ type LoginURLBuilder func(org string) (string, error)
 type CasdoorUserHandler struct {
 	dir        UserDirectory
 	loginURLFn LoginURLBuilder
+	audit      *services.AuditRecorder
 }
 
 // NewCasdoorUserHandler constructs the handler. loginURLFn builds the
 // per-tenant OAuth authorize URL (each org resolves its own client creds).
-func NewCasdoorUserHandler(dir UserDirectory, loginURLFn LoginURLBuilder) *CasdoorUserHandler {
-	return &CasdoorUserHandler{dir: dir, loginURLFn: loginURLFn}
+func NewCasdoorUserHandler(dir UserDirectory, loginURLFn LoginURLBuilder, ar *services.AuditRecorder) *CasdoorUserHandler {
+	return &CasdoorUserHandler{dir: dir, loginURLFn: loginURLFn, audit: ar}
 }
 
 // ListUsers serves GET /admin/users for casdoor mode.
@@ -69,27 +73,46 @@ func (h *CasdoorUserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	if req.Role != "" {
-		if err := h.dir.UpdateRole(tenant.GetTenantID(c), id, req.Role, actorID); err != nil {
+		rcpt, err := h.dir.UpdateRole(tenant.GetTenantID(c), id, req.Role, actorID)
+		if err != nil {
+			if rcpt != nil && rcpt.RemoteApplied && !rcpt.LocalApplied {
+				// 远端已生效、本地失败：partial（人工介入提示，spec §3.2 规则 3）
+				h.audit.RoleChanged(c, id, id, string(rcpt.RoleBefore), string(rcpt.RoleAfter), audit.StatusPartial)
+			}
 			respondDirectoryError(c, err)
 			return
+		}
+		// casdoor 侧 TargetName 用 id（无本地用户表可预读展示名）
+		h.audit.RoleChanged(c, id, id, string(rcpt.RoleBefore), string(rcpt.RoleAfter), audit.StatusSuccess)
+		if rcpt.StatusBefore == authdom.StatusPending && rcpt.StatusAfter == authdom.StatusActive {
+			// casdoor 隐式审批：分配角色即激活隐藏 pending，也不漏审
+			//（from/to 用本地权威值，spec §3.2 规则 2）
+			h.audit.StatusChanged(c, id, id, authdom.StatusPending, authdom.StatusActive)
 		}
 	}
 	if req.Status != "" {
-		if err := h.dir.SetDisabled(tenant.GetTenantID(c), id, req.Status == "disabled", actorID); err != nil {
+		rcpt, err := h.dir.SetDisabled(tenant.GetTenantID(c), id, req.Status == "disabled", actorID)
+		if err != nil {
 			respondDirectoryError(c, err)
 			return
 		}
+		// from/to 取 receipt 的 Effective 值（管理视图合成状态：远端
+		// forbidden 投影为 disabled，否则本地）
+		h.audit.StatusChanged(c, id, id, string(rcpt.EffectiveStatusBefore), string(rcpt.EffectiveStatusAfter))
 	}
 	respondSuccess(c, nil)
 }
 
 // ResetUserPassword serves POST /admin/users/:id/reset-password.
 func (h *CasdoorUserHandler) ResetUserPassword(c *gin.Context) {
-	plain, err := h.dir.ResetPassword(tenant.GetTenantID(c), c.Param("id"), c.GetString("user_id"))
+	id := c.Param("id")
+	plain, err := h.dir.ResetPassword(tenant.GetTenantID(c), id, c.GetString("user_id"))
 	if err != nil {
 		respondDirectoryError(c, err)
 		return
 	}
+	// casdoor 侧 TargetName 用 id（无本地用户表可预读展示名）
+	h.audit.Simple(c, audit.ActionResetPassword, audit.TargetUser, id, id)
 	respondSuccess(c, gin.H{"password": plain})
 }
 
@@ -105,6 +128,8 @@ func (h *CasdoorUserHandler) LoginURL(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "生成登录链接失败: "+err.Error())
 		return
 	}
+	// endpoint 按租户生成、无目标用户（spec §3）
+	h.audit.Simple(c, audit.ActionLoginURL, audit.TargetSystem, tenant.GetTenantID(c), "")
 	respondSuccess(c, gin.H{"loginUrl": loginURL})
 }
 

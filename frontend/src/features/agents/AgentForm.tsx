@@ -8,6 +8,7 @@ import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
 import { usePersonalities } from '@/queries/usePersonalities'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
+import { useTranslation } from 'react-i18next'
 import { getIconComponent, lightenHex } from '@/utils/icons'
 
 interface ToggleItemProps {
@@ -111,6 +112,7 @@ interface FormValues {
   systemPrompt: string
   desktopEnabled: boolean
   mobileEnabled: boolean
+  guestEnabled: boolean
   isDefault: boolean
   group: string
   personalityTemplateName: string
@@ -118,6 +120,7 @@ interface FormValues {
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
   const { styles } = useStyles()
+  const { t } = useTranslation()
   const [form] = Form.useForm<FormValues>()
   const createAgent = useCreateAgent()
   const updateAgent = useUpdateAgent()
@@ -163,6 +166,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
+          guestEnabled: editingAgent.guestEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
           group: editingAgent.group ?? '',
           personalityTemplateName: editingAgent.config.personalityTemplateName ?? ''
@@ -170,7 +174,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       } else {
         form.resetFields()
         form.setFieldsValue({
-        permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, isDefault: false,
+        permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, guestEnabled: false, isDefault: false,
         iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined,
         personalityTemplateName: ''
         })
@@ -218,7 +222,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
     if (editingAgent) {
       await updateAgent.mutateAsync({
         name: editingAgent.name,
-        data: { config, desktopEnabled: v.desktopEnabled, mobileEnabled: v.mobileEnabled, isDefault: v.isDefault }
+        data: { config, desktopEnabled: v.desktopEnabled, mobileEnabled: v.mobileEnabled, guestEnabled: v.guestEnabled, isDefault: v.isDefault }
       })
     } else {
       await createAgent.mutateAsync({
@@ -226,6 +230,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         config,
         desktopEnabled: v.desktopEnabled,
         mobileEnabled: v.mobileEnabled,
+        guestEnabled: v.guestEnabled,
         isDefault: v.isDefault
       })
     }
@@ -244,7 +249,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       destroyOnHidden
     >
       <div className={styles.head}>
-        <div className={styles.title}>{editingAgent ? '编辑代理' : '新建代理'}</div>
+        <div className={styles.title}>{editingAgent ? t('agents.form.editTitle') : t('agents.create')}</div>
         <button type="button" className={styles.closeBtn} onClick={onClose}>
           <XIcon size={18} />
         </button>
@@ -252,12 +257,12 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
 
       <Form form={form} layout="vertical" className={styles.body} requiredMark={false}>
         {/* 基本信息 */}
-        <div className={styles.section}>基本信息</div>
+        <div className={styles.section}>{t('agents.form.basicSection')}</div>
         <div className={styles.row}>
-          <Form.Item label="代理标识" name="name" rules={agentIdentifierFormRules('代理标识')}>
-            <Input placeholder="例如: general, code-review" disabled={!!editingAgent} />
+          <Form.Item label={t('agents.form.nameKey')} name="name" rules={agentIdentifierFormRules(t('agents.form.nameKey'))}>
+            <Input placeholder={t('agents.form.namePh')} disabled={!!editingAgent} />
           </Form.Item>
-          <Form.Item label="权限模式" name="permissionMode">
+          <Form.Item label={t('agents.form.permissionMode')} name="permissionMode">
             <Select options={[
               { label: 'Auto', value: 'auto' },
               { label: 'Plan', value: 'plan' },
@@ -265,10 +270,10 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
             ]} />
           </Form.Item>
         </div>
-        <Form.Item label="分组" name="group">
+        <Form.Item label={t('agents.form.group')} name="group">
           <AutoComplete
             options={groupOptions}
-            placeholder="选择或输入新分组"
+            placeholder={t('agents.form.groupPh')}
             allowClear
             suffix={<CaretDownIcon size={14} />}
             showSearch={{
@@ -281,18 +286,18 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </Form.Item>
 
         {/* 显示设置 */}
-        <div className={styles.section} style={{ marginTop: 20 }}>显示设置</div>
+        <div className={styles.section} style={{ marginTop: 20 }}>{t('agents.form.displaySection')}</div>
         <div className={styles.row}>
-          <Form.Item label="中文标题" name="titleZh">
-            <Input placeholder="给代理起个中文名" />
+          <Form.Item label={t('agents.form.titleZh')} name="titleZh">
+            <Input placeholder={t('agents.form.titleZhPh')} />
           </Form.Item>
           <Form.Item label="English Title" name="titleEn">
             <Input placeholder="Agent display name" />
           </Form.Item>
         </div>
         <div className={styles.row}>
-          <Form.Item label="中文描述" name="descriptionZh">
-            <Input placeholder="简要描述用途" />
+          <Form.Item label={t('agents.form.descZh')} name="descriptionZh">
+            <Input placeholder={t('agents.form.descZhPh')} />
           </Form.Item>
           <Form.Item label="English Description" name="descriptionEn">
             <Input placeholder="Brief description" />
@@ -300,7 +305,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </div>
 
         {/* Icon picker */}
-        <Form.Item label="图标" name="iconName">
+        <Form.Item label={t('agents.form.icon')} name="iconName">
           <div className={styles.iconGrid}>
             {AGENT_ICON_OPTIONS.map((opt) => {
               const IconCmp = getIconComponent(opt.name)
@@ -316,7 +321,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
                     backgroundColor: activeBg,
                     borderColor: activeColor
                   } : {}}
-                  title={opt.label}
+                  title={t(opt.label)}
                   onClick={(e) => { e.stopPropagation(); selectIcon(opt.name) }}
                 >
                   <IconCmp size={18} weight="duotone" color={active ? activeColor : '#9CA3AF'} />
@@ -328,7 +333,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
 
         {/* Color pickers */}
         <div className={styles.row}>
-          <Form.Item label="图标颜色" name="iconColor">
+          <Form.Item label={t('agents.form.iconColor')} name="iconColor">
             <div>
               <div className={styles.colorStrip}>
                 {PRESET_COLORS.map((c) => (
@@ -344,7 +349,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
                 onChange={(e) => { form.setFieldsValue({ iconColor: e.target.value }); }} />
             </div>
           </Form.Item>
-          <Form.Item label="背景颜色" name="iconBgColor">
+          <Form.Item label={t('agents.form.iconBg')} name="iconBgColor">
             <div>
               <div className={styles.colorStrip}>
                   {PRESET_BG_COLORS.map((c) => (
@@ -363,15 +368,15 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </div>
 
         {/* 能力配置 */}
-        <div className={styles.section} style={{ marginTop: 20 }}>能力配置</div>
-        <Form.Item label="最大轮次" name="maxTurns">
+        <div className={styles.section} style={{ marginTop: 20 }}>{t('agents.form.abilitySection')}</div>
+        <Form.Item label={t('agents.form.maxTurns')} name="maxTurns">
           <InputNumber min={1} max={500} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item label="会话查询数上限" name="maxSessionQueries" tooltip="控制单个会话内的最大查询次数，留空表示无限制">
-          <InputNumber min={1} placeholder="无限制" style={{ width: '100%' }} />
+        <Form.Item label={t('agents.form.maxSessionQueries')} name="maxSessionQueries" tooltip={t('agents.form.maxSessionQueriesTip')}>
+          <InputNumber min={1} placeholder={t('agents.form.noLimit')} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item label="禁用工具" name="disallowedTools" tooltip="在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名">
-          <Select mode="tags" open={false} tokenSeparators={[',']} placeholder="输入要禁用的工具名，回车添加" style={{ width: '100%' }} />
+        <Form.Item label={t('agents.form.disallowedTools')} name="disallowedTools" tooltip={t('agents.form.disallowedToolsTip')}>
+          <Select mode="tags" open={false} tokenSeparators={[',']} placeholder={t('agents.form.disallowedToolsPh')} style={{ width: '100%' }} />
         </Form.Item>
 
         {/* 人格只从独立人格库引用，原稿与投影不在 Agent 页面重复维护。 */}
@@ -395,36 +400,42 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         {/* Agent 自身的身份与工作边界，不承载人格。 */}
         <div className={styles.section} style={{ marginTop: 20 }}>职责与任务</div>
         <Form.Item name="systemPrompt" extra="只写这个 Agent 负责什么；表达方式和决策倾向由所选人格决定。">
-          <Input.TextArea placeholder="定义身份、职责范围、工作目标和边界..." rows={6} maxLength={20000} showCount />
+          <Input.TextArea placeholder={t('agents.form.promptPh')} rows={6} maxLength={20000} showCount />
         </Form.Item>
 
         {/* Toggles */}
         <div style={{ marginTop: 20 }}>
           <Form.Item name="desktopEnabled" valuePropName="checked" style={{ marginBottom: 0 }}>
             <ToggleItem
-              title="桌面端代理"
-              desc="桌面客户端加载此代理"
+              title={t('agents.form.desktopTitle')}
+              desc={t('agents.form.desktopDesc')}
+            />
+          </Form.Item>
+          <Form.Item name="guestEnabled" valuePropName="checked" style={{ marginBottom: 0 }}>
+            <ToggleItem
+              title={t('agents.form.guestTitle')}
+              desc={t('agents.form.guestDesc')}
             />
           </Form.Item>
           <Form.Item name="mobileEnabled" valuePropName="checked" style={{ marginBottom: 0 }}>
             <ToggleItem
-              title="手机端代理"
-              desc="手机端加载此代理（预留）"
+              title={t('agents.form.mobileTitle')}
+              desc={t('agents.form.mobileDesc')}
             />
           </Form.Item>
           <Form.Item name="isDefault" valuePropName="checked" style={{ marginBottom: 0 }}>
             <ToggleItem
-              title="设为默认"
-              desc="在新对话中自动预选此代理"
+              title={t('agents.form.defaultTitle')}
+              desc={t('agents.form.defaultDesc')}
             />
           </Form.Item>
         </div>
       </Form>
 
       <div className={styles.foot}>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <PrimaryButton onClick={handleSubmit} loading={submitting}>
-          {editingAgent ? '保存更新' : '创建代理'}
+          {editingAgent ? t('agents.form.save') : t('agents.form.createSubmit')}
         </PrimaryButton>
       </div>
     </Modal>

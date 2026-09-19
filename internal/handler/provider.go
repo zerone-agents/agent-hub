@@ -6,9 +6,9 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 
@@ -19,13 +19,14 @@ import (
 type ProviderHandler struct {
 	service        *services.ProviderService
 	multiragClient provider.MultiRAGClient
+	audit          *services.AuditRecorder
 }
 
 // NewProviderHandler wires a ProviderHandler. multiragClient is the
 // provider.MultiRAGClient used by SyncToMultiRAG; pass nil when MultiRAG
 // is not configured (the endpoint will then return 503).
-func NewProviderHandler(service *services.ProviderService, multiragClient provider.MultiRAGClient) *ProviderHandler {
-	return &ProviderHandler{service: service, multiragClient: multiragClient}
+func NewProviderHandler(service *services.ProviderService, multiragClient provider.MultiRAGClient, ar *services.AuditRecorder) *ProviderHandler {
+	return &ProviderHandler{service: service, multiragClient: multiragClient, audit: ar}
 }
 
 // respondProviderError 映射 Provider 领域错误（issue #95 P2：英文化后
@@ -299,8 +300,9 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 
 // ListRuntimeConfig serves every provider's runtime configuration (including
 // plaintext API keys) to any authenticated user, so Zerone Desktop can make
-// local model calls. The response is marked no-store and the audit log never
-// contains plaintext keys.
+// local model calls. The response is marked no-store.
+// 这是客户端例行读取（非管理类敏感操作），按审计范围定稿不落审计
+// （2026-09-14 用户确认移除；凭证敏感面由 provider.reveal_key（admin）覆盖）。
 func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	configs, err := h.service.ListRuntimeConfigs(tenant.GetTenantID(c))
 	if err != nil {
@@ -309,9 +311,6 @@ func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 	}
 
 	c.Header("Cache-Control", "no-store")
-	log.Printf("[AUDIT] provider runtime-config served | user_id=%s user_name=%s providers=%d remote_ip=%s time=%s",
-		c.GetString("user_id"), c.GetString("user_name"), len(configs), c.ClientIP(),
-		time.Now().UTC().Format(time.RFC3339))
 	respondSuccess(c, configs)
 }
 
@@ -329,9 +328,7 @@ func (h *ProviderHandler) RevealAPIKey(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[AUDIT] provider API key revealed | user_id=%s user_name=%s provider_id=%d remote_ip=%s method=%s path=%s result=success time=%s",
-		c.GetString("user_id"), c.GetString("user_name"), id, c.ClientIP(), c.Request.Method,
-		c.Request.URL.Path, time.Now().UTC().Format(time.RFC3339))
+	h.audit.RevealKeyLegacy(c, id)
 	respondSuccess(c, gin.H{"apiKey": apiKey})
 }
 
@@ -470,5 +467,6 @@ func (h *ProviderHandler) SyncToMultiRAG(c *gin.Context) {
 		respondProviderError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionSyncMultirag, audit.TargetProvider, c.Param("id"), "")
 	respondSuccess(c, result)
 }

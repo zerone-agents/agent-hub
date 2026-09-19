@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { PlusIcon, SquaresFourIcon, PlugIcon } from '@phosphor-icons/react'
+import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
-import type { Agent } from '@/api/agents'
+import type { Agent, DeploymentStatus } from '@/api/agents'
 import {
   useAgents, useDeleteAgent, useUpdateAgent,
   useUpdateSubagents, useUpdateAgentTools, useUpdateAgentSkills,
@@ -16,16 +17,25 @@ import { useProviders } from '@/queries/useProviders'
 import { useMcps, useUpdateAgentMcps } from '@/queries/useMcps'
 import { useCanWrite } from '@/hooks/useCanWrite'
 import { agentApi } from '@/api/agents'
+import { unwrapResponse } from '@/api/client'
 import type { ApiEnvelope } from '@/api/client'
-import { tokens as t } from '@/styles/tokens'
+import { tokens as tk } from '@/styles/tokens'
 import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
 import { buildToolOptions } from './toolOptions'
 import DeployModal from './DeployModal'
 import AgentKnowledgeModal from './AgentKnowledgeModal'
+import BulkActionBar from './bulk/BulkActionBar'
+import BulkConfirmModal from './bulk/BulkConfirmModal'
+import BulkTaskModal from './bulk/BulkTaskModal'
+import BulkTaskBubble from './bulk/BulkTaskBubble'
+import { useBulkAgentTask } from './bulk/useBulkAgentTask'
+import { classifyAllAgents } from './bulk/classifyBulkOperation'
+import type { BulkOperation, ClassifiedItem, PrecheckResult } from './bulk/classifyBulkOperation'
 import CardGrid from '@/components/CardGrid'
 import { useNavigate } from 'react-router'
+import { hasPendingArtifactUpdates } from './pendingArtifactUpdates'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -36,12 +46,12 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
     @media (max-width: 768px) { flex-direction: column; gap: 16px; }
   `,
-  pageTitle: css`font-size: ${t.text3xl}; font-weight: 700; color: ${t.text}; letter-spacing: -0.03em; line-height: 1.15;`,
-  pageSub: css`margin-top: 4px; font-size: ${t.textBase}; color: ${t.textTertiary};`,
+  pageTitle: css`font-size: ${tk.text3xl}; font-weight: 700; color: ${tk.text}; letter-spacing: -0.03em; line-height: 1.15;`,
+  pageSub: css`margin-top: 4px; font-size: ${tk.textBase}; color: ${tk.textTertiary};`,
   loadingWrap: css`display: flex; justify-content: center; padding: 80px 0;`,
   emptyState: css`text-align: center; padding: 80px 0;`,
-  emptyTitle: css`font-size: ${t.textLg}; font-weight: 600; color: ${t.text}; margin-bottom: 6px;`,
-  emptyDesc: css`color: ${t.textTertiary}; font-size: ${t.textSm};`,
+  emptyTitle: css`font-size: ${tk.textLg}; font-weight: 600; color: ${tk.text}; margin-bottom: 6px;`,
+  emptyDesc: css`color: ${tk.textTertiary}; font-size: ${tk.textSm};`,
   modalFoot: css`
     display: flex; justify-content: space-between; align-items: center; gap: 10px;
     padding: 14px 24px; border-top: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
@@ -57,20 +67,24 @@ const useStyles = createStyles(({ css }) => ({
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
   `,
-  sectionGroupTitle: css`display: flex; align-items: center; gap: 8px; color: ${t.text}; font-size: ${t.textBase}; font-weight: 600;`,
+  sectionGroupTitle: css`display: flex; align-items: center; gap: 8px; color: ${tk.text}; font-size: ${tk.textBase}; font-weight: 600;`,
   sectionCount: css`
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 24px; height: 24px; padding: 0 8px;
-    background: ${t.inkSubtle}; color: ${t.ink}; border-radius: 12px;
+    background: ${tk.inkSubtle}; color: ${tk.ink}; border-radius: 12px;
     font-size: 12px; font-weight: 600;
   `,
   toolbar: css`
     display: flex; justify-content: space-between; align-items: center;
     gap: 12px; margin-bottom: 16px;
   `,
+  toolbarActions: css`
+    display: flex; align-items: center; gap: 8px;
+  `,
 }))
 
 export default function AgentListPage() {
+  const { t } = useTranslation()
   const { styles } = useStyles()
   const navigate = useNavigate()
   const { data: agents = [], isLoading } = useAgents()
@@ -121,6 +135,104 @@ export default function AgentListPage() {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [knowledgeAgent, setKnowledgeAgent] = useState<Agent | null>(null)
 
+  // ===== 批量操作（#141 第一阶段 · 快速操作）=====
+  const bulkTask = useBulkAgentTask()
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [rawSelectedNames, setRawSelectedNames] = useState<Set<string>>(new Set())
+  const [confirmState, setConfirmState] = useState<{ operation: BulkOperation; items: ClassifiedItem[] } | null>(null)
+  const [precheckingOp, setPrecheckingOp] = useState<BulkOperation | null>(null)
+  // 预检代次（review 复审 P2）：退出选择模式时 bump，进行中的预检完成后
+  // 发现代次不符即丢弃结果——退出后不再弹旧批次的确认弹窗
+  const precheckGenerationRef = useRef(0)
+
+  const toggleSelect = (name: string) => {
+    setRawSelectedNames((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+  const addNames = (names: string[]) => {
+    setRawSelectedNames((prev) => new Set([...prev, ...names]))
+  }
+
+  // 列表刷新后剔除已消失的选中项（spec §4.1 选择保留策略）——render-time state
+  // adjustment（React 官方模式，替代 effect 内 setState）：真正从 raw 集删除，
+  // 防止同名 Agent 重现时被静默复活选中（review P2b）
+  const validNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents])
+  if (rawSelectedNames.size > 0) {
+    const kept = [...rawSelectedNames].filter((n) => validNames.has(n))
+    if (kept.length !== rawSelectedNames.size) {
+      setRawSelectedNames(new Set(kept))
+    }
+  }
+  const selectedNames = rawSelectedNames
+
+  const selectedAgents = useMemo(
+    () => agents.filter((a) => selectedNames.has(a.name)),
+    [agents, selectedNames],
+  )
+
+  const pendingUpdateCount = useMemo(
+    () => agents.filter(hasPendingArtifactUpdates).length,
+    [agents],
+  )
+
+  // 点批量操作：并发 5 路预检选中项 → 分类 → 确认弹窗（spec §4.2）。
+  // 预检互斥守卫（review P1）：进行中不接受第二个预检，防止竞争覆盖 confirmState。
+  const handleBulkOperation = async (op: BulkOperation) => {
+    if (bulkTask.phase === 'running' || precheckingOp !== null || selectedAgents.length === 0) return
+    const generation = precheckGenerationRef.current
+    setPrecheckingOp(op)
+    try {
+      const prechecks = new Map<string, PrecheckResult>()
+      const LIMIT = 5
+      for (let i = 0; i < selectedAgents.length; i += LIMIT) {
+        const chunk = selectedAgents.slice(i, i + LIMIT)
+        await Promise.all(chunk.map(async (a) => {
+          try {
+            const status = unwrapResponse<DeploymentStatus>(await agentApi.getDeployment(a.name))
+            prechecks.set(a.name, { kind: 'success', status })
+          } catch (err) {
+            prechecks.set(a.name, { kind: 'error', error: err })
+          }
+        }))
+      }
+      // 预检期间用户已退出选择模式 → 丢弃旧批次结果，不弹确认（review 复审 P2）
+      if (precheckGenerationRef.current !== generation) return
+      setConfirmState({ operation: op, items: classifyAllAgents(op, selectedAgents, prechecks) })
+    } finally {
+      setPrecheckingOp(null)
+    }
+  }
+
+  // 确认：启动批次；onFinished 清理成功项选中（spec §6 轻量重试路径）
+  const handleBulkConfirm = () => {
+    if (!confirmState) return
+    const { operation, items } = confirmState
+    bulkTask.start({
+      operation,
+      items,
+      onFinished: (succeeded) => {
+        setRawSelectedNames((prev) => new Set([...prev].filter((n) => !succeeded.includes(n))))
+      },
+    })
+    setConfirmState(null)
+  }
+
+  const exitSelectionMode = () => {
+    precheckGenerationRef.current++ // 使进行中的预检结果失效（review 复审 P2）
+    setSelectionMode(false)
+    setRawSelectedNames(new Set())
+  }
+
+  const settledCount = bulkTask.summary.succeeded + bulkTask.summary.failed
+    + bulkTask.summary.skipped + bulkTask.summary.blocked
+  const bubbleDot: 'green' | 'red' | null =
+    bulkTask.phase !== 'done' ? null
+      : (bulkTask.summary.failed > 0 || bulkTask.summary.blocked > 0 ? 'red' : 'green')
+
   // 搜索
   const [keywords, setKeywords] = useState('')
 
@@ -141,10 +253,11 @@ export default function AgentListPage() {
     })
   }, [agents, keywords])
 
-  // 按 group 分组，组内按 name 排序
+  // 按 group 分组，组内按 name 排序（group 为 nullish 或空串/空白串都归「默认分组」——
+  // DB 列默认空字符串，?? 不会回退空串，必须显式判空）
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
-      const group = agent.group ?? '默认分组'
+      const group = agent.group?.trim() ? agent.group : '默认分组'
       acc[group] ??= []
       acc[group].push(agent)
       return acc
@@ -335,10 +448,10 @@ export default function AgentListPage() {
       })
       const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
       if (result?.success) {
-        message.success(`连接成功 · ${result.latencyMs}ms`)
+        message.success(t('providers.connectSuccess', { ms: result.latencyMs }))
         setTestPassed(true)
       } else {
-        message.error(`连接失败 · ${result?.error ?? '未知错误'}`)
+        message.error(t('providers.connectFail', { error: result?.error ?? t('providers.unknownError') }))
         setTestPassed(false)
       }
     } catch {
@@ -374,8 +487,8 @@ export default function AgentListPage() {
       })
       setModelOpen(false)
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : '未知错误'
-      message.error(`保存失败 · ${errMsg}`)
+      const errMsg = err instanceof Error ? err.message : t('providers.unknownError')
+      message.error(t('agents.saveFail', { error: errMsg }))
     } finally {
       setSaving(false)
     }
@@ -397,8 +510,8 @@ export default function AgentListPage() {
     const expert = skills.filter((s) => s.type === 'expert').map((s) => ({ value: s.name, label: s.name }))
     const community = skills.filter((s) => s.type === 'community').map((s) => ({ value: s.name, label: s.name }))
     const groups: { label: string; options: { value: string; label: string }[] }[] = []
-    if (expert.length) groups.push({ label: '专家技能', options: expert })
-    if (community.length) groups.push({ label: '社区技能', options: community })
+    if (expert.length) groups.push({ label: t('skills.expertSection'), options: expert })
+    if (community.length) groups.push({ label: t('skills.communitySection'), options: community })
     return groups
   })()
 
@@ -483,40 +596,82 @@ export default function AgentListPage() {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div>
-          <div className={styles.pageTitle}>Agent 管理</div>
-          <div className={styles.pageSub}>管理您的 AI Agent 配置</div>
+          <div className={styles.pageTitle}>{t('agents.pageTitle')}</div>
+          <div className={styles.pageSub}>{t('agents.pageSub')}</div>
         </div>
         {canWrite && (
           <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={showCreate}>
-            新建代理
+            {t('agents.create')}
           </PrimaryButton>
         )}
       </div>
 
       <div className={styles.toolbar}>
-          <NameSearch
-            placeholder="搜索代理名称"
-            onSearch={setKeywords}
-            realtime
-          />
+        <NameSearch
+          placeholder={t('agents.searchPlaceholder')}
+          onSearch={setKeywords}
+          realtime
+        />
+        <div className={styles.toolbarActions}>
+          {/* 开始对话：新页签打开聊天总览（member 只读也可聊，不受 canWrite 限制） */}
+          {!selectionMode && (
+            <Button
+              icon={<ChatCircleDotsIcon size={14} />}
+              onClick={() => { window.open('/static/agents/chat', '_blank', 'noopener,noreferrer'); }}
+            >
+              {t('agents.startChat')}
+            </Button>
+          )}
+          {selectionMode && canWrite ? (
+            <BulkActionBar
+              selectedCount={selectedNames.size}
+              pendingUpdateCount={pendingUpdateCount}
+              onSelectAll={() => { addNames(filteredAgents.map((a) => a.name)); }}
+              onSelectPendingUpdates={() => { addNames(agents.filter(hasPendingArtifactUpdates).map((a) => a.name)); }}
+              onClear={() => { setRawSelectedNames(new Set()); }}
+              onOperation={(op) => { void handleBulkOperation(op); }}
+              onExit={exitSelectionMode}
+              operationsDisabled={bulkTask.phase === 'running'}
+              prechecking={precheckingOp}
+            />
+          ) : (
+            canWrite && (
+              <Button
+                icon={<CheckSquareIcon size={14} />}
+                onClick={() => { setRawSelectedNames(new Set()); setSelectionMode(true); }}
+              >
+                {t('agents.bulkOps')}
+              </Button>
+            )
+          )}
+        </div>
       </div>
 
       {isLoading ? (
         <div className={styles.loadingWrap}><Spin size="medium" /></div>
       ) : agents.length === 0 ? (
         <div className={styles.emptyState}>
-          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={t.textMuted} /></div>
-          <div className={styles.emptyTitle}>暂无代理</div>
-          <div className={styles.emptyDesc}>创建您的第一个代理以开始使用</div>
+          <div style={{ marginBottom: 20 }}><SquaresFourIcon size={48} weight="thin" color={tk.textMuted} /></div>
+          <div className={styles.emptyTitle}>{t('agents.emptyTitle')}</div>
+          <div className={styles.emptyDesc}>{t('agents.emptyDesc')}</div>
         </div>
       ) : (
         sortedGroups.map(group => (
           <div key={group} className={styles.section}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionGroupTitle}>
-                <span>{group}</span>
+                <span>{group === '默认分组' ? t('agents.defaultGroup') : group}</span>
                 <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>
+              {selectionMode && canWrite && (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => { addNames((groupedAgents[group] ?? []).map((a) => a.name)); }}
+                >
+                  {t('agents.selectAllInGroup')}
+                </Button>
+              )}
             </div>
             <CardGrid>
               {(groupedAgents[group] ?? []).map((agent) => (
@@ -535,6 +690,9 @@ export default function AgentListPage() {
                   onDeploy={showDeploy}
                   onEditKnowledge={handleEditKnowledge}
                   onViewRelations={(item) => { void navigate(`/relations?agent=${item.id}`) }}
+                  selectionMode={selectionMode && canWrite}
+                  selected={selectedNames.has(agent.name)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
             </CardGrid>
@@ -570,13 +728,13 @@ export default function AgentListPage() {
 
       {/* Sub-agents modal */}
       <Modal
-        title="管理子代理"
+        title={t('agents.modals.subagentTitle')}
         open={subagentOpen}
         onCancel={() => { setSubagentOpen(false); }}
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setSubagentOpen(false); }}>取消</Button>
+            <Button onClick={() => { setSubagentOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateSubagents.isPending}
@@ -585,17 +743,17 @@ export default function AgentListPage() {
                   setSubagentOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
         }
       >
-        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>选择此代理可调用的子代理：</p>
+        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>{t('agents.modals.subagentHint')}</p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择子代理"
+          placeholder={t('agents.modals.subagentPh')}
           options={subagentOptions}
           size="large"
           value={selectedSubagents}
@@ -606,13 +764,13 @@ export default function AgentListPage() {
 
       {/* Tools modal */}
       <Modal
-        title="管理工具"
+        title={t('agents.modals.toolTitle')}
         open={toolOpen}
         onCancel={() => { setToolOpen(false); }}
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setToolOpen(false); }}>取消</Button>
+            <Button onClick={() => { setToolOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentTools.isPending}
@@ -622,17 +780,17 @@ export default function AgentListPage() {
                   setToolOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
         }
       >
-        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>选择此代理可使用的工具：</p>
+        <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>{t('agents.modals.toolHint')}</p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择工具"
+          placeholder={t('agents.modals.toolPh')}
           options={toolOptions}
           size="large"
           value={selectedTools}
@@ -643,13 +801,13 @@ export default function AgentListPage() {
 
       {/* Skills modal */}
       <Modal
-        title="管理技能"
+        title={t('agents.modals.skillTitle')}
         open={skillOpen}
         onCancel={() => { setSkillOpen(false); }}
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setSkillOpen(false); }}>取消</Button>
+            <Button onClick={() => { setSkillOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentSkills.isPending}
@@ -658,19 +816,19 @@ export default function AgentListPage() {
                   setSkillOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          选择此代理的技能（专家和社区技能均可选）：
+          t('agents.modals.skillHint')
         </p>
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="选择技能"
+          placeholder={t('agents.modals.skillPh')}
           options={skillOptions}
           size="large"
           value={selectedSkills}
@@ -681,13 +839,13 @@ export default function AgentListPage() {
 
       {/* MCPs modal */}
       <Modal
-        title="管理 MCP"
+        title={t('agents.modals.mcpTitle')}
         open={mcpOpen}
         onCancel={() => { setMcpOpen(false); }}
         width={480}
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <Button onClick={() => { setMcpOpen(false); }}>取消</Button>
+            <Button onClick={() => { setMcpOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <PrimaryButton
                 loading={updateAgentMcps.isPending}
@@ -696,22 +854,22 @@ export default function AgentListPage() {
                   setMcpOpen(false)
                 }}
               >
-                确认
+                {t('agents.modals.confirm')}
               </PrimaryButton>
             )}
           </div>
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          选择此代理可使用的 MCP 服务器（在 MCP 配置页面管理可用列表）：
+          t('agents.modals.mcpHint')
         </p>
         {mcps.length === 0 ? (
-          <Empty description="请先在 MCP 配置页面添加服务器" />
+          <Empty description={t('agents.modals.mcpEmpty')} />
         ) : (
           <Select
             mode="multiple"
             style={{ width: '100%' }}
-            placeholder="选择 MCP"
+            placeholder={t('agents.modals.mcpPh')}
             options={mcpOptions}
             size="large"
             value={selectedMcps}
@@ -723,19 +881,19 @@ export default function AgentListPage() {
 
       {/* Model modal */}
       <Modal
-        title="设置模型"
+        title={t('agents.modals.modelTitle')}
         open={modelOpen}
         onCancel={() => { setModelOpen(false); }}
         footer={
           <div className={styles.modalFoot}>
-            <Button onClick={() => { setModelOpen(false); }}>取消</Button>
+            <Button onClick={() => { setModelOpen(false); }}>{t('common.cancel')}</Button>
             {canWrite && (
               <div className={styles.footRight}>
                 <Button onClick={handleTest} disabled={!canTest} loading={testing}>
-                  <PlugIcon size={14} /> 测试
+                  <PlugIcon size={14} /> {t('agents.modals.test')}
                 </Button>
                 <PrimaryButton onClick={handleSave} disabled={!canConfirm} loading={saving}>
-                  确认
+                  {t('agents.modals.confirm')}
                 </PrimaryButton>
               </div>
             )}
@@ -745,7 +903,7 @@ export default function AgentListPage() {
         destroyOnHidden
       >
         {providers.length === 0 ? (
-          <Empty description="请先在模型管理添加 Provider" />
+          <Empty description={t('agents.modals.modelEmpty')} />
         ) : (
           <>
             {/* Provider/Model offline warning */}
@@ -761,7 +919,7 @@ export default function AgentListPage() {
               if (!hit) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>
-                    ⚠️ 原 Provider 或模型已下线，请重新选择
+                    t('agents.modals.offlineWarning')
                   </p>
                 )
               }
@@ -771,12 +929,12 @@ export default function AgentListPage() {
             {/* Provider Select */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                选择供应商
+                {t('agents.modals.selectProvider')}
               </label>
               <Select
                 style={{ width: '100%' }}
                 size="large"
-                placeholder="选择供应商"
+                placeholder={t('agents.modals.selectProviderPh')}
                 allowClear
                 value={selectedProviderId ?? undefined}
                 onChange={handleProviderChange}
@@ -798,12 +956,12 @@ export default function AgentListPage() {
             {selectedProviderId && (
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                  选择或输入模型
+                  {t('agents.modals.selectOrInputModel')}
                 </label>
                 <AutoComplete
                   style={{ width: '100%' }}
                   size="large"
-                  placeholder="选择模型或输入自定义模型 ID"
+                  placeholder={t('agents.modals.selectModelPh')}
                   disabled={!canWrite}
                   value={modelDropdownOpen || !selectedModelSuggestion ? selectedModelId : selectedModelSuggestion.display}
                   onChange={(value) => {
@@ -849,14 +1007,14 @@ export default function AgentListPage() {
               if (selectedProvider.fields.length === 0) {
                 return (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    该 Provider 无需额外连接参数
+                    t('agents.modals.noConnParams')
                   </p>
                 )
               }
 
               return (
                 <>
-                  <div className={styles.sectionTitle}>连接参数</div>
+                  <div className={styles.sectionTitle}>{t('agents.modals.connSection')}</div>
                   {selectedProvider.fields.map((field) => (
                     <div key={field.key} style={{ marginBottom: 16 }}>
                       <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -867,14 +1025,14 @@ export default function AgentListPage() {
                   <Input
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
-                    placeholder={`输入${field.label}`}
+                    placeholder={t('agents.modals.inputPh', { label: field.label })}
                     disabled={!canWrite}
                   />
                 ) : field.type === 'select' ? (
                   <Select
                     value={fieldValues[field.key] ?? undefined}
                     onChange={(v) => { updateField(field.key, v); }}
-                    placeholder={`选择${field.label}`}
+                    placeholder={t('agents.modals.selectPh', { label: field.label })}
                     style={{ width: '100%' }}
                     options={[]}
                     disabled={!canWrite}
@@ -883,7 +1041,7 @@ export default function AgentListPage() {
                   <Input
                     value={fieldValues[field.key] ?? ''}
                     onChange={(e) => { updateField(field.key, e.target.value); }}
-                    placeholder={`输入${field.label}`}
+                    placeholder={t('agents.modals.inputPh', { label: field.label })}
                     disabled={!canWrite}
                   />
                 )}
@@ -895,6 +1053,33 @@ export default function AgentListPage() {
           </>
         )}
       </Modal>
+      <ExtensionSlotRenderer slot="agent.detail.tab" />
+
+      <BulkConfirmModal
+        open={confirmState !== null}
+        operation={confirmState?.operation ?? 'deploy'}
+        items={confirmState?.items ?? []}
+        onCancel={() => { setConfirmState(null); }}
+        onConfirm={handleBulkConfirm}
+      />
+
+      <BulkTaskModal
+        open={bulkTask.phase !== 'idle' && bulkTask.presentation === 'modal-open'}
+        phase={bulkTask.phase}
+        operation={bulkTask.operation}
+        items={bulkTask.items}
+        summary={bulkTask.summary}
+        onCollapse={bulkTask.collapse}
+        onClose={bulkTask.close}
+      />
+
+      <BulkTaskBubble
+        visible={bulkTask.phase !== 'idle' && bulkTask.presentation === 'collapsed'}
+        phase={bulkTask.phase}
+        progressText={`${settledCount}/${bulkTask.summary.total}`}
+        dot={bubbleDot}
+        onClick={bulkTask.reopen}
+      />
       <ExtensionSlotRenderer slot="agent.detail.tab" />
     </div>
   )

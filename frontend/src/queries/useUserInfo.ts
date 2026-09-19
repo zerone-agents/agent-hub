@@ -37,7 +37,8 @@ export function useUserInfo({ enabled = true }: UseUserInfoOptions = {}) {
         email: d.email ?? '',
         name: d.display_name ?? d.username ?? d.email?.split('@')[0] ?? '',
         avatar: d.avatar,
-        role: roles[0]
+        // 与后端 IsGuest 的 any-role 语义对齐：roles 含 guest 即 guest（防御未来多角色映射）
+        role: roles.includes('guest') ? 'guest' : roles[0],
       }
     },
     enabled: BYPASS_AUTH || (enabled && !!getAccessToken()),

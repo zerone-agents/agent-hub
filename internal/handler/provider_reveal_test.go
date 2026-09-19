@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/provider"
+	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/internal/middleware"
 	"control-panel/pkg/database"
 
@@ -20,12 +22,14 @@ import (
 
 const providerRevealTestEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func setupProviderRevealRouter(t *testing.T, apiKey string) (*gin.Engine, *bytes.Buffer) {
+func setupProviderRevealRouter(t *testing.T, apiKey string) (*gin.Engine, *bytes.Buffer, *gorm.DB) {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// auditTestSqlite 包装器（同包 audit_test.go）：audit_logs 的 datetime(6)
+	// tag 在纯 sqlite 下读回 string，行级断言（Task 12）需去精度后缀。
+	db, err := gorm.Open(auditTestSqlite{sqlite.Open(":memory:").(*sqlite.Dialector)}, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderAttribute{}))
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderAttribute{}, &audit.Log{}))
 
 	previousDB := database.DB
 	database.DB = db
@@ -56,22 +60,24 @@ func setupProviderRevealRouter(t *testing.T, apiKey string) (*gin.Engine, *bytes
 	})
 
 	gin.SetMode(gin.TestMode)
-	h := NewProviderHandler(services.NewProviderService(providerRevealTestEncryptionKey), nil)
+	h := NewProviderHandler(services.NewProviderService(providerRevealTestEncryptionKey), nil,
+		services.NewAuditRecorder(repository.NewAuditRepository(db)))
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if c.GetHeader("X-Test-Admin") == "true" {
 			c.Set("roles", []string{"admin"})
 			c.Set("user_id", "user-1")
 			c.Set("user_name", "Ada")
+			c.Set("tenant_id", "t1") // RevealKeyLegacy 的 DB 落库需要租户（Task 12）
 		}
 	})
 	router.POST("/api/v1/admin/providers/:id/reveal-key", middleware.RequireAdmin(), h.RevealAPIKey)
-	return router, auditLog
+	return router, auditLog, db
 }
 
 func TestRevealAPIKey_ReturnsPlaintextAndAuditsWithoutSecret(t *testing.T) {
 	apiKey := "sk-test-super-secret-1234"
-	router, auditLog := setupProviderRevealRouter(t, apiKey)
+	router, auditLog, _ := setupProviderRevealRouter(t, apiKey)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers/1/reveal-key", nil)
 	req.Header.Set("X-Test-Admin", "true")
@@ -90,7 +96,7 @@ func TestRevealAPIKey_ReturnsPlaintextAndAuditsWithoutSecret(t *testing.T) {
 }
 
 func TestRevealAPIKey_RejectsNonAdmin(t *testing.T) {
-	router, _ := setupProviderRevealRouter(t, "sk-test-super-secret-1234")
+	router, _, _ := setupProviderRevealRouter(t, "sk-test-super-secret-1234")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers/1/reveal-key", nil)
 	rec := httptest.NewRecorder()
@@ -100,7 +106,7 @@ func TestRevealAPIKey_RejectsNonAdmin(t *testing.T) {
 }
 
 func TestRevealAPIKey_ReturnsNotFoundForUnknownProvider(t *testing.T) {
-	router, _ := setupProviderRevealRouter(t, "sk-test-super-secret-1234")
+	router, _, _ := setupProviderRevealRouter(t, "sk-test-super-secret-1234")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers/99/reveal-key", nil)
 	req.Header.Set("X-Test-Admin", "true")

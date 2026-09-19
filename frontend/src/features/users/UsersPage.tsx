@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tag, Select, Button, Popconfirm, message, Modal, Typography } from 'antd'
-import { PlusIcon } from '@phosphor-icons/react'
+import { PlusIcon, SignInIcon } from '@phosphor-icons/react'
 import type { ColumnsType } from 'antd/es/table'
 import { usersApi, type AdminUser, type Invite, type UserRole } from '@/api/users'
 import { authApi } from '@/api/auth'
@@ -16,13 +17,15 @@ import LoginLinkModal from './LoginLinkModal'
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'member', label: 'member' },
   { value: 'maintainer', label: 'maintainer' },
-  { value: 'admin', label: 'admin' }
+  { value: 'admin', label: 'admin' },
+  { value: 'guest', label: 'guest' }
 ]
 
 function roleColor(role: string): string {
   switch (role) {
     case 'admin': return 'red'
     case 'maintainer': return 'blue'
+    case 'guest': return 'gold'
     default: return 'default'
   }
 }
@@ -36,6 +39,9 @@ function inviteStatusColor(status: string): string {
 }
 
 export default function UsersPage() {
+  const { t, i18n } = useTranslation()
+  // 列表日期格式跟随界面语言（zh 下输出与原 toLocaleString('zh-CN') 逐字一致）
+  const dateLocale = i18n.language === 'zh' ? 'zh-CN' : 'en-US'
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
@@ -80,7 +86,7 @@ export default function UsersPage() {
   const updateMutation = useMutation({
     mutationFn: (vars: { id: string | number; patch: { role?: UserRole; status?: 'active' | 'disabled' } }) =>
       usersApi.updateUser(vars.id, vars.patch),
-    onSuccess: () => { void invalidateAll(); message.success('已更新') },
+    onSuccess: () => { void invalidateAll(); message.success(t('users.toast.updated')) },
     onError: (err) => message.error(parseApiError(err))
   })
 
@@ -92,15 +98,15 @@ export default function UsersPage() {
 
   const revokeMutation = useMutation({
     mutationFn: (id: number) => usersApi.revokeInvite(id),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'invites'] }); message.success('已撤销') },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'invites'] }); message.success(t('users.toast.revoked')) },
     onError: (err) => message.error(parseApiError(err))
   })
 
   const userColumns: ColumnsType<AdminUser> = [
-    { title: '用户名', dataIndex: 'username', key: 'username' },
-    { title: '昵称', dataIndex: 'displayName', key: 'displayName' },
+    { title: t('users.columns.username'), dataIndex: 'username', key: 'username' },
+    { title: t('users.columns.nickname'), dataIndex: 'displayName', key: 'displayName' },
     {
-      title: '角色',
+      title: t('users.columns.role'),
       dataIndex: 'role',
       key: 'role',
       width: 160,
@@ -120,29 +126,29 @@ export default function UsersPage() {
       )
     },
     {
-      title: '状态',
+      title: t('users.columns.status'),
       dataIndex: 'status',
       key: 'status',
       width: 90,
       render: (status: string) => {
         // pending = casdoor 待审批（本地成员表），分配角色后置 active。
-        if (status === 'pending') return <Tag color="gold">待审批</Tag>
+        if (status === 'pending') return <Tag color="gold">{t('users.status.pending')}</Tag>
         return (
           <Tag color={status === 'active' ? 'green' : 'default'}>
-            {status === 'active' ? '启用' : '禁用'}
+            {status === 'active' ? t('users.status.active') : t('users.status.disabled')}
           </Tag>
         )
       }
     },
     {
-      title: '创建时间',
+      title: t('users.columns.createdAt'),
       dataIndex: 'createdAt',
       key: 'createdAt',
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString('zh-CN')
+      render: (v: string) => new Date(v).toLocaleString(dateLocale)
     },
     {
-      title: '操作',
+      title: t('users.columns.actions'),
       key: 'actions',
       width: 200,
       render: (_, record) => {
@@ -153,17 +159,17 @@ export default function UsersPage() {
           <>
             {record.status === 'active' ? (
               <Popconfirm
-                title="确认禁用该用户？"
-                description="用户将立即下线。"
-                okText="禁用"
+                title={t('users.disableConfirmTitle')}
+                description={t('users.disableConfirmDesc')}
+                okText={t('users.disable')}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={t('common.cancel')}
                 onConfirm={() =>
                   { updateMutation.mutate({ id: record.id, patch: { status: 'disabled' } }); }
                 }
                 disabled={isSelf}
               >
-                <Button size="small" disabled={isSelf}>禁用</Button>
+                <Button size="small" disabled={isSelf}>{t('users.disable')}</Button>
               </Popconfirm>
             ) : (
               <Button
@@ -172,20 +178,20 @@ export default function UsersPage() {
                   { updateMutation.mutate({ id: record.id, patch: { status: 'active' } }); }
                 }
               >
-                启用
+                {t('users.enable')}
               </Button>
             )}
             <Popconfirm
-              title="确认重置密码？"
-              description={`将为 "${record.username}" 生成随机新密码，原密码立即失效，所有会话下线。`}
-              okText="重置"
+              title={t('users.resetConfirmTitle')}
+              description={t('users.resetConfirmDesc', { name: record.username })}
+              okText={t('users.reset')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('common.cancel')}
               onConfirm={() => { resetMutation.mutate(record.id); }}
               disabled={isSelf}
             >
               <Button size="small" style={{ marginLeft: 8 }} disabled={isSelf}>
-                重置密码
+                {t('users.resetPassword')}
               </Button>
             </Popconfirm>
           </>
@@ -196,42 +202,42 @@ export default function UsersPage() {
 
   const inviteColumns: ColumnsType<Invite> = [
     {
-      title: '角色',
+      title: t('users.columns.role'),
       dataIndex: 'role',
       key: 'role',
       width: 110,
       render: (r: string) => <Tag color={roleColor(r)}>{r}</Tag>
     },
-    { title: '备注', dataIndex: 'note', key: 'note' },
+    { title: t('users.columns.note'), dataIndex: 'note', key: 'note' },
     {
-      title: '状态',
+      title: t('users.columns.status'),
       dataIndex: 'status',
       key: 'status',
       width: 100,
       render: (s: string) => <Tag color={inviteStatusColor(s)}>{s}</Tag>
     },
     {
-      title: '过期时间',
+      title: t('users.expiresAt'),
       dataIndex: 'expiresAt',
       key: 'expiresAt',
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString('zh-CN')
+      render: (v: string) => new Date(v).toLocaleString(dateLocale)
     },
     {
-      title: '操作',
+      title: t('users.columns.actions'),
       key: 'actions',
       width: 100,
       render: (_, record) =>
         record.status === 'pending' ? (
           <Popconfirm
-            title="确认撤销该邀请？"
-            description="撤销后该邀请链接立即失效，无法用于注册。"
-            okText="撤销"
+            title={t('users.inviteRevokeTitle')}
+            description={t('users.inviteRevokeDesc')}
+            okText={t('users.revoke')}
             okButtonProps={{ danger: true }}
-            cancelText="取消"
+            cancelText={t('common.cancel')}
             onConfirm={() => { revokeMutation.mutate(record.id); }}
           >
-            <Button size="small" danger>撤销</Button>
+            <Button size="small" danger>{t('users.revoke')}</Button>
           </Popconfirm>
         ) : null
     }
@@ -240,22 +246,22 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader
-        title="用户管理"
-        subtitle="邀请用户、管理角色与账号状态。仅管理员可见。"
+        title={t('users.pageTitle')}
+        subtitle={t('users.pageSub')}
         extra={
           isCasdoor ? (
-            <PrimaryButton onClick={openLoginLinkModal}>
-              登录链接
+            <PrimaryButton icon={<SignInIcon size={16} weight="bold" />} onClick={openLoginLinkModal}>
+              {t('users.loginLink')}
             </PrimaryButton>
           ) : (
             <PrimaryButton icon={<PlusIcon size={16} weight="bold" />} onClick={() => { setInviteModalOpen(true); }}>
-              创建邀请
+              {t('users.createInvite')}
             </PrimaryButton>
           )
         }
       />
 
-      <Typography.Title level={5} style={{ marginTop: 24 }}>用户</Typography.Title>
+      <Typography.Title level={5} style={{ marginTop: 24 }}>{t('users.sectionUsers')}</Typography.Title>
       <BorderedTable<AdminUser>
         rowKey="id"
         loading={usersLoading}
@@ -267,7 +273,7 @@ export default function UsersPage() {
 
       {!isCasdoor && (
         <>
-          <Typography.Title level={5} style={{ marginTop: 32 }}>邀请记录</Typography.Title>
+          <Typography.Title level={5} style={{ marginTop: 32 }}>{t('users.sectionInvites')}</Typography.Title>
           <BorderedTable<Invite>
             rowKey="id"
             loading={invitesLoading}
@@ -291,15 +297,15 @@ export default function UsersPage() {
       )}
 
       <Modal
-        title="重置密码成功"
+        title={t('users.resetSuccessTitle')}
         open={!!resetTarget}
         onCancel={() => { setResetTarget(null); }}
         footer={
-          <PrimaryButton onClick={() => { setResetTarget(null); }}>关闭</PrimaryButton>
+          <PrimaryButton onClick={() => { setResetTarget(null); }}>{t('users.invite.close')}</PrimaryButton>
         }
       >
         <Typography.Paragraph type="warning">
-          新密码仅显示这一次，请立即复制并安全送达被重置的用户：
+          {t('users.resetSuccessHint')}
         </Typography.Paragraph>
         <Typography.Paragraph copyable code>
           {resetTarget?.password ?? ''}

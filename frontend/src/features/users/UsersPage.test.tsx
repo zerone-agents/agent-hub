@@ -60,8 +60,7 @@ describe('UsersPage 按 auth.mode 分叉渲染', () => {
     expect(screen.queryByRole('button', { name: '登录链接' })).not.toBeInTheDocument()
   })
 
-  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {
-    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
+  it('casdoor 模式：渲染「登录链接」，隐藏创建邀请与邀请记录', async () => {    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'casdoor', initialized: true })
     renderUsersPage()
     expect(await screen.findByRole('button', { name: '登录链接' })).toBeInTheDocument()
     await waitFor(() => {
@@ -162,5 +161,37 @@ describe('UsersPage casdoor 待审批用户展示', () => {
     expect(screen.queryByRole('button', { name: '禁用' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '启用' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重置密码' })).not.toBeInTheDocument()
+  })
+})
+
+describe('UsersPage guest 角色选项', () => {
+  const memberUser = {
+    id: 'u-guest-target',
+    username: 'visitor',
+    displayName: '访客同学',
+    email: 'visitor@example.com',
+    role: 'member' as const,
+    status: 'active' as const,
+    createdAt: '2026-09-13T10:00:00Z'
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(authApi.getAuthMode).mockResolvedValue({ mode: 'builtin', initialized: true })
+    vi.mocked(usersApi.listUsers).mockResolvedValue([memberUser])
+    vi.mocked(usersApi.listInvites).mockResolvedValue([])
+    vi.mocked(usersApi.getLoginUrl).mockResolvedValue({ loginUrl: 'https://casdoor.example.com/login/oauth/authorize?client_id=acme' })
+  })
+
+  it('角色下拉包含「guest」选项，选择后经 updateUser 分配 guest', async () => {
+    vi.mocked(usersApi.updateUser).mockResolvedValue(undefined as never)
+    renderUsersPage()
+    const combobox = await screen.findByRole('combobox')
+    fireEvent.mouseDown(combobox)
+    const option = await screen.findByText('guest', { selector: '.ant-select-item-option-content' })
+    fireEvent.click(option)
+    await waitFor(() => {
+      expect(usersApi.updateUser).toHaveBeenCalledWith('u-guest-target', { role: 'guest' })
+    })
   })
 })

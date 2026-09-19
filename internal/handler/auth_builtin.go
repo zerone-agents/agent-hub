@@ -6,23 +6,37 @@ import (
 	"strconv"
 
 	"control-panel/internal/application/services"
+	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/domain/audit"
+	authdom "control-panel/internal/domain/auth"
 
 	"github.com/gin-gonic/gin"
 )
+
+// builtinTokenProvider：*builtin.Provider 的窄接口缝——token 签发/撤销失败
+// 路径可在同包测试中注入 stub。RefreshToken/RevokeAllForUser 是本 handler
+// 实际调用的另两个 provider 方法，一并纳入使字段收窄后全方法可编译。
+type builtinTokenProvider interface {
+	IssueTokenPair(user *authdom.User) (*auth.TokenPair, error)
+	RefreshToken(refreshToken string) (*auth.TokenPair, error)
+	RevokeToken(refreshToken string) error
+	RevokeAllForUser(userID uint64) error
+}
 
 // BuiltinAuthHandler serves /auth/* endpoints for auth.mode=builtin. It owns
 // setup, login, register, refresh, logout, change-password and invite
 // precheck. User-management (admin) endpoints live in AdminUserHandler.
 type BuiltinAuthHandler struct {
-	provider *builtin.Provider
-	users    *services.UserService
-	invites  *services.InviteService
+	p       builtinTokenProvider
+	users   *services.UserService
+	invites *services.InviteService
+	audit   *services.AuditRecorder
 }
 
 // NewBuiltinAuthHandler constructs a BuiltinAuthHandler.
-func NewBuiltinAuthHandler(p *builtin.Provider, users *services.UserService, invites *services.InviteService) *BuiltinAuthHandler {
-	return &BuiltinAuthHandler{provider: p, users: users, invites: invites}
+func NewBuiltinAuthHandler(p *builtin.Provider, users *services.UserService, invites *services.InviteService, ar *services.AuditRecorder) *BuiltinAuthHandler {
+	return &BuiltinAuthHandler{p: p, users: users, invites: invites, audit: ar}
 }
 
 // GetMode reports the auth mode and whether the system is initialized.
@@ -63,7 +77,15 @@ func (h *BuiltinAuthHandler) Setup(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	pair, err := h.provider.IssueTokenPair(user)
+	// 埋点边界（spec §3.1）：CreateInitialAdmin 成功即记录——此后 IssueTokenPair
+	// 失败时 admin 已创建，记录必须已存在。/auth/setup 是未认证端点（context 无
+	// tenant_id），builtin 恒 default（spec §5.6）→ 显式携带 actor 落库，避免
+	// 一次性 setup 事件退化为 stdout-only。
+	uid := strconv.FormatUint(user.ID, 10)
+	h.audit.Record(c, audit.SimpleEvent(
+		audit.Actor{TenantID: "default", UserID: uid, UserName: user.Username},
+		audit.ActionSetup, audit.TargetSystem, uid, user.Username))
+	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "签发令牌失败")
 		return
@@ -83,19 +105,25 @@ func (h *BuiltinAuthHandler) Login(c *gin.Context) {
 		return
 	}
 	user, err := h.users.Authenticate(req.Username, req.Password)
-	if errors.Is(err, services.ErrLocked) {
-		respondError(c, http.StatusTooManyRequests, err.Error())
-		return
-	}
 	if err != nil {
+		// 埋点先于错误响应（spec §3.1）：Authenticate 失败 → invalid_credentials
+		// （含锁定场景，uid 未知为空）
+		h.audit.Login(c, "", req.Username, "default", audit.StatusFailure, audit.ReasonInvalidCredentials)
+		if errors.Is(err, services.ErrLocked) {
+			respondError(c, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		respondError(c, http.StatusUnauthorized, services.ErrInvalidCredentials.Error())
 		return
 	}
-	pair, err := h.provider.IssueTokenPair(user)
+	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
+		// 凭校验已通过但会话未建立（spec §3.1：success = 签发完成）
+		h.audit.Login(c, strconv.FormatUint(user.ID, 10), req.Username, "default", audit.StatusFailure, audit.ReasonTokenIssuanceFailed)
 		respondError(c, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
+	h.audit.Login(c, strconv.FormatUint(user.ID, 10), req.Username, "default", audit.StatusSuccess, "")
 	respondSuccess(c, pair)
 }
 
@@ -115,7 +143,7 @@ func (h *BuiltinAuthHandler) Refresh(c *gin.Context) {
 	if token == "" {
 		token = req.RefreshTokenSnake
 	}
-	pair, err := h.provider.RefreshToken(token)
+	pair, err := h.p.RefreshToken(token)
 	if err != nil {
 		respondError(c, http.StatusUnauthorized, "refresh token 无效或已过期")
 		return
@@ -130,7 +158,12 @@ func (h *BuiltinAuthHandler) Logout(c *gin.Context) {
 		RefreshToken string `json:"refreshToken"`
 	}
 	_ = c.ShouldBindJSON(&req) // empty body is allowed (idempotent logout)
-	_ = h.provider.RevokeToken(req.RefreshToken)
+	revErr := h.p.RevokeToken(req.RefreshToken)
+	st := audit.StatusSuccess
+	if revErr != nil {
+		st = audit.StatusFailure // 凭证可能仍有效，如实记录（spec §3.1：状态以撤销结果为准）
+	}
+	h.audit.SimpleWithStatus(c, audit.ActionLogout, audit.TargetSystem, "", "", st)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "logged out successfully"})
 }
 
@@ -170,7 +203,7 @@ func (h *BuiltinAuthHandler) Register(c *gin.Context) {
 		respondError(c, http.StatusGone, services.ErrInviteInvalid.Error())
 		return
 	}
-	pair, err := h.provider.IssueTokenPair(user)
+	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "签发令牌失败")
 		return
@@ -218,15 +251,17 @@ func (h *BuiltinAuthHandler) ChangePassword(c *gin.Context) {
 		respondError(c, status, err.Error())
 		return
 	}
+	// 密码变更已提交生效（spec §3.1）——后续撤销/查询/签发失败不影响本记录。
+	h.audit.Simple(c, audit.ActionPasswordChange, audit.TargetUser, c.GetString("user_id"), c.GetString("user_name"))
 	// Drop every existing refresh token (all other sessions die) and issue a
 	// fresh pair for this session.
-	_ = h.provider.RevokeAllForUser(id)
+	_ = h.p.RevokeAllForUser(id)
 	user, err := h.users.GetByID(id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "用户查询失败")
 		return
 	}
-	pair, err := h.provider.IssueTokenPair(user)
+	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "签发令牌失败")
 		return
