@@ -18,6 +18,8 @@ func TestMySQLMigrationSmoke(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 冒烟")
 	}
+	// 此用例明确验收旧表清理，因此显式模拟运维已完成备份并开启破坏性迁移。
+	allowDestructiveMigrationsForTest(t)
 
 	// 每条池连接都必须明确指向冒烟库；USE 只影响当前会话，迁移锁促使
 	// GORM 另开连接时会回到原 DSN 的默认库，造成“迁移成功但跑错库”。
