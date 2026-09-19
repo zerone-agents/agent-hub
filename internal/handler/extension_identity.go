@@ -55,6 +55,6 @@ func (h *ExtensionIdentityHandler) Issue(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    issue,
-		"message": "扩展身份凭据已签发：token 仅此一次返回，请立即保存；调用 Hub API 时需同时携带 X-Extension-Name 与 X-Extension-Token",
+		"message": "扩展身份凭据已签发：token 仅此一次返回，请立即保存；调用 Hub API 时携带 X-Extension-Name 与 X-Extension-Token，不要再配置人类管理员 JWT/CLI Token",
 	})
 }

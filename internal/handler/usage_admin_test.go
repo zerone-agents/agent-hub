@@ -113,8 +113,11 @@ func TestUsageAdminSummaryAndTrends(t *testing.T) {
 
 func TestUsageAdminDimensionsAndErrors(t *testing.T) {
 	r := usageAdminRouter(t, "ta")
-	seedUsage(t, r, `{"kind":"extension_call","extensionName":"ext.a","createdAt":"2026-09-10T10:00:00Z"}`)
-	seedUsage(t, r, `{"kind":"model_call","model":"m1","error":"oops","createdAt":"2026-09-10T11:00:00Z"}`)
+	now := time.Now().UTC()
+	seedUsage(t, r, `{"kind":"extension_call","extensionName":"ext.a","createdAt":"`+now.Add(-time.Hour).Format(time.RFC3339)+`"}`)
+	// Keep the error inside the default seven-day report window but outside
+	// today's health window, so this test can independently assert both views.
+	seedUsage(t, r, `{"kind":"model_call","model":"m1","error":"oops","createdAt":"`+now.Add(-25*time.Hour).Format(time.RFC3339)+`"}`)
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/usage/by-extension", nil))
@@ -245,8 +248,9 @@ func TestUsageAdminAlertsAndPricing(t *testing.T) {
 func TestUsageAdminTenantIsolation(t *testing.T) {
 	ra := usageAdminRouter(t, "ta")
 	rb := usageAdminRouter(t, "tb") // 独立内存库：各自只见自己的数据
-	seedUsage(t, ra, `{"kind":"model_call","model":"m-a","createdAt":"2026-09-10T10:00:00Z"}`)
-	seedUsage(t, rb, `{"kind":"model_call","model":"m-b","createdAt":"2026-09-10T10:00:00Z"}`)
+	now := time.Now().UTC().Format(time.RFC3339)
+	seedUsage(t, ra, `{"kind":"model_call","model":"m-a","createdAt":"`+now+`"}`)
+	seedUsage(t, rb, `{"kind":"model_call","model":"m-b","createdAt":"`+now+`"}`)
 
 	w := httptest.NewRecorder()
 	ra.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/usage/by-model", nil))

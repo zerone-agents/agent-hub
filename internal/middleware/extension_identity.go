@@ -11,9 +11,10 @@
 //   - 两个都带但校验不通过（凭据错误 / 已停用 / 未签发）→ 401，不写身份；
 //   - 校验过程本身出错（数据库不可用）→ 503，同样不写身份。
 //
-// 注意：本中间件不替代认证。扩展调用 Hub 仍须通过 JWT（或 Agent Runtime
-// Token）进入，本中间件只是在已认证调用方之上再确定"是哪个扩展"，从而让
-// 扩展 grants 成为可执行的最小权限约束。
+// 在通用 API 链路中，这枚凭据就是扩展的独立认证身份：扩展不需要、
+// 也不应持有人类管理员 JWT/CLI Token。认证后由 ExtensionAPIGuard
+// 执行默认拒绝的接口白名单与 grants 检查。Agent Runtime 专用 MCP 链路
+// 仍可把它作为 Runtime Token 之上的额外收窄。
 package middleware
 
 import (
@@ -31,6 +32,10 @@ const (
 	ExtensionTokenHeaderName = "X-Extension-Token"
 	// ExtensionIdentityContextKey 是已认证扩展名在 gin.Context 中的键。
 	ExtensionIdentityContextKey = "authenticatedExtensionName"
+	// ExtensionTenantHeaderName is required only for tenant-scoped extensions.
+	// The credential is still verified against this tenant, so the header is a
+	// lookup hint rather than an authority claim.
+	ExtensionTenantHeaderName = "X-Extension-Tenant"
 )
 
 // ExtensionVerifier 是 ExtensionIdentityService.Verify 的最小接口形态
@@ -70,9 +75,16 @@ func ExtensionIdentity(verifier ExtensionVerifier) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		ok, err := verifier.Verify(tenant.GetTenantID(c), name, token)
+		tenantID := strings.TrimSpace(c.GetHeader(ExtensionTenantHeaderName))
+		if tenantID == "" {
+			tenantID = tenant.GetTenantID(c)
+		}
+		if tenantID == "" {
+			tenantID = tenant.DefaultID
+		}
+		ok, err := verifier.Verify(tenantID, name, token)
 		if err != nil {
-			log.Printf("[h7] extension identity verify failed: tenant=%s extension=%s: %v", tenant.GetTenantID(c), name, err)
+			log.Printf("[h7] extension identity verify failed: tenant=%s extension=%s: %v", tenantID, name, err)
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"success": false,
 				"error":   "扩展身份校验暂时不可用，请稍后再试",
@@ -88,7 +100,9 @@ func ExtensionIdentity(verifier ExtensionVerifier) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		tenant.SetTenantID(c, tenantID)
 		c.Set(ExtensionIdentityContextKey, name)
+		c.Set("auth_method", "extension")
 		c.Next()
 	}
 }

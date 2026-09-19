@@ -540,13 +540,20 @@ func main() {
 	// 模型/Agent/SKILL 配置同步（未审批用户仅可读配置，不可写）。
 	// builtin 用户必有角色，guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.PendingApprovalGuard())
+	// Extension identity is evaluated before human authentication. A verified
+	// extension uses its own credential and never needs a reusable admin JWT.
+	// ExtensionAPIGuard is default-deny and maps the small set of core APIs an
+	// extension may call to manifest permissions.
+	v1group := r.Group("/api/v1",
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.JWTAuthWithCLIOrExtension(cliTokenSvc, authProvider),
+		jwtutil.PendingApprovalGuard(),
+		middleware.ExtensionAPIGuard(extensionAuthzService))
 	// H7.4（P0）扩展身份认证：挂在 v1group 上，先于一切授权判定。带
 	// X-Extension-Name / X-Extension-Token 的请求先验证凭据（Hub 签发），
 	// 通过后把已认证扩展名写入上下文；不带这两个头的既有请求（前端控制台、
 	// Agent Runtime）行为完全不变。授权中间件只认上下文里的已认证名字，
 	// 因此"自己报一个扩展名"不再能影响任何判定。
-	v1group.Use(middleware.ExtensionIdentity(extensionIdentityService))
 	// H7.2 扩展数据代理：登录用户可访问已启用扩展声明的 GET 端点（限流 60/min）
 	extProxyGroup := v1group.Group("/extensions/:name",
 		middleware.ExtensionRateLimitByParam(middleware.ExtensionRateLimitConfig{RequestsPerMinute: 60},
