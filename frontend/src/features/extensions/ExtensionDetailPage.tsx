@@ -173,7 +173,7 @@ export default function ExtensionDetailPage() {
             key: 'actions',
             width: 160,
             render: (_, record) => (
-              <Button size="small" onClick={() => setViewVersion(record.version)}>
+              <Button size="small" onClick={() => { setViewVersion(record.version); }}>
                 完整 Manifest
               </Button>
             )
@@ -185,7 +185,7 @@ export default function ExtensionDetailPage() {
       <Drawer
         title={viewVersion ? `版本 ${viewVersion} · 完整 Manifest` : '完整 Manifest'}
         open={!!viewVersion}
-        onClose={() => setViewVersion(undefined)}
+        onClose={() => { setViewVersion(undefined); }}
         width={640}
       >
         {versionQuery.isLoading && <div>加载中…</div>}

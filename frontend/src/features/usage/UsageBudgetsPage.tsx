@@ -144,10 +144,10 @@ export default function UsageBudgetsPage() {
           <p className={styles.subtitle}>软预算：超限不阻断，只标记并告警 · 进度超 80% 变黄、超 100% 变红</p>
         </div>
         <Space>
-          <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setAlertModal(true)}>
+          <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => { setAlertModal(true); }}>
             新增告警规则
           </PrimaryButton>
-          <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setBudgetModal(true)}>
+          <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => { setBudgetModal(true); }}>
             新增预算
           </PrimaryButton>
         </Space>
@@ -274,7 +274,7 @@ export default function UsageBudgetsPage() {
         ]}
       />
 
-      <Modal title="新增 / 更新预算" open={budgetModal} onOk={submitBudget} onCancel={() => setBudgetModal(false)} confirmLoading={upsertBudget.isPending}>
+      <Modal title="新增 / 更新预算" open={budgetModal} onOk={submitBudget} onCancel={() => { setBudgetModal(false); }} confirmLoading={upsertBudget.isPending}>
         <Alert type="info" showIcon message="同维度 + 同周期的预算已存在时将覆盖更新" style={{ marginBottom: 16 }} />
         <Form form={form} layout="vertical">
           <Form.Item name="kind" label="预算维度" rules={[{ required: true, message: '请选择维度' }]}>
@@ -298,7 +298,7 @@ export default function UsageBudgetsPage() {
         </Form>
       </Modal>
 
-      <Modal title="新增 / 更新告警规则" open={alertModal} onOk={submitAlert} onCancel={() => setAlertModal(false)} confirmLoading={upsertAlert.isPending}>
+      <Modal title="新增 / 更新告警规则" open={alertModal} onOk={submitAlert} onCancel={() => { setAlertModal(false); }} confirmLoading={upsertAlert.isPending}>
         <Form form={alertForm} layout="vertical">
           <Form.Item name="rule" label="规则" rules={[{ required: true, message: '请选择规则' }]}>
             <Select

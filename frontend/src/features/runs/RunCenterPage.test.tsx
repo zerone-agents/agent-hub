@@ -179,10 +179,10 @@ describe('RunCenterPage', () => {
     fireEvent.mouseDown(screen.getByLabelText('本次使用的能力'))
     fireEvent.click(await screen.findByText('研究协作 · 1.0.0'))
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
-    await waitFor(() => expect(createMutate).toHaveBeenCalledWith(
+    await waitFor(() => { expect(createMutate).toHaveBeenCalledWith(
         { name: '新市场调研', description: '评估需求', capabilityBindings: [{ namespace: 'io.zerone.research', packageName: 'research-team', version: '1.0.0' }] },
         expect.objectContaining({ onSuccess: expect.any(Function) }),
-      ))
+      ); })
   })
 
   it('moves a running run to paused or completed', () => {

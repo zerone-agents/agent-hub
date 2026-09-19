@@ -6,10 +6,10 @@ import GovernancePage, {
 } from "./GovernancePage";
 import { workflowApi } from "@/api/workflows";
 const state = vi.hoisted(() => ({
-  groups: [{ id: "g1", name: "内容团队" }] as Array<{
+  groups: [{ id: "g1", name: "内容团队" }] as {
     id: string;
     name: string;
-  }>,
+  }[],
   members: [{ agentId: 1, role: "leader" as const }],
 }));
 vi.mock("@/hooks/useCanWrite", () => ({ useCanWrite: () => true }));

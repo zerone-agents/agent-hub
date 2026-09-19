@@ -20,7 +20,7 @@ export function useEnabledCapabilityPackages() {
 export function useRun(id?: string) {
   return useQuery<RunDetail>({
     queryKey: ['runs', id],
-    queryFn: async () => unwrapResponse<RunDetail>(await runApi.get(id as string)),
+    queryFn: async () => unwrapResponse<RunDetail>(await runApi.get(id!)),
     enabled: id !== undefined,
   })
 }
@@ -28,7 +28,7 @@ export function useRun(id?: string) {
 export function useRunStateChanges(id?: string) {
   return useQuery<RunStateChange[]>({
     queryKey: ['runs', id, 'state-changes'],
-    queryFn: async () => unwrapResponse<RunStateChange[]>(await runApi.listStateChanges(id as string)),
+    queryFn: async () => unwrapResponse<RunStateChange[]>(await runApi.listStateChanges(id!)),
     enabled: id !== undefined,
   })
 }
@@ -36,7 +36,7 @@ export function useRunStateChanges(id?: string) {
 export function useRunPersonaState(id?: string) {
   return useQuery<PersonaState>({
     queryKey: ['runs', id, 'persona-state'],
-    queryFn: async () => unwrapResponse<PersonaState>(await runApi.getPersonaState(id as string)),
+    queryFn: async () => unwrapResponse<PersonaState>(await runApi.getPersonaState(id!)),
     enabled: id !== undefined,
   })
 }
@@ -44,7 +44,7 @@ export function useRunPersonaState(id?: string) {
 export function useRunBeliefDisputes(id?: string) {
   return useQuery<BeliefDispute[]>({
     queryKey: ['runs', id, 'belief-disputes'],
-    queryFn: async () => unwrapResponse<BeliefDispute[]>(await runApi.listBeliefDisputes(id as string)),
+    queryFn: async () => unwrapResponse<BeliefDispute[]>(await runApi.listBeliefDisputes(id!)),
     enabled: id !== undefined,
   })
 }
@@ -52,23 +52,23 @@ export function useRunBeliefDisputes(id?: string) {
 export function useRunActivities(id?: string) {
   return useQuery<RunActivity[]>({
     queryKey: ['runs', id, 'activities'],
-    queryFn: async () => unwrapResponse<RunActivity[]>(await runApi.listActivities(id as string)),
+    queryFn: async () => unwrapResponse<RunActivity[]>(await runApi.listActivities(id!)),
     enabled: id !== undefined,
   })
 }
 
 export function useRunEvents(id?: string) {
-  return useQuery<RunEventItem[]>({ queryKey: ['runs', id, 'events'], queryFn: async () => unwrapResponse<RunEventItem[]>(await runApi.listEvents(id as string)), enabled: id !== undefined })
+  return useQuery<RunEventItem[]>({ queryKey: ['runs', id, 'events'], queryFn: async () => unwrapResponse<RunEventItem[]>(await runApi.listEvents(id!)), enabled: id !== undefined })
 }
 
 export function useRunToolResults(id?: string) {
-  return useQuery<ToolResultRecord[]>({ queryKey: ['runs', id, 'tool-results'], queryFn: async () => unwrapResponse<ToolResultRecord[]>(await runApi.listToolResults(id as string)), enabled: id !== undefined })
+  return useQuery<ToolResultRecord[]>({ queryKey: ['runs', id, 'tool-results'], queryFn: async () => unwrapResponse<ToolResultRecord[]>(await runApi.listToolResults(id!)), enabled: id !== undefined })
 }
 
 export function useRunAgentMessages(id?: string) {
   return useQuery<AgentMessage[]>({
     queryKey: ['runs', id, 'agent-messages'],
-    queryFn: async () => unwrapResponse<AgentMessage[]>(await runApi.listAgentMessages(id as string)),
+    queryFn: async () => unwrapResponse<AgentMessage[]>(await runApi.listAgentMessages(id!)),
     enabled: id !== undefined,
     refetchInterval: ({ state }) => state.data?.some((item) => item.status === 'queued' || item.status === 'running') ? 1500 : 5000,
   })
@@ -79,7 +79,7 @@ export function useRunRoutePlan(id?: string) {
     queryKey: ['runs', id, 'route-plan'],
     queryFn: async () => {
       try {
-        return unwrapResponse<RunRoutePlan>(await runApi.getRoutePlan(id as string))
+        return unwrapResponse<RunRoutePlan>(await runApi.getRoutePlan(id!))
       } catch (error: unknown) {
         const status = (error as { response?: { status?: number } })?.response?.status
         if (status === 404) return null

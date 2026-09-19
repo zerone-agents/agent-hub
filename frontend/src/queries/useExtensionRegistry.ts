@@ -30,7 +30,7 @@ export function useExtensionDetail(id: number | undefined) {
   return useQuery<ExtensionDetail>({
     queryKey: ['extensions', 'registry', 'detail', id],
     queryFn: async () =>
-      unwrapResponse<ExtensionDetail>(await extensionRegistryApi.get(id as number)),
+      unwrapResponse<ExtensionDetail>(await extensionRegistryApi.get(id!)),
     enabled: typeof id === 'number' && id > 0
   })
 }
@@ -40,7 +40,7 @@ export function useExtensionVersion(id: number | undefined, version: string | un
     queryKey: ['extensions', 'registry', 'version', id, version],
     queryFn: async () =>
       unwrapResponse<ExtensionVersionDetail>(
-        await extensionRegistryApi.getVersion(id as number, version as string)
+        await extensionRegistryApi.getVersion(id!, version!)
       ),
     enabled: typeof id === 'number' && id > 0 && !!version
   })
@@ -113,7 +113,7 @@ export function useExtensionImpact(id: number | undefined) {
   return useQuery<ExtensionImpact>({
     queryKey: ['extensions', 'registry', 'impact', id],
     queryFn: async () =>
-      unwrapResponse<ExtensionImpact>(await extensionRegistryApi.impact(id as number)),
+      unwrapResponse<ExtensionImpact>(await extensionRegistryApi.impact(id!)),
     enabled: typeof id === 'number' && id > 0
   })
 }

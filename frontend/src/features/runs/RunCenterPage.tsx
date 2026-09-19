@@ -277,9 +277,9 @@ function CollaborationTimeline({ items }: { items: AgentMessage[] }) {
       byParent.set(parent, [...(byParent.get(parent) ?? []), item])
     })
     const ordered: { item: AgentMessage; depth: number }[] = []
-    const append = (parent: string, depth: number) => (byParent.get(parent) ?? []).forEach((item) => {
+    const append = (parent: string, depth: number) => { (byParent.get(parent) ?? []).forEach((item) => {
       ordered.push({ item, depth }); append(item.id, depth + 1)
-    })
+    }); }
     append('__root__', 0)
     return <div className={styles.chain} key={first.conversationId || first.id}>
       <div className={styles.chainHead}><span>协作记录</span><span className={styles.chainNode}>{messages.length} 次实际联络</span><span>· 根消息 {first.rootMessageId || first.id}</span></div>
@@ -332,35 +332,35 @@ function TaskRoutePlan({ run, canWrite }: { run: Run; canWrite: boolean }) {
     setSteps(plan.data.steps.map(({ sourceAgentId, targetAgentId, action }) => ({ sourceAgentId, targetAgentId, action })))
   }, [plan.data])
 
-  const addStep = () => setSteps((current) => [...current, { sourceAgentId: participants[0]?.value ?? 0, targetAgentId: participants[1]?.value ?? 0, action: '' }])
-  const updateStep = (index: number, patch: Partial<RunRouteStep>) => setSteps((current) => current.map((step, at) => at === index ? { ...step, ...patch } : step))
-  const moveStep = (index: number, offset: number) => setSteps((current) => {
+  const addStep = () => { setSteps((current) => [...current, { sourceAgentId: participants[0]?.value ?? 0, targetAgentId: participants[1]?.value ?? 0, action: '' }]); }
+  const updateStep = (index: number, patch: Partial<RunRouteStep>) => { setSteps((current) => current.map((step, at) => at === index ? { ...step, ...patch } : step)); }
+  const moveStep = (index: number, offset: number) => { setSteps((current) => {
     const next = [...current]
     const target = index + offset
     if (target < 0 || target >= next.length) return current
     ;[next[index], next[target]] = [next[target], next[index]]
     return next
-  })
+  }); }
   const valid = steps.length > 0 && steps.every((step) => step.sourceAgentId > 0 && step.targetAgentId > 0 && step.sourceAgentId !== step.targetAgentId)
 
   return <section className={styles.routePlan} aria-labelledby={`route-plan-${run.id}`}>
     <div className={styles.routePlanHead}>
       <div><h3 className={styles.sectionTitle} id={`route-plan-${run.id}`}><ArrowRightIcon size={17} />任务路径</h3><p className={styles.collaborationHelp}>连接表示 Agent 长期可以联系谁；任务路径表示本次运行应该按什么顺序协作。</p></div>
       <div className={styles.routeMode} role="radiogroup" aria-label="路径模式">
-        <Button type="text" className={mode === 'strict' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'strict'} disabled={!editable} onClick={() => setMode('strict')}>严格执行</Button>
-        <Button type="text" className={mode === 'adaptive' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'adaptive'} disabled={!editable} onClick={() => setMode('adaptive')}>允许调整</Button>
+        <Button type="text" className={mode === 'strict' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'strict'} disabled={!editable} onClick={() => { setMode('strict'); }}>严格执行</Button>
+        <Button type="text" className={mode === 'adaptive' ? styles.routeModeSelected : undefined} size="small" role="radio" aria-checked={mode === 'adaptive'} disabled={!editable} onClick={() => { setMode('adaptive'); }}>允许调整</Button>
       </div>
     </div>
     {mode === 'strict' ? <Alert type="info" showIcon title="严格执行：只允许计划中的传递路径，长期存在的其他连接也不能绕过本次安排。" /> : <Alert type="warning" showIcon title="允许调整：Agent 可以改走其他已有连接，但必须说明偏离原因，系统会保留记录。" />}
     {plan.isError ? <Alert style={{ marginTop: 10 }} type="error" showIcon title="任务路径加载失败" description={parseApiError(plan.error)} /> : plan.isLoading ? <Skeleton active paragraph={{ rows: 2 }} /> : steps.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={editable ? '还没有任务路径，请添加第一步' : '本次运行没有锁定任务路径'} /> : <div className={styles.quietList} style={{ marginTop: 10 }}>{steps.map((step, index) => <div className={styles.routeStep} key={`${index}-${step.sourceAgentId}-${step.targetAgentId}`}>
       <span className={styles.routeIndex}>{index + 1}</span>
-      <Select aria-label={`第 ${index + 1} 步发送方`} value={step.sourceAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => updateStep(index, { sourceAgentId: value })} />
+      <Select aria-label={`第 ${index + 1} 步发送方`} value={step.sourceAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => { updateStep(index, { sourceAgentId: value }); }} />
       <ArrowRightIcon size={16} aria-hidden="true" />
-      <Select aria-label={`第 ${index + 1} 步接收方`} value={step.targetAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => updateStep(index, { targetAgentId: value })} />
-      <Select aria-label={`第 ${index + 1} 步动作`} allowClear placeholder="任意已授权动作" value={step.action || undefined} options={ROUTE_ACTION_OPTIONS} disabled={!editable} onChange={(value) => updateStep(index, { action: value ?? '' })} />
-      {editable && <div className={styles.routeControls}><Button type="text" size="small" aria-label={`上移第 ${index + 1} 步`} disabled={index === 0} icon={<CaretUpIcon />} onClick={() => moveStep(index, -1)} /><Button type="text" size="small" aria-label={`下移第 ${index + 1} 步`} disabled={index === steps.length - 1} icon={<CaretDownIcon />} onClick={() => moveStep(index, 1)} /><Button type="text" danger size="small" aria-label={`删除第 ${index + 1} 步`} icon={<TrashIcon />} onClick={() => setSteps((current) => current.filter((_, at) => at !== index))} /></div>}
+      <Select aria-label={`第 ${index + 1} 步接收方`} value={step.targetAgentId || undefined} options={participants} disabled={!editable} onChange={(value) => { updateStep(index, { targetAgentId: value }); }} />
+      <Select aria-label={`第 ${index + 1} 步动作`} allowClear placeholder="任意已授权动作" value={step.action || undefined} options={ROUTE_ACTION_OPTIONS} disabled={!editable} onChange={(value) => { updateStep(index, { action: value ?? '' }); }} />
+      {editable && <div className={styles.routeControls}><Button type="text" size="small" aria-label={`上移第 ${index + 1} 步`} disabled={index === 0} icon={<CaretUpIcon />} onClick={() => { moveStep(index, -1); }} /><Button type="text" size="small" aria-label={`下移第 ${index + 1} 步`} disabled={index === steps.length - 1} icon={<CaretDownIcon />} onClick={() => { moveStep(index, 1); }} /><Button type="text" danger size="small" aria-label={`删除第 ${index + 1} 步`} icon={<TrashIcon />} onClick={() => { setSteps((current) => current.filter((_, at) => at !== index)); }} /></div>}
     </div>)}</div>}
-    {editable && <div className={styles.routeFooter}><Button type="dashed" size="small" icon={<PlusIcon />} onClick={addStep}>添加一步</Button><PrimaryButton disabled={!valid} loading={save.isPending} onClick={() => save.mutate({ id: run.id, input: { mode, steps: steps.map(({ sourceAgentId, targetAgentId, action }) => ({ sourceAgentId, targetAgentId, ...(action ? { action } : {}) })) } })}>保存任务路径</PrimaryButton></div>}
+    {editable && <div className={styles.routeFooter}><Button type="dashed" size="small" icon={<PlusIcon />} onClick={addStep}>添加一步</Button><PrimaryButton disabled={!valid} loading={save.isPending} onClick={() => { save.mutate({ id: run.id, input: { mode, steps: steps.map(({ sourceAgentId, targetAgentId, action }) => ({ sourceAgentId, targetAgentId, ...(action ? { action } : {}) })) } }); }}>保存任务路径</PrimaryButton></div>}
     {!editable && plan.data && <div className={styles.future}>这份任务路径已随运行开始锁定。如需更换路径，请新建一次运行。</div>}
   </section>
 }
@@ -417,7 +417,7 @@ function RunDetailPanel({ id }: { id: string }) {
   const assigned = new Set((run.agents ?? []).map((agent) => agent.agentId))
   const agentOptions = (agents.data ?? []).filter((agent) => !assigned.has(agent.id)).map((agent) => ({ value: agent.id, label: agent.config.title?.['zh-CN'] || agent.name }))
   return <article className={styles.detail}>
-    <header className={styles.detailHead}><div><h2 className={styles.detailTitle}>{run.name}</h2><p className={styles.detailDesc}>{run.description || '未填写运行说明'}</p></div><div className={styles.detailActions}><RunStatusLabel status={run.status} />{canWrite && (NEXT_ACTION[run.status] ?? []).map((action, index) => index === 0 ? <PrimaryButton key={action.target} loading={transition.isPending} onClick={() => transition.mutate({ id, status: action.target })}>{action.label}</PrimaryButton> : <Button key={action.target} disabled={transition.isPending} onClick={() => transition.mutate({ id, status: action.target })}>{action.label}</Button>)}</div></header>
+    <header className={styles.detailHead}><div><h2 className={styles.detailTitle}>{run.name}</h2><p className={styles.detailDesc}>{run.description || '未填写运行说明'}</p></div><div className={styles.detailActions}><RunStatusLabel status={run.status} />{canWrite && (NEXT_ACTION[run.status] ?? []).map((action, index) => index === 0 ? <PrimaryButton key={action.target} loading={transition.isPending} onClick={() => { transition.mutate({ id, status: action.target }); }}>{action.label}</PrimaryButton> : <Button key={action.target} disabled={transition.isPending} onClick={() => { transition.mutate({ id, status: action.target }); }}>{action.label}</Button>)}</div></header>
     <div className={styles.facts}>
       <div className={styles.fact}><div className={styles.factLabel}>发起人</div><div className={styles.factValue}>{run.createdBy || '系统'}</div></div>
       <div className={styles.fact}><div className={styles.factLabel}>参与者</div><div className={styles.factValue}>{run.agents?.length ?? 0} 个 Agent</div></div>
@@ -426,7 +426,7 @@ function RunDetailPanel({ id }: { id: string }) {
     </div>
     {(run.capabilityBindings?.length ?? 0) > 0 && <div className={styles.bindings} aria-label="已锁定能力包">{run.capabilityBindings?.map((binding) => <div className={styles.binding} key={`${binding.namespace}-${binding.version}`}><strong>{binding.packageName}</strong><span>{binding.version}</span><Tag color="success" variant="filled">已固定</Tag></div>)}</div>}
     <section className={styles.participantSection}><h3 className={styles.sectionTitle}><RobotIcon size={17} />参与者</h3>
-        {canWrite && run.status === 'draft' && <div className={styles.addAgent}><Select aria-label="选择 Agent" value={agentId} onChange={setAgentId} options={agentOptions} placeholder="选择 Agent" showSearch optionFilterProp="label" /><Input aria-label="参与角色" value={role} onChange={(event) => setRole(event.target.value)} placeholder="参与角色" /><PrimaryButton icon={<PlusIcon size={15} />} disabled={!agentId} loading={addAgent.isPending} onClick={() => agentId && addAgent.mutate({ id, agentId, role: role.trim() || '参与者' }, { onSuccess: () => setAgentId(undefined) })}>添加</PrimaryButton></div>}
+        {canWrite && run.status === 'draft' && <div className={styles.addAgent}><Select aria-label="选择 Agent" value={agentId} onChange={setAgentId} options={agentOptions} placeholder="选择 Agent" showSearch optionFilterProp="label" /><Input aria-label="参与角色" value={role} onChange={(event) => { setRole(event.target.value); }} placeholder="参与角色" /><PrimaryButton icon={<PlusIcon size={15} />} disabled={!agentId} loading={addAgent.isPending} onClick={() => agentId && addAgent.mutate({ id, agentId, role: role.trim() || '参与者' }, { onSuccess: () => { setAgentId(undefined); } })}>添加</PrimaryButton></div>}
         {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><span className={styles.personActions}>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断依据</Button></span></div>)}</div>}
       </section>
     <PersonaPanel runId={id} agents={run.agents ?? []} states={states ?? []} changes={history.data ?? []} />
@@ -452,7 +452,7 @@ function RunDetailPanel({ id }: { id: string }) {
       </div> }]} />
       <ExtensionSlotRenderer slot="run.detail.tab" context={{ runId: id }} />
     </div>
-    <Modal title={`${promptAgentName || 'Agent'} 的判断依据`} open={promptSnapshot !== null} onCancel={() => setPromptSnapshot(null)} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
+    <Modal title={`${promptAgentName || 'Agent'} 的判断依据`} open={promptSnapshot !== null} onCancel={() => { setPromptSnapshot(null); }} footer={null} width={760} destroyOnHidden>{promptSnapshot && <PromptExplanation snapshot={promptSnapshot} />}</Modal>
   </article>
 }
 
@@ -472,14 +472,14 @@ export default function RunCenterPage() {
   useEffect(() => { if (!selectedId && runs[0]) void navigate(`/runs/${runs[0].id}`, { replace: true }) }, [navigate, runs, selectedId])
 
   return <main className={styles.page}>
-    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每一次任务都有独立档案：谁参与了、他们的心境和关系发生了什么变化。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />每次任务 · 独立档案</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setCreateOpen(true)}>新建运行</PrimaryButton>}</div></header>
+    <header className={styles.head}><div><h1 className={styles.title}>运行中心</h1><p className={styles.subtitle}>每一次任务都有独立档案：谁参与了、他们的心境和关系发生了什么变化。</p></div><div className={styles.detailActions}><div className={styles.scope}><span className={styles.scopeDot} />每次任务 · 独立档案</div>{canWrite && <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => { setCreateOpen(true); }}>新建运行</PrimaryButton>}</div></header>
     <div className={styles.shell}>
-      <aside className={styles.rail}><div className={styles.railHead}><div className={styles.railTitle}>运行档案</div><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索任务" /></div>
+      <aside className={styles.rail}><div className={styles.railHead}><div className={styles.railTitle}>运行档案</div><Input.Search allowClear value={search} onChange={(event) => { setSearch(event.target.value); }} placeholder="搜索任务" /></div>
         {list.isError ? <div className={styles.center}><Alert type="error" showIcon title="无法加载运行" description={parseApiError(list.error)} /></div> : list.isLoading ? <div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 7 }} /></div> : runs.length === 0 ? <div className={styles.center}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search ? '没有匹配的运行' : '还没有运行记录'} /></div> : <div className={styles.runList}>{runs.map((run: Run) => <button type="button" className={cx(styles.runButton, run.id === selectedId && styles.runButtonActive)} key={run.id} onClick={() => void navigate(`/runs/${run.id}`)}><div className={styles.runTop}><span className={styles.runName}>{run.name}</span><RunStatusLabel status={run.status} /></div><p className={styles.runDesc}>{run.description || '未填写运行说明'}</p><div className={styles.runMeta}><span>{run.agents?.length ?? 0} 个 Agent</span><ArrowRightIcon size={12} /><time>{formatTime(run.updatedAt)}</time></div></button>)}</div>}
       </aside>
       {selectedId ? <RunDetailPanel id={selectedId} /> : <div className={styles.center}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一次运行查看档案" /></div>}
     </div>
-    <Modal title="新建运行" open={createOpen} onCancel={() => setCreateOpen(false)} footer={null} destroyOnHidden>
+    <Modal title="新建运行" open={createOpen} onCancel={() => { setCreateOpen(false); }} footer={null} destroyOnHidden>
       <Form form={createForm} layout="vertical" onFinish={({ capabilityPackageIds, ...values }) => {
         const selected = new Set(capabilityPackageIds ?? [])
         const capabilityBindings = (packages.data ?? []).filter((item) => selected.has(item.id)).map((item) => ({ namespace: item.namespace, packageName: item.name, version: item.version }))
@@ -488,7 +488,7 @@ export default function RunCenterPage() {
         <Form.Item name="name" label="运行名称" extra="给这次任务起个名字，比如「三季度预算讨论」" rules={[{ required: true, whitespace: true, message: '请输入运行名称' }]}><Input maxLength={160} placeholder="例如：新市场研究" /></Form.Item>
         <Form.Item name="description" label="运行说明"><Input.TextArea rows={3} placeholder="这次运行要完成什么？" /></Form.Item>
         <Form.Item name="capabilityPackageIds" label="本次使用的能力" extra="不选也能创建，选了就会在整场任务中固定使用这些能力。创建后会固定当前版本，以后升级不会改变这次运行的复盘结果。"><Select mode="multiple" allowClear loading={packages.isLoading} optionFilterProp="label" placeholder={packages.data?.length ? '可选，可多选' : '暂无已启用的能力包'} options={(packages.data ?? []).map((item) => ({ value: item.id, label: `${item.displayName || item.name} · ${item.version}` }))} /></Form.Item>
-        <div className={styles.detailActions}><Button onClick={() => setCreateOpen(false)}>取消</Button><PrimaryButton htmlType="submit" loading={createRun.isPending}>创建运行</PrimaryButton></div>
+        <div className={styles.detailActions}><Button onClick={() => { setCreateOpen(false); }}>取消</Button><PrimaryButton htmlType="submit" loading={createRun.isPending}>创建运行</PrimaryButton></div>
       </Form>
     </Modal>
   </main>

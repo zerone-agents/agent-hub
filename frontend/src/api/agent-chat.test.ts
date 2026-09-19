@@ -79,6 +79,7 @@ describe('agentChatApi.sendMessageStream', () => {
   it('attaches an explicit run without changing the runtime message payload', async () => {
     await agentChatApi.sendMessageStream('min', 's1', 'hello', undefined, undefined, 'run-uuid')
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(String(init.body))).toEqual({ content: 'hello', runId: 'run-uuid' })
+    const body = typeof init.body === 'string' ? init.body : ''
+    expect(JSON.parse(body)).toEqual({ content: 'hello', runId: 'run-uuid' })
   })
 })

@@ -247,12 +247,12 @@ const exampleCopy = {
     description: "财务预演、法务审核、决策表决和合规确认依次留痕。",
   },
 };
-type ExampleValues = {
+interface ExampleValues {
   groupId: string;
   agentIds: number[];
   approvalRole: "leader" | "member" | "observer" | "guest";
   startNow?: boolean;
-};
+}
 export const buildExampleSteps = (
   kind: Example,
   values: ExampleValues,
@@ -572,7 +572,7 @@ export default function GovernancePage() {
                             styles.item,
                             e.id === executionId && styles.active,
                           )}
-                          onClick={() => setExecutionId(e.id)}
+                          onClick={() => { setExecutionId(e.id); }}
                         >
                           <div className={styles.row}>
                             <span className={styles.name}>
@@ -641,7 +641,7 @@ export default function GovernancePage() {
                             <PrimaryButton
                               style={{ marginTop: 16 }}
                               onClick={() =>
-                                startWorkflow.mutate(selectedVersion.id)
+                                { startWorkflow.mutate(selectedVersion.id); }
                               }
                             >
                               开始一次流程
@@ -676,7 +676,7 @@ export default function GovernancePage() {
                   {canWrite && (
                     <PrimaryButton
                       icon={<PlusIcon />}
-                      onClick={() => setDecisionOpen(true)}
+                      onClick={() => { setDecisionOpen(true); }}
                     >
                       发起表决
                     </PrimaryButton>
@@ -694,7 +694,7 @@ export default function GovernancePage() {
                             styles.item,
                             d.id === selectedDecisionId && styles.active,
                           )}
-                          onClick={() => setDecisionId(d.id)}
+                          onClick={() => { setDecisionId(d.id); }}
                         >
                           <div className={styles.row}>
                             <span className={styles.name}>{d.title}</span>
@@ -715,8 +715,8 @@ export default function GovernancePage() {
                         agentName={agentName}
                         canWrite={canWrite}
                         styles={styles}
-                        onVote={() => setVoteOpen(true)}
-                        onClose={() => closeDecision.mutate(decision.data!.id)}
+                        onVote={() => { setVoteOpen(true); }}
+                        onClose={() => { closeDecision.mutate(decision.data.id); }}
                       />
                     ) : (
                       <div className={styles.empty}>
@@ -740,7 +740,7 @@ export default function GovernancePage() {
         form={exampleForm}
         primaryClassName={primary.root}
         onGroupChange={setExampleGroupId}
-        onCancel={() => setExampleOpen(false)}
+        onCancel={() => { setExampleOpen(false); }}
         onSubmit={async (values) => {
           if (!exampleMembers.data?.length) {
             message.warning("这个群组还没有成员，请先到“群组与频道”中添加成员");
@@ -765,7 +765,7 @@ export default function GovernancePage() {
             return;
           }
           await makeExample.mutateAsync({
-            kind: example as Example,
+            kind: example!,
             values: { ...values, agentIds: validIds },
           });
           setExampleOpen(false);
@@ -774,7 +774,7 @@ export default function GovernancePage() {
       <Modal
         title="发起表决"
         open={decisionOpen}
-        onCancel={() => setDecisionOpen(false)}
+        onCancel={() => { setDecisionOpen(false); }}
         onOk={() => void submitDecision()}
         okText="发起并冻结名单"
         cancelText="取消"
@@ -841,11 +841,11 @@ export default function GovernancePage() {
       <Modal
         title="记录投票"
         open={voteOpen}
-        onCancel={() => setVoteOpen(false)}
+        onCancel={() => { setVoteOpen(false); }}
         onOk={() =>
           void voteForm.validateFields().then((v) =>
             castVote
-              .mutateAsync({ id: selectedDecisionId as string, ...v })
+              .mutateAsync({ id: selectedDecisionId!, ...v })
               .then(() => {
                 voteForm.resetFields();
                 setVoteOpen(false);
@@ -1103,12 +1103,12 @@ function DecisionPanel({
   onClose,
 }: {
   value: CollectiveDecision;
-  audit: Array<{
+  audit: {
     id: string;
     action: string;
     description?: string;
     createdAt: string;
-  }>;
+  }[];
   agentName: (id: number) => string;
   canWrite: boolean;
   styles: ReturnType<typeof useStyles>["styles"];

@@ -59,7 +59,7 @@ export default function CollaborationAuditPage() {
   const search = () => {
     const normalized = value.trim()
     if (!normalized) return
-    const next = { kind, value: normalized } as MessageChainSelector
+    const next = { kind, value: normalized }
     setSelector(next)
     setParams(kind === 'conversation' ? { conversation_id: normalized } : { root_message_id: normalized })
   }
@@ -68,7 +68,7 @@ export default function CollaborationAuditPage() {
     <p className={styles.subtitle}>核验 Agent 是否真的发出消息、收到回复并继续转交。这里展示 Hub 留下的系统证据，不采用 Agent 自己对执行过程的描述。</p>
     <div className={styles.search}>
       <Select aria-label="线索类型" value={kind} onChange={setKind} options={[{ value: 'conversation', label: '会话 ID' }, { value: 'root', label: '根消息 ID' }]} />
-      <Input aria-label="审计线索" value={value} onChange={(event) => setValue(event.target.value)} onPressEnter={search} placeholder={kind === 'conversation' ? '输入 conversation_id' : '输入 root_message_id'} />
+      <Input aria-label="审计线索" value={value} onChange={(event) => { setValue(event.target.value); }} onPressEnter={search} placeholder={kind === 'conversation' ? '输入 conversation_id' : '输入 root_message_id'} />
       <PrimaryButton icon={<MagnifyingGlassIcon />} onClick={search} disabled={!value.trim()}>查询证据</PrimaryButton>
     </div>
     {!selector ? <div className={styles.empty}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="输入聊天工具卡片或运行档案中的会话/根消息 ID" /></div> : query.isLoading ? <div className={styles.empty}><Skeleton active paragraph={{ rows: 5 }} /></div> : query.isError ? <Alert style={{ marginTop: 20 }} type="error" showIcon title="没有找到协作证据" description={parseApiError(query.error)} /> : query.data && <>

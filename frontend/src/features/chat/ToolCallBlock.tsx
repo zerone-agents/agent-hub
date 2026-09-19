@@ -101,14 +101,15 @@ export function getToolBusinessStatus(transportStatus: ToolCallBlockProps['statu
   const objects: Record<string, unknown>[] = []
   const visit = (value: unknown, depth = 0) => {
     if (depth > 3 || !value || typeof value !== 'object') return
-    if (Array.isArray(value)) { value.forEach((item) => visit(item, depth + 1)); return }
+    if (Array.isArray(value)) { value.forEach((item) => { visit(item, depth + 1); }); return }
     const object = value as Record<string, unknown>
     objects.push(object)
     for (const key of ['result', 'data', 'structuredContent']) visit(object[key], depth + 1)
   }
   visit(parsed)
-  if (objects.some((item) => item.isError === true || ['error', 'failed', 'guarded', 'rejected', 'dead_letter'].includes(String(item.status ?? '').toLowerCase()))) return 'error'
-  if (objects.some((item) => ['queued', 'running', 'pending', 'processing', 'retry'].includes(String(item.status ?? '').toLowerCase()))) return 'processing'
+  const statusOf = (item: Record<string, unknown>) => typeof item.status === 'string' ? item.status.toLowerCase() : ''
+  if (objects.some((item) => item.isError === true || ['error', 'failed', 'guarded', 'rejected', 'dead_letter'].includes(statusOf(item)))) return 'error'
+  if (objects.some((item) => ['queued', 'running', 'pending', 'processing', 'retry'].includes(statusOf(item)))) return 'processing'
   const text = typeof parsed === 'string' ? parsed.toLowerCase() : ''
   if (/no enabled relation|没有已启用的关系|请求超时|route_not_found|action_not_allowed/.test(text)) return 'error'
   return transportStatus

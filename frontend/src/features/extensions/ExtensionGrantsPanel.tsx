@@ -144,7 +144,7 @@ export default function ExtensionGrantsPanel({ extensionId }: { extensionId: num
                             size="small"
                             type="primary"
                             loading={approveMutation.isPending}
-                            onClick={() => approveMutation.mutate(g.id)}
+                            onClick={() => { approveMutation.mutate(g.id); }}
                           >
                             批准
                           </Button>
@@ -153,7 +153,7 @@ export default function ExtensionGrantsPanel({ extensionId }: { extensionId: num
                           <Popconfirm
                             title="撤销该授权？"
                             description="撤销后扩展立即失去对应权限。"
-                            onConfirm={() => revokeMutation.mutate(g.id)}
+                            onConfirm={() => { revokeMutation.mutate(g.id); }}
                           >
                             <Button size="small" danger loading={revokeMutation.isPending}>
                               撤销

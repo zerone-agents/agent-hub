@@ -216,7 +216,7 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
               <Checkbox
                 key={s.key}
                 checked={sections.includes(s.key)}
-                onChange={(e) => toggleSection(s.key, e.target.checked)}
+                onChange={(e) => { toggleSection(s.key, e.target.checked); }}
               >
                 {s.label}
               </Checkbox>
@@ -240,7 +240,7 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
                       style={{ width: 320 }}
                       placeholder="实际模型 ID，如 gpt-4o"
                       value={modelRefs[ref] ?? ''}
-                      onChange={(e) => setModelRefs((prev) => ({ ...prev, [ref]: e.target.value }))}
+                      onChange={(e) => { setModelRefs((prev) => ({ ...prev, [ref]: e.target.value })); }}
                     />
                   </div>
                 ))}
@@ -252,22 +252,22 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
                 style={{ width: 320 }}
                 placeholder="如 acme-"
                 value={namePrefix}
-                onChange={(e) => setNamePrefix(e.target.value)}
+                onChange={(e) => { setNamePrefix(e.target.value); }}
               />
             </div>
             <div>
               <div className={styles.planSection}>冲突策略</div>
               <Space>
-                <Tag.CheckableTag checked={strategy === 'fail'} onChange={() => setStrategy('fail')}>
+                <Tag.CheckableTag checked={strategy === 'fail'} onChange={() => { setStrategy('fail'); }}>
                   fail（冲突即中止，返回 409）
                 </Tag.CheckableTag>
-                <Tag.CheckableTag checked={strategy === 'rename'} onChange={() => setStrategy('rename')}>
+                <Tag.CheckableTag checked={strategy === 'rename'} onChange={() => { setStrategy('rename'); }}>
                   rename（自动加 -2 后缀）
                 </Tag.CheckableTag>
               </Space>
             </div>
             <Space size={16}>
-              <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)}>
+              <Checkbox checked={force} onChange={(e) => { setForce(e.target.checked); }}>
                 force（跳过扩展依赖缺失阻断）
               </Checkbox>
             </Space>
@@ -278,7 +278,7 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
                   style={{ width: 320 }}
                   placeholder="run id"
                   value={targetRunId}
-                  onChange={(e) => setTargetRunId(e.target.value)}
+                  onChange={(e) => { setTargetRunId(e.target.value); }}
                 />
               </div>
             )}
@@ -339,7 +339,7 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
                 <Input
                   style={{ width: 320 }}
                   value={idempotencyKey}
-                  onChange={(e) => setIdempotencyKey(e.target.value)}
+                  onChange={(e) => { setIdempotencyKey(e.target.value); }}
                 />
               </Descriptions.Item>
             </Descriptions>
@@ -348,7 +348,7 @@ export default function TemplateInstallWizard({ templateId, defaultVersion, onCl
       </div>
 
       <div className={styles.footer}>
-        <Button disabled={step === 0} onClick={() => setStep(step - 1)}>
+        <Button disabled={step === 0} onClick={() => { setStep(step - 1); }}>
           上一步
         </Button>
         {step < 1 && (

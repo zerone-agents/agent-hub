@@ -29,7 +29,7 @@ export function useTemplateList(params: TemplateListParams) {
 export function useTemplateDetail(id: number | undefined) {
   return useQuery<TemplateDetail>({
     queryKey: ['templates', 'detail', id],
-    queryFn: async () => unwrapResponse<TemplateDetail>(await templateApi.get(id as number)),
+    queryFn: async () => unwrapResponse<TemplateDetail>(await templateApi.get(id!)),
     enabled: typeof id === 'number' && id > 0
   })
 }
@@ -39,7 +39,7 @@ export function useTemplateVersion(id: number | undefined, version: string | und
     queryKey: ['templates', 'version', id, version],
     queryFn: async () =>
       unwrapResponse<TemplateVersionDetail>(
-        await templateApi.getVersion(id as number, version as string)
+        await templateApi.getVersion(id!, version!)
       ),
     enabled: typeof id === 'number' && id > 0 && !!version
   })

@@ -13,20 +13,20 @@ export function useGroups() {
 }
 
 export function useGroup(id?: string) {
-  return useQuery({ queryKey: ['groups', id], queryFn: async () => unwrapResponse<CollaborationGroup>(await groupApi.get(id as string)), enabled: Boolean(id) })
+  return useQuery({ queryKey: ['groups', id], queryFn: async () => unwrapResponse<CollaborationGroup>(await groupApi.get(id!)), enabled: Boolean(id) })
 }
 
 export function useGroupAudit(id?: string) {
-  return useQuery({ queryKey: ['groups', id, 'audit'], queryFn: async () => listFrom(unwrapResponse<GroupAuditEvent[] | { events?: GroupAuditEvent[] }>(await groupApi.audit(id as string))), enabled: Boolean(id) })
+  return useQuery({ queryKey: ['groups', id, 'audit'], queryFn: async () => listFrom(unwrapResponse<GroupAuditEvent[] | { events?: GroupAuditEvent[] }>(await groupApi.audit(id!))), enabled: Boolean(id) })
 }
 
-export function useGroupMembers(id?: string) { return useQuery({ queryKey:['groups',id,'members'], queryFn:async()=>listFrom(unwrapResponse<GroupMember[]>(await groupApi.members(id as string))), enabled:Boolean(id) }) }
-export function useGroupChannels(id?: string) { return useQuery({ queryKey:['groups',id,'channels'], queryFn:async()=>listFrom(unwrapResponse<GroupChannel[]>(await groupApi.channels(id as string))), enabled:Boolean(id) }) }
-export function useChannelSubscriptions(id?: string) { return useQuery({ queryKey:['channels',id,'subscriptions'], queryFn:async()=>listFrom(unwrapResponse<ChannelSubscription[]>(await groupApi.subscriptions(id as string))), enabled:Boolean(id) }) }
-export function useChannelMessages(id?: string) { return useQuery({ queryKey:['channels',id,'messages'], queryFn:async()=>listFrom(unwrapResponse<GroupMessage[]>(await groupApi.messages(id as string))), enabled:Boolean(id), refetchInterval:3000 }) }
-export function useChannelSessions(id?: string) { return useQuery({ queryKey:['channels',id,'sessions'], queryFn:async()=>listFrom(unwrapResponse<ConversationSession[]>(await groupApi.sessions(id as string))), enabled:Boolean(id), refetchInterval:3000 }) }
+export function useGroupMembers(id?: string) { return useQuery({ queryKey:['groups',id,'members'], queryFn:async()=>listFrom(unwrapResponse<GroupMember[]>(await groupApi.members(id!))), enabled:Boolean(id) }) }
+export function useGroupChannels(id?: string) { return useQuery({ queryKey:['groups',id,'channels'], queryFn:async()=>listFrom(unwrapResponse<GroupChannel[]>(await groupApi.channels(id!))), enabled:Boolean(id) }) }
+export function useChannelSubscriptions(id?: string) { return useQuery({ queryKey:['channels',id,'subscriptions'], queryFn:async()=>listFrom(unwrapResponse<ChannelSubscription[]>(await groupApi.subscriptions(id!))), enabled:Boolean(id) }) }
+export function useChannelMessages(id?: string) { return useQuery({ queryKey:['channels',id,'messages'], queryFn:async()=>listFrom(unwrapResponse<GroupMessage[]>(await groupApi.messages(id!))), enabled:Boolean(id), refetchInterval:3000 }) }
+export function useChannelSessions(id?: string) { return useQuery({ queryKey:['channels',id,'sessions'], queryFn:async()=>listFrom(unwrapResponse<ConversationSession[]>(await groupApi.sessions(id!))), enabled:Boolean(id), refetchInterval:3000 }) }
 export function useChannel(id?: string) {
-  return useQuery({ queryKey: ['channels', id], queryFn: async () => unwrapResponse<GroupChannel>(await groupApi.getChannel(id as string)), enabled: Boolean(id), refetchInterval: 3000 })
+  return useQuery({ queryKey: ['channels', id], queryFn: async () => unwrapResponse<GroupChannel>(await groupApi.getChannel(id!)), enabled: Boolean(id), refetchInterval: 3000 })
 }
 
 export function useGroupAction<T>(mutationFn: (input: T) => Promise<unknown>, success: string) {

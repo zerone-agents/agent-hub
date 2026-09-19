@@ -71,7 +71,7 @@ export interface ConversationSession {
   hostAgentId?: number
   hostAgentName?: string
   participantAgentIds?: number[]
-  participants?: Array<{ id: number; sessionId: string; agentId: number; role: 'host' | 'participant'; joinedAt: string }>
+  participants?: { id: number; sessionId: string; agentId: number; role: 'host' | 'participant'; joinedAt: string }[]
   status: SessionStatus
   summary?: string
   startedAt?: string

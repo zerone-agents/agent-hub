@@ -182,7 +182,7 @@ export default function UsageOverviewPage() {
       <div className={styles.toolbar}>
         <Segmented
           value={preset}
-          onChange={(v) => setPreset(v as Preset)}
+          onChange={(v) => { setPreset(v as Preset); }}
           options={[
             { label: '近 7 天', value: '7d' },
             { label: '近 30 天', value: '30d' },
@@ -192,7 +192,7 @@ export default function UsageOverviewPage() {
         {preset === 'custom' && (
           <RangePicker
             value={customRange}
-            onChange={(v) => setCustomRange(v as [Dayjs, Dayjs] | null)}
+            onChange={(v) => { setCustomRange(v as [Dayjs, Dayjs] | null); }}
             allowClear={false}
           />
         )}

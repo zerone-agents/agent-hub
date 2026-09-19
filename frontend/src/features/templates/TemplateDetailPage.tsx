@@ -159,7 +159,7 @@ export default function TemplateDetailPage() {
             {detail.source === 'seed' && <Tag>内置种子</Tag>}
           </h1>
           <p className={styles.subtitle}>
-            {detail.description || '（无描述）'}　<span>{detail.name}</span>
+            {detail.description || '（无描述）'} {' · '} <span>{detail.name}</span>
           </p>
         </div>
         <Space>
@@ -168,7 +168,7 @@ export default function TemplateDetailPage() {
           </PrimaryButton>
           <PrimaryButton
             icon={<RocketLaunchIcon size={16} />}
-            onClick={() => setInstallOpen(true)}
+            onClick={() => { setInstallOpen(true); }}
           >
             安装
           </PrimaryButton>
@@ -204,7 +204,7 @@ export default function TemplateDetailPage() {
           pagination={false}
           dataSource={detail.versions}
           onRow={(record) => ({
-            onClick: () => setSelectedVersion(record.version),
+            onClick: () => { setSelectedVersion(record.version); },
             style: { cursor: 'pointer' }
           })}
           columns={[
@@ -258,7 +258,7 @@ export default function TemplateDetailPage() {
       <Modal
         title="安装模板"
         open={installOpen}
-        onCancel={() => setInstallOpen(false)}
+        onCancel={() => { setInstallOpen(false); }}
         footer={null}
         width={860}
         destroyOnHidden
@@ -266,14 +266,14 @@ export default function TemplateDetailPage() {
         <TemplateInstallWizard
           templateId={detail.id}
           defaultVersion={version}
-          onClose={() => setInstallOpen(false)}
+          onClose={() => { setInstallOpen(false); }}
         />
       </Modal>
 
       <Modal
         title="导出结果（可作为新模板注册）"
         open={exportOpen}
-        onCancel={() => setExportOpen(false)}
+        onCancel={() => { setExportOpen(false); }}
         onOk={handleRegisterExported}
         okText="注册为新模板"
         confirmLoading={doRegister.isPending}
@@ -283,7 +283,7 @@ export default function TemplateDetailPage() {
         <Input.TextArea
           rows={16}
           value={exportedJson}
-          onChange={(e) => setExportedJson(e.target.value)}
+          onChange={(e) => { setExportedJson(e.target.value); }}
         />
       </Modal>
     </div>

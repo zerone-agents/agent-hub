@@ -140,7 +140,7 @@ export default function ExtensionLifecyclePanel({
                 loading={upgrade.isPending}
                 onClick={() =>
                   run(async () => {
-                    await upgrade.mutateAsync(upgradeTarget as string)
+                    await upgrade.mutateAsync(upgradeTarget!)
                   }, `已升级到 ${upgradeTarget}（含数据迁移）`)
                 }
               >
@@ -171,10 +171,10 @@ export default function ExtensionLifecyclePanel({
                 回滚
               </Button>
             </span>
-            <Button danger onClick={() => openImpact({ force: false, purge: false })}>
+            <Button danger onClick={() => { openImpact({ force: false, purge: false }); }}>
               卸载
             </Button>
-            <Button danger onClick={() => openImpact({ force: false, purge: true })}>
+            <Button danger onClick={() => { openImpact({ force: false, purge: true }); }}>
               卸载并清除版本数据
             </Button>
           </div>
@@ -194,7 +194,7 @@ export default function ExtensionLifecyclePanel({
             loading={install.isPending}
             onClick={() =>
               run(async () => {
-                await install.mutateAsync(installVersion as string)
+                await install.mutateAsync(installVersion!)
               }, `扩展已安装并启用（${installVersion}）`)
             }
           >
@@ -209,7 +209,7 @@ export default function ExtensionLifecyclePanel({
       <Modal
         title={`卸载前影响范围预览 · ${data.name}`}
         open={impactOpen}
-        onCancel={() => setImpactOpen(false)}
+        onCancel={() => { setImpactOpen(false); }}
         okText={impactDependents.length > 0 ? '停用依赖方并卸载' : '确认卸载'}
         cancelText="取消"
         okButtonProps={{ danger: true, loading: busy }}
@@ -220,7 +220,7 @@ export default function ExtensionLifecyclePanel({
               force: mode.force || impactDependents.length > 0,
               purge: mode.purge
             })
-          }, '扩展已卸载：历史运行状态数据依旧保留').then(() => setImpactOpen(false))
+          }, '扩展已卸载：历史运行状态数据依旧保留').then(() => { setImpactOpen(false); })
         }}
       >
         {impactQuery.isLoading && <div>加载影响范围…</div>}

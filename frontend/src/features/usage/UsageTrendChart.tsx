@@ -99,7 +99,7 @@ export default function UsageTrendChart({ trends, metric, metricLabel }: Props) 
           <span
             key={s.kind}
             className={cx(styles.legendItem, hidden[s.kind] && styles.legendItemOff)}
-            onClick={() => setHidden((h) => ({ ...h, [s.kind]: !h[s.kind] }))}
+            onClick={() => { setHidden((h) => ({ ...h, [s.kind]: !h[s.kind] })); }}
           >
             <span className={styles.dot} style={{ background: s.color }} />
             {USAGE_KIND_LABELS[s.kind] ?? s.kind}

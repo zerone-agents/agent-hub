@@ -147,7 +147,7 @@ export default function TemplateListPage() {
             声明式模板：预览执行计划、映射模型、一键安装 Agent 团队/角色包（H7.3）
           </p>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setRegisterOpen(true)}>
+        <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => { setRegisterOpen(true); }}>
           注册模板
         </PrimaryButton>
       </div>
@@ -199,7 +199,7 @@ export default function TemplateListPage() {
       <Modal
         title="注册模板"
         open={registerOpen}
-        onCancel={() => setRegisterOpen(false)}
+        onCancel={() => { setRegisterOpen(false); }}
         onOk={handleRegister}
         confirmLoading={register.isPending}
         okText="注册"
@@ -212,7 +212,7 @@ export default function TemplateListPage() {
         <Input.TextArea
           rows={12}
           value={registerJson}
-          onChange={(e) => setRegisterJson(e.target.value)}
+          onChange={(e) => { setRegisterJson(e.target.value); }}
           placeholder='{"name":"io.zerone.example","version":"1.0.0","displayName":"…","category":"team","spec":{"agents":[…]}}'
         />
       </Modal>

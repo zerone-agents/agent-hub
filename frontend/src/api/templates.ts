@@ -126,31 +126,31 @@ export interface TemplateInstallResult {
 }
 
 export interface TemplateSpec {
-  agents?: Array<{
+  agents?: {
     name: string
     title?: string
     systemPrompt?: string
     personalityPrompt?: string
     modelRef?: string
     tools?: string[]
-  }>
-  personalityTemplates?: Array<{ name: string; content: string }>
-  groups?: Array<{
+  }[]
+  personalityTemplates?: { name: string; content: string }[]
+  groups?: {
     name: string
     description?: string
     channels?: string[]
     memberRefs?: string[]
-  }>
-  relations?: Array<{
+  }[]
+  relations?: {
     fromRef: string
     toRef: string
     relationType: string
     allowedActions?: string[]
-  }>
-  workflows?: Array<{
+  }[]
+  workflows?: {
     name: string
     description?: string
-    steps: Array<{
+    steps: {
       key: string
       name?: string
       type?: string
@@ -160,22 +160,22 @@ export interface TemplateSpec {
       config?: Record<string, unknown>
       timeoutSeconds?: number
       maxRetries?: number
-    }>
-  }>
-  stateSchemas?: Array<{
+    }[]
+  }[]
+  stateSchemas?: {
     namespace: string
     name: string
     version: string
     schema: Record<string, unknown>
-  }>
-  extensionDeps?: Array<{ name: string; versionRange?: string }>
-  sampleData?: Array<{
+  }[]
+  extensionDeps?: { name: string; versionRange?: string }[]
+  sampleData?: {
     kind: string
     namespace: string
     subjectType: string
     subjectId: string
     data: Record<string, unknown>
-  }>
+  }[]
 }
 
 export const templateApi = {

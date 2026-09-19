@@ -91,7 +91,7 @@ export default function ExtensionListPage() {
           </h1>
           <p className={styles.subtitle}>扩展注册中心：注册、版本与权限声明管理（H7.0）</p>
         </div>
-        <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => setRegisterOpen(true)}>
+        <PrimaryButton icon={<PlusIcon size={16} />} onClick={() => { setRegisterOpen(true); }}>
           注册扩展
         </PrimaryButton>
       </div>
@@ -204,7 +204,7 @@ export default function ExtensionListPage() {
       <Modal
         title="注册扩展"
         open={registerOpen}
-        onCancel={() => setRegisterOpen(false)}
+        onCancel={() => { setRegisterOpen(false); }}
         onOk={handleRegister}
         confirmLoading={register.isPending}
         okText="注册"
@@ -221,7 +221,7 @@ export default function ExtensionListPage() {
           rows={14}
           placeholder='{"apiVersion":"agenthub.extension/v1alpha1","name":"io.zerone.example",...}'
           value={manifest}
-          onChange={(e) => setManifest(e.target.value)}
+          onChange={(e) => { setManifest(e.target.value); }}
         />
       </Modal>
     </div>

@@ -185,8 +185,8 @@ function KeyValue({ data }: { data?: Record<string, unknown> }) {
         {entries.map((entry, i) => {
           const pair = entry as unknown as Record<string, unknown> | unknown[]
           const isPair = Array.isArray(pair)
-          const k = asString(isPair ? pair[0] : (pair as Record<string, unknown>)?.key)
-          const v = asString(isPair ? pair[1] : (pair as Record<string, unknown>)?.value)
+          const k = asString(isPair ? pair[0] : (pair)?.key)
+          const v = asString(isPair ? pair[1] : (pair)?.value)
           return (
             <tr key={`${k}-${i}`}>
               <td>{k}</td>

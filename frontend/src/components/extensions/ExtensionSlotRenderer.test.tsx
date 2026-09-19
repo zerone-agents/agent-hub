@@ -50,7 +50,7 @@ describe('ExtensionSlotRenderer', () => {
   it('空插槽不渲染任何内容', async () => {
     mockedFetchSlots.mockResolvedValue([])
     const { container } = renderSlot()
-    await waitFor(() => expect(container.firstChild).toBeNull(), { timeout: 3000 })
+    await waitFor(() => { expect(container.firstChild).toBeNull(); }, { timeout: 3000 })
   })
 
   it('渲染 stat-card（标题+数值+说明）', async () => {
@@ -128,7 +128,7 @@ describe('ExtensionSlotRenderer', () => {
   it('未知组件类型不渲染', async () => {
     mockedFetchSlots.mockResolvedValue([item({ component: 'evil-widget' })])
     const { container } = renderSlot()
-    await waitFor(() => expect(mockedFetchSlots).toHaveBeenCalled())
+    await waitFor(() => { expect(mockedFetchSlots).toHaveBeenCalled(); })
     expect(container.querySelector('[data-extension-slot]')).toBeNull()
   })
 
@@ -183,7 +183,7 @@ describe('ExtensionSlotRenderer', () => {
   it('插槽列表请求失败时静默降级为空', async () => {
     mockedFetchSlots.mockRejectedValue(new Error('network'))
     const { container } = renderSlot()
-    await waitFor(() => expect(container.firstChild).toBeNull(), { timeout: 3000 })
+    await waitFor(() => { expect(container.firstChild).toBeNull(); }, { timeout: 3000 })
   })
 
   it('响应式栅格：PC 3 列 / 平板 2 列 / 手机 1 列', async () => {
