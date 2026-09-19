@@ -45,7 +45,7 @@ semantic_matches="$({
 # migrates historical records into an explicit capability package. These exact
 # files form the audited compatibility boundary; routing, prompts, MCP and
 # product UI are deliberately not allowlisted.
-semantic_matches="$(printf '%s\n' "$semantic_matches" | rg -v '^(internal/domain/agentrelation/(model|dynamics)\.go|internal/infrastructure/persistence/agent_relation_repository\.go|internal/application/services/(agent_relation_service|relation_type_service)\.go|internal/handler/(agent_relation|relation_type)\.go|pkg/database/database\.go|frontend/src/api/(agent-relations|relation-types)\.ts):' || true)"
+semantic_matches="$(printf '%s\n' "$semantic_matches" | rg -v '^(internal/domain/(agentrelation/(model|dynamics)|reldynamics/dynamics)\.go|internal/infrastructure/persistence/agent_relation_repository\.go|internal/application/services/(agent_relation_service|relation_type_service|relation_dynamics_service)\.go|internal/handler/(agent_relation|relation_type)\.go|pkg/database/database\.go|frontend/src/api/(agent-relations|relation-types)\.ts):' || true)"
 
 if [[ -n "$semantic_matches" ]]; then
   echo "platform-neutrality: vertical semantics found in shipped platform sources:" >&2

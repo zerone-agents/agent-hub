@@ -1,4 +1,4 @@
-// H7.3 模板种子：通用 Team 模板与 Speeding 示例角色包。
+// H7.3 模板种子：仅包含平台通用模板。
 // EnsureSeedTemplates 幂等（按内容哈希）：同 name 存在则仅在内容哈希变化时
 // 追加新版本，相同内容直接返回。种子注册到共享租户 "default"，各租户
 // 列表/详情/安装可读（安装产物落在请求租户内）。
@@ -59,58 +59,6 @@ func teamSeedSpec() *template.Spec {
 	}
 }
 
-// speedingSeedSpec 是 Speeding 示例游戏角色包：通用结构示例（不出现
-// 财富等 Core 垂直字段，人物设定全部放在 personalityPrompt 文本里；
-// 垂直字段由 Speeding 能力包在安装后自行声明与初始化）。
-func speedingSeedSpec() *template.Spec {
-	return &template.Spec{
-		Agents: []template.AgentSpec{
-			{
-				Name:         "speeding-racer",
-				Title:        "车手·烈风",
-				SystemPrompt: "你是竞速世界中的车手角色。遵守本局规则与主持人裁定，围绕比赛目标行动。",
-				PersonalityPrompt: "人物设定：性格冲动果敢，说话直接，重义气；压力下容易冒进，但从不推卸责任。" +
-					"口头禅是「先过弯再说」。与队友信任建立慢、建立后极稳固。",
-				ModelRef: "default/roleplay",
-			},
-			{
-				Name:         "speeding-strategist",
-				Title:        "策略师·冷杉",
-				SystemPrompt: "你是竞速世界中的策略师角色。负责分析局势、制定比赛策略并提醒队友风险。",
-				PersonalityPrompt: "人物设定：冷静缜密，习惯先评估概率再行动；不善言辞但每句都有分量；" +
-					"对数据分析有执念，休息时也在复盘。",
-				ModelRef: "default/roleplay",
-			},
-			{
-				Name:         "speeding-veteran",
-				Title:        "老将·磐石",
-				SystemPrompt: "你是竞速世界中的老将角色。凭经验稳住队伍节奏，在关键时刻做出判断。",
-				PersonalityPrompt: "人物设定：阅历丰富、沉稳可靠；喜欢讲过去的故事激励新人；" +
-					"对新手宽容，对原则问题寸步不让。",
-				ModelRef: "default/roleplay",
-			},
-		},
-		Groups: []template.GroupSpec{
-			{
-				Name:        "speeding-crew",
-				Description: "Speeding 示例车队：车手、策略师与老将。",
-				Channels:    []string{"pit", "strategy"},
-				MemberRefs:  []string{"speeding-racer", "speeding-strategist", "speeding-veteran"},
-			},
-		},
-		Relations: []template.RelationSpec{
-			{
-				FromRef: "speeding-racer", ToRef: "speeding-strategist", RelationType: "peer",
-				AllowedActions: []string{"inform", "consult"},
-			},
-			{
-				FromRef: "speeding-veteran", ToRef: "speeding-racer", RelationType: "advisor",
-				AllowedActions: []string{"consult", "review", "inform"},
-			},
-		},
-	}
-}
-
 type seedTemplate struct {
 	name        string
 	displayName string
@@ -128,12 +76,6 @@ func seedTemplates() []seedTemplate {
 			description: "三人通用岗位团队：协调者、执行者、审阅者，含群组与汇报/顾问关系，开箱即用。",
 			category:    template.CategoryTeam, icon: "users-three", version: "1.0.0",
 			spec: teamSeedSpec(),
-		},
-		{
-			name: "io.zerone.speeding.sample-crew", displayName: "Speeding 示例车队",
-			description: "Speeding 示例游戏角色包：车手/策略师/老将三人组（人物设定在人格提示词中，垂直字段由能力包提供）。",
-			category:    template.CategoryGame, icon: "flag", version: "1.0.0",
-			spec: speedingSeedSpec(),
 		},
 	}
 }

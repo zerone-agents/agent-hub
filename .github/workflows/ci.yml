@@ -69,6 +69,9 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Install platform-neutrality scanner
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Verify platform boundary without Speeding
         env:
           H0_DATABASE_URL: root:test@tcp(127.0.0.1:3306)/hub?charset=utf8mb4&parseTime=true

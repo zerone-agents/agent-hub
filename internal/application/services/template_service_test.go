@@ -448,15 +448,15 @@ func TestTemplateServiceEnsureSeedTemplatesIdempotent(t *testing.T) {
 
 	var count int64
 	require.NoError(t, db.Model(&template.TemplateDefinition{}).Where("tenant_id=?", "default").Count(&count).Error)
-	require.EqualValues(t, 2, count)
+	require.EqualValues(t, 1, count)
 
 	// 共享种子：其他租户可见可预览
 	page, err := svc.List("tenant-a", TemplateListFilter{})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, page.Total)
-	names := []string{page.Items[0].Name, page.Items[1].Name}
+	require.EqualValues(t, 1, page.Total)
+	names := []string{page.Items[0].Name}
 	require.Contains(t, names, "io.zerone.team.basic")
-	require.Contains(t, names, "io.zerone.speeding.sample-crew")
+	require.NotContains(t, names, "io.zerone.speeding.sample-crew", "vertical examples must not be seeded by Hub Core")
 
 	plan, err := svc.Resolve("tenant-a", page.Items[0].TemplateDefinition.ID, "",
 		TemplateMapping{ModelRefs: map[string]string{
