@@ -20,6 +20,7 @@ import { agentApi } from '@/api/agents'
 import { unwrapResponse } from '@/api/client'
 import type { ApiEnvelope } from '@/api/client'
 import { tokens as tk } from '@/styles/tokens'
+import ExtensionSlotRenderer from '@/components/extensions/ExtensionSlotRenderer'
 import AgentCard from './AgentCard'
 import AgentForm from './AgentForm'
 import { buildToolOptions } from './toolOptions'
@@ -33,6 +34,7 @@ import { useBulkAgentTask } from './bulk/useBulkAgentTask'
 import { classifyAllAgents } from './bulk/classifyBulkOperation'
 import type { BulkOperation, ClassifiedItem, PrecheckResult } from './bulk/classifyBulkOperation'
 import CardGrid from '@/components/CardGrid'
+import { useNavigate } from 'react-router'
 import { hasPendingArtifactUpdates } from './pendingArtifactUpdates'
 
 const useStyles = createStyles(({ css }) => ({
@@ -84,6 +86,7 @@ const useStyles = createStyles(({ css }) => ({
 export default function AgentListPage() {
   const { t } = useTranslation()
   const { styles } = useStyles()
+  const navigate = useNavigate()
   const { data: agents = [], isLoading } = useAgents()
   const { data: tools = [] } = useTools()
   const canWrite = useCanWrite()
@@ -686,6 +689,7 @@ export default function AgentListPage() {
                   onEditModel={handleEditModel}
                   onDeploy={showDeploy}
                   onEditKnowledge={handleEditKnowledge}
+                  onViewRelations={(item) => { void navigate(`/relations?agent=${item.id}`) }}
                   selectionMode={selectionMode && canWrite}
                   selected={selectedNames.has(agent.name)}
                   onToggleSelect={toggleSelect}
@@ -1049,6 +1053,7 @@ export default function AgentListPage() {
           </>
         )}
       </Modal>
+      <ExtensionSlotRenderer slot="agent.detail.tab" />
 
       <BulkConfirmModal
         open={confirmState !== null}
@@ -1075,6 +1080,7 @@ export default function AgentListPage() {
         dot={bubbleDot}
         onClick={bulkTask.reopen}
       />
+      <ExtensionSlotRenderer slot="agent.detail.tab" />
     </div>
   )
 }

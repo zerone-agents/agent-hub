@@ -70,6 +70,17 @@ describe('ToolCallBlock', () => {
     expect(screen.getByText('Result')).toBeInTheDocument()
   })
 
+  it('uses business failure instead of transport success', () => {
+    renderWith(<ToolCallBlock toolName="mcp__organization__agent_send" toolId="t1" result={{ isError: true, status: 'guarded' }} status="success" />)
+    expect(screen.getByTestId('tool-call-title')).toHaveAttribute('data-status', 'error')
+  })
+
+  it('shows queued MCP result as processing rather than success', () => {
+    renderWith(<ToolCallBlock toolName="mcp__organization__agent_send" toolId="t1" result={'{"status":"queued","message_id":"m1"}'} status="success" />)
+    expect(screen.getByTestId('tool-call-title')).toHaveAttribute('data-status', 'processing')
+    expect(screen.getByText('后台处理中，结果会在运行档案自动更新')).toBeInTheDocument()
+  })
+
   it('renders "（无输出）" placeholder when result is empty', () => {
     renderWith(
       <ToolCallBlock

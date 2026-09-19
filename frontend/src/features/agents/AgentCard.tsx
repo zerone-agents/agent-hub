@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { useTranslation } from 'react-i18next'
-import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon } from '@phosphor-icons/react'
+import { PencilSimpleIcon, TrashIcon, DiamondsFourIcon, WrenchIcon, StarIcon, CpuIcon, PlusIcon, PlugsConnectedIcon, RocketIcon, BooksIcon, ShareNetworkIcon } from '@phosphor-icons/react'
 import { Popconfirm, Tag, Tooltip, Checkbox } from 'antd'
 import { createStyles } from 'antd-style'
 import type { Agent } from '@/api/agents'
@@ -88,6 +88,7 @@ interface AgentCardProps {
   onEditModel: (agent: Agent) => void
   onDeploy: (agent: Agent) => void
   onEditKnowledge: (agent: Agent) => void
+  onViewRelations?: (agent: Agent) => void
   /** 批量选择模式（#141）：显示复选框、隐藏单卡操作、stats 链接禁用、整卡点击切换 */
   selectionMode?: boolean
   selected?: boolean
@@ -97,7 +98,7 @@ interface AgentCardProps {
 export default function AgentCard({
   agent, modelDisplayName, canWrite, onEdit, onDelete,
   onEditSubagents, onEditTools, onEditSkills, onEditMcps, onEditModel, onDeploy, onEditKnowledge,
-  selectionMode = false, selected = false, onToggleSelect,
+  onViewRelations, selectionMode = false, selected = false, onToggleSelect,
 }: AgentCardProps) {
   const { t } = useTranslation()
   const { styles } = useStyles()
@@ -185,6 +186,9 @@ export default function AgentCard({
       footerLeft={formatTime(agent.createdAt)}
       footerRight={selectionMode ? undefined : (
         <>
+          <button type="button" className={styles.actBtn} title={t('agents.card.relations', { defaultValue: '关系拓扑' })} onClick={() => { onViewRelations?.(agent); }}>
+            <ShareNetworkIcon size={14} />
+          </button>
           <button type="button" className={styles.actBtn} title={t('agents.card.deploy')} onClick={() => { onDeploy(agent); }}>
             <RocketIcon size={14} />
           </button>

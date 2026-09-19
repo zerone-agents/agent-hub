@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { NAV_ITEMS } from '@/lib/nav'
 import { tokens as tk } from '@/styles/tokens'
 import BrandMark from '@/components/BrandMark'
+import ExtensionSidebarSection from '@/components/extensions/ExtensionSidebarSection'
 
 const useStyles = createStyles(({ css }) => ({
   sidebar: css`
@@ -137,6 +138,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
           )
         })}
       </nav>
+      <ExtensionSidebarSection />
     </aside>
   )
 }

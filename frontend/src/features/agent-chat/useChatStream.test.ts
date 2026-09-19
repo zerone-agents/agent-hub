@@ -195,6 +195,15 @@ describe('useChatStream', () => {
       expect(onEstablished).toHaveBeenCalledTimes(1)
     })
 
+    it('passes the selected run id to the chat API', async () => {
+      mockSend.mockResolvedValue(sseResponse('event: done\ndata: {}\n\n'))
+      const { result } = renderHook(() => useChatStream())
+      await act(async () => {
+        await result.current.send('min', 's1', 'hello', undefined, undefined, 'run-uuid')
+      })
+      expect(mockSend).toHaveBeenCalledWith('min', 's1', 'hello', expect.anything(), undefined, 'run-uuid')
+    })
+
     it('exposes errorCode when the request fails with an ApiError', async () => {
       mockSend.mockRejectedValueOnce(
         new ApiError('Attachment not found', 400, 'attachment_missing')

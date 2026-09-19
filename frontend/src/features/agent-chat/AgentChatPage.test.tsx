@@ -18,6 +18,7 @@ const router = vi.hoisted(() => ({
 
 vi.mock('react-router', () => ({
   useParams: () => router.params,
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
   useNavigate: () => router.navigate,
 }))
 

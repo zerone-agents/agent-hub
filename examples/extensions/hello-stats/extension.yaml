@@ -1,0 +1,52 @@
+apiVersion: agenthub.extension/v1alpha1
+name: io.zerone.hello-stats
+version: 0.1.0
+displayName: Hello Stats
+description: 声明 dashboard.card 统计卡片插槽、一个只读统计路由与状态 Schema 的最小扩展示例
+publisher: zerone
+icon: ""
+dependencies: []
+permissions:
+  - permission: ui
+    scope: io.zerone.hello-stats/*
+    actions: [read]
+  - permission: state
+    scope: io.zerone.hello-stats/*
+    actions: [read]
+ui:
+  slots: [dashboard.card]
+stateSchemas:
+  - name: stats
+    description: 扩展自有计数状态（JSON Schema 2020-12，写操作仅限本扩展命名空间）
+    payload:
+      type: object
+      additionalProperties: false
+      properties:
+        runs:
+          type: integer
+          minimum: 0
+        messages:
+          type: integer
+          minimum: 0
+      required: [runs, messages]
+events: []
+# 声明式路由：平台网关按 manifest 注册只读 GET 端点（H7.2 消费）。
+# 该端点只暴露本扩展命名空间内、已声明 stateSchema 派生的聚合数据。
+tools:
+  - name: stats-endpoint
+    description: GET /api/v1/extensions/hello-stats/stats 返回 runs/messages 聚合统计
+    payload:
+      method: GET
+      path: /api/v1/extensions/hello-stats/stats
+      auth: none
+      responseSchema:
+        type: object
+        properties:
+          runs:
+            type: integer
+          messages:
+            type: integer
+        required: [runs, messages]
+relations: []
+promptInjections: []
+migrations: []

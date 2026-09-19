@@ -5,6 +5,7 @@ import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, AgentConfig } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
+import { usePersonalities } from '@/queries/usePersonalities'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
 import { useTranslation } from 'react-i18next'
@@ -78,7 +79,15 @@ const useStyles = createStyles(({ css }) => ({
   foot: css`
     display: flex; justify-content: flex-end; gap: 10px;
     padding: 14px 24px; border-top: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
-  `
+  `,
+  personalityNote: css`
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+    align-items: start; margin-top: -14px; color: var(--text-muted); font-size: 11px; line-height: 1.5;
+  `,
+  personalityVersion: css`
+    color: var(--primary); white-space: nowrap;
+    font: 650 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  `,
 }))
 
 interface AgentFormProps {
@@ -106,6 +115,7 @@ interface FormValues {
   guestEnabled: boolean
   isDefault: boolean
   group: string
+  personalityTemplateName: string
 }
 
 export default function AgentForm({ open, editingAgent, onClose }: AgentFormProps) {
@@ -116,6 +126,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const updateAgent = useUpdateAgent()
   const submitting = createAgent.isPending || updateAgent.isPending
   const { data: allAgents = [] } = useAgents()
+  const { data: personalities = [] } = usePersonalities()
 
   // 提取去重后的 group 值
   const groupOptions = React.useMemo(() => {
@@ -133,6 +144,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const iconName = Form.useWatch('iconName', form)
   const iconColor = Form.useWatch('iconColor', form)
   const iconBgColor = Form.useWatch('iconBgColor', form)
+  const personalityTemplateName = Form.useWatch('personalityTemplateName', form)
+  const selectedPersonality = personalities.find((item) => item.name === personalityTemplateName)
 
   useEffect(() => {
     if (open) {
@@ -155,13 +168,15 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           mobileEnabled: editingAgent.mobileEnabled ?? false,
           guestEnabled: editingAgent.guestEnabled ?? false,
           isDefault: editingAgent.isDefault ?? false,
-          group: editingAgent.group ?? ''
+          group: editingAgent.group ?? '',
+          personalityTemplateName: editingAgent.config.personalityTemplateName ?? ''
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, guestEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined,
+        personalityTemplateName: ''
         })
       }
     }
@@ -200,7 +215,8 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       iconName: v.iconName || undefined,
       iconColor: v.iconColor || undefined,
       iconBgColor: v.iconBgColor || undefined,
-      group: v.group || ''
+      group: v.group || '',
+      personalityTemplateName: v.personalityTemplateName || ''
     }
 
     if (editingAgent) {
@@ -363,9 +379,27 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder={t('agents.form.disallowedToolsPh')} style={{ width: '100%' }} />
         </Form.Item>
 
-        {/* 系统提示词 */}
-        <div className={styles.section} style={{ marginTop: 20 }}>{t('agents.form.promptSection')}</div>
-        <Form.Item name="systemPrompt">
+        {/* 人格只从独立人格库引用，原稿与投影不在 Agent 页面重复维护。 */}
+        <div className={styles.section} style={{ marginTop: 20 }}>人格</div>
+        <Form.Item label="人格模板" name="personalityTemplateName">
+          <Select
+            showSearch={{ optionFilterProp: 'label' }}
+            allowClear
+            placeholder="不设置人格"
+            options={personalities.filter((item) => item.enabled || item.name === personalityTemplateName).map((item) => ({
+              value: item.name,
+              label: `${item.title} · v${item.currentVersion}`,
+            }))}
+          />
+        </Form.Item>
+        <div className={styles.personalityNote}>
+          <span>{selectedPersonality?.description.trim() ? selectedPersonality.description : '人格内容统一在人格库中创建和维护；Agent 页面只负责选择。'}</span>
+          {selectedPersonality ? <span className={styles.personalityVersion}>保存 v{selectedPersonality.currentVersion}</span> : null}
+        </div>
+
+        {/* Agent 自身的身份与工作边界，不承载人格。 */}
+        <div className={styles.section} style={{ marginTop: 20 }}>职责与任务</div>
+        <Form.Item name="systemPrompt" extra="只写这个 Agent 负责什么；表达方式和决策倾向由所选人格决定。">
           <Input.TextArea placeholder={t('agents.form.promptPh')} rows={6} maxLength={20000} showCount />
         </Form.Item>
 

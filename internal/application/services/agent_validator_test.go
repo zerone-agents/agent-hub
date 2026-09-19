@@ -270,6 +270,14 @@ func TestValidateConfig_DisallowedTools(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_BehaviorProfile(t *testing.T) {
+	require.NoError(t, ValidateConfig(map[string]interface{}{}))
+	for _, value := range []interface{}{behaviorProfileConfigMap(), nil} {
+		err := ValidateConfig(map[string]interface{}{"behaviorProfile": value})
+		require.ErrorContains(t, err, "已停止配置")
+	}
+}
+
 // TestValidateConfig_RejectsNonLLMModel is the Task 6 regression: the
 // validator must check the bound model's type via provider_models, not
 // the provider's top-level type. Under the old validator, binding an

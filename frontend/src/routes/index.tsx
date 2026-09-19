@@ -55,6 +55,69 @@ export const router = createBrowserRouter(
             import('@/features/agents/AgentListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'runs/:runId?',
+          lazy: () =>
+            import('@/features/runs/RunCenterPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'personalities',
+          lazy: () =>
+            import('@/features/personalities/PersonalityLibraryPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'relations',
+          lazy: () =>
+            import('@/features/relations/RelationListPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'groups',
+          lazy: () =>
+            import('@/features/groups/GroupWorkspacePage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'governance',
+          lazy: () =>
+            import('@/features/governance/GovernancePage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'collaboration-audit',
+          lazy: () =>
+            import('@/features/audit/CollaborationAuditPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'extensions',
+          lazy: () =>
+            import('@/features/extensions/ExtensionListPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'extensions/acceptance',
+          lazy: () =>
+            import('@/features/extensions/ExtensionAcceptancePage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'extensions/:id',
+          lazy: () =>
+            import('@/features/extensions/ExtensionDetailPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'templates',
+          lazy: () =>
+            import('@/features/templates/TemplateListPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'templates/:id',
+          lazy: () =>
+            import('@/features/templates/TemplateDetailPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'usage',
+          lazy: () => import('@/features/usage/UsageOverviewPage').then((m) => ({ Component: m.default }))
+        },
+        {
+          path: 'usage/budgets',
+          lazy: () => import('@/features/usage/UsageBudgetsPage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'tools',
           lazy: () => import('@/features/tools/ToolListPage').then((m) => ({ Component: m.default }))
         },

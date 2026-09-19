@@ -56,10 +56,33 @@ func TestMigrateAigcModelCodes_NoOpWhenNoModels(t *testing.T) {
 	require.False(t, db.Migrator().HasColumn("aigc_configs", "model_codes"))
 }
 
+// 未 opt-in 时不得删列，但**回填必须照做** —— 加列/回填是功能性的，
+// 删旧列才是可选的清理，两者不能一起被开关关掉。
+func TestMigrateAigcModelCodes_BackfillStillRunsWithoutDropOptIn(t *testing.T) {
+	db := openMigrationDbEmpty(t)
+	old := destructiveMigrationsAllowed
+	destructiveMigrationsAllowed = false
+	t.Cleanup(func() { destructiveMigrationsAllowed = old })
+
+	seedAigcConfig(t, db, map[string]string{"glm-4.5": "0001"})
+	seedProviderModel(t, db, 1, "glm-4.5", "")
+
+	require.NoError(t, migrateAigcModelCodes(db))
+	require.Equal(t, "0001", modelCode(t, db, "glm-4.5"), "回填不受破坏性开关影响")
+	require.True(t, db.Migrator().HasColumn("aigc_configs", "model_codes"), "未 opt-in 时保留旧列")
+
+	// 再跑一次仍是幂等（回填有 alreadyAssigned 守卫），且不报错。
+	require.NoError(t, migrateAigcModelCodes(db))
+	require.Equal(t, "0001", modelCode(t, db, "glm-4.5"))
+}
+
 // ── helpers ──
 
 func openMigrationDbEmpty(t *testing.T) *gorm.DB {
 	t.Helper()
+	// 本组用例要验证真实的删列效果，先打开破坏性迁移开关
+	// （默认关闭时的行为由 destructive_migration_gate_test.go 覆盖）。
+	allowDestructiveMigrationsForTest(t)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&provider.ProviderModel{}))

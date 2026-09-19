@@ -23,6 +23,7 @@ const useStyles = createStyles(({ css }) => ({
   cardError: css`
     border-color: rgba(220, 38, 38, 0.3);
   `,
+  cardProcessing: css`border-color: color-mix(in srgb, var(--primary) 35%, transparent);`,
   title: css`
     display: flex; align-items: center; gap: 8px;
     padding: 6px 10px; cursor: pointer; user-select: none;
@@ -80,7 +81,38 @@ export interface ToolCallBlockProps {
   toolId: string
   input?: Record<string, unknown>
   result?: unknown
-  status: 'pending' | 'success' | 'error'
+  status: 'pending' | 'processing' | 'success' | 'error'
+}
+
+type ToolBusinessStatus = ToolCallBlockProps['status']
+
+function parseResult(result: unknown): unknown {
+  if (typeof result !== 'string') return result
+  const value = result.trim()
+  if (!value.startsWith('{') && !value.startsWith('[')) return result
+  try { return JSON.parse(value) } catch { return result }
+}
+
+/** Transport success is not business success. MCP results often carry their
+ * own state in a JSON envelope, so derive the visible state from that envelope. */
+export function getToolBusinessStatus(transportStatus: ToolCallBlockProps['status'], result: unknown): ToolBusinessStatus {
+  if (transportStatus === 'pending' || transportStatus === 'error') return transportStatus
+  const parsed = parseResult(result)
+  const objects: Record<string, unknown>[] = []
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 3 || !value || typeof value !== 'object') return
+    if (Array.isArray(value)) { value.forEach((item) => { visit(item, depth + 1); }); return }
+    const object = value as Record<string, unknown>
+    objects.push(object)
+    for (const key of ['result', 'data', 'structuredContent']) visit(object[key], depth + 1)
+  }
+  visit(parsed)
+  const statusOf = (item: Record<string, unknown>) => typeof item.status === 'string' ? item.status.toLowerCase() : ''
+  if (objects.some((item) => item.isError === true || ['error', 'failed', 'guarded', 'rejected', 'dead_letter'].includes(statusOf(item)))) return 'error'
+  if (objects.some((item) => ['queued', 'running', 'pending', 'processing', 'retry'].includes(statusOf(item)))) return 'processing'
+  const text = typeof parsed === 'string' ? parsed.toLowerCase() : ''
+  if (/no enabled relation|没有已启用的关系|请求超时|route_not_found|action_not_allowed/.test(text)) return 'error'
+  return transportStatus
 }
 
 const INITIAL_RESULT_LIMIT = 1000
@@ -114,6 +146,7 @@ export default function ToolCallBlock({
     [toolName, input]
   )
   const resultStr = useMemo(() => resultToString(result), [result])
+  const visibleStatus = useMemo(() => getToolBusinessStatus(status, result), [status, result])
 
   const [open, setOpen] = useState(false)
   const [limit, setLimit] = useState<number>(INITIAL_RESULT_LIMIT)
@@ -129,19 +162,20 @@ export default function ToolCallBlock({
   }
 
   return (
-    <div className={`${styles.card} ${status === 'error' ? styles.cardError : ''}`}>
+    <div className={`${styles.card} ${visibleStatus === 'error' ? styles.cardError : ''} ${visibleStatus === 'processing' ? styles.cardProcessing : ''}`}>
       <div
-        className={`${styles.title} ${status === 'error' ? styles.titleError : ''}`}
+        className={`${styles.title} ${visibleStatus === 'error' ? styles.titleError : ''}`}
         data-testid="tool-call-title"
-        data-status={status}
+        data-status={visibleStatus}
         onClick={handleClick}
       >
         {open ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
-        {status === 'pending' && <SpinnerIcon size={12} color={tk.textMuted} />}
-        {status === 'success' && <CheckCircleIcon size={12} color={tk.success} weight="fill" />}
-        {status === 'error' && <XCircleIcon size={12} color={tk.danger} weight="fill" />}
+        {(visibleStatus === 'pending' || visibleStatus === 'processing') && <SpinnerIcon size={12} color={visibleStatus === 'processing' ? 'var(--primary)' : tk.textMuted} />}
+        {visibleStatus === 'success' && <CheckCircleIcon size={12} color={tk.success} weight="fill" />}
+        {visibleStatus === 'error' && <XCircleIcon size={12} color={tk.danger} weight="fill" />}
         <span className={styles.toolName}>{toolName}</span>
         {summary && <span className={styles.summary}>{summary}</span>}
+        {visibleStatus === 'processing' && <span className={styles.summary}>后台处理中，结果会在运行档案自动更新</span>}
       </div>
       {open && (
         <div className={styles.body}>
@@ -153,7 +187,7 @@ export default function ToolCallBlock({
           )}
           <div className={styles.resultSection}>
             <div className={styles.sectionLabel}>Result</div>
-            {status === 'pending' ? (
+            {visibleStatus === 'pending' ? (
               <div className={styles.pendingPlaceholder}>{t('chat.toolCall.pending')}</div>
             ) : resultStr === '' ? (
               <div className={styles.emptyPlaceholder}>{t('chat.toolCall.emptyOutput')}</div>

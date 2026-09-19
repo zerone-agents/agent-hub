@@ -28,8 +28,23 @@ type SystemMetrics struct {
 	MemoryUsage string `json:"memory_usage"`
 }
 
-// HealthCheck reports the overall system health including database, auth, and runtime metrics.
+// HealthCheck reports the legacy Casdoor-aware health view. New server wiring
+// should use HealthCheckForAuthMode so optional auth backends do not make an
+// otherwise healthy deployment fail readiness checks.
 func HealthCheck(c *gin.Context) {
+	healthCheck(c, true)
+}
+
+// HealthCheckForAuthMode builds a health handler for the configured auth mode.
+// Casdoor is a required dependency only when Casdoor authentication is active;
+// builtin deployments report it as disabled and remain healthy.
+func HealthCheckForAuthMode(casdoorRequired bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		healthCheck(c, casdoorRequired)
+	}
+}
+
+func healthCheck(c *gin.Context, casdoorRequired bool) {
 	services := make(map[string]ServiceStatus)
 	allHealthy := true
 
@@ -51,7 +66,9 @@ func HealthCheck(c *gin.Context) {
 	}
 
 	casdoorStart := time.Now()
-	if auth.GetClient() != nil {
+	if !casdoorRequired {
+		services["casdoor"] = ServiceStatus{Status: "disabled"}
+	} else if auth.GetClient() != nil {
 		services["casdoor"] = ServiceStatus{
 			Status:  "healthy",
 			Latency: time.Since(casdoorStart).String(),
@@ -83,14 +100,34 @@ func HealthCheck(c *gin.Context) {
 	})
 }
 
-// ServiceHealthCheck reports the health status of a specific named service.
+// ServiceHealthCheck retains the legacy Casdoor-required behaviour.
 func ServiceHealthCheck(c *gin.Context) {
+	serviceHealthCheck(c, true)
+}
+
+// ServiceHealthCheckForAuthMode reports optional Casdoor as disabled (and
+// available) in builtin mode instead of returning a false-positive outage.
+func ServiceHealthCheckForAuthMode(casdoorRequired bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serviceHealthCheck(c, casdoorRequired)
+	}
+}
+
+func serviceHealthCheck(c *gin.Context, casdoorRequired bool) {
 	serviceName := c.Param("service")
 
 	services := map[string]ServiceStatus{
 		"backend": {Status: "healthy"},
-		"casdoor": {Status: "healthy"},
 		"mysql":   {Status: "healthy"},
+	}
+	if casdoorRequired {
+		if auth.GetClient() == nil {
+			services["casdoor"] = ServiceStatus{Status: "unhealthy", Error: "not initialized"}
+		} else {
+			services["casdoor"] = ServiceStatus{Status: "healthy"}
+		}
+	} else {
+		services["casdoor"] = ServiceStatus{Status: "disabled"}
 	}
 
 	status, ok := services[serviceName]
@@ -103,7 +140,7 @@ func ServiceHealthCheck(c *gin.Context) {
 	}
 
 	httpStatus := http.StatusOK
-	if status.Status != "healthy" {
+	if status.Status == "unhealthy" {
 		httpStatus = http.StatusServiceUnavailable
 	}
 

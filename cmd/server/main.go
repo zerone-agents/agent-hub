@@ -265,7 +265,80 @@ func main() {
 		cfg.Deployer.RuntimeAPIKey,
 		cfg.Deployer.DeployerURLHost,
 	)
-	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
+	runService := services.NewRunService(database.GetDB())
+	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
+	// H7.4 授权服务必须在种子之前就位：EnsureBuiltinPersonaPacks 会把
+	// manifest 声明的权限同步成 grants 行（syncGrantsWithTx），而该方法在
+	// authz 为 nil 时是 no-op。此前种子跑在 SetAuthzService 之前，导致四个
+	// 内置扩展永远没有 grants，与本文件早先"授权同步与种子同事务"的注释不符。
+	extensionAuthzService := services.NewExtensionAuthzService(database.GetDB())
+	extensionLifecycleService.SetAuthzService(extensionAuthzService)
+	// H7.4（P0）扩展身份认证服务：签发/校验扩展凭据。
+	extensionIdentityService := services.NewExtensionIdentityService(database.GetDB())
+	// H7 P1：四个人物能力注册为 default 租户的内置扩展（默认已安装+启用），
+	// 之后所有生效路径经 PersonaCapabilityGate 运行时查询，管理员停用立即
+	// 生效且无需重启。种子幂等；失败必须中断启动（否则能力被静默关闭）。
+	if err := extensionLifecycleService.EnsureBuiltinPersonaPacks(); err != nil {
+		log.Fatalf("Failed to ensure builtin persona packs: %v", err)
+	}
+	// P0-3 启动期断言：种子必须真正落地 grants 行。syncGrantsWithTx 在 authz
+	// 未接线时是静默 no-op，而"把 SetAuthzService 放在种子之前"只是一句注释，
+	// 挡不住下一次重排——这里显式验证，把静默失效变成启动失败。
+	for _, packName := range services.BuiltinPersonaPackNames() {
+		count, err := extensionAuthzService.CountGrants(services.BuiltinPersonaPackTenant, packName)
+		if err != nil {
+			log.Fatalf("Failed to verify grants for builtin extension %s: %v", packName, err)
+		}
+		if count == 0 {
+			log.Fatalf("Builtin extension %s has no grants after seeding: extensionAuthzService must be wired before EnsureBuiltinPersonaPacks", packName)
+		}
+	}
+	personaGate := services.NewPersonaCapabilityGate(database.GetDB())
+	// H6 persona capability packs (WS6 wiring): all state lives in RunState;
+	// EnsureSchemas is idempotent and failures are non-fatal (log warning).
+	// 状态 Schema 只在对应内置扩展仍启用时确保；四个全停则整段跳过。
+	emotionService := services.NewEmotionService(runService)
+	beliefService := services.NewBeliefService(runService)
+	memoryService := services.NewMemoryService(runService)
+	relationDynamicsService := services.NewRelationDynamicsService(runService)
+	for name, svc := range map[string]func() error{
+		"emotion":               emotionService.EnsureSchemas,
+		"belief":                beliefService.EnsureSchemas,
+		"memory":                memoryService.EnsureSchemas,
+		"relationship-dynamics": relationDynamicsService.EnsureSchemas,
+	} {
+		if !personaGate.Enabled("default", name) {
+			log.Printf("H6 %s capability disabled via extension lifecycle; skipping schema ensure", name)
+			continue
+		}
+		if err := svc(); err != nil {
+			log.Printf("Warning: H6 %s schema ensure failed: %v", name, err)
+		}
+	}
+	eventHandler := handler.NewEventHandler(services.NewEventService(database.GetDB()))
+	promptComposerService := services.NewPromptComposerService(database.GetDB())
+	// H6 WS5/WS6: recent_memory 阶段从主观记忆包检索该 Agent 的前 5 条记忆。
+	// Provider 出错时合成器会跳过该阶段，这里再包一层防御。
+	// H7 P1：经 PersonaCapabilityGate 包装，主观记忆扩展被停用时闭包返回
+	// 空结果，合成器跳过该阶段；gate 在闭包内运行时查询，停用立即生效。
+	promptComposerService.SetRecentMemoryProvider(personaGate.GateRecentMemoryProvider(func(tenantID, runID string, agentID uint64) ([]services.RecentMemoryItem, error) {
+		entries, err := memoryService.Recall(tenantID, runID, agentID, "", 5, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		items := make([]services.RecentMemoryItem, 0, len(entries))
+		for i := range entries {
+			items = append(items, services.RecentMemoryItem{
+				Label: entries[i].FactRef,
+				Text:  entries[i].Interpretation,
+			})
+		}
+		return items, nil
+	}))
+	promptComposerHandler := handler.NewPromptComposerHandler(promptComposerService)
+	toolResultHandler := handler.NewToolResultHandler(services.NewToolResultService(database.GetDB()))
+	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, runService)
+	agentChatHandler.SetPromptComposer(promptComposerService)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
@@ -277,6 +350,42 @@ func main() {
 
 	sceneService := services.NewSceneService()
 	sceneHandler := handler.NewSceneHandler(sceneService)
+	personalityService := services.NewPersonalityService()
+	personalityHandler := handler.NewPersonalityHandler(personalityService)
+	extensionVerificationHandler := handler.NewExtensionVerificationHandler()
+	relationTypeHandler := handler.NewRelationTypeHandler(services.NewRelationTypeService())
+	agentRelationService := services.NewAgentRelationService()
+	agentRelationHandler := handler.NewAgentRelationHandler(agentRelationService)
+	runHandler := handler.NewRunHandler(runService)
+	capabilityRegistryHandler := handler.NewCapabilityRegistryHandler(services.NewCapabilityRegistryService(database.GetDB()))
+	extensionService := services.NewExtensionService(database.GetDB())
+	extensionAdminHandler := handler.NewExtensionAdminHandlerWithLifecycle(extensionService, extensionLifecycleService)
+	// H7.2 UI 插槽 / H7.4 权限 / H7.5 用量
+	extensionSlotService := services.NewExtensionSlotService(database.GetDB())
+	extensionSlotHandler := handler.NewExtensionSlotHandler(extensionSlotService)
+	extensionAuthzHandler := handler.NewExtensionAuthzHandler(extensionAuthzService)
+	extensionIdentityHandler := handler.NewExtensionIdentityHandler(extensionIdentityService)
+	usageService := services.NewUsageService(database.GetDB())
+	usageAdminHandler := handler.NewUsageAdminHandler(usageService)
+	// H7.5 用量埋点注入（nil 安全）
+	agentChatHandler.SetUsageService(usageService)
+	// H7.3 模板库
+	templateService := services.NewTemplateService(database.GetDB())
+	templateService.SetRunService(runService)
+	if err := templateService.EnsureSeedTemplates(); err != nil {
+		log.Printf("ensure seed templates failed: %v", err)
+	}
+	templateAdminHandler := handler.NewTemplateAdminHandler(templateService)
+	collaborationHandler := handler.NewCollaborationHandler(services.NewCollaborationService(database.GetDB()))
+	workflowService := services.NewWorkflowService(database.GetDB())
+	workflowService.SetDispatcher(services.NewWorkflowAgentDispatcher(agentChatSvc))
+	workflowService.SetPersonaHooks(emotionService, relationDynamicsService)
+	workflowService.SetPersonaCapabilityGate(personaGate)
+	workflowService.SetUsageService(usageService)
+	workflowHandler := handler.NewWorkflowHandler(workflowService)
+	decisionService := services.NewDecisionService(database.GetDB())
+	decisionService.SetWorkflowService(workflowService)
+	decisionHandler := handler.NewDecisionHandler(decisionService)
 
 	// push-key 通道的租户归属按模式解析：builtin 忽略 org 恒 "default"；
 	// casdoor 下 org 缺省时解析为 tenant_oauth_clients 的 default 行组织。
@@ -322,7 +431,7 @@ func main() {
 	}
 
 	mcpService := services.NewMcpService(cfg.Provider.EncryptionKey)
-	if err := mcpService.SeedBuiltins(cfg.Knowledge.MCPURL); err != nil {
+	if err := mcpService.SeedBuiltins(cfg.Knowledge.MCPURL, cfg.Organization.MCPURL); err != nil {
 		log.Fatalf("Failed to seed builtin MCPs: %v", err)
 	}
 	if err := toolService.SeedBuiltins(); err != nil {
@@ -337,12 +446,25 @@ func main() {
 	mcpHandler := handler.NewMcpHandler(mcpService)
 
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
+	organizationMessageService := services.NewAgentMessageService(agentChatSvc)
+	organizationMessageService.SetPersonaHooks(beliefService, relationDynamicsService)
+	organizationMessageService.SetPersonaCapabilityGate(personaGate)
+	organizationMessageService.SetUsageService(usageService)
+	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
+	organizationMcpHandler.SetWorkflowService(workflowService)
+	organizationMcpHandler.SetDecisionService(decisionService)
+	organizationMcpHandler.SetPersonaServices(emotionService, beliefService, memoryService, relationDynamicsService)
+	organizationMcpHandler.SetPersonaGate(personaGate)
+	organizationMcpHandler.SetPersonaRunResolver(runService.ActiveRunForAgent)
+	agentMessageAdminHandler := handler.NewAgentMessageAdminHandler(organizationMessageService)
+	personaAdminHandler := handler.NewPersonaAdminHandler(runService, beliefService)
 
 	// ==================== 路由管理 ====================
 
 	// /health
-	r.GET("/health", handler.HealthCheck)
-	r.GET("/health/:service", handler.ServiceHealthCheck)
+	casdoorRequiredForHealth := cfg.Auth.IsCasdoor()
+	r.GET("/health", handler.HealthCheckForAuthMode(casdoorRequiredForHealth))
+	r.GET("/health/:service", handler.ServiceHealthCheckForAuthMode(casdoorRequiredForHealth))
 
 	// /api/v1/ops — 运维端点（组织 OAuth 客户端管理），不走 JWT 链，
 	// 由 X-Ops-Key 常量时间鉴权。OPS_API_KEY 为空 = 功能未启用，端点不挂载（等效 404）。
@@ -434,11 +556,134 @@ func main() {
 	// 依赖配置端点完成模型/Agent/SKILL 配置同步（guest 仅可读配置，不可写）。
 	// 正式角色用户 guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.GuestGuard())
+	// Extension identity is evaluated before human authentication. A verified
+	// extension uses its own credential and never needs a reusable admin JWT.
+	// ExtensionAPIGuard is default-deny and maps the small set of core APIs an
+	// extension may call to manifest permissions.
+	v1group := r.Group("/api/v1",
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.JWTAuthWithCLIOrExtension(cliTokenSvc, authProvider),
+		jwtutil.GuestGuard(),
+		middleware.ExtensionAPIGuard(extensionAuthzService))
+	// H7.4（P0）扩展身份认证：挂在 v1group 上，先于一切授权判定。带
+	// X-Extension-Name / X-Extension-Token 的请求先验证凭据（Hub 签发），
+	// 通过后把已认证扩展名写入上下文；不带这两个头的既有请求（前端控制台、
+	// Agent Runtime）行为完全不变。授权中间件只认上下文里的已认证名字，
+	// 因此"自己报一个扩展名"不再能影响任何判定。
+	// H7.2 扩展数据代理：登录用户可访问已启用扩展声明的 GET 端点（限流 60/min）
+	extProxyGroup := v1group.Group("/extensions/:name",
+		middleware.ExtensionRateLimitByParam(middleware.ExtensionRateLimitConfig{RequestsPerMinute: 60},
+			func(c *gin.Context) string { return c.Param("name") }))
+	extProxyGroup.GET("/*wildcard", extensionSlotHandler.Proxy)
 	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
+
+	// ---------- Extension protocol H0 verification ----------
+	// Metadata/examples are safe for all approved members. Inline validation is
+	// manager-only and never resolves file references from pasted manifests.
+	adminRead.GET("/extensions/h0", extensionVerificationHandler.Overview)
+	adminWrite.POST("/extensions/validate", extensionVerificationHandler.Validate)
+
+	// ---------- H1 isolated runs and generic state ----------
+	// H7.4 扩展身份强制检查：已认证扩展按 (permission, action, resource) 判定，
+	// 无授权 403；无扩展身份的既有请求零影响（中间件内部放行）。
+	// 覆盖面按"同一资源读写同权"对齐：同一资源不能出现"读受检查、写不受检查"，
+	// 否则持有 read 授权的扩展可以直接改成写。
+	runResource := func(c *gin.Context) string { return c.Param("id") }
+	adminRead.GET("/runs", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", nil), runHandler.List)
+	adminWrite.POST("/runs", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", nil), runHandler.Create)
+	adminRead.GET("/runs/:id", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.Get)
+	adminWrite.POST("/runs/:id/transitions", middleware.ExtensionAuthz(extensionAuthzService, "run", "update", runResource), runHandler.Transition)
+	adminWrite.POST("/runs/:id/agents", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.AddAgent)
+	adminWrite.PUT("/runs/:id/route-plan", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.PutRoutePlan)
+	adminRead.GET("/runs/:id/route-plan", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.GetRoutePlan)
+	adminWrite.POST("/state-schemas", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", nil), runHandler.RegisterSchema)
+	adminWrite.POST("/runs/:id/states", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.InitializeState)
+	adminWrite.PUT("/runs/:id/states/:stateId", middleware.ExtensionAuthz(extensionAuthzService, "state", "write", runResource), runHandler.CommitState)
+	adminRead.GET("/runs/:id/state-changes", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), runHandler.StateChanges)
+	adminRead.GET("/runs/:id/activities", middleware.ExtensionAuthz(extensionAuthzService, "run", "read", runResource), runHandler.Activities)
+	adminRead.GET("/runs/:id/events", middleware.ExtensionAuthz(extensionAuthzService, "event", "read", runResource), eventHandler.ListRun)
+	adminWrite.POST("/runs/:id/activities", middleware.ExtensionAuthz(extensionAuthzService, "run", "write", runResource), runHandler.AppendActivity)
+	adminRead.GET("/runs/:id/tool-results", middleware.ExtensionAuthz(extensionAuthzService, "tool", "read", runResource), toolResultHandler.List)
+	adminRead.GET("/runs/:id/agent-messages", middleware.ExtensionAuthz(extensionAuthzService, "message", "read", runResource), agentMessageAdminHandler.ListRun)
+	// H6 persona admin views (read-only; same authorization as neighboring run reads)
+	adminRead.GET("/runs/:id/persona-state", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.PersonaState)
+	adminRead.GET("/runs/:id/belief-disputes", middleware.ExtensionAuthz(extensionAuthzService, "state", "read", runResource), personaAdminHandler.BeliefDisputes)
+	adminRead.GET("/channels/:id/messages", agentMessageAdminHandler.ListChannel)
+	adminWrite.GET("/agent-message-chains", agentMessageAdminHandler.GetChain)
+	adminRead.GET("/runs/:id/tool-results/:toolResultId", toolResultHandler.Get)
+	adminWrite.POST("/runs/:id/tool-results/validate", toolResultHandler.Validate)
+	adminWrite.POST("/runs/:id/tool-results", toolResultHandler.Commit)
+	adminWrite.POST("/runs/:id/tool-results/reject", toolResultHandler.Reject)
+	adminWrite.POST("/runs/:id/agents/:agentId/prompt", promptComposerHandler.Compose)
+	adminRead.GET("/runs/:id/agents/:agentId/prompt", promptComposerHandler.Latest)
+	adminRead.GET("/capability-packages", capabilityRegistryHandler.List)
+	adminWrite.POST("/capability-packages", capabilityRegistryHandler.Register)
+	adminWrite.POST("/capability-packages/:id/approve", capabilityRegistryHandler.Approve)
+	// H7.0 扩展注册中心（通用扩展市场，独立于 H6 capability-packages）
+	adminWrite.POST("/extensions", extensionAdminHandler.Register)
+	adminRead.GET("/extensions", extensionAdminHandler.List)
+	adminRead.GET("/extensions/:id", extensionAdminHandler.Get)
+	adminWrite.POST("/extensions/:id/install", extensionAdminHandler.Install)
+	adminWrite.POST("/extensions/:id/enable", extensionAdminHandler.Enable)
+	adminWrite.POST("/extensions/:id/disable", extensionAdminHandler.Disable)
+	adminWrite.POST("/extensions/:id/upgrade", extensionAdminHandler.Upgrade)
+	adminWrite.POST("/extensions/:id/rollback", extensionAdminHandler.Rollback)
+	adminWrite.DELETE("/extensions/:id/uninstall", extensionAdminHandler.Uninstall)
+	adminRead.GET("/extensions/:id/impact", extensionAdminHandler.Impact)
+	adminRead.GET("/extensions/:id/versions/:version", extensionAdminHandler.GetVersion)
+	// H7.2 UI 插槽
+	adminRead.GET("/extensions/slots", extensionSlotHandler.ListSlots)
+	adminWrite.POST("/extensions/:id/slots/:slot/visible", extensionSlotHandler.SetSlotVisible)
+	// H7.4 扩展权限与审计
+	adminRead.GET("/extensions/:id/grants", extensionAuthzHandler.ListGrants)
+	adminRead.GET("/extensions/:id/audit", extensionAuthzHandler.ListAudit)
+	adminWrite.POST("/extensions/:id/grants/:grantId/approve", extensionAuthzHandler.ApproveGrant)
+	adminWrite.DELETE("/extensions/:id/grants/:grantId", extensionAuthzHandler.RevokeGrant)
+	// H7.4 扩展身份凭据（P0）：签发/轮换与查询（明文仅签发响应返回一次）
+	adminRead.GET("/extensions/:id/credential", extensionIdentityHandler.Describe)
+	adminWrite.POST("/extensions/:id/credential", extensionIdentityHandler.Issue)
+	// H7.3 模板库
+	adminWrite.POST("/templates", templateAdminHandler.Register)
+	adminRead.GET("/templates", templateAdminHandler.List)
+	adminRead.GET("/templates/:id", templateAdminHandler.Get)
+	adminRead.GET("/templates/:id/versions/:version", templateAdminHandler.GetVersion)
+	adminWrite.POST("/templates/:id/preview", templateAdminHandler.Preview)
+	adminWrite.POST("/templates/:id/install", templateAdminHandler.Install)
+	adminWrite.POST("/templates/:id/export", templateAdminHandler.Export)
+	// H7.5 用量与运维
+	adminRead.GET("/usage/summary", usageAdminHandler.Summary)
+	adminRead.GET("/usage/by-extension", usageAdminHandler.ByExtension)
+	adminRead.GET("/usage/by-agent", usageAdminHandler.ByAgent)
+	adminRead.GET("/usage/by-run", usageAdminHandler.ByRun)
+	adminRead.GET("/usage/by-model", usageAdminHandler.ByModel)
+	adminRead.GET("/usage/errors", usageAdminHandler.Errors)
+	adminRead.GET("/usage/storage", usageAdminHandler.Storage)
+	adminRead.GET("/usage/health", usageAdminHandler.Health)
+	adminRead.GET("/usage/export", usageAdminHandler.Export)
+	adminRead.GET("/usage/budgets", usageAdminHandler.ListBudgets)
+	adminWrite.PUT("/usage/budgets", usageAdminHandler.UpsertBudget)
+	adminWrite.DELETE("/usage/budgets/:id", usageAdminHandler.DeleteBudget)
+	adminRead.GET("/usage/alerts", usageAdminHandler.ListAlerts)
+	adminWrite.PUT("/usage/alerts", usageAdminHandler.UpsertAlert)
+	adminWrite.DELETE("/usage/alerts/:id", usageAdminHandler.DeleteAlert)
+	adminRead.GET("/usage/alerts/events", usageAdminHandler.AlertEvents)
+	adminRead.GET("/usage/pricing", usageAdminHandler.GetPricing)
+	adminWrite.PUT("/usage/pricing", usageAdminHandler.PutPricing)
+	adminWrite.PATCH("/capability-packages/:id/enabled", capabilityRegistryHandler.SetEnabled)
+	adminRead.GET("/capability-packages/:id/resources", capabilityRegistryHandler.Resources)
+
+	// ---------- H4 group and channel collaboration ----------
+	handler.RegisterCollaborationRoutes(adminWrite, adminRead, collaborationHandler)
+	// ---------- H5 reusable workflows and approvals ----------
+	// H7.4 扩展身份强制检查：workflow 读写按 (workflow, read/write) 判定。
+	handler.RegisterWorkflowRoutes(
+		adminWrite.Group("", middleware.ExtensionAuthz(extensionAuthzService, "workflow", "write", nil)),
+		adminRead.Group("", middleware.ExtensionAuthz(extensionAuthzService, "workflow", "read", nil)),
+		workflowHandler)
+	handler.RegisterDecisionRoutes(adminWrite, adminRead, decisionHandler)
 
 	// ---------- Audit 领域 ----------
 	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。
@@ -471,7 +716,10 @@ func main() {
 	// 管理接口：写方法/敏感 GET（files/content）→ write 组；
 	// 非敏感 GET（列表、detail、tools、skills、mcps、knowledge、files 列表、deploy 状态）→ read 组（member 只读）
 	adminAgentsGroup := adminWrite.Group("/agents")
-	adminAgentsReadGroup := adminRead.Group("/agents")
+	// H7.4 扩展身份强制检查：管理端 agent 只读接口按 (agent, read) 判定。
+	adminAgentsReadGroup := adminRead.Group("/agents",
+		middleware.ExtensionAuthz(extensionAuthzService, "agent", "read",
+			func(c *gin.Context) string { return c.Param("name") }))
 	{
 		adminAgentsReadGroup.GET("", agentHandler.ListAdmin)
 		adminAgentsGroup.POST("", agentHandler.Create)
@@ -572,10 +820,60 @@ func main() {
 		adminScenesGroup.DELETE("/:name", sceneHandler.Delete)
 	}
 
+	// ---------- Prompt-first 人格库 ----------
+	adminPersonalitiesGroup := adminWrite.Group("/personalities")
+	adminPersonalitiesReadGroup := adminRead.Group("/personalities")
+	{
+		adminPersonalitiesReadGroup.GET("", personalityHandler.List)
+		adminPersonalitiesReadGroup.GET("/:name", personalityHandler.Get)
+		adminPersonalitiesGroup.POST("", personalityHandler.Create)
+		adminPersonalitiesGroup.PUT("/:name", personalityHandler.Update)
+		adminPersonalitiesGroup.DELETE("/:name", personalityHandler.Delete)
+	}
+
+	// ---------- Agent 组织关系 ----------
+	// 一条记录是一条有向边；双向关系由创建接口原子写入两条边。
+	adminRelationsGroup := adminWrite.Group("/agent-relations")
+	adminRelationsReadGroup := adminRead.Group("/agent-relations")
+	{
+		adminRelationsReadGroup.GET("", agentRelationHandler.List)
+		adminRelationsReadGroup.GET("/:id/events", agentRelationHandler.ListEvents)
+		adminRelationsGroup.POST("", agentRelationHandler.Create)
+		adminRelationsGroup.POST("/:id/events", agentRelationHandler.RecordEvent)
+		adminRelationsGroup.PUT("/:id", agentRelationHandler.Update)
+		adminRelationsGroup.DELETE("/:id", agentRelationHandler.Delete)
+	}
+	adminRelationTypesGroup := adminWrite.Group("/relation-types")
+	adminRelationTypesReadGroup := adminRead.Group("/relation-types")
+	{
+		adminRelationTypesReadGroup.GET("", relationTypeHandler.List)
+		adminRelationTypesGroup.POST("", relationTypeHandler.Create)
+		adminRelationTypesGroup.PUT("/:name", relationTypeHandler.Update)
+		adminRelationTypesGroup.DELETE("/:name", relationTypeHandler.Delete)
+	}
+
 	// ---------- Knowledge MCP 运行时 ----------
 	// This endpoint is called by the agent runtime with an Agent Runtime Token,
 	// not a user JWT, so it must not be under the JWTAuthWithCLI middleware group.
-	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
+	// H7.4（P0）：额外挂扩展身份链——若调用方声明自己是某个扩展（成对给出
+	// 名称+凭据），则必须持有效凭据且拥有对应 grants；未声明身份的既有
+	// Runtime Token 调用行为不变。
+	knowledgeMcpChain := []gin.HandlerFunc{
+		middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey),
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.ExtensionAuthz(extensionAuthzService, "tool", "read", nil),
+		knowledgeMcpHandler.HandleMessage,
+	}
+	r.POST("/api/v1/knowledge/mcp", knowledgeMcpChain...)
+	// Organization MCP shares runtime-token authentication with knowledge MCP,
+	// but authorizes every send against the directed relation table.
+	organizationMcpChain := []gin.HandlerFunc{
+		middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey),
+		middleware.ExtensionIdentity(extensionIdentityService),
+		middleware.ExtensionAuthz(extensionAuthzService, "message", "write", nil),
+		organizationMcpHandler.HandleMessage,
+	}
+	r.POST("/api/v1/organization/mcp", organizationMcpChain...)
 
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组

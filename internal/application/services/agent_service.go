@@ -20,12 +20,13 @@ import (
 
 // AgentService provides business logic for managing agent configurations.
 type AgentService struct {
-	repo          *repository.AgentRepository
-	toolRepo      *repository.ToolRepository
-	skillRepo     *repository.SkillRepository
-	mcpRepo       *repository.McpRepository
-	providerSvc   *ProviderService
-	encryptionKey string
+	repo            *repository.AgentRepository
+	personalityRepo *repository.PersonalityRepository
+	toolRepo        *repository.ToolRepository
+	skillRepo       *repository.SkillRepository
+	mcpRepo         *repository.McpRepository
+	providerSvc     *ProviderService
+	encryptionKey   string
 	// capabilitySecret verifies the per-agent knowledge MCP capabilities
 	// (issue #111 reopened). Independent from encryptionKey: provisioned
 	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
@@ -40,6 +41,7 @@ type AgentService struct {
 func NewAgentService(encryptionKey, capabilitySecret string) *AgentService {
 	return &AgentService{
 		repo:             repository.NewAgentRepository(),
+		personalityRepo:  repository.NewPersonalityRepository(),
 		toolRepo:         repository.NewToolRepository(),
 		skillRepo:        repository.NewSkillRepository(),
 		mcpRepo:          repository.NewMcpRepository(),
@@ -421,7 +423,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, err
 	}
 
-	cfg, err := s.prepareCreateConfig(input)
+	cfg, err := s.prepareCreateConfig(tenantID, input)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +454,7 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 }
 
 // prepareCreateConfig builds an AgentConfig from creation input with enabled/isDefault resolution.
-func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.AgentConfig, error) {
+func (s *AgentService) prepareCreateConfig(tenantID string, input *CreateAgentInput) (*agent.AgentConfig, error) {
 	desktop := false
 	if input.DesktopEnabled != nil {
 		desktop = *input.DesktopEnabled
@@ -479,6 +481,9 @@ func (s *AgentService) prepareCreateConfig(input *CreateAgentInput) (*agent.Agen
 		IsDefault:      isDefault,
 	}
 	if err := unpackConfigToModel(input.Config, cfg, s.encryptionKey); err != nil {
+		return nil, err
+	}
+	if err := s.applyPersonalitySelection(tenantID, cfg, input.Config, false); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -524,11 +529,35 @@ func (s *AgentService) UpdateAgent(tenantID, name string, input *UpdateAgentInpu
 // applyUpdateConfig applies the update input fields to an existing agent config.
 func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig, input *UpdateAgentInput) error {
 	if input.Config != nil {
+		// 人格内容属于人格库的服务端快照。旧客户端即使仍提交这些
+		// 字段，在没有切换人格模板时也不能直接改写它们。
+		previousTemplateName := cfg.PersonalityTemplateName
+		previousTemplateVersion := cfg.PersonalityTemplateVersion
+		previousPrompt := cfg.PersonalityPrompt
+		previousProfile := cfg.BehaviorProfile
 		if err := ValidateConfig(*input.Config); err != nil {
 			return err
 		}
 		if err := unpackConfigToModel(*input.Config, cfg, s.encryptionKey); err != nil {
 			return err
+		}
+		if _, changed := (*input.Config)["personalityTemplateName"]; changed {
+			selectedName, _ := (*input.Config)["personalityTemplateName"].(string)
+			keepDisabledSnapshot := strings.TrimSpace(selectedName) == previousTemplateName
+			if keepDisabledSnapshot {
+				cfg.PersonalityTemplateName = previousTemplateName
+				cfg.PersonalityTemplateVersion = previousTemplateVersion
+				cfg.PersonalityPrompt = previousPrompt
+				cfg.BehaviorProfile = previousProfile
+			}
+			if err := s.applyPersonalitySelection(tenantID, cfg, *input.Config, keepDisabledSnapshot); err != nil {
+				return err
+			}
+		} else {
+			cfg.PersonalityTemplateName = previousTemplateName
+			cfg.PersonalityTemplateVersion = previousTemplateVersion
+			cfg.PersonalityPrompt = previousPrompt
+			cfg.BehaviorProfile = previousProfile
 		}
 	}
 
@@ -550,6 +579,43 @@ func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig
 	if input.Source != "" {
 		cfg.Source = input.Source
 	}
+	return nil
+}
+
+// applyPersonalitySelection makes the personality library the only editable
+// source of personality content. Agent requests choose a template by name;
+// the server snapshots its current prompt and version so runtime deployments
+// remain reproducible. Legacy behavior profiles are never copied forward.
+func (s *AgentService) applyPersonalitySelection(tenantID string, cfg *agent.AgentConfig, config map[string]interface{}, allowDisabledSnapshot bool) error {
+	raw, exists := config["personalityTemplateName"]
+	name, ok := raw.(string)
+	if exists && !ok {
+		return fmt.Errorf("personalityTemplateName 必须是字符串")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		cfg.PersonalityTemplateName = ""
+		cfg.PersonalityTemplateVersion = 0
+		cfg.PersonalityPrompt = ""
+		cfg.BehaviorProfile = nil
+		return nil
+	}
+
+	template, err := s.personalityRepo.GetByName(tenantID, name)
+	if err != nil {
+		return fmt.Errorf("人格 %q 不存在: %w", name, err)
+	}
+	if !template.Enabled {
+		if allowDisabledSnapshot {
+			return nil
+		}
+		return fmt.Errorf("人格 %q 已停用，请选择其他人格", name)
+	}
+
+	cfg.PersonalityTemplateName = template.Name
+	cfg.PersonalityTemplateVersion = template.CurrentVersion
+	cfg.PersonalityPrompt = template.Prompt
+	cfg.BehaviorProfile = nil
 	return nil
 }
 
@@ -681,6 +747,15 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	if v, ok := config["group"].(string); ok {
 		cfg.Group = v
 	}
+	if v, ok := config["personalityTemplateName"].(string); ok {
+		cfg.PersonalityTemplateName = v
+	}
+	if v, ok := config["personalityTemplateVersion"].(float64); ok {
+		cfg.PersonalityTemplateVersion = int(v)
+	}
+	if v, ok := config["personalityPrompt"].(string); ok {
+		cfg.PersonalityPrompt = v
+	}
 
 	// Handle maxSessionQueries field
 	if v, ok := config["maxSessionQueries"].(float64); ok {
@@ -729,14 +804,18 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 
 func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]interface{} {
 	m := map[string]interface{}{
-		"systemPrompt":   cfg.SystemPrompt,
-		"permissionMode": cfg.PermissionMode,
-		"maxTurns":       cfg.MaxTurns,
-		"icon":           cfg.Icon,
-		"iconName":       cfg.IconName,
-		"iconColor":      cfg.IconColor,
-		"iconBgColor":    cfg.IconBgColor,
-		"group":          cfg.Group,
+		"systemPrompt":               cfg.SystemPrompt,
+		"permissionMode":             cfg.PermissionMode,
+		"maxTurns":                   cfg.MaxTurns,
+		"icon":                       cfg.Icon,
+		"iconName":                   cfg.IconName,
+		"iconColor":                  cfg.IconColor,
+		"iconBgColor":                cfg.IconBgColor,
+		"group":                      cfg.Group,
+		"behaviorProfile":            cfg.BehaviorProfile,
+		"personalityTemplateName":    cfg.PersonalityTemplateName,
+		"personalityTemplateVersion": cfg.PersonalityTemplateVersion,
+		"personalityPrompt":          cfg.PersonalityPrompt,
 	}
 
 	if cfg.MaxSessionQueries != nil {

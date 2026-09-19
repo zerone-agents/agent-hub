@@ -72,7 +72,8 @@ interface UseChatStreamReturn {
     sessionId: string,
     content: string,
     attachments?: AttachmentDesc[],
-    onEstablished?: () => void
+    onEstablished?: () => void,
+    runId?: string
   ) => Promise<void>
   reset: () => void
 }
@@ -119,7 +120,8 @@ export function useChatStream(): UseChatStreamReturn {
     sessionId: string,
     content: string,
     attachments?: AttachmentDesc[],
-    onEstablished?: () => void
+    onEstablished?: () => void,
+    runId?: string
   ) => {
     // Abort any in-flight stream
     abortRef.current?.abort()
@@ -142,7 +144,9 @@ export function useChatStream(): UseChatStreamReturn {
     setState({ phase: 'sending', parts: [], error: null, retry: null, sessionId, errorPersisted: false })
 
     try {
-      const resp = await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal, attachments)
+      const resp = runId
+        ? await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal, attachments, runId)
+        : await agentChatApi.sendMessageStream(agentName, sessionId, content, ctrl.signal, attachments)
       // fetch 200：SSE 已建立。附件/输入清空时机锚点（issue #94：SSE 成功
       // 建立后才清空文本、本地文件和 blob URL）。
       onEstablished?.()

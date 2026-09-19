@@ -1,0 +1,22 @@
+apiVersion: agenthub.extension/v1alpha1
+kind: CapabilityPackage
+metadata:
+  name: Invalid Name
+  namespace: speeding
+  version: latest
+  displayName: Invalid package
+  description: Invalid fixture
+  publisher: test
+compatibility:
+  hub: "*"
+  runtimeProtocol: "*"
+permissions:
+  state: { read: [], write: [] }
+  events: { consume: [], emit: [] }
+  tools: { expose: [] }
+  network: { outbound: [] }
+contributes:
+  stateSchemas:
+    - id: state
+      version: 1.0
+      file: ../outside.json

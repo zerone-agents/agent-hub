@@ -19,5 +19,5 @@ frontend/.vite/
 docs/superpowers/
 quickstart/.env
 
-# SDD worktrees
-.worktrees/
+# Local SQLite dev database (scripts/dev-local.sh)
+agent_hub.db*

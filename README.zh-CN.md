@@ -87,6 +87,7 @@ Zerone Agent Hub 是 Go（Gin + GORM）后端 + 内嵌 React 19 SPA。它协调 
 - 🚢 [部署](docs/deployment.md)
 - 🔐 [安全须知](docs/security.md)
 - 🗄️ [数据模型](docs/data-model.md)
+- 🎮 [SPEEDING 世界运行与叙事系统 TODO](docs/speeding-world-runtime-todo.md)
 
 ---
 

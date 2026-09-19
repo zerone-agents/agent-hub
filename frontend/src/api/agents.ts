@@ -1,5 +1,18 @@
 import apiClient from './client'
 
+/** @deprecated Read-only compatibility shape for historical API records. */
+export interface BehaviorProfile {
+  version: 1
+  hierarchyCompliance: number
+  ambition: number
+  whistleblowing: number
+  riskTolerance: number
+  conflictAvoidance: number
+  secrecy: number
+  selfInterest: number
+  escalationThreshold: number
+}
+
 export interface AgentConfig {
   id?: number
   name?: string
@@ -22,6 +35,11 @@ export interface AgentConfig {
   source?: string
   isDefault?: boolean
   group?: string
+  /** @deprecated Read-only; new writes are rejected by the Hub. */
+  behaviorProfile?: BehaviorProfile | null
+  personalityTemplateName?: string
+  personalityTemplateVersion?: number
+  personalityPrompt?: string
   createdAt?: string
   updatedAt?: string
 }

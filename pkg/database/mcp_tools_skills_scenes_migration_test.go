@@ -149,3 +149,45 @@ func TestPresetToolNames_ExpandedTo18(t *testing.T) {
 		require.Contains(t, agent.PresetToolNames, name)
 	}
 }
+
+// 回归 P1：回填目标不可推断（backfillTenantID 为空）且确实存在遗留行时，
+// 旧判据（`backfillTenantID != ""` 前置条件）会把整段迁移短路，遗留行既不
+// 回填也不报错，永久留在共享域被所有租户读到。现在必须显式报错。
+//
+// 同时断言报错发生在任何写操作之前：遗留行原地保持，等待运维显式指定租户，
+// 而不是被部分迁移改坏后再失败。
+func TestMigrateMcpToolsSkillsScenes_UninferableTenantWithLegacyRowsFails(t *testing.T) {
+	db := setupLegacyBackfillDB(t)
+	seedToolRow(t, db, "my-tool", "") // 非预设 → 真正的遗留信号
+	seedSkillRow(t, db, "my-skill")
+	agentID := seedAgentRow(t, db, "my-agent", "zerone")
+	seedSceneRow(t, db, "my-scene", agentID)
+	backfillTenantID = ""
+
+	err := migrateMcpToolsSkillsScenesTenantID()
+	require.Error(t, err, "无法推断目标租户时不得静默跳过回填")
+	require.Contains(t, err.Error(), "无法自动推断目标租户")
+	require.Contains(t, err.Error(), "CASDOOR_ORGANIZATION", "错误信息必须给出可执行的修复指引")
+
+	// 报错前不得改动任何行。
+	require.Equal(t, map[string]string{"my-tool": ""}, tenantIDsByTable(t, db, "tools"))
+	require.Equal(t, map[string]string{"my-skill": ""}, tenantIDsByTable(t, db, "skills"))
+	require.Equal(t, map[string]string{"my-scene": ""}, tenantIDsByTable(t, db, "scenes"))
+}
+
+// 显式指定回填目标后，同一份数据必须能正常完成迁移（报错路径不是死胡同）。
+func TestMigrateMcpToolsSkillsScenes_UninferableThenConfiguredSucceeds(t *testing.T) {
+	db := setupLegacyBackfillDB(t)
+	seedToolRow(t, db, "my-tool", "")
+	seedSkillRow(t, db, "my-skill")
+	agentID := seedAgentRow(t, db, "my-agent", "zerone")
+	seedSceneRow(t, db, "my-scene", agentID)
+	backfillTenantID = ""
+	require.Error(t, migrateMcpToolsSkillsScenesTenantID())
+
+	backfillTenantID = "zerone"
+	require.NoError(t, migrateMcpToolsSkillsScenesTenantID())
+	require.Equal(t, map[string]string{"my-tool": "zerone"}, tenantIDsByTable(t, db, "tools"))
+	require.Equal(t, map[string]string{"my-skill": "zerone"}, tenantIDsByTable(t, db, "skills"))
+	require.Equal(t, map[string]string{"my-scene": "zerone"}, tenantIDsByTable(t, db, "scenes"))
+}

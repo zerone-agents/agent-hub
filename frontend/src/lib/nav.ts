@@ -10,7 +10,16 @@ import {
   CubeIcon,
   FilmSlateIcon,
   BooksIcon,
-  ChatsIcon
+  ChatsIcon,
+  ShareNetworkIcon,
+  FingerprintIcon,
+  PackageIcon,
+  PulseIcon,
+  ShieldCheckIcon,
+  UsersThreeIcon,
+  GitBranchIcon,
+  SquaresFourIcon,
+  ChartPieIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -25,7 +34,16 @@ export interface NavItem {
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'dashboard', label: 'nav.dashboard', path: '/dashboard', icon: GaugeIcon },
+  { id: 'runs', label: '运行中心', path: '/runs', icon: PulseIcon },
   { id: 'agents', label: 'nav.agents', path: '/agents', icon: RobotIcon },
+  { id: 'personalities', label: '人格库', path: '/personalities', icon: FingerprintIcon },
+  { id: 'relations', label: '组织关系', path: '/relations', icon: ShareNetworkIcon },
+  { id: 'groups', label: '组织协作', path: '/groups', icon: UsersThreeIcon },
+  { id: 'governance', label: '流程与决策', path: '/governance', icon: GitBranchIcon },
+  { id: 'collaboration-audit', label: '协作审计', path: '/collaboration-audit', icon: ShieldCheckIcon },
+  { id: 'extensions', label: '扩展能力', path: '/extensions', icon: PackageIcon },
+  { id: 'templates', label: '模板库', path: '/templates', icon: SquaresFourIcon },
+  { id: 'usage', label: '用量运维', path: '/usage', icon: ChartPieIcon },
   { id: 'tools', label: 'nav.tools', path: '/tools', icon: WrenchIcon },
   { id: 'mcps', label: 'nav.mcps', path: '/mcps', icon: PlugsConnectedIcon },
   { id: 'skills', label: 'nav.skills', path: '/skills', icon: SparkleIcon },

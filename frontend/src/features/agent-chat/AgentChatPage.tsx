@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 // 组件外纯函数：直调 i18next
 import i18next from '@/i18n'
-import { useParams, useNavigate } from 'react-router'
+import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { Empty } from 'antd'
 import { StopIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -138,6 +138,8 @@ function sendErrorMessage(errorCode: string | undefined, fallback: string | null
 function AgentChatInner({ name }: { name: string }) {
   const { t } = useTranslation()
   const { styles } = useStyles()
+  const [searchParams] = useSearchParams()
+  const runId = searchParams.get('runId') ?? undefined
   const navigate = useNavigate()
   const { data: mode } = useAuthMode()
   const { data: user } = useUserInfo()
@@ -367,7 +369,7 @@ function AgentChatInner({ name }: { name: string }) {
     void stream.send(name, selected.id, content, descriptors, () => {
       chatInputRef.current?.clearText()
       attachments.clearAll()
-    })
+    }, runId)
     return true
   }
 

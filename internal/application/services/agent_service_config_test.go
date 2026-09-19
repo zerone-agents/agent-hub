@@ -174,6 +174,30 @@ func TestDisallowedToolsConfigKeys(t *testing.T) {
 	})
 }
 
+func behaviorProfileConfigMap() map[string]interface{} {
+	return map[string]interface{}{
+		"version":             float64(1),
+		"hierarchyCompliance": float64(75),
+		"ambition":            float64(30),
+		"whistleblowing":      float64(55),
+		"riskTolerance":       float64(35),
+		"conflictAvoidance":   float64(60),
+		"secrecy":             float64(55),
+		"selfInterest":        float64(35),
+		"escalationThreshold": float64(75),
+	}
+}
+
+func TestBehaviorProfileConfigKeys(t *testing.T) {
+	t.Run("legacy profile remains readable and untouched by unrelated edits", func(t *testing.T) {
+		profile := agent.DefaultBehaviorProfile()
+		cfg := &agent.AgentConfig{BehaviorProfile: &profile}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{"systemPrompt": "updated"}, cfg, ""))
+		require.Same(t, &profile, cfg.BehaviorProfile)
+		require.Equal(t, &profile, modelToConfigMap(cfg, "")["behaviorProfile"])
+	})
+}
+
 // setupAgentKnowledgeAuthTestDB 起 sqlite 内存库，建齐
 // GetAgentKnowledgeDatasetsForRequest 触碰的三张表：agents、agent_subagents、
 // agent_knowledge_datasets。与 setupSubagentToolsTestDB 同款裸 SQL 方案
@@ -207,6 +231,10 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			guest_enabled INTEGER NOT NULL DEFAULT 0,
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
+			behavior_profile JSON,
+			personality_template_name VARCHAR(64) DEFAULT '',
+			personality_template_version INTEGER NOT NULL DEFAULT 0,
+			personality_prompt TEXT,
 			max_session_queries INTEGER,
 			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,

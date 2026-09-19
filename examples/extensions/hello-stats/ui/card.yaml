@@ -1,0 +1,18 @@
+# dashboard.card 插槽的组件声明（H7.2 渲染消费）。
+#
+# manifest 的 ui.slots 声明了 dashboard.card，本文件描述卡片组件：
+# stat-card 渲染 /runs 与 /messages 两个计数字段，数据来自 stats 状态 Schema。
+component: stat-card
+title: Hello Stats
+dataSource:
+  type: state
+  schemaRef: stats
+fields:
+  - path: /runs
+    label: 运行次数
+    format: integer
+    visualization: number
+  - path: /messages
+    label: 消息数
+    format: integer
+    visualization: number

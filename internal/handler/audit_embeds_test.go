@@ -15,6 +15,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/aigc"
 	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
@@ -99,6 +100,7 @@ func setupAuditDeployEnv(t *testing.T) (*gin.Engine, *gorm.DB) {
 	db := openAuditEmbedDB(t)
 	require.NoError(t, db.AutoMigrate(
 		&agent.AgentConfig{}, &agent.AgentSubagent{},
+		&agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{},
 		&agent.Tool{}, &agent.AgentTool{},
 		&skill.Skill{}, &agent.AgentSkill{},
 		&mcp.McpServer{}, &mcp.AgentMcpServer{},

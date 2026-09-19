@@ -17,6 +17,37 @@ vi.mock('@/queries/useAgents', () => ({
   useAgents: () => ({ data: [] as Agent[] }),
 }))
 
+vi.mock('@/queries/usePersonalities', () => ({
+  usePersonalities: () => ({
+    data: [
+      {
+        id: 1,
+        name: 'duty-whistleblower',
+        title: '尽职揭弊者',
+        description: '重事实与公共责任',
+        prompt: '证据充分且常规渠道失效时，你会越级报告。',
+        currentVersion: 3,
+        enabled: true,
+        isBuiltin: true,
+        usageCount: 0,
+        createdAt: '',
+        updatedAt: '',
+        behaviorProfile: {
+          version: 1,
+          hierarchyCompliance: 65,
+          ambition: 35,
+          whistleblowing: 95,
+          riskTolerance: 65,
+          conflictAvoidance: 20,
+          secrecy: 35,
+          selfInterest: 20,
+          escalationThreshold: 25,
+        },
+      },
+    ],
+  }),
+}))
+
 function renderForm(editingAgent: Agent | null) {
   return render(
     <ConfigProvider theme={antdTheme}>
@@ -126,6 +157,42 @@ describe('AgentForm disallowedTools', { timeout: 15000 }, () => {
     const payload = updateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
     expect(payload.name).toBe('deny-agent')
     expect(payload.data.config.disallowedTools).toEqual(['Bash', 'WebSearch'])
+  })
+})
+
+describe('AgentForm personality library selection', { timeout: 15000 }, () => {
+  beforeEach(() => {
+    createAgent.mockReset()
+    updateAgent.mockReset()
+  })
+
+  it('keeps personality editing out of the agent form', () => {
+    renderForm(null)
+
+    expect(screen.getByRole('combobox', { name: '人格模板' })).toBeInTheDocument()
+    expect(screen.queryByText('人格原稿')).not.toBeInTheDocument()
+    expect(screen.queryByText('提示词原稿')).not.toBeInTheDocument()
+    expect(screen.queryByText('结构化投影（兼容）')).not.toBeInTheDocument()
+    expect(screen.getByText('职责与任务')).toBeInTheDocument()
+  })
+
+  it('submits only the personality reference and leaves snapshotting to the server', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    const personalitySelect = screen.getByRole('combobox', { name: '人格模板' })
+    await user.click(personalitySelect)
+    await user.click(await screen.findByText('尽职揭弊者 · v3'))
+    await user.type(screen.getByLabelText('代理标识'), 'prompt-agent')
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
+    expect(payload.config.personalityTemplateName).toBe('duty-whistleblower')
+    expect(payload.config).not.toHaveProperty('personalityTemplateVersion')
+    expect(payload.config).not.toHaveProperty('personalityPrompt')
+    expect(payload.config).not.toHaveProperty('behaviorProfile')
+    expect(screen.getByText('重事实与公共责任')).toBeInTheDocument()
   })
 })
 

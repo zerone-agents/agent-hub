@@ -15,6 +15,7 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth/jwtutil"
 	"control-panel/internal/domain/chat"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/infrastructure/runtime"
 
@@ -22,11 +23,51 @@ import (
 )
 
 type AgentChatHandler struct {
-	svc *services.AgentChatService
+	svc            *services.AgentChatService
+	runTrace       runTraceService
+	promptComposer promptDeliveryService
+	usage          *services.UsageService // H7.5 advisory usage hook; nil = off
 }
 
-func NewAgentChatHandler(svc *services.AgentChatService) *AgentChatHandler {
-	return &AgentChatHandler{svc: svc}
+type runTraceService interface {
+	Get(tenantID, id string) (*rundomain.Run, error)
+	AppendActivity(tenantID, runID string, input services.AppendRunActivityInput) (*rundomain.RunActivity, error)
+}
+
+type promptDeliveryService interface {
+	ComposeForDelivery(tenantID, runID string, agentID uint64, userInput string) (*rundomain.PromptSnapshot, string, error)
+	MarkDelivery(tenantID, snapshotID, status string) error
+}
+
+func NewAgentChatHandler(svc *services.AgentChatService, runTrace ...runTraceService) *AgentChatHandler {
+	h := &AgentChatHandler{svc: svc}
+	if len(runTrace) > 0 {
+		h.runTrace = runTrace[0]
+	}
+	return h
+}
+
+// SetPromptComposer enables run-scoped prompt delivery without changing the
+// legacy chat constructor used by integrations that do not support Runs.
+func (h *AgentChatHandler) SetPromptComposer(service promptDeliveryService) {
+	h.promptComposer = service
+}
+
+// SetUsageService 注入 H7.5 用量采集（advisory：Record 永不阻塞、永不
+// panic，聊天路径不因埋点失败而受影响）。
+func (h *AgentChatHandler) SetUsageService(u *services.UsageService) { h.usage = u }
+
+// recordModelCall 是聊天路径的 model_call 埋点（nil-safe + Record 自身
+// recover，调用处零心智负担）。
+func (h *AgentChatHandler) recordModelCall(tenantID, runID string, latency time.Duration, runErr string) {
+	if h.usage == nil {
+		return
+	}
+	latencyMs := latency.Milliseconds()
+	h.usage.Record(services.UsageRecordInput{
+		Kind: "model_call", TenantID: tenantID, RunID: runID,
+		LatencyMs: &latencyMs, Error: runErr,
+	})
 }
 
 // blockGuestInvisibleAgent: guest 访问未开放 Agent 时写中性 404（与
@@ -150,6 +191,7 @@ func (h *AgentChatHandler) Capabilities(c *gin.Context) {
 type sendMessageReq struct {
 	Content     string                    `json:"content"`
 	Attachments []services.AttachmentDesc `json:"attachments"`
+	RunID       string                    `json:"runId,omitempty"`
 }
 
 // runRequestBody is the POST /v1/agents/{agentId}/runs JSON body. attachments
@@ -210,6 +252,17 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
+	// A chat execution may be attached to an explicit H1 Run. Legacy chat
+	// remains valid without runId; once supplied, the Run must be running and
+	// contain this Agent in its immutable participant snapshot.
+	var runParticipant *rundomain.RunAgent
+	if req.RunID != "" {
+		runParticipant, err = h.validateRunParticipant(tenantID, req.RunID, agentName)
+		if err != nil {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+	}
 	// 2. Resolve runtime URL, API key, and the deployer-reported container id
 	// BEFORE anything is persisted: the attachment probe below needs the base
 	// URL, and a resolve failure must not leave a persisted user turn (or an
@@ -266,17 +319,51 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 			return
 		}
 	}
+
+	// For an explicit Run, the runtime receives a JSON envelope containing the
+	// platform-owned composed context and the exact user input. JSON encoding
+	// makes user text data rather than a forgeable prompt delimiter. The chat
+	// message persisted below intentionally remains the original user input.
+	runtimeMessage := req.Content
+	var promptSnapshot *rundomain.PromptSnapshot
+	if req.RunID != "" {
+		if h.promptComposer == nil {
+			respondError(c, http.StatusServiceUnavailable, "运行上下文服务暂不可用")
+			return
+		}
+		promptSnapshot, runtimeMessage, err = h.promptComposer.ComposeForDelivery(tenantID, req.RunID, runParticipant.AgentID, req.Content)
+		if err != nil {
+			log.Printf("[chat] compose run prompt failed: tenant=%s run=%s agent=%s err=%v", tenantID, req.RunID, agentName, err)
+			respondError(c, http.StatusConflict, "本次运行的判断背景生成失败")
+			return
+		}
+	}
 	msg, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments)
 	if err != nil {
+		if promptSnapshot != nil {
+			_ = h.promptComposer.MarkDelivery(tenantID, promptSnapshot.ID, "failed")
+		}
 		log.Printf("[chat] save user message failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
 		respondError(c, http.StatusNotFound, "会话不存在")
 		return
 	}
+	executionID := msg.ID
+	if req.RunID != "" {
+		h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+			Kind: "participant", Status: "active", ActorType: "agent", ActorID: agentName,
+			StepID: executionID, Name: agentName,
+		})
+		h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+			Kind: "started", Status: "running", ActorType: "agent", ActorID: agentName,
+			StepID: executionID, Name: "agent_execution",
+			Input: map[string]any{"sessionId": sessionID, "messageId": msg.ID, "hasAttachments": len(req.Attachments) > 0},
+		})
+	}
 
 	// 5. Build runtime request body. Re-use the runtime SDK session id if this
 	// control-panel session has already been bound to one.
-	body := runRequestBody{Message: req.Content}
+	body := runRequestBody{Message: runtimeMessage}
 	if sess.RuntimeSessionID != "" {
 		body.SessionID = sess.RuntimeSessionID
 	}
@@ -287,6 +374,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 
 	// 6. Open runtime stream
 	ctx := c.Request.Context()
+	runStart := time.Now()
 	// runtime 注册名为裸 Agent ID（issue #114）；scoped deployment key 仅是
 	// deployer 资源标识，不参与 runtime 寻址。
 	// 带附件的 run 携带 X-Expected-Container-Id（runtime v2.7.0 原子代次校验
@@ -299,6 +387,15 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	rc, err := h.svc.RuntimeClient().StreamRun(ctx, baseURL, services.NormalizeAgentName(agentName), apiKey, bodyBytes, expectedContainerID)
 	if err != nil {
+		if promptSnapshot != nil {
+			_ = h.promptComposer.MarkDelivery(tenantID, promptSnapshot.ID, "failed")
+		}
+		if req.RunID != "" {
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: "failed", Status: "failed", ActorType: "agent", ActorID: agentName,
+				StepID: executionID, Name: "agent_execution", Error: "runtime request failed",
+			})
+		}
 		// Runtime run-attachment domain errors (attachment_missing etc.) are
 		// pre-run failures: surface the code so the frontend can retry from
 		// local files instead of persisting a system error message. The code
@@ -334,10 +431,16 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
+		h.recordModelCall(tenantID, req.RunID, time.Since(runStart), "runtime_connect_failed")
 		respondError(c, http.StatusBadGateway, "Runtime 连接失败，请稍后重试")
 		return
 	}
 	defer rc.Close()
+	if promptSnapshot != nil {
+		if markErr := h.promptComposer.MarkDelivery(tenantID, promptSnapshot.ID, "delivered"); markErr != nil {
+			log.Printf("[chat] mark prompt delivered failed: tenant=%s run=%s snapshot=%s err=%v", tenantID, req.RunID, promptSnapshot.ID, markErr)
+		}
+	}
 
 	// 会话标题：优先文本；纯附件消息取第一个文件名（issue #94）。时机在
 	// runtime 流成功建立之后（review round 7）：pre-run 拒绝（回滚分支）与
@@ -410,6 +513,23 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// showed nothing. Now we always flush buffered content to the DB; the
 	// runtime keeps executing regardless of the downstream connection.
 	aggregateStr := aggregate.String()
+	if req.RunID != "" {
+		for _, activity := range extractRuntimeActivities(aggregateStr) {
+			input := decodeActivityObject(activity.InputJSON)
+			output := decodeActivityObject(activity.OutputJSON)
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: activity.Kind, Status: activity.Status, ActorType: "agent", ActorID: agentName,
+				StepID: firstNonEmpty(activity.StepID, executionID), Name: activity.Name,
+				Input: input, Output: output, Error: activity.Error,
+			})
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			h.appendRunActivity(tenantID, req.RunID, services.AppendRunActivityInput{
+				Kind: "failed", Status: "failed", ActorType: "agent", ActorID: agentName,
+				StepID: executionID, Name: "agent_execution", Error: "runtime stream interrupted",
+			})
+		}
+	}
 
 	// result/subtype=error（如 429 配额耗尽）是正常结束的流里携带的运行时
 	// 失败，scanner.Err 为 nil 覆盖不到；落库为系统错误消息，刷新后历史可见。
@@ -437,6 +557,65 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		aigcLabel := extractAigcLabel(aggregateStr)
 		_, _ = h.svc.SaveAssistantMessage(tenantID, userID, sessionID, contentJSON, aigcLabel)
 	}
+	// H7.5 埋点：model_call（错误取自流内 result error / 流中断）。
+	usageErr := extractRuntimeError(aggregateStr)
+	if usageErr == "" {
+		if scanErr := scanner.Err(); scanErr != nil {
+			usageErr = "runtime_stream_interrupted"
+		}
+	}
+	h.recordModelCall(tenantID, req.RunID, time.Since(runStart), usageErr)
+}
+
+func (h *AgentChatHandler) validateRunParticipant(tenantID, runID, agentName string) (*rundomain.RunAgent, error) {
+	if h.runTrace == nil {
+		return nil, fmt.Errorf("运行跟踪服务暂不可用")
+	}
+	run, err := h.runTrace.Get(tenantID, runID)
+	if err != nil {
+		return nil, fmt.Errorf("运行不存在或不可访问")
+	}
+	if run.Status != rundomain.StatusRunning {
+		return nil, fmt.Errorf("运行当前不是执行中状态")
+	}
+	for i := range run.Agents {
+		participant := &run.Agents[i]
+		if services.NormalizeAgentName(participant.AgentNameSnapshot) == agentName {
+			return participant, nil
+		}
+	}
+	return nil, fmt.Errorf("当前 Agent 不在该运行的参与者中")
+}
+
+func (h *AgentChatHandler) appendRunActivity(tenantID, runID string, input services.AppendRunActivityInput) {
+	if h.runTrace == nil {
+		return
+	}
+	if _, err := h.runTrace.AppendActivity(tenantID, runID, input); err != nil {
+		log.Printf("[chat] append run activity failed: tenant=%s run=%s kind=%s err=%v", tenantID, runID, input.Kind, err)
+	}
+}
+
+func decodeActivityObject(raw string) map[string]any {
+	if raw == "" {
+		return nil
+	}
+	var object map[string]any
+	if json.Unmarshal([]byte(raw), &object) == nil {
+		return object
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) == nil {
+		return map[string]any{"value": value}
+	}
+	return map[string]any{"value": raw}
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 // saveErrorMessage persists a system error message so the failure is visible
