@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/extension"
 	reldynamics "control-panel/internal/domain/reldynamics"
@@ -32,12 +33,16 @@ func personaGateMessageFixture(t *testing.T) (agentMessageFixture, *ExtensionLif
 	f := setupAgentMessageService(t)
 	require.NoError(t, f.db.AutoMigrate(
 		&rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{},
+		&rundomain.CapabilityBinding{},
 		&extension.Extension{}, &extension.Version{}, &extension.Install{},
 	))
 	runSvc := NewRunService(f.db)
 	f.service.SetPersonaHooks(NewBeliefService(runSvc), NewRelationDynamicsService(runSvc))
 	lifecycle := NewExtensionLifecycleService(f.db)
 	require.NoError(t, lifecycle.EnsureBuiltinPersonaPacks())
+	for _, namespace := range []string{"io.zerone.emotion", "io.zerone.belief", "io.zerone.subjective-memory", "io.zerone.relationship-dynamics"} {
+		require.NoError(t, f.db.Create(&rundomain.CapabilityBinding{TenantID: "tenant-a", RunID: "run-1", Namespace: namespace, PackageName: "test", Version: "1", ContentHash: "test", ManifestYAML: "test"}).Error)
+	}
 	f.service.SetPersonaCapabilityGate(NewPersonaCapabilityGate(f.db))
 	return f, lifecycle
 }
@@ -191,4 +196,31 @@ func TestAgentMessageRelationGateNeedConfirmFollowsPackSwitch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, disabledSend.GuardReason, "停用后不再打确认标记（标注而非授权约束）")
+}
+
+func TestAgentMessagePersonaHooksRequireRunBinding(t *testing.T) {
+	f, _ := personaGateMessageFixture(t)
+	addMessageRelation(t, f, f.a, f.b, "task", "async", "summary_only", "inform")
+
+	bound, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "task", Action: "inform", Message: "bound fact", RunID: "run-1",
+	})
+	require.NoError(t, err)
+	beliefs := NewBeliefService(NewRunService(f.db))
+	rows, err := beliefs.List("tenant-a", "run-1", f.b.ID, bound.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	started := time.Now().UTC()
+	require.NoError(t, f.db.Create(&rundomain.Run{ID: "run-unbound", TenantID: "tenant-a", Name: "unbound", Status: rundomain.StatusRunning, StartedAt: &started}).Error)
+	for _, item := range []agent.AgentConfig{f.a, f.b} {
+		require.NoError(t, f.db.Create(&rundomain.RunAgent{TenantID: "tenant-a", RunID: "run-unbound", AgentID: item.ID, AgentNameSnapshot: item.Name}).Error)
+	}
+	unbound, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "task", Action: "inform", Message: "must stay outside H6", RunID: "run-unbound",
+	})
+	require.NoError(t, err)
+	rows, err = beliefs.List("tenant-a", "run-unbound", f.b.ID, unbound.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows, "an unbound Run must not acquire H6 belief state")
 }

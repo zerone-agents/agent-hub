@@ -284,6 +284,12 @@ func main() {
 	if err := extensionLifecycleService.EnsureBuiltinPersonaPacks(); err != nil {
 		log.Fatalf("Failed to ensure builtin persona packs: %v", err)
 	}
+	// H6 Run binding: expose the same four persona abilities as immutable,
+	// selectable capability packages. Extension installation controls whether
+	// code is available; a Run binding controls whether that Run may use it.
+	if err := services.NewCapabilityRegistryService(database.GetDB()).EnsureBuiltinPersonaCapabilities(); err != nil {
+		log.Fatalf("Failed to ensure builtin persona capability packages: %v", err)
+	}
 	// P0-3 启动期断言：种子必须真正落地 grants 行。syncGrantsWithTx 在 authz
 	// 未接线时是静默 no-op，而"把 SetAuthzService 放在种子之前"只是一句注释，
 	// 挡不住下一次重排——这里显式验证，把静默失效变成启动失败。

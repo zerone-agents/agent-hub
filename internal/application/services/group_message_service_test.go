@@ -98,6 +98,10 @@ func TestGroupSendRoundRobinPersistsAndRotates(t *testing.T) {
 		require.Equal(t, 1, dispatch.RecipientCount)
 		require.Len(t, dispatch.Deliveries, 1)
 		require.Equal(t, expected, dispatch.Deliveries[0].TargetAgent)
+		require.Eventually(t, func() bool {
+			current, statusErr := service.GroupMessageStatus("tenant-a", &agents[0], dispatch.ID)
+			return statusErr == nil && current.Status == agentrelation.DispatchStatusCompleted
+		}, time.Second, 10*time.Millisecond)
 	}
 	restarted := newAgentMessageService(repository.NewAgentRelationRepositoryWithDB(service.messageRepo.DB()), repository.NewAgentMessageRepositoryWithDB(service.messageRepo.DB()), repository.NewAgentRepositoryWithDB(service.messageRepo.DB()), service.runner)
 	dispatch, err := restarted.GroupSend("tenant-a", &agents[0], GroupMessageInput{GroupID: group.ID, Message: "after restart", Audience: "round_robin", IdempotencyKey: "rr-restart"})

@@ -86,6 +86,14 @@ func (h *OrganizationMcpHandler) personaPackEnabled(tenantID, pack string) bool 
 	return h.personaGate.Enabled(tenantID, pack)
 }
 
+func (h *OrganizationMcpHandler) personaPackEnabledForRun(tenantID, runID, pack string) bool {
+	if h.personaGate == nil {
+		services.WarnPersonaGateMissing("OrganizationMcpHandler")
+		return true
+	}
+	return h.personaGate.EnabledForRun(tenantID, runID, pack)
+}
+
 // personaDisabledError 是人物工具被扩展生命周期停用时的统一错误。
 func personaDisabledError(id interface{}, pack string) jsonRPCResponse {
 	return mcpErrorResult(id, fmt.Sprintf("能力 %s 已被停用", pack))
@@ -632,15 +640,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, execution)
 	case "emotion_status":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackEmotion) {
-			return personaDisabledError(id, services.PersonaPackEmotion), nil
-		}
 		if h.emotionService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackEmotion) {
+			return personaDisabledError(id, services.PersonaPackEmotion), nil
 		}
 		state, err := h.emotionService.Status(tenantID, runID, source.ID)
 		if err != nil {
@@ -651,15 +659,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, state)
 	case "belief_list":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackBelief) {
-			return personaDisabledError(id, services.PersonaPackBelief), nil
-		}
 		if h.beliefService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackBelief) {
+			return personaDisabledError(id, services.PersonaPackBelief), nil
 		}
 		var args beliefListArgs
 		if len(call.Arguments) > 0 {
@@ -673,15 +681,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"beliefs": beliefs})
 	case "belief_claim":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackBelief) {
-			return personaDisabledError(id, services.PersonaPackBelief), nil
-		}
 		if h.beliefService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackBelief) {
+			return personaDisabledError(id, services.PersonaPackBelief), nil
 		}
 		var args beliefClaimArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
@@ -693,15 +701,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"factRef": factRef})
 	case "memory_record":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackMemory) {
-			return personaDisabledError(id, services.PersonaPackMemory), nil
-		}
 		if h.memoryService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackMemory) {
+			return personaDisabledError(id, services.PersonaPackMemory), nil
 		}
 		var args memoryRecordArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
@@ -717,15 +725,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, entry)
 	case "memory_recall":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackMemory) {
-			return personaDisabledError(id, services.PersonaPackMemory), nil
-		}
 		if h.memoryService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackMemory) {
+			return personaDisabledError(id, services.PersonaPackMemory), nil
 		}
 		var args memoryRecallArgs
 		if len(call.Arguments) > 0 {
@@ -739,15 +747,15 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 		}
 		return mcpJSONResult(id, map[string]interface{}{"memories": memories})
 	case "relation_view":
-		if !h.personaPackEnabled(tenantID, services.PersonaPackRelationshipDynamics) {
-			return personaDisabledError(id, services.PersonaPackRelationshipDynamics), nil
-		}
 		if h.relationDynService == nil {
 			return mcpErrorResult(id, personaDisabled), nil
 		}
 		runID, failure, ok := h.resolvePersonaRun(tenantID, source, id)
 		if !ok {
 			return failure, nil
+		}
+		if !h.personaPackEnabledForRun(tenantID, runID, services.PersonaPackRelationshipDynamics) {
+			return personaDisabledError(id, services.PersonaPackRelationshipDynamics), nil
 		}
 		var args relationViewArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {

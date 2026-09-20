@@ -197,7 +197,7 @@ func setupPersonaGateMcpRouter(t *testing.T) (*gin.Engine, *gorm.DB, *services.E
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "-")+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &extension.Extension{}, &extension.Version{}, &extension.Install{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.CapabilityBinding{}, &rundomain.StateSchema{}, &rundomain.RunState{}, &rundomain.RunStateChange{}, &extension.Extension{}, &extension.Version{}, &extension.Install{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	require.NoError(t, db.Create(&a).Error)
@@ -208,6 +208,9 @@ func setupPersonaGateMcpRouter(t *testing.T) (*gin.Engine, *gorm.DB, *services.E
 	runService := services.NewRunService(db)
 	lifecycle := services.NewExtensionLifecycleService(db)
 	require.NoError(t, lifecycle.EnsureBuiltinPersonaPacks())
+	for _, namespace := range []string{"io.zerone.emotion", "io.zerone.belief", "io.zerone.subjective-memory", "io.zerone.relationship-dynamics"} {
+		require.NoError(t, db.Create(&rundomain.CapabilityBinding{TenantID: "tenant-a", RunID: "run-gate", Namespace: namespace, PackageName: "test", Version: "1", ContentHash: "test", ManifestYAML: "test"}).Error)
+	}
 
 	h := NewOrganizationMcpHandler(&fakeOrganizationMessageService{})
 	h.SetPersonaServices(

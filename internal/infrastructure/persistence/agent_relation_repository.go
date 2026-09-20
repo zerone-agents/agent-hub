@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"control-panel/internal/domain/agentrelation"
@@ -294,12 +295,23 @@ func (r *AgentMessageRepository) CreateIdempotent(tenantID string, message *agen
 	message.TenantID = tenantID
 	var result *agentrelation.AgentMessage
 	created := false
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		var err error
-		result, created, err = r.CreateIdempotentTx(tx, tenantID, message)
-		return err
-	})
-	return result, created, err
+	for attempt := 0; attempt < 6; attempt++ {
+		result = nil
+		created = false
+		err := r.db.Transaction(func(tx *gorm.DB) error {
+			var createErr error
+			result, created, createErr = r.CreateIdempotentTx(tx, tenantID, message)
+			return createErr
+		})
+		if err == nil {
+			return result, created, nil
+		}
+		if !isTransientMessageWriteError(err) || attempt == 5 {
+			return nil, false, err
+		}
+		time.Sleep((time.Duration(attempt+1)*10 + messageWriteJitter(message.ID)) * time.Millisecond)
+	}
+	return result, created, nil
 }
 
 func (r *AgentMessageRepository) CreateIdempotentTx(tx *gorm.DB, tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
@@ -355,20 +367,44 @@ func (r *AgentMessageRepository) SaveTx(tx *gorm.DB, tenantID string, message *a
 		return ErrTenantIDRequired
 	}
 	message.TenantID = tenantID
-	result := TenantOwned(tx, tenantID).Where("id = ?", message.ID).Updates(message)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+	for attempt := 0; attempt < 6; attempt++ {
+		result := TenantOwned(tx, tenantID).Where("id = ?", message.ID).Updates(message)
+		if result.Error == nil {
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			return nil
+		}
+		if !isTransientMessageWriteError(result.Error) || attempt == 5 {
+			return result.Error
+		}
+		time.Sleep((time.Duration(attempt+1)*10 + messageWriteJitter(message.ID)) * time.Millisecond)
 	}
 	return nil
+}
+
+func isTransientMessageWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "database is locked") ||
+		strings.Contains(text, "database is deadlocked") ||
+		strings.Contains(text, "deadlock found")
+}
+
+func messageWriteJitter(messageID string) time.Duration {
+	var sum int
+	for i := 0; i < len(messageID); i++ {
+		sum += int(messageID[i])
+	}
+	return time.Duration(sum % 11)
 }
 
 func (r *AgentMessageRepository) GetForAgent(tenantID, id string, agentID uint64) (*agentrelation.AgentMessage, error) {
 	var message agentrelation.AgentMessage
 	err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
-		Where("id = ? AND (source_agent_id = ? OR target_agent_id = ?)", id, agentID, agentID).
+		Where("id = ? AND (source_agent_id = ? OR (target_agent_id = ? AND status <> ?))", id, agentID, agentID, agentrelation.MessageStatusGuarded).
 		First(&message).Error
 	if err != nil {
 		return nil, err
@@ -382,7 +418,7 @@ func (r *AgentMessageRepository) ListForAgent(tenantID string, agentID uint64, l
 	}
 	var messages []*agentrelation.AgentMessage
 	err := TenantOwned(r.db.Model(&agentrelation.AgentMessage{}), tenantID).
-		Where("source_agent_id = ? OR target_agent_id = ?", agentID, agentID).
+		Where("source_agent_id = ? OR (target_agent_id = ? AND status <> ?)", agentID, agentID, agentrelation.MessageStatusGuarded).
 		Order("created_at DESC").Limit(limit).Find(&messages).Error
 	return messages, err
 }
@@ -434,7 +470,7 @@ func (r *AgentMessageRepository) listChain(tenantID, conversationID, rootMessage
 		query = query.Where("root_message_id = ?", rootMessageID)
 	}
 	if agentID != 0 {
-		query = query.Where("source_agent_id = ? OR target_agent_id = ?", agentID, agentID)
+		query = query.Where("source_agent_id = ? OR (target_agent_id = ? AND status <> ?)", agentID, agentID, agentrelation.MessageStatusGuarded)
 	}
 	var messages []*agentrelation.AgentMessage
 	err := query.Order("hop ASC, created_at ASC, id ASC").Limit(limit).Find(&messages).Error

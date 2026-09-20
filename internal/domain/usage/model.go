@@ -43,15 +43,21 @@ const (
 // UsageRecord 是一条用量事件。Tokens / Cost / Bytes / Latency 均为可空：
 // 埋点处拿不到就记 NULL。Denied 标记软预算超限（记录仍保留，供审计）。
 type UsageRecord struct {
-	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	TenantID      string    `gorm:"type:varchar(64);not null;index:idx_usage_records_tenant_kind_created,priority:1;index:idx_usage_records_tenant_ext_created,priority:1" json:"-"`
-	Kind          string    `gorm:"type:varchar(32);not null;index:idx_usage_records_tenant_kind_created,priority:2" json:"kind"`
-	AgentID       *uint64   `json:"agentId,omitempty"`
-	RunID         string    `gorm:"type:varchar(64);not null;default:'';index" json:"runId,omitempty"`
+	ID        uint64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	TenantID  string  `gorm:"type:varchar(64);not null;index:idx_usage_records_tenant_kind_created,priority:1;index:idx_usage_records_tenant_ext_created,priority:1" json:"-"`
+	Kind      string  `gorm:"type:varchar(32);not null;index:idx_usage_records_tenant_kind_created,priority:2" json:"kind"`
+	AgentID   *uint64 `json:"agentId,omitempty"`
+	RunID     string  `gorm:"type:varchar(64);not null;default:'';index" json:"runId,omitempty"`
+	MessageID string  `gorm:"type:varchar(64);not null;default:'';index" json:"messageId,omitempty"`
+	// DedupKey is nullable deliberately: MySQL permits multiple NULL values in
+	// a unique index, while a non-empty chat-call key makes retries idempotent.
+	DedupKey      *string   `gorm:"type:varchar(255);uniqueIndex" json:"-"`
 	ExtensionName string    `gorm:"type:varchar(253);not null;default:'';index:idx_usage_records_tenant_ext_created,priority:2" json:"extensionName,omitempty"`
+	Provider      string    `gorm:"type:varchar(128);not null;default:''" json:"provider,omitempty"`
 	Model         string    `gorm:"type:varchar(128);not null;default:''" json:"model,omitempty"`
 	TokensIn      *int64    `json:"tokensIn,omitempty"`
 	TokensOut     *int64    `json:"tokensOut,omitempty"`
+	TokensTotal   *int64    `json:"tokensTotal,omitempty"`
 	CostMicros    *int64    `json:"costMicros,omitempty"`
 	Bytes         *int64    `json:"bytes,omitempty"`
 	LatencyMs     *int64    `json:"latencyMs,omitempty"`

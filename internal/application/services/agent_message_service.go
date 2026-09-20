@@ -81,19 +81,19 @@ func (s *AgentMessageService) SetPersonaCapabilityGate(g *PersonaCapabilityGate)
 // personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
 // 原有"恒生效"行为（测试基座与旧接线兼容），但打一条一次性告警，
 // 避免"漏挂 SetPersonaCapabilityGate"变成无人知晓的静默 fail-open。
-func (s *AgentMessageService) personaPackEnabled(tenantID, pack string) bool {
+func (s *AgentMessageService) personaPackEnabled(tenantID, runID, pack string) bool {
 	if s.personaGate == nil {
 		warnPersonaGateMissing("AgentMessageService")
 		return true
 	}
-	return s.personaGate.Enabled(tenantID, pack)
+	return s.personaGate.EnabledForRun(tenantID, runID, pack)
 }
 
 // recordBeliefDelivery is the H6 delivery hook: a durably delivered message
 // becomes a fact the target agent holds a belief about. Idempotency key is
 // deterministic per (message, agent) so replays are no-ops.
 func (s *AgentMessageService) recordBeliefDelivery(tenantID string, message *agentrelation.AgentMessage) {
-	if s.personaBelief == nil || !s.personaPackEnabled(tenantID, PersonaPackBelief) || message == nil || message.RunID == "" {
+	if s.personaBelief == nil || message == nil || message.RunID == "" || !s.personaPackEnabled(tenantID, message.RunID, PersonaPackBelief) {
 		return
 	}
 	err := s.personaBelief.RecordDelivery(tenantID, message.RunID, message.TargetAgentID, message.ID, message.CreatedAt, fmt.Sprintf("belief-delivery:%s:%d", message.ID, message.TargetAgentID))
@@ -662,7 +662,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		idempotencyKey = uuid.NewString()
 	}
 	if existing, findErr := s.messageRepo.FindByIdempotencyKey(tenantID, idempotencyKey, source.ID); findErr == nil {
-		return agentMessageToDTO(existing), nil
+		return agentMessageToParticipantDTO(existing, source.ID), nil
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return nil, findErr
 	}
@@ -700,7 +700,8 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		if persistErr != nil {
 			return nil, fmt.Errorf("记录链路守卫失败: %w", persistErr)
 		}
-		return agentMessageToDTO(persisted), authErr
+		s.reconcileParentChain(tenantID, persisted)
+		return agentMessageToParticipantDTO(persisted, source.ID), authErr
 	}
 	if runID != "" {
 		runValid, participantsValid, err := s.messageRepo.ValidateRunParticipants(tenantID, runID, source.ID, target.ID)
@@ -757,7 +758,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			relationGate = "relation_gate_eval_failed"
 		case !allowed:
 			return persistAuthorizationGuard("relation_gate_denied", fmt.Errorf("对方当前态度拒绝 %s 请求", input.Action))
-		case needConfirm && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics):
+		case needConfirm && s.personaPackEnabled(tenantID, input.RunID, PersonaPackRelationshipDynamics):
 			relationGate = "relation_gate_need_confirm"
 		}
 	}
@@ -801,13 +802,14 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		return nil, fmt.Errorf("记录组织消息失败: %w", err)
 	}
 	if !created {
-		return agentMessageToDTO(persisted), nil
+		return agentMessageToParticipantDTO(persisted, source.ID), nil
 	}
 	if guardReason != "" {
+		s.reconcileParentChain(tenantID, message)
 		if guardReason == "sync_wait_cycle" {
-			return agentMessageToDTO(message), agentrelation.ErrSyncDeadlock
+			return agentMessageToParticipantDTO(message, source.ID), agentrelation.ErrSyncDeadlock
 		}
-		return agentMessageToDTO(message), agentrelation.ErrChainGuarded
+		return agentMessageToParticipantDTO(message, source.ID), agentrelation.ErrChainGuarded
 	}
 	// H6: the message is durably delivered from here on — record the belief
 	// delivery fact for the target, and persist the gate verdict when the
@@ -893,7 +895,20 @@ func (s *AgentMessageService) publishMessageEventTx(tx *gorm.DB, tenantID string
 }
 
 func (s *AgentMessageService) saveStatusWithEvent(tenantID string, message *agentrelation.AgentMessage) error {
-	return s.events.db.Transaction(func(tx *gorm.DB) error {
+	err := s.events.db.Transaction(func(tx *gorm.DB) error {
+		var current agentrelation.AgentMessage
+		if err := repository.TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).
+			Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", message.ID).First(&current).Error; err != nil {
+			return err
+		}
+		// Terminal states are monotonic. A target runtime may return after a
+		// descendant has already closed the causal branch; its stale in-memory
+		// copy must not resurrect a guarded/failed/completed message as running.
+		if isTerminalMessageStatus(current.Status) && current.Status != message.Status {
+			message.Status, message.Reply, message.Error, message.GuardReason = current.Status, current.Reply, current.Error, current.GuardReason
+			message.CompletedAt = current.CompletedAt
+			return nil
+		}
 		if err := s.messageRepo.SaveTx(tx, tenantID, message); err != nil {
 			return err
 		}
@@ -903,6 +918,111 @@ func (s *AgentMessageService) saveStatusWithEvent(tenantID string, message *agen
 		_, err := s.publishMessageEventTx(tx, tenantID, message, message.Status, message.ID)
 		return err
 	})
+	if err == nil && isTerminalMessageStatus(message.Status) {
+		s.reconcileParentChain(tenantID, message)
+	}
+	return err
+}
+
+func isTerminalMessageStatus(status string) bool {
+	switch status {
+	case agentrelation.MessageStatusCompleted, agentrelation.MessageStatusFailed, agentrelation.MessageStatusGuarded:
+		return true
+	default:
+		return false
+	}
+}
+
+// reconcileParentChain closes each ancestor once all of its direct children
+// are terminal. This makes a causal A→B→C hand-off converge even when B's
+// runtime never emits a separate final reply after C finishes. Failure wins
+// over guard, and guard wins over success; unfinished siblings keep the parent
+// open. The conditional update makes retries and concurrent child completions
+// idempotent.
+func (s *AgentMessageService) reconcileParentChain(tenantID string, child *agentrelation.AgentMessage) {
+	if child == nil || child.ParentMessageID == "" || !isTerminalMessageStatus(child.Status) {
+		return
+	}
+	parentID := child.ParentMessageID
+	for parentID != "" {
+		// Most continuations are attached to a parent that has already returned.
+		// Avoid taking a write transaction in that common case (and reduce lock
+		// contention with a concurrently starting sibling).
+		var snapshot agentrelation.AgentMessage
+		if err := repository.TenantOwned(s.events.db.Model(&agentrelation.AgentMessage{}), tenantID).Where("id = ?", parentID).First(&snapshot).Error; err != nil {
+			return
+		}
+		if isTerminalMessageStatus(snapshot.Status) {
+			return
+		}
+		var nextParentID string
+		changed := false
+		err := s.events.db.Transaction(func(tx *gorm.DB) error {
+			var parent agentrelation.AgentMessage
+			if err := repository.TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).
+				Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", parentID).First(&parent).Error; err != nil {
+				return err
+			}
+			nextParentID = parent.ParentMessageID
+			if isTerminalMessageStatus(parent.Status) {
+				return nil
+			}
+			var children []*agentrelation.AgentMessage
+			if err := repository.TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).
+				Where("parent_message_id = ?", parent.ID).Find(&children).Error; err != nil {
+				return err
+			}
+			if len(children) == 0 {
+				return nil
+			}
+			status := agentrelation.MessageStatusCompleted
+			var terminal *agentrelation.AgentMessage
+			for _, candidate := range children {
+				if !isTerminalMessageStatus(candidate.Status) {
+					return nil
+				}
+				if terminal == nil || candidate.Status == agentrelation.MessageStatusFailed || (candidate.Status == agentrelation.MessageStatusGuarded && status == agentrelation.MessageStatusCompleted) {
+					terminal = candidate
+					status = candidate.Status
+				}
+			}
+			now := time.Now().UTC()
+			updates := map[string]any{"status": status, "completed_at": &now}
+			switch status {
+			case agentrelation.MessageStatusCompleted:
+				if strings.TrimSpace(parent.Reply) == "" && terminal != nil {
+					updates["reply"] = terminal.Reply
+				}
+			case agentrelation.MessageStatusFailed:
+				updates["error"] = "下游 Agent 未能完成协作"
+			case agentrelation.MessageStatusGuarded:
+				updates["guard_reason"] = terminal.GuardReason
+			}
+			result := repository.TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).
+				Where("id = ? AND status IN ?", parent.ID, []string{agentrelation.MessageStatusQueued, agentrelation.MessageStatusRunning}).Updates(updates)
+			if result.Error != nil || result.RowsAffected == 0 {
+				return result.Error
+			}
+			if err := repository.TenantOwned(tx.Model(&agentrelation.AgentMessage{}), tenantID).Where("id = ?", parent.ID).First(&parent).Error; err != nil {
+				return err
+			}
+			if parent.RunID != "" {
+				if _, err := s.publishMessageEventTx(tx, tenantID, &parent, parent.Status, terminal.ID); err != nil {
+					return err
+				}
+			}
+			changed = true
+			return nil
+		})
+		if err != nil {
+			log.Printf("reconcile agent message parent failed: child=%s parent=%s: %v", child.ID, parentID, err)
+			return
+		}
+		if !changed {
+			return
+		}
+		parentID = nextParentID
+	}
 }
 
 func (s *AgentMessageService) Get(tenantID string, source *agent.AgentConfig, id string) (*AgentMessageDTO, error) {
@@ -916,7 +1036,7 @@ func (s *AgentMessageService) Get(tenantID string, source *agent.AgentConfig, id
 		}
 		return nil, fmt.Errorf("读取组织消息失败: %w", err)
 	}
-	return agentMessageToDTO(message), nil
+	return agentMessageToParticipantDTO(message, source.ID), nil
 }
 
 func (s *AgentMessageService) Inbox(tenantID string, source *agent.AgentConfig, limit int) ([]*AgentMessageDTO, error) {
@@ -929,7 +1049,7 @@ func (s *AgentMessageService) Inbox(tenantID string, source *agent.AgentConfig, 
 	}
 	result := make([]*AgentMessageDTO, 0, len(messages))
 	for _, message := range messages {
-		result = append(result, agentMessageToDTO(message))
+		result = append(result, agentMessageToParticipantDTO(message, source.ID))
 	}
 	return result, nil
 }
@@ -1002,6 +1122,9 @@ func (s *AgentMessageService) messageChain(tenantID string, agentID uint64, conv
 	result := &AgentMessageChainDTO{ConversationID: rows[0].ConversationID, RootMessageID: rows[0].RootMessageID, Messages: make([]*AgentMessageDTO, 0, len(rows)), MessageCount: len(rows), Verified: true}
 	for _, row := range rows {
 		dto := agentMessageToDTO(row)
+		if agentID != 0 {
+			dto = agentMessageToParticipantDTO(row, agentID)
+		}
 		result.Messages = append(result.Messages, dto)
 		result.Verified = result.Verified && dto.Verified
 	}
@@ -1235,6 +1358,23 @@ func agentMessageToDTO(message *agentrelation.AgentMessage) *AgentMessageDTO {
 	if message.CompletedAt != nil {
 		value := message.CompletedAt.UTC().Format(time.RFC3339)
 		dto.CompletedAt = &value
+	}
+	return dto
+}
+
+// agentMessageToParticipantDTO returns a failure receipt, not the attempted
+// payload, to the sender of a guarded message. Guarded deliveries are excluded
+// from target-side repository queries altogether; this extra projection keeps
+// sender polling useful without turning the audit record into a data leak.
+func agentMessageToParticipantDTO(message *agentrelation.AgentMessage, viewerAgentID uint64) *AgentMessageDTO {
+	dto := agentMessageToDTO(message)
+	if message.Status == agentrelation.MessageStatusGuarded {
+		dto.Content = ""
+		dto.Reply = ""
+		dto.IdempotencyKey = ""
+		if viewerAgentID != message.SourceAgentID {
+			dto.Error = ""
+		}
 	}
 	return dto
 }

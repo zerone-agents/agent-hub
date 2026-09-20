@@ -59,13 +59,22 @@ func (h *AgentChatHandler) SetUsageService(u *services.UsageService) { h.usage =
 
 // recordModelCall 是聊天路径的 model_call 埋点（nil-safe + Record 自身
 // recover，调用处零心智负担）。
-func (h *AgentChatHandler) recordModelCall(tenantID, runID string, latency time.Duration, runErr string) {
+func (h *AgentChatHandler) recordModelCall(tenantID, runID, messageID string, agentID uint64, fallbackModel, fallbackProvider string, result runtimeUsage, latency time.Duration, runErr string) {
 	if h.usage == nil {
 		return
 	}
 	latencyMs := latency.Milliseconds()
+	model := firstNonEmpty(result.Model, fallbackModel)
+	provider := firstNonEmpty(result.Provider, fallbackProvider)
+	dedupKey := tenantID + ":model_call:" + messageID
+	var agentIDPtr *uint64
+	if agentID != 0 {
+		agentIDPtr = &agentID
+	}
 	h.usage.Record(services.UsageRecordInput{
-		Kind: "model_call", TenantID: tenantID, RunID: runID,
+		Kind: "model_call", TenantID: tenantID, RunID: runID, MessageID: messageID,
+		DedupKey: &dedupKey, AgentID: agentIDPtr, Provider: provider, Model: model,
+		TokensIn: result.TokensIn, TokensOut: result.TokensOut, TokensTotal: result.TokensTotal,
 		LatencyMs: &latencyMs, Error: runErr,
 	})
 }
@@ -263,6 +272,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 			return
 		}
 	}
+	usageAgentID, usageModel, usageProvider, identityErr := h.svc.AgentUsageIdentity(tenantID, agentName)
+	if identityErr != nil {
+		log.Printf("[usage] resolve agent attribution failed: tenant=%s agent=%s err=%v", tenantID, agentName, identityErr)
+	}
+	if runParticipant != nil {
+		usageAgentID = runParticipant.AgentID
+	}
 	// 2. Resolve runtime URL, API key, and the deployer-reported container id
 	// BEFORE anything is persisted: the attachment probe below needs the base
 	// URL, and a resolve failure must not leave a persisted user turn (or an
@@ -431,7 +447,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
-		h.recordModelCall(tenantID, req.RunID, time.Since(runStart), "runtime_connect_failed")
+		h.recordModelCall(tenantID, req.RunID, msg.ID, usageAgentID, usageModel, usageProvider, runtimeUsage{}, time.Since(runStart), "runtime_connect_failed")
 		respondError(c, http.StatusBadGateway, "Runtime 连接失败，请稍后重试")
 		return
 	}
@@ -564,7 +580,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 			usageErr = "runtime_stream_interrupted"
 		}
 	}
-	h.recordModelCall(tenantID, req.RunID, time.Since(runStart), usageErr)
+	h.recordModelCall(tenantID, req.RunID, msg.ID, usageAgentID, usageModel, usageProvider, extractRuntimeUsage(aggregateStr), time.Since(runStart), usageErr)
 }
 
 func (h *AgentChatHandler) validateRunParticipant(tenantID, runID, agentName string) (*rundomain.RunAgent, error) {
@@ -669,6 +685,78 @@ func extractRuntimeError(sse string) string {
 		return strings.Join(messages, "\n")
 	}
 	return errorType
+}
+
+// runtimeUsage is the normalized terminal usage envelope emitted by the
+// runtime. Pointers preserve the distinction between an explicit zero (for a
+// rejected call) and an older runtime that did not report usage at all.
+type runtimeUsage struct {
+	Model       string
+	Provider    string
+	TokensIn    *int64
+	TokensOut   *int64
+	TokensTotal *int64
+}
+
+// extractRuntimeUsage reads the last valid result event. Runtime versions use
+// both Anthropic-style input_tokens/output_tokens and OpenAI-style
+// prompt_tokens/completion_tokens, so accept both without guessing zero for a
+// missing field. The terminal result is authoritative over earlier events.
+func extractRuntimeUsage(sse string) runtimeUsage {
+	var found runtimeUsage
+	lines := strings.Split(sse, "\n")
+	var eventName string
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			eventName = ""
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if eventName != "result" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var data struct {
+			Type     string `json:"type"`
+			Model    string `json:"model"`
+			Provider string `json:"provider"`
+			Usage    struct {
+				InputTokens      *int64 `json:"input_tokens"`
+				OutputTokens     *int64 `json:"output_tokens"`
+				PromptTokens     *int64 `json:"prompt_tokens"`
+				CompletionTokens *int64 `json:"completion_tokens"`
+				TotalTokens      *int64 `json:"total_tokens"`
+			} `json:"usage"`
+		}
+		if json.Unmarshal([]byte(payload), &data) != nil || data.Type != "result" {
+			continue
+		}
+		in := data.Usage.InputTokens
+		if in == nil {
+			in = data.Usage.PromptTokens
+		}
+		out := data.Usage.OutputTokens
+		if out == nil {
+			out = data.Usage.CompletionTokens
+		}
+		total := data.Usage.TotalTokens
+		if total == nil && (in != nil || out != nil) {
+			value := int64(0)
+			if in != nil {
+				value += *in
+			}
+			if out != nil {
+				value += *out
+			}
+			total = &value
+		}
+		found = runtimeUsage{Model: data.Model, Provider: data.Provider, TokensIn: in, TokensOut: out, TokensTotal: total}
+	}
+	return found
 }
 
 // extractRuntimeSessionID scans the raw SSE stream for the first system.init

@@ -44,3 +44,26 @@ func TestExtractRuntimeError_SkipsMalformedPayload(t *testing.T) {
 	sse := "event: result\ndata: {not json}\n\nevent: result\ndata: {\"type\":\"result\",\"subtype\":\"error\",\"errors\":[\"boom\"]}\n\n"
 	require.Equal(t, "boom", extractRuntimeError(sse))
 }
+
+func TestExtractRuntimeUsageAnthropicShape(t *testing.T) {
+	sse := "event: result\ndata: {\"type\":\"result\",\"model\":\"qwen3.6-plus\",\"provider\":\"aliyun-bailian\",\"usage\":{\"input_tokens\":12067,\"output_tokens\":327}}\n\n"
+	got := extractRuntimeUsage(sse)
+	require.Equal(t, "qwen3.6-plus", got.Model)
+	require.Equal(t, "aliyun-bailian", got.Provider)
+	require.Equal(t, int64(12067), *got.TokensIn)
+	require.Equal(t, int64(327), *got.TokensOut)
+	require.Equal(t, int64(12394), *got.TokensTotal)
+}
+
+func TestExtractRuntimeUsageOpenAIShapeAndMissingUsage(t *testing.T) {
+	sse := "event: result\ndata: {\"type\":\"result\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14}}\n\n"
+	got := extractRuntimeUsage(sse)
+	require.Equal(t, int64(10), *got.TokensIn)
+	require.Equal(t, int64(4), *got.TokensOut)
+	require.Equal(t, int64(14), *got.TokensTotal)
+
+	missing := extractRuntimeUsage("event: result\ndata: {\"type\":\"result\",\"subtype\":\"success\"}\n\n")
+	require.Nil(t, missing.TokensIn)
+	require.Nil(t, missing.TokensOut)
+	require.Nil(t, missing.TokensTotal)
+}

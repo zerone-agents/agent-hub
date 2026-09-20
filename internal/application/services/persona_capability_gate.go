@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"control-panel/internal/domain/extension"
+	rundomain "control-panel/internal/domain/run"
 
 	"gorm.io/gorm"
 )
@@ -85,6 +86,28 @@ func (g *PersonaCapabilityGate) Enabled(tenantID, pack string) bool {
 	return false
 }
 
+// EnabledForRun combines the platform lifecycle switch with the immutable
+// capability snapshot of a Run. A persona feature is active only when that
+// Run explicitly bound the corresponding package. This keeps H6 application
+// state out of Agent configuration and prevents state leaking into unrelated
+// Runs.
+func (g *PersonaCapabilityGate) EnabledForRun(tenantID, runID, pack string) bool {
+	if !g.Enabled(tenantID, pack) || runID == "" {
+		return false
+	}
+	namespace, ok := personaCapabilityNamespace(pack)
+	if !ok {
+		return false
+	}
+	var count int64
+	if err := g.db.Model(&rundomain.CapabilityBinding{}).
+		Where("tenant_id=? AND run_id=? AND namespace=?", tenantID, runID, namespace).
+		Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
+}
+
 // enabledInTenant 返回某租户内该扩展的安装是否启用；found=false 表示
 // 该租户没有此扩展记录（调用方应回退到 default 租户）。
 func (g *PersonaCapabilityGate) enabledInTenant(tenantID, name string) (enabled bool, found bool, err error) {
@@ -112,7 +135,7 @@ func (g *PersonaCapabilityGate) enabledInTenant(tenantID, name string) (enabled 
 // Provider。闭包内每次调用都即时查 gate，停用立即生效。
 func (g *PersonaCapabilityGate) GateRecentMemoryProvider(inner RecentMemoryProviderFunc) RecentMemoryProviderFunc {
 	return func(tenantID, runID string, agentID uint64) ([]RecentMemoryItem, error) {
-		if !g.Enabled(tenantID, PersonaPackMemory) {
+		if !g.EnabledForRun(tenantID, runID, PersonaPackMemory) {
 			return nil, nil
 		}
 		return inner(tenantID, runID, agentID)

@@ -39,6 +39,10 @@ type agentRepoForChat interface {
 	GetByName(tenantID, name string) (*agent.AgentConfig, error)
 }
 
+type providerKeyRepoForChat interface {
+	GetProviderKey(tenantID string, id uint64) (string, error)
+}
+
 // AgentChatService handles agent chat sessions and message persistence.
 // Streaming itself is delegated to the HTTP handler, which calls
 // svc.RuntimeClient().StreamRun(...) and forwards bytes via flusher.Flush().
@@ -93,6 +97,29 @@ func (s *AgentChatService) AgentGuestVisible(tenantID, name string) (bool, error
 		return false, fmt.Errorf("get agent %s failed: %w", name, err)
 	}
 	return cfg.GuestEnabled, nil
+}
+
+// AgentUsageIdentity resolves the stable database identity and configured
+// model/provider used as fallbacks when an older runtime omits attribution
+// fields from its terminal SSE result.
+func (s *AgentChatService) AgentUsageIdentity(tenantID, name string) (uint64, string, string, error) {
+	cfg, err := s.agentRepo.GetByName(tenantID, name)
+	if err != nil {
+		return 0, "", "", err
+	}
+	provider := ""
+	if cfg.ProviderID != nil {
+		resolver, ok := s.agentRepo.(providerKeyRepoForChat)
+		if ok {
+			provider, err = resolver.GetProviderKey(tenantID, *cfg.ProviderID)
+		}
+		if !ok || err != nil {
+			// Retain a stable, non-empty attribution even if a legacy provider row
+			// was removed after the Agent was configured.
+			provider = "id:" + strconv.FormatUint(*cfg.ProviderID, 10)
+		}
+	}
+	return cfg.ID, cfg.ModelID, provider, nil
 }
 
 // RuntimeClient exposes the runtime client for the handler to stream from.

@@ -59,6 +59,42 @@ func TestUsageRecordPersistsUTC(t *testing.T) {
 	require.Equal(t, 0, offset, "用量记录时间戳必须落 UTC，实际偏移 %d 秒", offset)
 }
 
+func TestUsageRecordAttributionAndDedup(t *testing.T) {
+	db := usageTestDB(t)
+	svc := newUsageSvc(t, db)
+	agentID := uint64(42)
+	dedup := "ta:model_call:message-1"
+	in := UsageRecordInput{
+		Kind: usage.KindModelCall, TenantID: "ta", RunID: "run-1", MessageID: "message-1",
+		DedupKey: &dedup, AgentID: &agentID, Provider: "aliyun-bailian", Model: "qwen3.6-plus",
+		TokensIn: i64(12), TokensOut: i64(3), TokensTotal: i64(15),
+	}
+	svc.Record(in)
+	svc.Record(in)
+	flushUsage(t, db, 1)
+	require.Eventually(t, func() bool {
+		backlog, _ := svc.QueueStats()
+		return backlog == 0
+	}, 3*time.Second, 10*time.Millisecond)
+
+	var count int64
+	require.NoError(t, db.Model(&usage.UsageRecord{}).Where("dedup_key = ?", dedup).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	time.Sleep(300 * time.Millisecond)
+	require.NoError(t, db.Model(&usage.UsageRecord{}).Where("dedup_key = ?", dedup).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	var rec usage.UsageRecord
+	require.NoError(t, db.Where("dedup_key = ?", dedup).First(&rec).Error)
+	require.Equal(t, agentID, *rec.AgentID)
+	require.Equal(t, "run-1", rec.RunID)
+	require.Equal(t, "message-1", rec.MessageID)
+	require.Equal(t, "aliyun-bailian", rec.Provider)
+	require.Equal(t, "qwen3.6-plus", rec.Model)
+	require.Equal(t, int64(12), *rec.TokensIn)
+	require.Equal(t, int64(3), *rec.TokensOut)
+	require.Equal(t, int64(15), *rec.TokensTotal)
+}
+
 func TestUsageRecordNilServiceAndPanicSafe(t *testing.T) {
 	// nil 接收者：绝不 panic（Recover 在方法入口 defer）。
 	var nilSvc *UsageService
@@ -258,7 +294,7 @@ func TestUsageExportCSVFormat(t *testing.T) {
 	out := buf.String()
 	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
 	require.Len(t, lines, 2) // 表头 + 1 行（tb 被租户隔离排除）
-	require.Contains(t, out, "id,kind,agent_id,run_id,extension_name,model")
+	require.Contains(t, out, "id,kind,agent_id,run_id,message_id,extension_name,provider,model")
 	require.Contains(t, out, "model_call")
 	require.Contains(t, out, "oops")
 	require.Contains(t, out, ",5,") // tokens_in=5

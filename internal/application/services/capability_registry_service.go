@@ -98,6 +98,9 @@ func (m capabilityManifestMetadata) provenance(tenantID string, packageID uint64
 
 func (s *CapabilityRegistryService) List(tenantID string, enabled *bool) ([]capability.Package, error) {
 	q := s.db.Where("tenant_id=?", tenantID)
+	if tenantID != BuiltinPersonaCapabilityTenant {
+		q = s.db.Where("tenant_id=? OR (tenant_id=? AND source_type=?)", tenantID, BuiltinPersonaCapabilityTenant, "seed")
+	}
 	if enabled != nil {
 		q = q.Where("enabled=?", *enabled)
 	}
@@ -166,6 +169,11 @@ func (s *CapabilityRegistryService) Resources(tenantID string, packageID uint64)
 func (s *CapabilityRegistryService) GetEnabled(tx *gorm.DB, tenantID, namespace, name, version string) (*capability.Package, error) {
 	var p capability.Package
 	err := tx.Where("tenant_id=? AND namespace=? AND name=? AND version=? AND enabled=?", tenantID, namespace, name, version, true).First(&p).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) && tenantID != BuiltinPersonaCapabilityTenant {
+		// Platform-provided seed packages are reusable by every tenant, while
+		// uploaded/registry packages remain strictly tenant-local.
+		err = tx.Where("tenant_id=? AND namespace=? AND name=? AND version=? AND enabled=? AND source_type=?", BuiltinPersonaCapabilityTenant, namespace, name, version, true, "seed").First(&p).Error
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("capability %s/%s@%s is not registered and enabled", namespace, name, version)
 	}

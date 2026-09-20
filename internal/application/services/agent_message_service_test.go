@@ -355,6 +355,125 @@ func TestAgentMessageServiceRejectsReverseAndUnauthorizedAction(t *testing.T) {
 	}
 }
 
+func TestAgentMessageServiceGuardReceiptDoesNotExposePayloadToEitherParticipant(t *testing.T) {
+	f := setupAgentMessageService(t)
+	secret := "董事会尚未公开的收购底价"
+
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "missing", Action: "consult", Message: secret, IdempotencyKey: "guard-secret",
+	})
+	require.ErrorIs(t, err, agentrelation.ErrRouteNotFound)
+	require.Equal(t, agentrelation.MessageStatusGuarded, guarded.Status)
+	require.Empty(t, guarded.Content)
+	require.Empty(t, guarded.IdempotencyKey)
+
+	senderInbox, err := f.service.Inbox("tenant-a", &f.a, 20)
+	require.NoError(t, err)
+	require.Len(t, senderInbox, 1)
+	require.Equal(t, "route_not_found", senderInbox[0].GuardReason)
+	require.Empty(t, senderInbox[0].Content)
+
+	targetInbox, err := f.service.Inbox("tenant-a", &f.b, 20)
+	require.NoError(t, err)
+	require.Empty(t, targetInbox, "a rejected delivery must never enter the target inbox")
+	_, err = f.service.Get("tenant-a", &f.b, guarded.ID)
+	require.ErrorIs(t, err, agentrelation.ErrMessageNotFound)
+
+	var audit agentrelation.AgentMessage
+	require.NoError(t, f.db.Where("id = ?", guarded.ID).First(&audit).Error)
+	require.Equal(t, secret, audit.Content, "administrative audit retains the attempted payload")
+}
+
+func TestAgentMessageServiceTerminalChildReconcilesRunningParent(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.b, f.c, "chain", "sync", "summary_only", "consult")
+	now := time.Now().UTC()
+	parent := agentrelation.AgentMessage{
+		ID: "parent-running", TenantID: "tenant-a", RelationID: 1, RunID: "run-1",
+		ConversationID: "conv-reconcile", RootMessageID: "parent-running", Hop: 1, MaxHops: 8,
+		EventBudget: 64, EventCount: 1, TokenBudget: 65536, VisitedAgentIDs: []uint64{f.a.ID, f.b.ID},
+		IdempotencyKey: "parent-running", Scope: "chain", SourceAgentID: f.a.ID, SourceAgent: f.a.Name,
+		TargetAgentID: f.b.ID, TargetAgent: f.b.Name, Action: "handoff", DeliveryPolicy: "async",
+		ContextPolicy: "summary_only", Content: "A asks B", Status: agentrelation.MessageStatusRunning, CreatedAt: now, StartedAt: &now,
+	}
+	require.NoError(t, f.db.Create(&parent).Error)
+
+	child, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.c.Name, Scope: "chain", Action: "consult", Message: "B asks C",
+		ParentMessageID: parent.ID, IdempotencyKey: "child-success",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusCompleted, child.Status)
+
+	var stored agentrelation.AgentMessage
+	require.NoError(t, f.db.Where("id = ?", parent.ID).First(&stored).Error)
+	require.Equal(t, agentrelation.MessageStatusCompleted, stored.Status)
+	require.NotNil(t, stored.CompletedAt)
+	require.Equal(t, "B 的真实回复", stored.Reply)
+
+	// A stale target execution result may add detail, but cannot reopen or
+	// downgrade the terminal state established by child reconciliation.
+	stale := parent
+	stale.Status = agentrelation.MessageStatusRunning
+	require.NoError(t, f.service.saveStatusWithEvent("tenant-a", &stale))
+	require.Equal(t, agentrelation.MessageStatusCompleted, stale.Status)
+}
+
+func TestAgentMessageServiceGuardedChildClosesParentWithoutLeakingPayload(t *testing.T) {
+	f := setupAgentMessageService(t)
+	now := time.Now().UTC()
+	parent := agentrelation.AgentMessage{
+		ID: "parent-guard", TenantID: "tenant-a", RelationID: 1, RunID: "run-1",
+		ConversationID: "conv-guard", RootMessageID: "parent-guard", Hop: 1, MaxHops: 8,
+		EventBudget: 64, EventCount: 1, TokenBudget: 65536, VisitedAgentIDs: []uint64{f.a.ID, f.b.ID},
+		IdempotencyKey: "parent-guard", Scope: "chain", SourceAgentID: f.a.ID, SourceAgent: f.a.Name,
+		TargetAgentID: f.b.ID, TargetAgent: f.b.Name, Action: "handoff", DeliveryPolicy: "async",
+		ContextPolicy: "summary_only", Content: "A asks B", Status: agentrelation.MessageStatusRunning, CreatedAt: now, StartedAt: &now,
+	}
+	require.NoError(t, f.db.Create(&parent).Error)
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.c.Name, Scope: "missing", Action: "consult", Message: "sensitive rejected child",
+		ParentMessageID: parent.ID, IdempotencyKey: "child-guard",
+	})
+	require.ErrorIs(t, err, agentrelation.ErrRouteNotFound)
+	require.Empty(t, guarded.Content)
+
+	var stored agentrelation.AgentMessage
+	require.NoError(t, f.db.Where("id = ?", parent.ID).First(&stored).Error)
+	require.Equal(t, agentrelation.MessageStatusGuarded, stored.Status)
+	require.Equal(t, "route_not_found", stored.GuardReason)
+}
+
+func TestAgentMessageServiceFailedChildClosesParentAsFailed(t *testing.T) {
+	f := setupAgentMessageService(t)
+	now := time.Now().UTC()
+	parent := agentrelation.AgentMessage{
+		ID: "parent-failed", TenantID: "tenant-a", ConversationID: "conv-failed", RootMessageID: "parent-failed",
+		Hop: 1, MaxHops: 8, EventBudget: 64, EventCount: 1, TokenBudget: 65536,
+		SourceAgentID: f.a.ID, SourceAgent: f.a.Name, TargetAgentID: f.b.ID, TargetAgent: f.b.Name,
+		Scope: "chain", Action: "handoff", DeliveryPolicy: "async", ContextPolicy: "none", Content: "work",
+		Status: agentrelation.MessageStatusRunning, CreatedAt: now, StartedAt: &now,
+	}
+	child := agentrelation.AgentMessage{
+		ID: "child-failed", TenantID: "tenant-a", ConversationID: parent.ConversationID, RootMessageID: parent.ID,
+		ParentMessageID: parent.ID, Hop: 2, MaxHops: 8, EventBudget: 64, EventCount: 2, TokenBudget: 65536,
+		SourceAgentID: f.b.ID, SourceAgent: f.b.Name, TargetAgentID: f.c.ID, TargetAgent: f.c.Name,
+		Scope: "chain", Action: "consult", DeliveryPolicy: "async", ContextPolicy: "none", Content: "check",
+		Status: agentrelation.MessageStatusRunning, CreatedAt: now, StartedAt: &now,
+	}
+	require.NoError(t, f.db.Create(&parent).Error)
+	require.NoError(t, f.db.Create(&child).Error)
+	child.Status = agentrelation.MessageStatusFailed
+	child.Error = "runtime unavailable"
+	child.CompletedAt = &now
+	require.NoError(t, f.service.saveStatusWithEvent("tenant-a", &child))
+
+	var stored agentrelation.AgentMessage
+	require.NoError(t, f.db.Where("id = ?", parent.ID).First(&stored).Error)
+	require.Equal(t, agentrelation.MessageStatusFailed, stored.Status)
+	require.Equal(t, "下游 Agent 未能完成协作", stored.Error)
+}
+
 func TestAgentMessageServiceNoneContextDropsAllCallerContext(t *testing.T) {
 	f := setupAgentMessageService(t)
 	addMessageRelation(t, f, f.a, f.b, "private", "sync", "none", "inform")
@@ -662,6 +781,10 @@ func TestAgentMessageServiceAllowsAsyncReturnButRejectsSyncWaitCycle(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, 2, returned.Hop)
 	require.Equal(t, f.a.ID, returned.VisitedAgentIDs[len(returned.VisitedAgentIDs)-1])
+	require.Eventually(t, func() bool {
+		var current agentrelation.AgentMessage
+		return f.db.Where("id = ?", returned.ID).First(&current).Error == nil && current.Status == agentrelation.MessageStatusCompleted
+	}, time.Second, 10*time.Millisecond)
 
 	// Changing the current edge to sync turns the same legal graph cycle into
 	// a synchronous call-stack deadlock, so it is persisted as a guard.

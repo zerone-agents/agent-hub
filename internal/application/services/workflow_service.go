@@ -75,12 +75,12 @@ func (s *WorkflowService) SetPersonaCapabilityGate(g *PersonaCapabilityGate) { s
 // personaPackEnabled 报告某人物能力包当前是否生效；未接 gate 时保持
 // 原有"恒生效"行为（测试基座与旧接线兼容），但打一条一次性告警，
 // 避免"漏挂 SetPersonaCapabilityGate"变成无人知晓的静默 fail-open。
-func (s *WorkflowService) personaPackEnabled(tenantID, pack string) bool {
+func (s *WorkflowService) personaPackEnabled(tenantID, runID, pack string) bool {
 	if s.personaGate == nil {
 		warnPersonaGateMissing("WorkflowService")
 		return true
 	}
-	return s.personaGate.Enabled(tenantID, pack)
+	return s.personaGate.EnabledForRun(tenantID, runID, pack)
 }
 
 type WorkflowStepInput struct {
@@ -701,17 +701,17 @@ func (s *WorkflowService) finishStep(tenantID, id string, output map[string]any,
 // log-and-continue. H7 P1: each pack only fires while its builtin extension
 // stays enabled (runtime gate check, disable takes effect immediately).
 func (s *WorkflowService) emitStepPersonaEvents(tenantID string, executionID, stepRunID, actor string, success bool, idem string) {
-	emotionOn := s.personaEmotion != nil && s.personaPackEnabled(tenantID, PersonaPackEmotion)
-	reldynOn := s.personaRelDyn != nil && s.personaPackEnabled(tenantID, PersonaPackRelationshipDynamics)
-	if !emotionOn && !reldynOn {
-		return
-	}
 	var ex workflow.Execution
 	if err := s.db.Where("tenant_id=? AND id=?", tenantID, executionID).First(&ex).Error; err != nil {
 		log.Printf("[h6] step persona hook: execution %s lookup failed: %v", executionID, err)
 		return
 	}
 	if ex.RunID == "" {
+		return
+	}
+	emotionOn := s.personaEmotion != nil && s.personaPackEnabled(tenantID, ex.RunID, PersonaPackEmotion)
+	reldynOn := s.personaRelDyn != nil && s.personaPackEnabled(tenantID, ex.RunID, PersonaPackRelationshipDynamics)
+	if !emotionOn && !reldynOn {
 		return
 	}
 	var completer agent.AgentConfig

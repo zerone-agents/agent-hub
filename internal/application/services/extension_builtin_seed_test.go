@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"control-panel/internal/domain/extension"
+	rundomain "control-panel/internal/domain/run"
 	"control-panel/internal/extensionmanifest"
 
 	"github.com/stretchr/testify/require"
@@ -190,6 +191,7 @@ func TestPromptComposerRecentMemoryGatedByExtension(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&extension.Extension{}, &extension.Version{}, &extension.Install{}))
 	lifecycle := NewExtensionLifecycleService(db)
 	require.NoError(t, lifecycle.EnsureBuiltinPersonaPacks())
+	require.NoError(t, db.Create(&rundomain.CapabilityBinding{TenantID: "t1", RunID: r.ID, Namespace: "io.zerone.subjective-memory", PackageName: "subjective-memory", Version: "1.0.0", ContentHash: "test", ManifestYAML: "test"}).Error)
 	gate := NewPersonaCapabilityGate(db)
 
 	called := 0

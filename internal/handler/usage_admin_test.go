@@ -192,6 +192,9 @@ func TestUsageAdminExportCSV(t *testing.T) {
 	require.Len(t, records, 3) // 表头 + 2 行
 	require.Equal(t, "id", records[0][0])
 	require.Equal(t, "kind", records[0][1])
+	require.Contains(t, records[0], "message_id")
+	require.Contains(t, records[0], "provider")
+	require.Contains(t, records[0], "tokens_total")
 
 	// kind 过滤：只导 model_call。
 	w = httptest.NewRecorder()

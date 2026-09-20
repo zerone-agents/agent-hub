@@ -4,6 +4,7 @@ import (
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/agentrelation"
 	"control-panel/internal/domain/mcp"
+	"control-panel/internal/domain/provider"
 	"control-panel/pkg/database"
 
 	"gorm.io/gorm"
@@ -11,6 +12,14 @@ import (
 
 type AgentRepository struct {
 	db *gorm.DB
+}
+
+func (r *AgentRepository) GetProviderKey(tenantID string, id uint64) (string, error) {
+	var item provider.ProviderSummary
+	if err := TenantOwned(r.db, tenantID).Where("id = ?", id).First(&item).Error; err != nil {
+		return "", err
+	}
+	return item.Key, nil
 }
 
 func NewAgentRepository() *AgentRepository {

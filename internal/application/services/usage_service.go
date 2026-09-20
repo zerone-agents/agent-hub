@@ -31,6 +31,7 @@ import (
 	"control-panel/internal/domain/usage"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ModelPricingKey 是 system_settings 中模型单价配置的键（D-H7.5-3）。
@@ -54,10 +55,14 @@ type UsageRecordInput struct {
 	TenantID      string
 	AgentID       *uint64
 	RunID         string
+	MessageID     string
+	DedupKey      *string
 	ExtensionName string
+	Provider      string
 	Model         string
 	TokensIn      *int64
 	TokensOut     *int64
+	TokensTotal   *int64
 	Bytes         *int64
 	LatencyMs     *int64
 	Error         string
@@ -220,10 +225,14 @@ func (s *UsageService) Record(in UsageRecordInput) {
 		Kind:          in.Kind,
 		AgentID:       in.AgentID,
 		RunID:         in.RunID,
+		MessageID:     in.MessageID,
+		DedupKey:      in.DedupKey,
 		ExtensionName: in.ExtensionName,
+		Provider:      in.Provider,
 		Model:         in.Model,
 		TokensIn:      in.TokensIn,
 		TokensOut:     in.TokensOut,
+		TokensTotal:   in.TokensTotal,
 		Bytes:         in.Bytes,
 		LatencyMs:     in.LatencyMs,
 		Error:         in.Error,
@@ -309,7 +318,11 @@ func (s *UsageService) worker() {
 		if len(batch) == 0 {
 			return
 		}
-		if err := s.db.CreateInBatches(batch, 50).Error; err != nil {
+		// A model call may be retried by an HTTP client after the runtime has
+		// already completed. DedupKey's unique index plus DO NOTHING prevents
+		// double billing without causing one duplicate to discard the rest of a
+		// mixed batch. Records without a key retain append-only semantics.
+		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batch, 50).Error; err != nil {
 			s.workerErr.Add(int64(len(batch)))
 			log.Printf("[usage] persist batch failed (dropped %d): %v", len(batch), err)
 		}
@@ -672,13 +685,13 @@ func (s *UsageService) ExportRows(tenantID string, start, end time.Time, kind st
 // ExportCSV 把明细写成 CSV（含表头）。
 func (s *UsageService) ExportCSV(w io.Writer, tenantID string, start, end time.Time, kind string) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"id", "kind", "agent_id", "run_id", "extension_name", "model",
-		"tokens_in", "tokens_out", "cost_micros", "bytes", "latency_ms", "error", "denied", "created_at"}); err != nil {
+	if err := cw.Write([]string{"id", "kind", "agent_id", "run_id", "message_id", "extension_name", "provider", "model",
+		"tokens_in", "tokens_out", "tokens_total", "cost_micros", "bytes", "latency_ms", "error", "denied", "created_at"}); err != nil {
 		return err
 	}
 	err := s.ExportRows(tenantID, start, end, kind, func(rec *usage.UsageRecord) bool {
-		row := []string{strconv.FormatUint(rec.ID, 10), rec.Kind, "", rec.RunID, rec.ExtensionName, rec.Model,
-			nullableInt(rec.TokensIn), nullableInt(rec.TokensOut), nullableInt(rec.CostMicros),
+		row := []string{strconv.FormatUint(rec.ID, 10), rec.Kind, "", rec.RunID, rec.MessageID, rec.ExtensionName, rec.Provider, rec.Model,
+			nullableInt(rec.TokensIn), nullableInt(rec.TokensOut), nullableInt(rec.TokensTotal), nullableInt(rec.CostMicros),
 			nullableInt(rec.Bytes), nullableInt(rec.LatencyMs), rec.Error,
 			strconv.FormatBool(rec.Denied), rec.CreatedAt.UTC().Format(time.RFC3339)}
 		if rec.AgentID != nil {
