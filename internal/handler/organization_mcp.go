@@ -41,6 +41,7 @@ type GroupOrganizationMessageService interface {
 // identity is never accepted from tool arguments.
 type OrganizationMcpHandler struct {
 	service         OrganizationMessageService
+	waitService     *services.AgentMessageWaitService
 	workflowService *services.WorkflowService
 	decisionService *services.DecisionService
 
@@ -108,6 +109,10 @@ func (h *OrganizationMcpHandler) SetDecisionService(service *services.DecisionSe
 
 func NewOrganizationMcpHandler(service OrganizationMessageService) *OrganizationMcpHandler {
 	return &OrganizationMcpHandler{service: service}
+}
+
+func (h *OrganizationMcpHandler) SetMessageWaitService(service *services.AgentMessageWaitService) {
+	h.waitService = service
 }
 
 func (h *OrganizationMcpHandler) HandleMessage(c *gin.Context) {
@@ -187,6 +192,7 @@ func (h *OrganizationMcpHandler) handleToolsList(c *gin.Context, id interface{})
 					"deadline":               map[string]interface{}{"type": "string", "format": "date-time", "description": "RFC3339 链路截止时间。"},
 					"idempotency_key":        map[string]interface{}{"type": "string", "description": "本跳稳定唯一键；重试时必须复用。"},
 					"route_deviation_reason": map[string]interface{}{"type": "string", "description": "Run 使用 adaptive 路由且本跳不在计划内时必填，用于审计偏离原因。"},
+					"wait_mode":              map[string]interface{}{"type": "string", "enum": []string{"callback", "none"}, "description": "是否在目标完成后由 Hub 自动恢复当前会话。consult/assign/review/challenge/handoff 的续跳默认 callback；通知类动作默认 none。"},
 				},
 				"required": []string{"target_agent", "action", "message"},
 			},
@@ -319,6 +325,16 @@ type agentSendArgs struct {
 	Deadline             string `json:"deadline"`
 	IdempotencyKey       string `json:"idempotency_key"`
 	RouteDeviationReason string `json:"route_deviation_reason"`
+	WaitMode             string `json:"wait_mode"`
+}
+
+func actionExpectsCallback(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "consult", "assign", "review", "challenge", "handoff":
+		return true
+	default:
+		return false
+	}
 }
 
 type agentMessageStatusArgs struct {
@@ -473,6 +489,25 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			}
 			deadline = &parsed
 		}
+		waitMode := strings.ToLower(strings.TrimSpace(args.WaitMode))
+		if waitMode == "" && strings.TrimSpace(args.ParentMessageID) != "" && actionExpectsCallback(args.Action) {
+			waitMode = "callback"
+		}
+		if waitMode != "" && waitMode != "none" && waitMode != "callback" {
+			return mcpErrorResult(id, "wait_mode 只能是 callback 或 none"), nil
+		}
+		runtimeSessionID := strings.TrimSpace(c.GetHeader("X-Zerone-Runtime-Session-ID"))
+		if waitMode == "callback" {
+			if h.waitService == nil {
+				return mcpErrorResult(id, "回调等待能力尚未启用"), nil
+			}
+			if strings.TrimSpace(args.RunID) == "" || strings.TrimSpace(args.ParentMessageID) == "" {
+				return mcpErrorResult(id, "callback 模式要求 run_id 和 parent_message_id"), nil
+			}
+			if runtimeSessionID == "" {
+				return mcpErrorResult(id, "当前 Runtime 未提供可信会话标识，无法登记回调等待"), nil
+			}
+		}
 		message, err := h.service.Send(ctx, tenantID, source, services.SendAgentMessageInput{
 			TargetAgent: args.TargetAgent, Scope: args.Scope, Action: args.Action,
 			Message: args.Message, ContextSummary: args.ContextSummary, SharedContext: args.SharedContext,
@@ -482,6 +517,12 @@ func (h *OrganizationMcpHandler) handleToolsCall(ctx context.Context, c *gin.Con
 			RunID: args.RunID, ParentMessageID: args.ParentMessageID, DeadlineAt: deadline,
 			IdempotencyKey:       args.IdempotencyKey,
 			RouteDeviationReason: args.RouteDeviationReason,
+			CallbackRuntimeSessionID: func() string {
+				if waitMode == "callback" {
+					return runtimeSessionID
+				}
+				return ""
+			}(),
 		})
 		if err != nil {
 			return mcpErrorResult(id, err.Error()), nil

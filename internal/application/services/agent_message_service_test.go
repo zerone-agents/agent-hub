@@ -67,7 +67,7 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "-"))), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.RunRoutePlan{}, &rundomain.RunRouteStep{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &agentrelation.AgentMessageWait{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.RunRoutePlan{}, &rundomain.RunRouteStep{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	b := agent.AgentConfig{Name: "agent-b", TenantID: "tenant-a"}
@@ -158,6 +158,57 @@ func addTypedMessageRelation(
 	}
 	require.NoError(t, f.db.Create(&relation).Error)
 	return relation
+}
+
+func TestAgentMessageCallbackWaitIsDurableBeforeTargetExecutionStarts(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.b, f.c, "callback-order", "async", "none", "consult")
+	deadline := time.Now().UTC().Add(10 * time.Minute)
+	parent := &agentrelation.AgentMessage{
+		ID: "parent-b", TenantID: "tenant-a", RunID: "run-1",
+		ConversationID: "conversation-1", RootMessageID: "root-1",
+		Hop: 1, MaxHops: 8, EventBudget: 64, EventCount: 1,
+		TokenBudget: 65536, VisitedAgentIDs: []uint64{f.a.ID, f.b.ID},
+		DeadlineAt: &deadline, IdempotencyKey: "parent-b-key",
+		SourceAgentID: f.a.ID, SourceAgent: f.a.Name,
+		TargetAgentID: f.b.ID, TargetAgent: f.b.Name,
+		Scope: "callback-order", Action: "assign", DeliveryPolicy: "async",
+		ContextPolicy: "none", Content: "A asks B", Status: agentrelation.MessageStatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, f.db.Create(parent).Error)
+	waitRepo := repository.NewAgentMessageWaitRepositoryWithDB(f.db)
+	f.service.SetMessageWaitService(NewAgentMessageWaitServiceWithRepository(waitRepo))
+
+	started := make(chan error, 1)
+	f.runner.onRun = func(_, _, _ string) {
+		var count int64
+		err := f.db.Model(&agentrelation.AgentMessageWait{}).
+			Where("tenant_id = ? AND parent_message_id = ? AND status = ?", "tenant-a", parent.ID, agentrelation.MessageWaitStatusWaiting).
+			Count(&count).Error
+		if err == nil && count != 1 {
+			err = fmt.Errorf("callback wait count at execution start = %d, want 1", count)
+		}
+		started <- err
+	}
+
+	child, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.c.Name, Scope: "callback-order", Action: "consult",
+		Message: "B asks C", ParentMessageID: parent.ID,
+		IdempotencyKey: "child-c-key", CallbackRuntimeSessionID: "runtime-session-b",
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentrelation.MessageStatusQueued, child.Status)
+	select {
+	case startErr := <-started:
+		require.NoError(t, startErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("target execution did not start")
+	}
+	var wait agentrelation.AgentMessageWait
+	require.NoError(t, f.db.Where("tenant_id = ? AND waiting_message_id = ?", "tenant-a", child.ID).First(&wait).Error)
+	require.Equal(t, "runtime-session-b", wait.RuntimeSessionID)
+	require.Equal(t, parent.ID, wait.ParentMessageID)
 }
 
 // TestAgentMessageServiceRoutesEveryOrganizationRelationship is the compact

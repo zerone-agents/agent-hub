@@ -460,7 +460,10 @@ func main() {
 	organizationMessageService.SetPersonaHooks(beliefService, relationDynamicsService)
 	organizationMessageService.SetPersonaCapabilityGate(personaGate)
 	organizationMessageService.SetUsageService(usageService)
+	messageWaitService := services.NewAgentMessageWaitService()
+	organizationMessageService.SetMessageWaitService(messageWaitService)
 	organizationMcpHandler := handler.NewOrganizationMcpHandler(organizationMessageService)
+	organizationMcpHandler.SetMessageWaitService(messageWaitService)
 	organizationMcpHandler.SetWorkflowService(workflowService)
 	organizationMcpHandler.SetDecisionService(decisionService)
 	organizationMcpHandler.SetPersonaServices(emotionService, beliefService, memoryService, relationDynamicsService)
@@ -997,13 +1000,12 @@ func main() {
 	defer stop()
 	kongService.StartReconciler(appCtx)
 	eventWorkerDone := make(chan struct{})
+	messageResumeDispatcher := services.NewRuntimeResumeDispatcher(agentChatSvc, organizationMessageService)
+	messageTerminalHandler := services.NewAgentMessageTerminalHandler(messageWaitService, messageResumeDispatcher)
 	go func() {
 		defer close(eventWorkerDone)
-		err := eventService.RunWorkers(appCtx, 250*time.Millisecond, func(_ context.Context, _ eventdomain.Envelope) error {
-			// H2 events currently represent already-committed platform facts. The
-			// core consumer acknowledges them; extension-specific side effects are
-			// added as explicit handlers rather than hidden in the outbox worker.
-			return nil
+		err := eventService.RunWorkers(appCtx, 250*time.Millisecond, func(ctx context.Context, envelope eventdomain.Envelope) error {
+			return messageTerminalHandler.Handle(ctx, envelope)
 		}, func(err error) {
 			log.Printf("Event worker error: %v", err)
 		})

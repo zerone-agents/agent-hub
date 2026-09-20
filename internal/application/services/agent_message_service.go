@@ -62,10 +62,13 @@ type AgentMessageService struct {
 	personaGate *PersonaCapabilityGate
 	// H7.5 usage hook: nil leaves behavior unchanged; Record never blocks.
 	usage *UsageService
+	waits *AgentMessageWaitService
 }
 
 // SetUsageService 注入 H7.5 用量采集（advisory）。
 func (s *AgentMessageService) SetUsageService(u *UsageService) { s.usage = u }
+
+func (s *AgentMessageService) SetMessageWaitService(w *AgentMessageWaitService) { s.waits = w }
 
 // SetPersonaHooks injects the H6 belief and relation-dynamics packs into the
 // message dispatch path. Both hooks are advisory: failures are logged and
@@ -142,24 +145,25 @@ func newAgentMessageService(
 }
 
 type SendAgentMessageInput struct {
-	TargetAgent             string
-	Scope                   string
-	Action                  string
-	Message                 string
-	ContextSummary          string
-	SharedContext           string
-	RunID                   string
-	ConversationID          string
-	RootMessageID           string
-	ParentMessageID         string
-	Hop, MaxHops            int
-	DeadlineAt              *time.Time
-	EventBudget, EventCount int64
-	TokenBudget, TokensUsed int64
-	VisitedAgentIDs         []uint64
-	IdempotencyKey          string
-	RouteDeviationReason    string
-	SyncStack               []uint64
+	TargetAgent              string
+	Scope                    string
+	Action                   string
+	Message                  string
+	ContextSummary           string
+	SharedContext            string
+	RunID                    string
+	ConversationID           string
+	RootMessageID            string
+	ParentMessageID          string
+	Hop, MaxHops             int
+	DeadlineAt               *time.Time
+	EventBudget, EventCount  int64
+	TokenBudget, TokensUsed  int64
+	VisitedAgentIDs          []uint64
+	IdempotencyKey           string
+	RouteDeviationReason     string
+	SyncStack                []uint64
+	CallbackRuntimeSessionID string
 }
 
 type AgentMessageDTO struct {
@@ -629,6 +633,17 @@ func (s *AgentMessageService) Relations(tenantID string, source *agent.AgentConf
 	return result, nil
 }
 
+// ResolveResumeAgentName resolves the runtime identity from the tenant-scoped,
+// already-authorized waiting Agent id. Terminal events cannot choose a target
+// Agent name directly.
+func (s *AgentMessageService) ResolveResumeAgentName(_ context.Context, tenantID string, agentID uint64) (string, error) {
+	resolved, err := s.agentRepo.GetByID(tenantID, agentID)
+	if err != nil {
+		return "", err
+	}
+	return resolved.Name, nil
+}
+
 func (s *AgentMessageService) SignalRelation(tenantID string, source *agent.AgentConfig, targetAgent, scope string, input *RecordAgentRelationEventInput) (*AgentRelationEventResultDTO, error) {
 	if source == nil {
 		return nil, agentrelation.ErrAgentNotFound
@@ -797,7 +812,16 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	if guardReason != "" {
 		message.Status = agentrelation.MessageStatusGuarded
 	}
-	persisted, created, err := s.createMessageWithEvents(tenantID, message)
+	var callbackWait *RegisterAgentMessageWaitInput
+	if runtimeSessionID := strings.TrimSpace(input.CallbackRuntimeSessionID); runtimeSessionID != "" && guardReason == "" {
+		callbackWait = &RegisterAgentMessageWaitInput{
+			RunID: message.RunID, RuntimeSessionID: runtimeSessionID, WaitingAgentID: source.ID,
+			ParentMessageID: message.ParentMessageID, WaitingMessageID: message.ID,
+			DeadlineAt: message.DeadlineAt,
+			DedupeKey:  fmt.Sprintf("agent-callback:%s:%s:%s", message.ParentMessageID, message.ID, runtimeSessionID),
+		}
+	}
+	persisted, created, err := s.createMessageWithEventsAndWait(ctx, tenantID, message, callbackWait)
 	if err != nil {
 		return nil, fmt.Errorf("记录组织消息失败: %w", err)
 	}
@@ -863,6 +887,10 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 }
 
 func (s *AgentMessageService) createMessageWithEvents(tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
+	return s.createMessageWithEventsAndWait(context.Background(), tenantID, message, nil)
+}
+
+func (s *AgentMessageService) createMessageWithEventsAndWait(ctx context.Context, tenantID string, message *agentrelation.AgentMessage, wait *RegisterAgentMessageWaitInput) (*agentrelation.AgentMessage, bool, error) {
 	var persisted *agentrelation.AgentMessage
 	created := false
 	err := s.events.db.Transaction(func(tx *gorm.DB) error {
@@ -879,6 +907,15 @@ func (s *AgentMessageService) createMessageWithEvents(tenantID string, message *
 			return err
 		}
 		_, err = s.publishMessageEventTx(tx, tenantID, message, message.Status, accepted.ID)
+		if err != nil {
+			return err
+		}
+		if wait != nil {
+			if s.waits == nil {
+				return errors.New("callback wait service is not configured")
+			}
+			_, _, err = s.waits.RegisterTx(ctx, tx, tenantID, *wait)
+		}
 		return err
 	})
 	return persisted, created, err
@@ -890,7 +927,7 @@ func (s *AgentMessageService) publishMessageEventTx(tx *gorm.DB, tenantID string
 		Scope: eventdomain.Ref{Type: "run", ID: message.RunID}, Subject: eventdomain.Ref{Type: "agent", ID: fmt.Sprint(message.TargetAgentID)}, Actor: eventdomain.Ref{Type: "agent", ID: fmt.Sprint(message.SourceAgentID)},
 		Visibility: "participants", CorrelationID: message.ConversationID, CausationID: cause, RootEventID: message.RootMessageID,
 		IdempotencyKey: "agent-message:" + message.ID + ":" + state,
-		Data:           map[string]any{"messageId": message.ID, "parentMessageId": message.ParentMessageID, "sourceAgent": message.SourceAgent, "targetAgent": message.TargetAgent, "action": message.Action, "hop": message.Hop, "status": state, "guardReason": message.GuardReason, "tokensUsed": message.TokensUsed, "routeMode": message.RouteMode, "routePlanned": message.RoutePlanned, "routeDeviation": message.RouteDeviation},
+		Data:           map[string]any{"messageId": message.ID, "parentMessageId": message.ParentMessageID, "sourceAgent": message.SourceAgent, "targetAgent": message.TargetAgent, "action": message.Action, "hop": message.Hop, "status": state, "reply": message.Reply, "error": message.Error, "guardReason": message.GuardReason, "tokensUsed": message.TokensUsed, "routeMode": message.RouteMode, "routePlanned": message.RoutePlanned, "routeDeviation": message.RouteDeviation},
 	})
 }
 
@@ -1440,6 +1477,30 @@ func (s *AgentChatService) RunOneShot(ctx context.Context, tenantID, agentName, 
 	}
 	body, _ := json.Marshal(map[string]string{"message": message})
 	rc, err := s.runtimeClient.StreamRun(ctx, baseURL, NormalizeAgentName(agentName), apiKey, body, "")
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	raw, err := io.ReadAll(io.LimitReader(rc, maxAgentRunResponseBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) > maxAgentRunResponseBytes {
+		return "", fmt.Errorf("目标 Agent 回复超过限制")
+	}
+	return extractOneShotReply(string(raw))
+}
+
+// ResumeOneShot continues the exact runtime session that produced a waiting
+// organization message. It deliberately has no "start fresh" fallback: a
+// missing/stale session is a failed resume and must be handled by wait timeout
+// policy, otherwise the Hub could execute the same consultation twice.
+func (s *AgentChatService) ResumeOneShot(ctx context.Context, tenantID, agentName, runtimeSessionID, message string) (string, error) {
+	baseURL, apiKey, _, err := s.ResolveRuntime(tenantID, agentName)
+	if err != nil {
+		return "", err
+	}
+	rc, err := s.runtimeClient.StreamResume(ctx, baseURL, NormalizeAgentName(agentName), apiKey, runtimeSessionID, message)
 	if err != nil {
 		return "", err
 	}

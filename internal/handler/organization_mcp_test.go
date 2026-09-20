@@ -76,6 +76,10 @@ func setupOrganizationMcpRouter(service OrganizationMessageService) *gin.Engine 
 }
 
 func postOrganizationRPC(t *testing.T, router http.Handler, method string, params json.RawMessage, token string) *httptest.ResponseRecorder {
+	return postOrganizationRPCWithSession(t, router, method, params, token, "")
+}
+
+func postOrganizationRPCWithSession(t *testing.T, router http.Handler, method string, params json.RawMessage, token, runtimeSessionID string) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(jsonRPCRequest{JSONRPC: "2.0", ID: 7, Method: method, Params: params})
 	require.NoError(t, err)
@@ -84,9 +88,28 @@ func postOrganizationRPC(t *testing.T, router http.Handler, method string, param
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	if runtimeSessionID != "" {
+		req.Header.Set("X-Zerone-Runtime-Session-ID", runtimeSessionID)
+	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
+}
+
+func decodeMcpErrorText(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.True(t, response.Result.IsError)
+	require.Len(t, response.Result.Content, 1)
+	return response.Result.Content[0].Text
 }
 
 func decodeMcpTextResult(t *testing.T, rec *httptest.ResponseRecorder) map[string]interface{} {
@@ -178,6 +201,65 @@ func TestOrganizationMcpDerivesSourceFromRuntimeToken(t *testing.T) {
 	require.Equal(t, "review", service.input.Action)
 }
 
+func TestOrganizationMcpContinuationDefaultsCallbackForWorkActions(t *testing.T) {
+	for _, action := range []string{"consult", "assign", "review", "challenge", "handoff"} {
+		t.Run(action, func(t *testing.T) {
+			service := &fakeOrganizationMessageService{sent: &services.AgentMessageDTO{ID: "child-1", Status: "queued"}}
+			h := NewOrganizationMcpHandler(service)
+			// The handler only needs a configured wait capability here; the real
+			// service owns durable registration so it can happen before execution.
+			h.SetMessageWaitService(services.NewAgentMessageWaitService())
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.POST("/api/v1/organization/mcp", func(c *gin.Context) {
+				c.Set("agent", &agent.AgentConfig{ID: 41, Name: "agent-a", TenantID: "tenant-a"})
+				tenant.SetTenantID(c, "tenant-a")
+			}, h.HandleMessage)
+			params := json.RawMessage(`{"name":"agent_send","arguments":{"target_agent":"agent-c","action":"` + action + `","message":"continue","run_id":"run-1","parent_message_id":"parent-1"}}`)
+			rec := postOrganizationRPCWithSession(t, router, "tools/call", params, "", "runtime-session-1")
+			decodeMcpTextResult(t, rec)
+			require.Equal(t, "runtime-session-1", service.input.CallbackRuntimeSessionID)
+		})
+	}
+}
+
+func TestOrganizationMcpCallbackRejectsMissingTrustedSessionBeforeSend(t *testing.T) {
+	service := &fakeOrganizationMessageService{sent: &services.AgentMessageDTO{ID: "must-not-send"}}
+	h := NewOrganizationMcpHandler(service)
+	h.SetMessageWaitService(services.NewAgentMessageWaitService())
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/v1/organization/mcp", func(c *gin.Context) {
+		c.Set("agent", &agent.AgentConfig{ID: 41, Name: "agent-a", TenantID: "tenant-a"})
+		tenant.SetTenantID(c, "tenant-a")
+	}, h.HandleMessage)
+	params := json.RawMessage(`{"name":"agent_send","arguments":{"target_agent":"agent-c","action":"consult","message":"continue","run_id":"run-1","parent_message_id":"parent-1"}}`)
+	rec := postOrganizationRPC(t, router, "tools/call", params, "")
+	require.Contains(t, decodeMcpErrorText(t, rec), "可信会话标识")
+	require.Empty(t, service.input.TargetAgent, "validation must reject before dispatch")
+}
+
+func TestOrganizationMcpExplicitNoneAndNotificationsDoNotRequireSession(t *testing.T) {
+	tests := []struct {
+		name, action, waitMode string
+	}{
+		{name: "explicit none", action: "consult", waitMode: `,"wait_mode":"none"`},
+		{name: "notification default", action: "inform"},
+		{name: "report default", action: "report"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeOrganizationMessageService{sent: &services.AgentMessageDTO{ID: "child-1", Status: "queued"}}
+			router := setupOrganizationMcpRouter(service)
+			params := json.RawMessage(`{"name":"agent_send","arguments":{"target_agent":"agent-c","action":"` + tc.action + `","message":"continue","run_id":"run-1","parent_message_id":"parent-1"` + tc.waitMode + `}}`)
+			rec := postOrganizationRPC(t, router, "tools/call", params, "agent-a-token")
+			decodeMcpTextResult(t, rec)
+			require.Empty(t, service.input.CallbackRuntimeSessionID)
+			require.Equal(t, "agent-c", service.input.TargetAgent)
+		})
+	}
+}
+
 func TestOrganizationMcpContinuationCannotResetServerOwnedChain(t *testing.T) {
 	service := &fakeOrganizationMessageService{sent: &services.AgentMessageDTO{
 		ID: "message-2", ConversationID: "server-conversation", RootMessageID: "root-1", ParentMessageID: "parent-1", Hop: 3, MaxHops: 8, Status: "queued",
@@ -186,7 +268,7 @@ func TestOrganizationMcpContinuationCannotResetServerOwnedChain(t *testing.T) {
 	params := json.RawMessage(`{
 		"name":"agent_send",
 		"arguments":{
-			"target_agent":"agent-c","action":"handoff","message":"continue",
+			"target_agent":"agent-c","action":"handoff","message":"continue","wait_mode":"none",
 			"parent_message_id":"parent-1","idempotency_key":"parent-1:handoff:c",
 			"conversation_id":"spoofed","root_message_id":"spoofed","hop":1,"max_hops":999,
 			"budget":{"max_events":999999,"events_used":0},"trace":{"visited_agent_ids":[],"sync_stack":[]}

@@ -34,6 +34,16 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// ResumeRunRequest is the runtime v2.8.x continuation contract.  Runtime does
+// not expose a separate "resume" endpoint: continuing an agent means posting
+// another run with the session id returned by the original run.  The Hub keeps
+// wait/message/run/idempotency metadata in the (platform-owned) message
+// envelope; only Message and SessionID cross the runtime API boundary.
+type ResumeRunRequest struct {
+	Message   string `json:"message"`
+	SessionID string `json:"sessionId"`
+}
+
 // RuntimeHTTPError marks a non-2xx runtime response. The upstream error body
 // is deliberately NOT carried: runtime responses can echo the resolved agent
 // config, whose MCP connection headers the hub armed at deploy time
@@ -143,6 +153,21 @@ func (c *Client) StreamRun(ctx context.Context, baseURL, agentName, apiKey strin
 	}
 
 	return resp.Body, nil
+}
+
+// StreamResume continues an existing runtime session. Authentication is the
+// same x-api-key contract as StreamRun. sessionID is mandatory: silently
+// starting a fresh session would turn a callback into a second, unrelated
+// task and can recreate the duplicate-dispatch problem this API prevents.
+func (c *Client) StreamResume(ctx context.Context, baseURL, agentName, apiKey, sessionID, message string) (io.ReadCloser, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("runtime resume requires session id")
+	}
+	body, err := json.Marshal(ResumeRunRequest{Message: message, SessionID: sessionID})
+	if err != nil {
+		return nil, fmt.Errorf("encode runtime resume request: %w", err)
+	}
+	return c.StreamRun(ctx, baseURL, agentName, apiKey, body, "")
 }
 
 // GetAgentDetail calls GET {baseURL}/v1/agents/{agentName} and returns the
