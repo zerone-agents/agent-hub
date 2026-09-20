@@ -49,8 +49,17 @@ for edge in "$aid:$bid:assign" "$bid:$cid:consult"; do
   [[ "$code" == 201 || "$code" == 409 ]] || { cat "/tmp/$PREFIX-relation-$source-$target.json" >&2; exit 3; }
 done
 
-curl -fsS -X POST -H "$H" -H 'Content-Type: application/json' --data '{"status":"running"}' \
-  "$HUB_URL/api/v1/admin/runs/$RUN_ID/transitions" >/dev/null
+# Relations are a deploy-time system capability. Force a fresh artifact after
+# the edges exist so organization MCP is mounted into all three runtimes.
+for suffix in a b c; do
+  name="$PREFIX-$suffix"
+  curl -fsS -X POST -H "$H" "$HUB_URL/api/v1/admin/agents/$name/deploy?force=true" >/dev/null
+done
+sleep 3
+
+transition_code=$(curl -sS -o "/tmp/$PREFIX-transition.json" -w '%{http_code}' -X POST -H "$H" \
+  -H 'Content-Type: application/json' --data '{"status":"running"}' "$HUB_URL/api/v1/admin/runs/$RUN_ID/transitions")
+[[ "$transition_code" == 200 || "$transition_code" == 422 ]] || { cat "/tmp/$PREFIX-transition.json" >&2; exit 4; }
 
 session=$(curl -fsS -X POST -H "$H" -H 'Content-Type: application/json' --data '{"title":"ACCEPT-H1H7 A-B-C"}' \
   "$HUB_URL/api/v1/agents/$PREFIX-a/chat/sessions" | jq -er '.data.id')
