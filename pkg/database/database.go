@@ -243,6 +243,7 @@ func AutoMigrate(backfillTenant string) error {
 		&agentrelation.AgentRelationEvent{},
 		&agentrelation.AgentMessage{},
 		&agentrelation.AgentMessageDedupe{},
+		&agentrelation.AgentMessageReturnClaim{},
 		&agentrelation.AgentMessageDispatch{},
 		&agentrelation.AgentMessageDispatchCursor{},
 		&agentrelation.AgentMessageWait{},

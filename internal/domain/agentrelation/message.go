@@ -70,6 +70,22 @@ type AgentMessageDedupe struct {
 
 func (AgentMessageDedupe) TableName() string { return "agent_message_dedupes" }
 
+// AgentMessageReturnClaim elects the single authoritative final return for a
+// request. A parent fixes the legal reverse edge (target -> source), therefore
+// tenant + parent is sufficient and deliberately does not collapse unrelated
+// messages, lateral traffic, or non-final actions.
+type AgentMessageReturnClaim struct {
+	ID              uint64    `gorm:"primaryKey;autoIncrement"`
+	TenantID        string    `gorm:"type:varchar(64);not null;uniqueIndex:uk_agent_message_return_claim,priority:1"`
+	ParentMessageID string    `gorm:"type:char(36);not null;uniqueIndex:uk_agent_message_return_claim,priority:2"`
+	MessageID       string    `gorm:"type:char(36);not null;uniqueIndex"`
+	SourceAgentID   uint64    `gorm:"not null"`
+	TargetAgentID   uint64    `gorm:"not null"`
+	CreatedAt       time.Time `gorm:"not null"`
+}
+
+func (AgentMessageReturnClaim) TableName() string { return "agent_message_return_claims" }
+
 const (
 	DispatchStatusQueued    = "queued"
 	DispatchStatusRunning   = "running"

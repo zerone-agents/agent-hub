@@ -722,7 +722,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		// A rejected duplicate callback return is an audit event, not a failure
 		// of the already completed child request. Propagating its guarded state
 		// would incorrectly poison the authoritative callback chain.
-		if reason != "callback_return_managed" {
+		if reason != "callback_return_managed" && reason != "duplicate_return" {
 			s.reconcileParentChain(tenantID, persisted)
 		}
 		return agentMessageToParticipantDTO(persisted, source.ID), authErr
@@ -845,9 +845,17 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 			DedupeKey:  fmt.Sprintf("agent-callback:%s:%s:%s", message.ParentMessageID, message.ID, runtimeSessionID),
 		}
 	}
-	persisted, created, err := s.createMessageWithEventsAndWait(ctx, tenantID, message, callbackWait)
+	// Only report/inform on the exact reverse edge compete for the final-return
+	// slot. The unique claim is inserted in the same transaction as the message,
+	// so concurrent model completions cannot both escape to execution.
+	claimFinalReturn := parent != nil && (input.Action == "report" || input.Action == "inform") &&
+		source.ID == parent.TargetAgentID && target.ID == parent.SourceAgentID
+	persisted, created, returnClaimed, err := s.createMessageWithEventsAndWait(ctx, tenantID, message, callbackWait, claimFinalReturn)
 	if err != nil {
 		return nil, fmt.Errorf("记录组织消息失败: %w", err)
+	}
+	if claimFinalReturn && !returnClaimed {
+		return persistAuthorizationGuard("duplicate_return", agentrelation.ErrChainGuarded)
 	}
 	if !created {
 		return agentMessageToParticipantDTO(persisted, source.ID), nil
@@ -911,13 +919,29 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 }
 
 func (s *AgentMessageService) createMessageWithEvents(tenantID string, message *agentrelation.AgentMessage) (*agentrelation.AgentMessage, bool, error) {
-	return s.createMessageWithEventsAndWait(context.Background(), tenantID, message, nil)
+	persisted, created, _, err := s.createMessageWithEventsAndWait(context.Background(), tenantID, message, nil, false)
+	return persisted, created, err
 }
 
-func (s *AgentMessageService) createMessageWithEventsAndWait(ctx context.Context, tenantID string, message *agentrelation.AgentMessage, wait *RegisterAgentMessageWaitInput) (*agentrelation.AgentMessage, bool, error) {
+func (s *AgentMessageService) createMessageWithEventsAndWait(ctx context.Context, tenantID string, message *agentrelation.AgentMessage, wait *RegisterAgentMessageWaitInput, claimFinalReturn bool) (*agentrelation.AgentMessage, bool, bool, error) {
 	var persisted *agentrelation.AgentMessage
 	created := false
+	returnClaimed := !claimFinalReturn
 	err := s.events.db.Transaction(func(tx *gorm.DB) error {
+		if claimFinalReturn {
+			claim := &agentrelation.AgentMessageReturnClaim{
+				TenantID: tenantID, ParentMessageID: message.ParentMessageID, MessageID: message.ID,
+				SourceAgentID: message.SourceAgentID, TargetAgentID: message.TargetAgentID, CreatedAt: time.Now().UTC(),
+			}
+			insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(claim)
+			if insert.Error != nil {
+				return insert.Error
+			}
+			if insert.RowsAffected == 0 {
+				return nil
+			}
+			returnClaimed = true
+		}
 		var err error
 		persisted, created, err = s.messageRepo.CreateIdempotentTx(tx, tenantID, message)
 		if err != nil || !created {
@@ -942,7 +966,7 @@ func (s *AgentMessageService) createMessageWithEventsAndWait(ctx context.Context
 		}
 		return err
 	})
-	return persisted, created, err
+	return persisted, created, returnClaimed, err
 }
 
 func (s *AgentMessageService) publishMessageEventTx(tx *gorm.DB, tenantID string, message *agentrelation.AgentMessage, state, cause string) (*eventdomain.Envelope, error) {
@@ -1485,6 +1509,8 @@ func guardDescription(reason string) string {
 		return "同步回路会互相等待，请改为异步回报"
 	case "callback_return_managed":
 		return "该请求已由回调自动恢复上游，不得再显式回报"
+	case "duplicate_return":
+		return "该请求已有最终返回，后续重复回报已拦截"
 	case "route_not_found":
 		return "当前 Agent 没有向目标发送该消息的组织关系"
 	case "action_not_allowed":

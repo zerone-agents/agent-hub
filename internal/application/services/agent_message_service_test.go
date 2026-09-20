@@ -67,7 +67,7 @@ func setupAgentMessageService(t *testing.T) agentMessageFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "-"))), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &agentrelation.AgentMessageWait{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.RunRoutePlan{}, &rundomain.RunRouteStep{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
+	require.NoError(t, db.AutoMigrate(&agent.AgentConfig{}, &agentrelation.AgentRelation{}, &agentrelation.AgentRelationEvent{}, &agentrelation.AgentMessage{}, &agentrelation.AgentMessageDedupe{}, &agentrelation.AgentMessageReturnClaim{}, &agentrelation.AgentMessageWait{}, &rundomain.Run{}, &rundomain.RunAgent{}, &rundomain.RunRoutePlan{}, &rundomain.RunRouteStep{}, &eventdomain.StreamCursor{}, &eventdomain.Envelope{}, &eventdomain.Delivery{}, &eventdomain.DeliveryAttempt{}, &eventdomain.CausalBudget{}))
 
 	a := agent.AgentConfig{Name: "agent-a", TenantID: "tenant-a"}
 	b := agent.AgentConfig{Name: "agent-b", TenantID: "tenant-a"}
@@ -843,11 +843,16 @@ func TestAgentMessageServiceAllowsAsyncReturnButRejectsSyncWaitCycle(t *testing.
 		return f.db.Where("id = ?", returned.ID).First(&current).Error == nil && current.Status == agentrelation.MessageStatusCompleted
 	}, time.Second, 10*time.Millisecond)
 
-	// Changing the current edge to sync turns the same legal graph cycle into
-	// a synchronous call-stack deadlock, so it is persisted as a guard.
+	// Changing the current edge to sync turns a separate legal graph cycle into
+	// a synchronous call-stack deadlock, so it is persisted as a guard. A
+	// separate parent keeps this assertion independent from final-return dedupe.
 	require.NoError(t, f.db.Model(&agentrelation.AgentRelation{}).Where("source_agent_id=? AND target_agent_id=?", f.b.ID, f.a.ID).Update("delivery_policy", "sync").Error)
-	require.NoError(t, f.db.Model(&agentrelation.AgentMessage{}).Where("id=?", first.ID).Update("status", agentrelation.MessageStatusRunning).Error)
-	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "return", Action: "report", Message: "sync answer", ParentMessageID: first.ID, IdempotencyKey: "return-sync"})
+	var syncParent agentrelation.AgentMessage
+	require.NoError(t, f.db.Where("tenant_id = ? AND id = ?", "tenant-a", first.ID).First(&syncParent).Error)
+	syncParent.ID, syncParent.RootMessageID, syncParent.ConversationID = "return-sync-parent", "return-sync-parent", "return-sync-conversation"
+	syncParent.IdempotencyKey, syncParent.Status = "return-sync-parent", agentrelation.MessageStatusRunning
+	require.NoError(t, f.db.Create(&syncParent).Error)
+	guarded, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{TargetAgent: f.a.Name, Scope: "return", Action: "report", Message: "sync answer", ParentMessageID: syncParent.ID, IdempotencyKey: "return-sync"})
 	require.ErrorIs(t, err, agentrelation.ErrSyncDeadlock)
 	require.Equal(t, agentrelation.MessageStatusGuarded, guarded.Status)
 	require.Equal(t, "sync_wait_cycle", guarded.GuardReason)
@@ -941,6 +946,67 @@ func TestAgentMessageServiceCallbackReturnGuardIsTenantScoped(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, agentrelation.MessageStatusGuarded, returned.Status)
 }
+
+func TestAgentMessageServiceAllowsOnlyFirstExactFinalReturn(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.b, f.a, "final-return", "async", "summary_only", "report", "inform", "challenge")
+	now := time.Now().UTC()
+	parent := &agentrelation.AgentMessage{
+		ID: "final-parent", TenantID: "tenant-a", RunID: "run-1", ConversationID: "final-conversation",
+		RootMessageID: "final-parent", Hop: 1, MaxHops: 8, DeadlineAt: ptrTime(now.Add(time.Minute)),
+		EventBudget: 64, EventCount: 1, TokenBudget: 65536, VisitedAgentIDs: []uint64{f.a.ID, f.b.ID},
+		IdempotencyKey: "final-parent-key", Scope: "final-return", SourceAgentID: f.a.ID, SourceAgent: f.a.Name,
+		TargetAgentID: f.b.ID, TargetAgent: f.b.Name, Action: "assign", DeliveryPolicy: "async",
+		ContextPolicy: "summary_only", Content: "do it", Status: agentrelation.MessageStatusCompleted, CreatedAt: now,
+	}
+	require.NoError(t, f.db.Create(parent).Error)
+
+	first, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "final-return", Action: "report", Message: "authoritative result",
+		ParentMessageID: parent.ID, IdempotencyKey: "final-return-first",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, first.Status)
+	require.Eventually(t, func() bool {
+		var current agentrelation.AgentMessage
+		return f.db.Where("tenant_id = ? AND id = ?", "tenant-a", first.ID).First(&current).Error == nil &&
+			isTerminalMessageStatus(current.Status)
+	}, time.Second, 10*time.Millisecond)
+
+	duplicate, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "final-return", Action: "inform", Message: "second result",
+		ParentMessageID: parent.ID, IdempotencyKey: "final-return-second",
+	})
+	require.ErrorIs(t, err, agentrelation.ErrChainGuarded)
+	require.Equal(t, agentrelation.MessageStatusGuarded, duplicate.Status)
+	require.Equal(t, "duplicate_return", duplicate.GuardReason)
+	require.Empty(t, duplicate.Content)
+
+	// A non-final action on the same edge is independent of the claim.
+	challenge, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "final-return", Action: "challenge", Message: "counterpoint",
+		ParentMessageID: parent.ID, IdempotencyKey: "final-return-challenge",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, challenge.Status)
+
+	// A foreign tenant's same parent id cannot reserve tenant-a's slot.
+	require.NoError(t, f.db.Create(&agentrelation.AgentMessageReturnClaim{
+		TenantID: "tenant-b", ParentMessageID: "other-parent", MessageID: "foreign-return",
+		SourceAgentID: f.b.ID, TargetAgentID: f.a.ID, CreatedAt: now,
+	}).Error)
+	otherParent := *parent
+	otherParent.ID, otherParent.RootMessageID, otherParent.IdempotencyKey = "other-parent", "other-parent", "other-parent-key"
+	require.NoError(t, f.db.Create(&otherParent).Error)
+	other, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "final-return", Action: "report", Message: "tenant-local result",
+		ParentMessageID: otherParent.ID, IdempotencyKey: "other-return",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, other.Status)
+}
+
+func ptrTime(value time.Time) *time.Time { return &value }
 
 func TestAgentMessageServiceGuardsBudgetAndDeduplicatesRepeatedHop(t *testing.T) {
 	f := setupAgentMessageService(t)
