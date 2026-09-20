@@ -853,6 +853,95 @@ func TestAgentMessageServiceAllowsAsyncReturnButRejectsSyncWaitCycle(t *testing.
 	require.Equal(t, "sync_wait_cycle", guarded.GuardReason)
 }
 
+func TestAgentMessageServiceCallbackWaitBlocksOnlyExactExplicitReturn(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.c, f.b, "callback-return", "async", "summary_only", "report", "inform", "challenge")
+	addMessageRelation(t, f, f.c, f.a, "callback-return", "async", "summary_only", "report")
+
+	makeCallbackChild := func(id string) *agentrelation.AgentMessage {
+		t.Helper()
+		deadline := time.Now().UTC().Add(10 * time.Minute)
+		message := &agentrelation.AgentMessage{
+			ID: id, TenantID: "tenant-a", RunID: "run-1", ConversationID: "callback-conversation",
+			RootMessageID: id, Hop: 2, MaxHops: 8, DeadlineAt: &deadline,
+			EventBudget: 64, EventCount: 2, TokenBudget: 65536, VisitedAgentIDs: []uint64{f.b.ID, f.c.ID},
+			IdempotencyKey: id + "-message", Scope: "callback-return",
+			SourceAgentID: f.b.ID, SourceAgent: f.b.Name, TargetAgentID: f.c.ID, TargetAgent: f.c.Name,
+			Action: "consult", DeliveryPolicy: "async", ContextPolicy: "summary_only", Content: "B asks C",
+			Status: agentrelation.MessageStatusCompleted, CreatedAt: time.Now().UTC(),
+		}
+		require.NoError(t, f.db.Create(message).Error)
+		require.NoError(t, f.db.Create(&agentrelation.AgentMessageWait{
+			ID: id + "-wait", TenantID: "tenant-a", RunID: "run-1", WaitingAgentID: f.b.ID,
+			WaitingAgent: f.b.Name, RuntimeSessionID: id + "-session", ParentMessageID: id + "-upstream",
+			WaitingMessageID: id, Status: agentrelation.MessageWaitStatusResumed,
+			DedupeKey: id + "-dedupe", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}).Error)
+		return message
+	}
+
+	for _, action := range []string{"report", "inform"} {
+		child := makeCallbackChild("callback-child-" + action)
+		guarded, sendErr := f.service.Send(context.Background(), "tenant-a", &f.c, SendAgentMessageInput{
+			TargetAgent: f.b.Name, Scope: "callback-return", Action: action, Message: "duplicate explicit return",
+			ParentMessageID: child.ID, IdempotencyKey: "callback-return-" + action,
+		})
+		require.ErrorIs(t, sendErr, agentrelation.ErrChainGuarded)
+		require.Equal(t, agentrelation.MessageStatusGuarded, guarded.Status)
+		require.Equal(t, "callback_return_managed", guarded.GuardReason)
+		require.Equal(t, "该请求已由回调自动恢复上游，不得再显式回报", guarded.GuardDescription)
+		var unchanged agentrelation.AgentMessage
+		require.NoError(t, f.db.Where("tenant_id = ? AND id = ?", "tenant-a", child.ID).First(&unchanged).Error)
+		require.Equal(t, agentrelation.MessageStatusCompleted, unchanged.Status)
+	}
+
+	// A different action on the exact reverse edge is not a duplicate result.
+	challengeParent := makeCallbackChild("callback-child-challenge")
+	challenge, err := f.service.Send(context.Background(), "tenant-a", &f.c, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "callback-return", Action: "challenge", Message: "challenge the premise",
+		ParentMessageID: challengeParent.ID, IdempotencyKey: "callback-return-challenge",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, challenge.Status)
+
+	// Nor is a report to a different participant: the guard is precise, not a
+	// blanket ban on all sends made while a callback exists.
+	lateralParent := makeCallbackChild("callback-child-lateral")
+	lateral, err := f.service.Send(context.Background(), "tenant-a", &f.c, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "callback-return", Action: "report", Message: "lateral audit copy",
+		ParentMessageID: lateralParent.ID, IdempotencyKey: "callback-return-lateral",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, lateral.Status)
+}
+
+func TestAgentMessageServiceCallbackReturnGuardIsTenantScoped(t *testing.T) {
+	f := setupAgentMessageService(t)
+	addMessageRelation(t, f, f.a, f.b, "callback-tenant", "async", "summary_only", "consult")
+	addMessageRelation(t, f, f.b, f.a, "callback-tenant", "async", "summary_only", "report")
+
+	parent, err := f.service.Send(context.Background(), "tenant-a", &f.a, SendAgentMessageInput{
+		TargetAgent: f.b.Name, Scope: "callback-tenant", Action: "consult", Message: "ask",
+		RunID: "run-1", IdempotencyKey: "callback-tenant-parent",
+	})
+	require.NoError(t, err)
+	// A foreign tenant row with the same waiting_message_id must not affect
+	// tenant-a authorization. Insert directly to exercise lookup isolation.
+	require.NoError(t, f.db.Create(&agentrelation.AgentMessageWait{
+		ID: "foreign-wait", TenantID: "tenant-b", RunID: "foreign-run", WaitingAgentID: 999,
+		WaitingAgent: "foreign", RuntimeSessionID: "foreign-session", ParentMessageID: "foreign-parent",
+		WaitingMessageID: parent.ID, Status: agentrelation.MessageWaitStatusWaiting,
+		DedupeKey: "foreign-dedupe", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}).Error)
+
+	returned, err := f.service.Send(context.Background(), "tenant-a", &f.b, SendAgentMessageInput{
+		TargetAgent: f.a.Name, Scope: "callback-tenant", Action: "report", Message: "valid return",
+		ParentMessageID: parent.ID, IdempotencyKey: "callback-tenant-return",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, agentrelation.MessageStatusGuarded, returned.Status)
+}
+
 func TestAgentMessageServiceGuardsBudgetAndDeduplicatesRepeatedHop(t *testing.T) {
 	f := setupAgentMessageService(t)
 	addMessageRelation(t, f, f.a, f.b, "loop", "sync", "summary_only", "inform")

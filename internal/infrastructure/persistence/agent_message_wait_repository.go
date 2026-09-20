@@ -52,6 +52,23 @@ func (r *AgentMessageWaitRepository) Get(tenantID, id string) (*agentrelation.Ag
 	return &row, err
 }
 
+// ExistsForWaitingMessage reports whether messageID has ever registered a
+// callback continuation in this tenant. Terminal waits deliberately still
+// count: a late explicit report/inform must not create a second return path
+// after the callback has already resumed the waiting runtime session.
+func (r *AgentMessageWaitRepository) ExistsForWaitingMessage(tenantID, messageID string) (bool, error) {
+	if tenantID == "" {
+		return false, ErrTenantIDRequired
+	}
+	if messageID == "" {
+		return false, errors.New("waiting_message_id is required")
+	}
+	var count int64
+	err := TenantOwned(r.db.Model(&agentrelation.AgentMessageWait{}), tenantID).
+		Where("waiting_message_id = ?", messageID).Limit(1).Count(&count).Error
+	return count > 0, err
+}
+
 // ValidateMessages loads both sides under the same tenant and proves they
 // belong to one non-empty Run. The waiting agent must own the child request
 // and participate in the parent execution.

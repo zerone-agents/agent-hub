@@ -122,6 +122,7 @@ func NewAgentMessageService(runner AgentMessageRunner) *AgentMessageService {
 		syncWaitTimeout:  defaultSyncWaitTimeout,
 		executionTimeout: defaultExecutionTimeout,
 		collaboration:    NewCollaborationService(relationRepo.DB()),
+		waits:            NewAgentMessageWaitServiceWithRepository(repository.NewAgentMessageWaitRepositoryWithDB(relationRepo.DB())),
 	}
 }
 
@@ -141,6 +142,7 @@ func newAgentMessageService(
 		syncWaitTimeout:  defaultSyncWaitTimeout,
 		executionTimeout: defaultExecutionTimeout,
 		collaboration:    NewCollaborationService(messageRepo.DB()),
+		waits:            NewAgentMessageWaitServiceWithRepository(repository.NewAgentMessageWaitRepositoryWithDB(messageRepo.DB())),
 	}
 }
 
@@ -691,8 +693,10 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		deadline = input.DeadlineAt.UTC()
 	}
 	visited := []uint64{source.ID, target.ID}
+	var parent *agentrelation.AgentMessage
 	if strings.TrimSpace(input.ParentMessageID) != "" {
-		parent, parentErr := s.messageRepo.GetForAgent(tenantID, strings.TrimSpace(input.ParentMessageID), source.ID)
+		parent, err = s.messageRepo.GetForAgent(tenantID, strings.TrimSpace(input.ParentMessageID), source.ID)
+		parentErr := err
 		if parentErr != nil || parent.TargetAgentID != source.ID {
 			return nil, agentrelation.ErrMessageNotFound
 		}
@@ -715,7 +719,12 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		if persistErr != nil {
 			return nil, fmt.Errorf("记录链路守卫失败: %w", persistErr)
 		}
-		s.reconcileParentChain(tenantID, persisted)
+		// A rejected duplicate callback return is an audit event, not a failure
+		// of the already completed child request. Propagating its guarded state
+		// would incorrectly poison the authoritative callback chain.
+		if reason != "callback_return_managed" {
+			s.reconcileParentChain(tenantID, persisted)
+		}
 		return agentMessageToParticipantDTO(persisted, source.ID), authErr
 	}
 	if runID != "" {
@@ -732,6 +741,21 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 	}
 	if _, ok := agentrelation.Actions[input.Action]; !ok {
 		return persistAuthorizationGuard("action_not_allowed", agentrelation.ErrInvalidAction)
+	}
+	// A callback wait is the one authoritative return channel for its child
+	// request. Block only the precise reverse report/inform (child target back
+	// to child source); lateral messages and every other action remain legal.
+	// The lookup is tenant-scoped and includes terminal waits so a late model
+	// response cannot race the callback and produce a duplicate upstream path.
+	if parent != nil && (input.Action == "report" || input.Action == "inform") &&
+		source.ID == parent.TargetAgentID && target.ID == parent.SourceAgentID {
+		hasCallback, callbackErr := s.waits.ExistsForWaitingMessage(ctx, tenantID, parent.ID)
+		if callbackErr != nil {
+			return nil, callbackErr
+		}
+		if hasCallback {
+			return persistAuthorizationGuard("callback_return_managed", agentrelation.ErrChainGuarded)
+		}
 	}
 	relation, err := s.resolveRelation(tenantID, source.ID, target.ID, input.Scope, input.Action)
 	if err != nil {
@@ -1459,6 +1483,8 @@ func guardDescription(reason string) string {
 		return "本次协作的 Token 用量已达上限"
 	case "sync_wait_cycle":
 		return "同步回路会互相等待，请改为异步回报"
+	case "callback_return_managed":
+		return "该请求已由回调自动恢复上游，不得再显式回报"
 	case "route_not_found":
 		return "当前 Agent 没有向目标发送该消息的组织关系"
 	case "action_not_allowed":

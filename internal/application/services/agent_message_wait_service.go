@@ -82,6 +82,10 @@ func (s *AgentMessageWaitService) ClaimReadyForMessage(_ context.Context, tenant
 	return s.repo.ClaimReadyForMessage(strings.TrimSpace(tenantID), strings.TrimSpace(runID), strings.TrimSpace(waitingMessageID), strings.TrimSpace(eventID), s.now(), limit)
 }
 
+func (s *AgentMessageWaitService) ExistsForWaitingMessage(_ context.Context, tenantID, waitingMessageID string) (bool, error) {
+	return s.repo.ExistsForWaitingMessage(strings.TrimSpace(tenantID), strings.TrimSpace(waitingMessageID))
+}
+
 func (s *AgentMessageWaitService) CompleteResume(_ context.Context, tenantID, waitID, eventID string) error {
 	return s.repo.CompleteResume(strings.TrimSpace(tenantID), strings.TrimSpace(waitID), strings.TrimSpace(eventID), s.now())
 }
