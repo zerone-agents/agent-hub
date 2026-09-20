@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,6 +122,54 @@ func TestProcessNextHonorsTimeoutAndRetries(t *testing.T) {
 	var row eventdomain.Delivery
 	require.NoError(t, db.First(&row).Error)
 	require.Equal(t, eventdomain.DeliveryRetry, row.Status)
+}
+
+func TestRunWorkersDiscoversTenantsOnceAndStopsWithContext(t *testing.T) {
+	s, db, runID := eventTestService(t)
+	secondRunID := "00000000-0000-0000-0000-000000000002"
+	require.NoError(t, db.Create(&rundomain.Run{ID: secondRunID, TenantID: "tenant-b", Name: "second", Status: rundomain.StatusRunning}).Error)
+
+	first, err := s.Publish("tenant-a", validEvent(runID, "worker:a"))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	var mu sync.Mutex
+	seen := make(map[string]int)
+	go func() {
+		done <- s.RunWorkers(ctx, 5*time.Millisecond, func(_ context.Context, envelope eventdomain.Envelope) error {
+			mu.Lock()
+			seen[envelope.ID]++
+			mu.Unlock()
+			return nil
+		}, nil)
+	}()
+
+	require.Eventually(t, func() bool {
+		var delivery eventdomain.Delivery
+		return db.Where("event_id = ?", first.ID).First(&delivery).Error == nil && delivery.Status == eventdomain.DeliveryDelivered
+	}, time.Second, 10*time.Millisecond)
+
+	// tenant-b appears after the supervisor has started and must be discovered
+	// without spawning duplicate workers for tenant-a.
+	secondInput := validEvent(secondRunID, "worker:b")
+	second, err := s.Publish("tenant-b", secondInput)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		var delivery eventdomain.Delivery
+		return db.Where("event_id = ?", second.ID).First(&delivery).Error == nil && delivery.Status == eventdomain.DeliveryDelivered
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	mu.Lock()
+	require.Equal(t, 1, seen[first.ID])
+	require.Equal(t, 1, seen[second.ID])
+	mu.Unlock()
+
+	var attempts int64
+	require.NoError(t, db.Model(&eventdomain.DeliveryAttempt{}).Count(&attempts).Error)
+	require.Equal(t, int64(2), attempts)
 }
 
 func TestDerivedEventCarriesExplicitCausalChain(t *testing.T) {

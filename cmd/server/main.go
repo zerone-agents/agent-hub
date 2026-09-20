@@ -6,8 +6,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os/signal"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"control-panel/internal/application/services"
@@ -17,6 +19,7 @@ import (
 	"control-panel/internal/config"
 	"control-panel/internal/directory"
 	authdom "control-panel/internal/domain/auth"
+	eventdomain "control-panel/internal/domain/event"
 	knowledgedomain "control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/systemsetting"
@@ -315,7 +318,8 @@ func main() {
 			log.Printf("Warning: H6 %s schema ensure failed: %v", name, err)
 		}
 	}
-	eventHandler := handler.NewEventHandler(services.NewEventService(database.GetDB()))
+	eventService := services.NewEventService(database.GetDB())
+	eventHandler := handler.NewEventHandler(eventService)
 	promptComposerService := services.NewPromptComposerService(database.GetDB())
 	// H6 WS5/WS6: recent_memory 阶段从主观记忆包检索该 Agent 的前 5 条记忆。
 	// Provider 出错时合成器会跳过该阶段，这里再包一层防御。
@@ -981,13 +985,46 @@ func main() {
 		c.Redirect(http.StatusFound, "/static")
 	})
 
-	// Start Kong gateway reconciler. If Kong is not configured this is a no-op.
-	reconcileCtx, reconcileCancel := context.WithCancel(context.Background())
-	defer reconcileCancel()
-	kongService.StartReconciler(reconcileCtx)
+	// All background work shares the process lifecycle. Cancelling appCtx stops
+	// both reconcilers and the durable event workers before the database closes.
+	appCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	kongService.StartReconciler(appCtx)
+	eventWorkerDone := make(chan struct{})
+	go func() {
+		defer close(eventWorkerDone)
+		err := eventService.RunWorkers(appCtx, 250*time.Millisecond, func(_ context.Context, _ eventdomain.Envelope) error {
+			// H2 events currently represent already-committed platform facts. The
+			// core consumer acknowledges them; extension-specific side effects are
+			// added as explicit handlers rather than hidden in the outbox worker.
+			return nil
+		}, func(err error) {
+			log.Printf("Event worker error: %v", err)
+		})
+		if err != nil && appCtx.Err() == nil {
+			log.Printf("Event worker stopped unexpectedly: %v", err)
+		}
+	}()
 
-	log.Printf("Server starting on %s", cfg.GetServerAddr())
-	if err := r.Run(cfg.GetServerAddr()); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	server := &http.Server{Addr: cfg.GetServerAddr(), Handler: r, ReadHeaderTimeout: 10 * time.Second}
+	serverErr := make(chan error, 1)
+	go func() {
+		log.Printf("Server starting on %s", cfg.GetServerAddr())
+		serverErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-appCtx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server graceful shutdown failed: %v", err)
+		}
+		cancel()
+	case err := <-serverErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Printf("Failed to start server: %v", err)
+		}
+		stop()
 	}
+	<-eventWorkerDone
 }

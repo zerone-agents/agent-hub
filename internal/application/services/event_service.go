@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	eventdomain "control-panel/internal/domain/event"
@@ -293,6 +294,67 @@ type EventHandler func(context.Context, eventdomain.Envelope) error
 // RunWorker polls the durable outbox until ctx is cancelled. Applications
 // start one worker per tenant/handler registry; an idle queue is not an error.
 func (s *EventService) RunWorker(ctx context.Context, tenantID string, pollInterval time.Duration, handler EventHandler) error {
+	return s.runWorker(ctx, tenantID, pollInterval, handler, nil)
+}
+
+// RunWorkers discovers tenants with durable deliveries and runs exactly one
+// polling loop for each tenant for the lifetime of ctx. New tenants are picked
+// up without restarting the server. report is deliberately best-effort: a
+// broken delivery must not stop independent streams from being consumed.
+func (s *EventService) RunWorkers(ctx context.Context, pollInterval time.Duration, handler EventHandler, report func(error)) error {
+	if handler == nil {
+		return errors.New("event handler is required")
+	}
+	if pollInterval <= 0 {
+		pollInterval = 250 * time.Millisecond
+	}
+
+	var workers sync.WaitGroup
+	started := make(map[string]struct{})
+	discover := func() {
+		var tenants []string
+		err := s.db.Model(&eventdomain.Delivery{}).
+			Distinct("tenant_id").
+			Where("status IN ?", []string{eventdomain.DeliveryPending, eventdomain.DeliveryRetry, eventdomain.DeliveryProcessing}).
+			Pluck("tenant_id", &tenants).Error
+		if err != nil {
+			reportWorkerError(report, fmt.Errorf("discover event worker tenants: %w", err))
+			return
+		}
+		for _, tenantID := range tenants {
+			tenantID = strings.TrimSpace(tenantID)
+			if tenantID == "" {
+				continue
+			}
+			if _, ok := started[tenantID]; ok {
+				continue
+			}
+			started[tenantID] = struct{}{}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				if err := s.runWorker(ctx, tenantID, pollInterval, handler, report); err != nil && !errors.Is(err, context.Canceled) {
+					reportWorkerError(report, fmt.Errorf("event worker tenant %q stopped: %w", tenantID, err))
+				}
+			}()
+		}
+	}
+
+	discover()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			workers.Wait()
+			return ctx.Err()
+		case <-ticker.C:
+			discover()
+		}
+	}
+}
+
+func (s *EventService) runWorker(ctx context.Context, tenantID string, pollInterval time.Duration, handler EventHandler, report func(error)) error {
 	if handler == nil {
 		return errors.New("event handler is required")
 	}
@@ -302,14 +364,24 @@ func (s *EventService) RunWorker(ctx context.Context, tenantID string, pollInter
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		// Delivery failures are persisted by ProcessNext. Continuing keeps the
-		// worker available for independent streams.
-		_ = s.ProcessNext(ctx, tenantID, handler)
+		err := s.ProcessNext(ctx, tenantID, handler)
+		if err != nil && !errors.Is(err, ErrNoDelivery) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			reportWorkerError(report, fmt.Errorf("process event delivery for tenant %q: %w", tenantID, err))
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 		}
+	}
+}
+
+func reportWorkerError(report func(error), err error) {
+	if report != nil && err != nil {
+		report(err)
 	}
 }
 
