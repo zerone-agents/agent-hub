@@ -1339,7 +1339,11 @@ func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agen
 		fmt.Fprintf(&b, "允许共享的上下文：\n%s\n", message.SharedContext)
 	}
 	fmt.Fprintf(&b, "发送方消息：\n%s\n\n", message.Content)
-	b.WriteString("请保持你自己的身份、利益和红线，不得假装知道未共享的上下文。你可以按已授权关系异步转发、交接或回报；续跳调用 agent_send 时必须将本消息 ID 作为 parent_message_id，并提供稳定的 idempotency_key，链路字段由 Hub 继承。不要发起会回到当前同步调用栈的同步消息。")
+	b.WriteString("请保持你自己的身份、利益和红线，不得假装知道未共享的上下文。你可以按已授权关系异步转发或交接；续跳调用 agent_send 时必须将本消息 ID 作为 parent_message_id，并提供稳定的 idempotency_key，链路字段由 Hub 继承。不要发起会回到当前同步调用栈的同步消息。")
+	switch message.Action {
+	case "consult", "assign", "review", "challenge", "handoff":
+		b.WriteString(" 本任务的最终结果请直接作为当前运行的文本回复返回；不要再向发送方额外发送 report/inform，Hub 会保存回复并按等待凭证自动恢复上游会话。")
+	}
 	return b.String()
 }
 
