@@ -372,7 +372,7 @@ func (s *AgentMessageService) GroupSend(tenantID string, source *agent.AgentConf
 		}
 		s.recordBeliefDelivery(tenantID, persisted)
 		relation := &agentrelation.AgentRelation{Scope: message.Scope, RelationType: "group_member", DeliveryPolicy: "async", ContextPolicy: "none"}
-		envelope := buildAgentMessageEnvelope(source, &target, relation, persisted)
+		envelope := buildAgentMessageEnvelope(source, &target, relation, persisted, false)
 		deliveries = append(deliveries, agentMessageToDTO(persisted))
 		plans = append(plans, deliveryPlan{target: target, message: persisted, envelope: envelope})
 	}
@@ -846,7 +846,7 @@ func (s *AgentMessageService) Send(ctx context.Context, tenantID string, source 
 		}
 	}
 
-	envelope := buildAgentMessageEnvelope(source, target, relation, message)
+	envelope := buildAgentMessageEnvelope(source, target, relation, message, callbackWait != nil)
 	if relation.DeliveryPolicy == "async" {
 		dto := agentMessageToDTO(message)
 		go func() {
@@ -1319,7 +1319,7 @@ func estimateMessageTokens(value string) int64 {
 	return nonASCII + (ascii+3)/4
 }
 
-func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agentrelation.AgentRelation, message *agentrelation.AgentMessage) string {
+func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agentrelation.AgentRelation, message *agentrelation.AgentMessage, callbackReturn bool) string {
 	var b strings.Builder
 	connection := relation.ConnectionContract()
 	fmt.Fprintf(&b, "[Agent Hub 组织消息]\n消息ID：%s\n你是接收方 %s；发送方是 %s。\n", message.ID, target.Name, source.Name)
@@ -1342,6 +1342,9 @@ func buildAgentMessageEnvelope(source, target *agent.AgentConfig, relation *agen
 	b.WriteString("请保持你自己的身份、利益和红线，不得假装知道未共享的上下文。你可以按已授权关系异步转发或交接；续跳调用 agent_send 时必须将本消息 ID 作为 parent_message_id，并提供稳定的 idempotency_key，链路字段由 Hub 继承。不要发起会回到当前同步调用栈的同步消息。")
 	switch message.Action {
 	case "consult", "assign", "review", "challenge", "handoff":
+		if !callbackReturn {
+			break
+		}
 		b.WriteString(" 本任务的最终结果请直接作为当前运行的文本回复返回；不要再向发送方额外发送 report/inform，Hub 会保存回复并按等待凭证自动恢复上游会话。")
 	}
 	return b.String()

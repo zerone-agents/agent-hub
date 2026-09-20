@@ -743,7 +743,8 @@ func TestBuildAgentMessageEnvelopeUsesPlatformNeutralProtocolLabel(t *testing.T)
 	}
 
 	deadline := time.Now().UTC().Add(time.Minute)
-	envelope := buildAgentMessageEnvelope(source, target, relation, &agentrelation.AgentMessage{ID: "msg-1", ConversationID: "conv-1", RootMessageID: "msg-1", Hop: 1, MaxHops: 8, EventCount: 1, EventBudget: 64, TokenBudget: 65536, DeadlineAt: &deadline, Action: "consult", Content: "请复核结论"})
+	message := &agentrelation.AgentMessage{ID: "msg-1", ConversationID: "conv-1", RootMessageID: "msg-1", Hop: 1, MaxHops: 8, EventCount: 1, EventBudget: 64, TokenBudget: 65536, DeadlineAt: &deadline, Action: "consult", Content: "请复核结论"}
+	envelope := buildAgentMessageEnvelope(source, target, relation, message, false)
 
 	require.Contains(t, envelope, "[Agent Hub 组织消息]")
 	require.NotContains(t, envelope, "SPEEDING")
@@ -751,6 +752,11 @@ func TestBuildAgentMessageEnvelopeUsesPlatformNeutralProtocolLabel(t *testing.T)
 	require.Contains(t, envelope, "发送方是 research-lead")
 	require.NotContains(t, envelope, "neutral（0")
 	require.NotContains(t, envelope, "人物关系上下文")
+	require.NotContains(t, envelope, "不要再向发送方额外发送 report/inform")
+
+	callbackEnvelope := buildAgentMessageEnvelope(source, target, relation, message, true)
+	require.Contains(t, callbackEnvelope, "不要再向发送方额外发送 report/inform")
+	require.Contains(t, callbackEnvelope, "按等待凭证自动恢复上游会话")
 }
 
 func TestAgentMessageServiceDerivesAuthorizedMultiHopChain(t *testing.T) {
