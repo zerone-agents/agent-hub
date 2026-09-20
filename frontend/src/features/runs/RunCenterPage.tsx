@@ -9,6 +9,7 @@ import {
   ClockCounterClockwiseIcon,
   PauseCircleIcon,
   PlayCircleIcon,
+  SpinnerGapIcon,
   RobotIcon,
   EyeIcon,
   StackIcon,
@@ -138,6 +139,22 @@ const useStyles = createStyles(({ css }) => ({
   changeBody: css`margin-top: 4px; color: ${t.textTertiary}; font-size: 12px; line-height: 1.5;`,
   future: css`margin-top: 20px; padding-top: 15px; border-top: 1px dashed var(--border); color: ${t.textMuted}; font-size: 12px; line-height: 1.6;`,
   collaboration: css`margin-top: 22px; border-top: 1px solid var(--border); padding-top: 20px;`,
+  progressNotice: css`
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 20px; padding: 13px 14px;
+    border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border)); border-radius: ${t.radiusSm}px;
+    background: color-mix(in srgb, var(--primary) 5%, var(--card));
+    @media (max-width: 620px) { flex-direction: column; gap: 10px; padding: 14px; }
+  `,
+  progressMain: css`display: flex; align-items: flex-start; gap: 9px; min-width: 0;`,
+  progressIcon: css`
+    flex: 0 0 auto; margin-top: 2px; color: var(--primary);
+    animation: collaborationSpin 1.2s linear infinite;
+    @keyframes collaborationSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { animation: none; }
+  `,
+  progressTitle: css`color: ${t.text}; font-size: ${t.textSm}; font-weight: 650; line-height: 1.45;`,
+  progressDescription: css`margin-top: 2px; color: ${t.textTertiary}; font-size: 12px; line-height: 1.55;`,
+  progressMeta: css`flex: 0 0 auto; color: ${t.textMuted}; font-size: 11px; line-height: 1.5; white-space: nowrap; @media (max-width: 620px) { white-space: normal; }`,
   collaborationHead: css`display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; @media (max-width: 620px) { flex-direction: column; }`,
   collaborationHelp: css`margin: -5px 0 0; color: ${t.textTertiary}; font-size: 12px; line-height: 1.6;`,
   chain: css`overflow: hidden; border: 1px solid var(--border); border-radius: ${t.radiusSm}px;`,
@@ -250,6 +267,8 @@ const GUARD_REASON: Record<string, string> = {
   max_hops_exceeded: '已达到最大传递层数', event_budget_exceeded: '本次协作的消息额度已用完',
   token_budget_exceeded: '本次协作的内容额度已用完', deadline_exceeded: '已超过本次协作的截止时间',
   sync_wait_cycle: '同步等待会形成死锁', repeated_agent: '检测到可能反复传递的路径',
+  callback_return_managed: '结果已由系统自动送回，不再重复汇报',
+  duplicate_return: '同一任务的结果已经送回，重复汇报已拦截',
 }
 const ACTION_LABEL: Record<string, string> = { inform: '告知', consult: '征询', assign: '指派', report: '汇报', submit: '提交', review: '审核', challenge: '质疑', handoff: '移交', escalate: '越级汇报', invite: '邀请' }
 
@@ -299,6 +318,20 @@ function CollaborationTimeline({ items }: { items: AgentMessage[] }) {
       })}
     </div>
   })}</div>
+}
+
+function CollaborationProgress({ items }: { items: AgentMessage[] }) {
+  const { styles } = useStyles()
+  const active = [...items].filter((item) => item.status === 'queued' || item.status === 'running').sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  if (!active) return null
+  const duplicates = items.filter((item) => item.status === 'guarded' && (item.guardReason === 'duplicate_return' || item.guardReason === 'callback_return_managed')).length
+  const action = ACTION_LABEL[active.action] ?? active.action
+  const title = active.status === 'queued' ? `${active.targetAgent} 正在等待接收任务` : active.parentMessageId ? `${active.sourceAgent} 正在等待 ${active.targetAgent} 返回结果` : `${active.targetAgent} 正在处理 ${active.sourceAgent} 的任务`
+  const description = active.status === 'queued' ? `${action}已进入队列，系统会在 Agent 可用时自动开始。` : active.parentMessageId ? `这一步完成后，系统会自动恢复上游 Agent，无需手动刷新或催促。` : `正在执行“${action}”，后续转交和回报会继续记录在本次运行中。`
+  return <div className={styles.progressNotice} role="status" aria-live="polite">
+    <div className={styles.progressMain}><SpinnerGapIcon className={styles.progressIcon} size={16} aria-hidden="true" /><div><div className={styles.progressTitle}>{title}</div><div className={styles.progressDescription}>{description}</div></div></div>
+    <div className={styles.progressMeta}>{active.sourceAgent} → {active.targetAgent}{duplicates > 0 ? ` · 已拦截 ${duplicates} 次重复反馈` : ''}</div>
+  </div>
 }
 
 function CollaborationGuide({ run, onConfigure }: { run: Run; onConfigure: () => void }) {
@@ -430,6 +463,7 @@ function RunDetailPanel({ id }: { id: string }) {
         {(run.agents?.length ?? 0) === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未添加 Agent" /> : <div className={styles.quietList}>{run.agents?.map((agent) => <div className={styles.person} key={agent.id}><span className={styles.avatar}><RobotIcon size={16} /></span><span className={styles.personName}>{agent.agentNameSnapshot || `Agent ${agent.agentId}`}</span><span className={styles.role}>{agent.role || '参与者'}</span><span className={styles.personActions}>{run.status === 'running' && <Button size="small" icon={<ChatCircleTextIcon size={16} />} onClick={() => void navigate(`/agents/${encodeURIComponent(agent.agentNameSnapshot)}/chat?runId=${encodeURIComponent(id)}`)}>进入本次对话</Button>}<Button size="small" icon={<EyeIcon size={16} />} loading={composePrompt.isPending && promptAgentName === agent.agentNameSnapshot} onClick={() => { setPromptAgentName(agent.agentNameSnapshot); composePrompt.mutate({ id, agentId: agent.agentId }, { onSuccess: setPromptSnapshot }) }}>查看判断依据</Button></span></div>)}</div>}
       </section>
     <PersonaPanel runId={id} agents={run.agents ?? []} states={states ?? []} changes={history.data ?? []} />
+    {!agentMessages.isLoading && !agentMessages.isError && <CollaborationProgress items={agentMessages.data ?? []} />}
     <div className={styles.collaboration}>
       <Collapse items={[{ key: 'advanced', label: '协作细节（高级）', forceRender: true, children: <div style={{ display: 'grid', gap: 22 }}>
         <section className={styles.section}><h3 className={styles.sectionTitle}><StackIcon size={17} />当前状态</h3><StateList states={states ?? []} /></section>

@@ -164,6 +164,15 @@ describe('RunCenterPage', () => {
     expect(screen.getByText(/上一步 m1/)).toBeInTheDocument()
   })
 
+  it('shows a visible collaboration progress notice without opening advanced details', () => {
+    collaborationMessages = [
+      { id: 'm-progress', relationId: 2, runId: 'run-market', conversationId: 'c-progress', rootMessageId: 'm-root', parentMessageId: 'm-root', hop: 2, maxHops: 8, scope: 'project', sourceAgent: '财务 Agent', targetAgent: '法务 Agent', action: 'consult', deliveryPolicy: 'async', contextPolicy: 'summary_only', status: 'running', createdAt: '2026-09-20T08:00:00Z', startedAt: '2026-09-20T08:00:01Z' },
+    ]
+    renderPage()
+    expect(screen.getByRole('status')).toHaveTextContent('财务 Agent 正在等待 法务 Agent 返回结果')
+    expect(screen.getByRole('status')).toHaveTextContent('系统会自动恢复上游 Agent')
+  })
+
   it('filters runs by task name', () => {
     renderPage()
     fireEvent.change(screen.getByPlaceholderText('搜索任务'), { target: { value: '风险' } })
