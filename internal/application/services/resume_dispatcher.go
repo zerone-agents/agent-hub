@@ -13,7 +13,7 @@ const maxResumeResultRunes = 16000
 var ErrInvalidResumeRequest = errors.New("invalid agent resume request")
 
 type ResumeAgentRunner interface {
-	ResumeOneShot(ctx context.Context, tenantID, agentName, runtimeSessionID, message string) (string, error)
+	ResumeAccepted(ctx context.Context, tenantID, agentName, runtimeSessionID, message string) error
 }
 
 type ResumeAgentResolver interface {
@@ -62,7 +62,7 @@ func (d *RuntimeResumeDispatcher) ResumeAgentMessage(ctx context.Context, input 
 	if strings.TrimSpace(agentName) == "" {
 		return fmt.Errorf("resolve waiting agent: empty name")
 	}
-	_, err = d.runner.ResumeOneShot(ctx, input.TenantID, agentName, input.RuntimeSessionID, envelope)
+	err = d.runner.ResumeAccepted(ctx, input.TenantID, agentName, input.RuntimeSessionID, envelope)
 	if err != nil {
 		return fmt.Errorf("resume waiting agent runtime: %w", err)
 	}

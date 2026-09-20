@@ -1515,6 +1515,29 @@ func (s *AgentChatService) ResumeOneShot(ctx context.Context, tenantID, agentNam
 	return extractOneShotReply(string(raw))
 }
 
+// ResumeAccepted confirms only that the existing runtime session accepted the
+// continuation. The SSE generation is drained in the background: an event
+// worker must not hold its delivery lease for an entire model turn, otherwise
+// a lease timeout can retry the same continuation and duplicate side effects.
+func (s *AgentChatService) ResumeAccepted(ctx context.Context, tenantID, agentName, runtimeSessionID, message string) error {
+	baseURL, apiKey, _, err := s.ResolveRuntime(tenantID, agentName)
+	if err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithTimeout(context.Background(), defaultExecutionTimeout)
+	rc, err := s.runtimeClient.StreamResume(runCtx, baseURL, NormalizeAgentName(agentName), apiKey, runtimeSessionID, message)
+	if err != nil {
+		cancel()
+		return err
+	}
+	go func() {
+		defer cancel()
+		defer rc.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(rc, maxAgentRunResponseBytes+1))
+	}()
+	return nil
+}
+
 func extractOneShotReply(sse string) (string, error) {
 	var eventName string
 	var replies []string

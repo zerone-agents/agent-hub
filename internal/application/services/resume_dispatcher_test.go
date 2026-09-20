@@ -15,10 +15,10 @@ type resumeRunnerFake struct {
 	err                             error
 }
 
-func (f *resumeRunnerFake) ResumeOneShot(_ context.Context, tenant, agent, session, message string) (string, error) {
+func (f *resumeRunnerFake) ResumeAccepted(_ context.Context, tenant, agent, session, message string) error {
 	f.calls++
 	f.tenant, f.agent, f.session, f.message = tenant, agent, session, message
-	return "continued", f.err
+	return f.err
 }
 
 type resumeResolverFake struct {
