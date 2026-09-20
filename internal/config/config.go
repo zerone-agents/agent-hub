@@ -95,9 +95,12 @@ func (c *Config) ValidateAuth() error {
 }
 
 type DeployerConfig struct {
-	URL           string `mapstructure:"url"`
-	APIKey        string `mapstructure:"api_key"`
-	PublicHost    string `mapstructure:"public_host"`
+	URL        string `mapstructure:"url"`
+	APIKey     string `mapstructure:"api_key"`
+	PublicHost string `mapstructure:"public_host"`
+	// UpstreamHost is the hostname the hub/Kong use with deployer-published
+	// runtime ports. Unlike URL, it is normally the Docker host rather than the
+	// deployer container itself (for example host.docker.internal).
 	UpstreamHost  string `mapstructure:"upstream_host"`
 	RuntimeAPIKey string `mapstructure:"runtime_api_key"`
 	// DeployerURLHost is derived strictly from a valid AGENT_DEPLOYER_URL in
@@ -193,6 +196,11 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("deployer.url", "AGENT_DEPLOYER_URL")
 	viper.BindEnv("deployer.api_key", "AGENT_DEPLOYER_API_KEY")
 	viper.BindEnv("deployer.public_host", "AGENT_DEPLOYER_PUBLIC_HOST")
+	// Keep deployer.upstream_host as the config-file key for compatibility,
+	// while giving deployments an explicit, accurately named environment
+	// variable. Runtime ports are published on the Docker host, not on the
+	// deployer container addressed by AGENT_DEPLOYER_URL.
+	viper.BindEnv("deployer.upstream_host", "AGENT_RUNTIME_UPSTREAM_HOST")
 	viper.BindEnv("deployer.runtime_api_key", "AGENT_RUNTIME_API_KEY")
 	viper.BindEnv("knowledge.multirag_base_url", "MULTIRAG_BASE_URL")
 	viper.BindEnv("knowledge.multirag_api_key", "MULTIRAG_API_KEY")
@@ -242,9 +250,10 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// Kong service upstream host defaults to the deployer URL hostname (internal
-	// address Kong uses to reach the runtime containers). If explicitly configured,
-	// PublicHost can still be used as a fallback for backwards compatibility.
+	// Runtime dynamic ports are normally published on the Docker host. Prefer an
+	// explicit upstream host (AGENT_RUNTIME_UPSTREAM_HOST / the compatible
+	// deployer.upstream_host config key). Existing installations retain their
+	// historical URL-host, then public-host fallback when it is omitted.
 	if cfg.Deployer.UpstreamHost == "" && cfg.Deployer.URL != "" {
 		if u, err := url.Parse(cfg.Deployer.URL); err == nil && u.Hostname() != "" {
 			cfg.Deployer.UpstreamHost = u.Hostname()
@@ -254,9 +263,9 @@ func LoadConfig() (*Config, error) {
 		cfg.Deployer.UpstreamHost = cfg.Deployer.PublicHost
 	}
 
-	// Strict upstream host for the no-Kong runtime proxy, chat resolver and
-	// internal probes: only ever derived from a valid deployer URL. No
-	// explicit config, no PublicHost fallback (spec 3.5).
+	// Retained as a derived compatibility value for older integrations. New
+	// runtime dialing must use UpstreamHost, whose explicit override is required
+	// when deployer controls the host Docker daemon from a sibling container.
 	cfg.Deployer.DeployerURLHost = deriveDeployerURLHost(cfg.Deployer.URL)
 
 	SetGlobalConfig(&cfg)

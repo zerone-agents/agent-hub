@@ -71,7 +71,7 @@ var proxyOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,62}$`)
 
 type RuntimeProxyService struct {
 	repo         RuntimeProxyAgentRepo
-	upstreamHost string // cfg.Deployer.DeployerURLHost; "" = fail closed
+	upstreamHost string // cfg.Deployer.UpstreamHost; "" = fail closed
 }
 
 func NewRuntimeProxyService(repo RuntimeProxyAgentRepo, upstreamHost string) *RuntimeProxyService {

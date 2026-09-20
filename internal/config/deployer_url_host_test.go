@@ -47,13 +47,68 @@ func TestDeployerURLHostNotConfigurable(t *testing.T) {
 	}
 }
 
-// 真实语义：钉住 deriveDeployerURLHost 派生 host 的回归——它是运行时
-// 配置钩子回填 DeployerURLHost 的唯一派生点（config.go:247,260），供
-// no-Kong runtime proxy / chat 解析使用，且从不回退 PublicHost。UpstreamHost
-// override/fallback 属既有行为，由 TestDeployerURLHostNotConfigurable 与
-// 上游 config 测试覆盖；本测试从未触碰 UpstreamHost，Kong 链路不受影响。
+func TestLegacyUpstreamHostConfigFieldRemainsSupported(t *testing.T) {
+	v := viper.New()
+	v.Set("deployer.upstream_host", "docker-host.internal")
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := cfg.Deployer.UpstreamHost; got != "docker-host.internal" {
+		t.Fatalf("legacy deployer.upstream_host = %q, want docker-host.internal", got)
+	}
+}
+
+// DeployerURLHost remains a derived compatibility value. Runtime callers use
+// UpstreamHost so a sibling hub container can dial host-published ports.
 func TestResolveBaseURLHostSemantics(t *testing.T) {
 	if got := deriveDeployerURLHost("http://agent-deployer:8080"); got != "agent-deployer" {
 		t.Fatalf("unexpected host %q", got)
+	}
+}
+
+func TestRuntimeUpstreamHostEnvOverridesDeployerURLHost(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	t.Setenv("AGENT_DEPLOYER_URL", "http://deployer:8080")
+	t.Setenv("AGENT_DEPLOYER_PUBLIC_HOST", "runtime.example.com")
+	t.Setenv("AGENT_RUNTIME_UPSTREAM_HOST", "host.docker.internal")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got := cfg.Deployer.UpstreamHost; got != "host.docker.internal" {
+		t.Fatalf("UpstreamHost = %q, want host.docker.internal", got)
+	}
+	if got := cfg.Deployer.DeployerURLHost; got != "deployer" {
+		t.Fatalf("compatibility DeployerURLHost = %q, want deployer", got)
+	}
+}
+
+func TestRuntimeUpstreamHostLegacyFallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		deployerURL string
+		publicHost  string
+		want        string
+	}{
+		{name: "deployer URL host", deployerURL: "http://deployer:8080", publicHost: "runtime.example.com", want: "deployer"},
+		{name: "public host without URL", publicHost: "runtime.example.com", want: "runtime.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			t.Setenv("AGENT_DEPLOYER_URL", tc.deployerURL)
+			t.Setenv("AGENT_DEPLOYER_PUBLIC_HOST", tc.publicHost)
+			t.Setenv("AGENT_RUNTIME_UPSTREAM_HOST", "")
+			cfg, err := LoadConfig()
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if got := cfg.Deployer.UpstreamHost; got != tc.want {
+				t.Fatalf("UpstreamHost = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

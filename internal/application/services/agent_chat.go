@@ -51,7 +51,7 @@ type AgentChatService struct {
 	runtimeClient *runtime.Client
 	publicHost    string
 	runtimeKey    string
-	upstreamHost  string // cfg.Deployer.DeployerURLHost; "" = fail closed (no-Kong upstream)
+	upstreamHost  string // cfg.Deployer.UpstreamHost; "" = fail closed (no-Kong upstream)
 
 	// attachment capability probe cache（15s TTL，issue #94）
 	probeMu    sync.Mutex
@@ -301,11 +301,11 @@ func (s *AgentChatService) AutoTitleSession(tenantID, sessionID, firstUserConten
 }
 
 // noKongUpstream builds the internal upstream base URL for the no-Kong mode:
-// hostname(AGENT_DEPLOYER_URL) + published port. Empty upstream host fails
+// AGENT_RUNTIME_UPSTREAM_HOST + published port. Empty upstream host fails
 // closed — DB may retain running state from before a config change.
 func (s *AgentChatService) noKongUpstream(port int) (string, error) {
 	if s.upstreamHost == "" {
-		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+		return "", fmt.Errorf("internal runtime upstream host is not configured")
 	}
 	return "http://" + net.JoinHostPort(s.upstreamHost, strconv.Itoa(port)), nil
 }

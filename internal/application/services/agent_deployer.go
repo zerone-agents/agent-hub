@@ -117,7 +117,7 @@ type aigcConfigProvider interface {
 type AgentDeployerService struct {
 	client        *deployer.Client
 	publicHost    string
-	upstreamHost  string // cfg.Deployer.DeployerURLHost; strict, no PublicHost fallback
+	upstreamHost  string // cfg.Deployer.UpstreamHost; "" = fail closed
 	cdnHost       string
 	encryptionKey string
 	// capabilitySecret signs the per-agent knowledge MCP capabilities
@@ -346,7 +346,7 @@ func (s *AgentDeployerService) probeHost() (string, error) {
 		return s.publicHost, nil
 	}
 	if s.upstreamHost == "" {
-		return "", fmt.Errorf("internal upstream host unavailable (AGENT_DEPLOYER_URL not configured)")
+		return "", fmt.Errorf("internal runtime upstream host is not configured")
 	}
 	return s.upstreamHost, nil
 }

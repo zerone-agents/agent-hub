@@ -48,9 +48,10 @@ open http://localhost:8081/static/
 > and configure a registry mirror for the daemon.
 
 > **Remote server deployments:** set `AGENT_DEPLOYER_PUBLIC_HOST` to the
-> server's public IP/domain. Browsers and the hub's health probes reach runtime
-> containers at `<public-host>:<dynamic-port>`, so the firewall / cloud
-> security group must allow the Docker ephemeral port range (32768-60999).
+> server's public IP/domain for browser-facing runtime URLs. The hub reaches
+> runtime ports through `AGENT_RUNTIME_UPSTREAM_HOST` (the quickstart default,
+> `host.docker.internal`, is mapped to Docker's host gateway on Linux), so the
+> dynamic port range does not need to be exposed to the public internet.
 
 ### Build from source
 
@@ -82,7 +83,7 @@ Login afterwards: http://localhost:8081/static/login — username `admin` + the 
 
 ## Configuration
 
-See [.env.example](.env.example) for all options. Optional integrations (model providers, Kong, knowledge base) are disabled by default — uncomment and fill in to enable. The agent-deployer integration is wired up in-stack by default (`AGENT_DEPLOYER_URL=http://deployer:8080`); set `AGENT_DEPLOYER_API_KEY` so the hub and deployer authenticate with each other.
+See [.env.example](.env.example) for all options. Optional integrations (model providers, Kong, knowledge base) are disabled by default — uncomment and fill in to enable. The agent-deployer control API is wired up in-stack by default (`AGENT_DEPLOYER_URL=http://deployer:8080`), while runtime dynamic ports use `AGENT_RUNTIME_UPSTREAM_HOST=host.docker.internal`; set `AGENT_DEPLOYER_API_KEY` so the hub and deployer authenticate with each other.
 
 > **Switching to Casdoor SSO:** this quickstart uses the built-in auth. For the hosted SaaS / enterprise deployments that delegate to Casdoor, set `AUTH_MODE=casdoor` and provide the `CASDOOR_*` variables instead (see `docs/configuration.md`).
 

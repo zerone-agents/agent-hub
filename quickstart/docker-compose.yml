@@ -60,6 +60,9 @@ services:
       # agent-deployer integration (the deployer service is part of this stack):
       AGENT_DEPLOYER_URL: ${AGENT_DEPLOYER_URL:-http://deployer:8080}
       AGENT_DEPLOYER_API_KEY: ${AGENT_DEPLOYER_API_KEY:-}
+      # The deployer publishes runtime ports on the Docker host. The deployer
+      # service name itself does not own those ports.
+      AGENT_RUNTIME_UPSTREAM_HOST: ${AGENT_RUNTIME_UPSTREAM_HOST:-host.docker.internal}
       # Host used to reach runtime containers' dynamic ports (browser + health
       # probes). localhost for local runs; the server's public IP/domain when
       # deployed on a remote host.
@@ -73,6 +76,9 @@ services:
       ORGANIZATION_MCP_URL: ${ORGANIZATION_MCP_URL:-}
     ports:
       - "${HUB_PORT:-8081}:${HUB_PORT:-8081}"
+    extra_hosts:
+      # Docker Engine on Linux does not define host.docker.internal by default.
+      - "host.docker.internal:host-gateway"
 
   deployer:
     # Manages agent-runtime containers on the host Docker daemon.
@@ -88,6 +94,8 @@ services:
       - AGENT_DEPLOYER_DATA_DIR=${DEPLOYER_DATA_DIR:?Set DEPLOYER_DATA_DIR in .env to an absolute host path, e.g. /var/lib/agent-deployer}
       - AGENT_DEPLOYER_PORT=8080
       - AGENT_DEPLOYER_RUNTIME_IMAGE=${RUNTIME_IMAGE:-zeroneai/agent-runtime}:latest
+      # Keep false unless RUNTIME_IMAGE:latest has been verified as v2.6.0+.
+      - AGENT_DEPLOYER_RUNTIME_IMAGE_ASSUME_LATEST=${AGENT_DEPLOYER_RUNTIME_IMAGE_ASSUME_LATEST:-false}
       # Empty = auth disabled (local dev only; always set this in production).
       - AGENT_DEPLOYER_API_KEY=${AGENT_DEPLOYER_API_KEY:-}
       # Per-container resource limits (defaults: 2 CPU cores, 2048 MB memory)

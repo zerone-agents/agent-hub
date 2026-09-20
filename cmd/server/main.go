@@ -241,7 +241,7 @@ func main() {
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
 		Client:            deployerClient,
 		PublicHost:        cfg.Deployer.PublicHost,
-		UpstreamHost:      cfg.Deployer.DeployerURLHost,
+		UpstreamHost:      cfg.Deployer.UpstreamHost,
 		CDNHost:           cfg.OSS.CDNHost,
 		EncryptionKey:     cfg.Provider.EncryptionKey,
 		RuntimeAPIKey:     cfg.Deployer.RuntimeAPIKey,
@@ -266,7 +266,7 @@ func main() {
 		runtimeClient,
 		cfg.Deployer.PublicHost,
 		cfg.Deployer.RuntimeAPIKey,
-		cfg.Deployer.DeployerURLHost,
+		cfg.Deployer.UpstreamHost,
 	)
 	runService := services.NewRunService(database.GetDB())
 	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
@@ -976,7 +976,7 @@ func main() {
 	// Kong mode keeps its own /{org}/{agent} Service/Route chain and must NOT
 	// register /runtime/* (falls to NoRoute → 302 /static).
 	if cfg.Kong.AdminURL == "" {
-		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
+		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.UpstreamHost)
 		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()))
 	}
 
