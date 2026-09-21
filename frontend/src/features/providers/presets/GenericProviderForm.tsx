@@ -138,8 +138,11 @@ interface FormValues {
 }
 
 const FIELD_DEFINITIONS: Partial<Record<string, { label: string; labelEn: string; type: PresetField['type']; required: boolean; secret: boolean }>> = {
+  // eslint-disable-next-line no-restricted-syntax -- FIELD_DEFINITIONS 双语数据设计：label=中文名/labelEn=英文名同时展示且入库（P3 决策③）
   name: { label: '名称', labelEn: 'Name', type: 'text', required: true, secret: false },
+  // eslint-disable-next-line no-restricted-syntax -- FIELD_DEFINITIONS 双语数据设计：label=中文名/labelEn=英文名同时展示且入库（P3 决策③）
   base_url: { label: 'API 地址', labelEn: 'API URL', type: 'text', required: true, secret: false },
+  // eslint-disable-next-line no-restricted-syntax -- FIELD_DEFINITIONS 双语数据设计：label=中文名/labelEn=英文名同时展示且入库（P3 决策③）
   api_key: { label: 'API 密钥', labelEn: 'API Key', type: 'password', required: false, secret: true },
 }
 
@@ -262,6 +265,7 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
 
   // ── Fields editor ──
   const handleAddField = () => {
+    // eslint-disable-next-line no-restricted-syntax -- FIELD_DEFINITIONS 双语数据设计：label=中文名/labelEn=英文名同时展示且入库（P3 决策③）
     setFields([...fields, { key: 'api_key', label: 'API 密钥', labelEn: 'API Key', type: 'password', secret: true }])
   }
   const handleRemoveField = (i: number) => {
