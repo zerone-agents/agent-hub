@@ -140,7 +140,7 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 
 	baseURL, apiKey, _, err := h.svc.ResolveRuntime(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		respondError(c, http.StatusConflict, "agent_unavailable", "agent not available: "+err.Error())
 		return
 	}
 
@@ -158,11 +158,11 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 		// English detail goes to server-side logs only (CONTRIBUTING).
 		var httpErr *runtime.RuntimeHTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-			respondError(c, http.StatusNotFound, "Agent 在运行时不存在")
+			respondError(c, http.StatusNotFound, "agent_runtime_not_found", "Agent 在运行时不存在")
 			return
 		}
 		log.Printf("agent detail for %q failed: %v", agentName, err)
-		respondError(c, http.StatusBadGateway, "Agent 运行时不可用")
+		respondError(c, http.StatusBadGateway, "agent_runtime_unavailable", "Agent 运行时不可用")
 		return
 	}
 
@@ -177,7 +177,7 @@ func (h *AgentDetailHandler) GetAgentDetail(c *gin.Context) {
 	redacted, err := redactAgentDetail(body)
 	if err != nil {
 		log.Printf("agent detail for %q: redaction failed (malformed runtime JSON): %v", agentName, err)
-		respondError(c, http.StatusBadGateway, "Agent 运行时返回了无法解析的详情数据")
+		respondError(c, http.StatusBadGateway, "agent_detail_unparseable", "Agent 运行时返回了无法解析的详情数据")
 		return
 	}
 

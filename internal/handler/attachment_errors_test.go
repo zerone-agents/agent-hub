@@ -15,7 +15,7 @@ func TestRespondErrorCode_Shape(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	respondErrorCode(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded, "too many files")
+	respondError(c, http.StatusRequestEntityTooLarge, chat.ErrCodeUploadLimitExceeded, "too many files")
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.JSONEq(t, `{"success":false,"error":"too many files","code":"upload_limit_exceeded"}`, w.Body.String())
 }

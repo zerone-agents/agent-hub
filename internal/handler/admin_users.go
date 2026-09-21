@@ -50,7 +50,7 @@ func toUserDTO(u *authdom.User) userDTO {
 func (h *AdminUserHandler) ListUsers(c *gin.Context) {
 	users, err := h.users.List()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "查询用户失败")
+		respondError(c, http.StatusInternalServerError, "user_query_failed", "查询用户失败")
 		return
 	}
 	dtos := make([]userDTO, 0, len(users))
@@ -66,12 +66,12 @@ func (h *AdminUserHandler) ListUsers(c *gin.Context) {
 func (h *AdminUserHandler) UpdateUser(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "无效的用户 ID")
+		respondError(c, http.StatusBadRequest, "invalid_user_id", "无效的用户 ID")
 		return
 	}
 	actorID, err := strconv.ParseUint(c.GetString("user_id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusUnauthorized, "无效的用户身份")
+		respondError(c, http.StatusUnauthorized, "invalid_user_identity", "无效的用户身份")
 		return
 	}
 	var req struct {
@@ -79,17 +79,17 @@ func (h *AdminUserHandler) UpdateUser(c *gin.Context) {
 		Status string `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	if req.Role == "" && req.Status == "" {
-		respondError(c, http.StatusBadRequest, "至少需要提供一个字段")
+		respondError(c, http.StatusBadRequest, "field_required", "至少需要提供一个字段")
 		return
 	}
 	if req.Role != "" {
 		rcpt, err := h.users.UpdateRole(id, actorID, req.Role)
 		if err != nil {
-			respondError(c, http.StatusBadRequest, err.Error())
+			respondError(c, http.StatusBadRequest, "user_role_update_failed", err.Error())
 			return
 		}
 		// 规则 1：role 已生效即记（即使同请求随后 status 失败——部分成功不漏审）
@@ -99,7 +99,7 @@ func (h *AdminUserHandler) UpdateUser(c *gin.Context) {
 	if req.Status != "" {
 		rcpt, err := h.users.SetStatus(id, actorID, req.Status)
 		if err != nil {
-			respondError(c, http.StatusBadRequest, err.Error())
+			respondError(c, http.StatusBadRequest, "user_status_update_failed", err.Error())
 			return
 		}
 		// builtin 无远端：from/to 取 receipt 的 Effective 值（== Status）
@@ -127,13 +127,13 @@ func (h *AdminUserHandler) displayUserName(id uint64) string {
 func (h *AdminUserHandler) ResetUserPassword(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "无效的用户 ID")
+		respondError(c, http.StatusBadRequest, "invalid_user_id", "无效的用户 ID")
 		return
 	}
 	actorID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 64)
 	plain, err := h.users.ResetPassword(id, actorID)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "password_reset_failed", err.Error())
 		return
 	}
 	_ = h.provider.RevokeAllForUser(id)
@@ -152,13 +152,13 @@ func (h *AdminUserHandler) CreateInvite(c *gin.Context) {
 		ExpiresInDays int    `json:"expiresInDays"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	actorID, _ := strconv.ParseUint(c.GetString("user_id"), 10, 64)
 	res, err := h.invites.Create(req.Role, req.Note, actorID, req.ExpiresInDays)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invite_creation_failed", err.Error())
 		return
 	}
 	// 审计使用真实值（PR #150 审查 P2）：res.ID（携带于结果，无需反查）与
@@ -185,7 +185,7 @@ type inviteDTO struct {
 func (h *AdminUserHandler) ListInvites(c *gin.Context) {
 	invites, err := h.invites.List()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "查询邀请失败")
+		respondError(c, http.StatusInternalServerError, "invite_query_failed", "查询邀请失败")
 		return
 	}
 	dtos := make([]inviteDTO, 0, len(invites))
@@ -209,11 +209,11 @@ func (h *AdminUserHandler) ListInvites(c *gin.Context) {
 func (h *AdminUserHandler) RevokeInvite(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "无效的邀请 ID")
+		respondError(c, http.StatusBadRequest, "invalid_invite_id", "无效的邀请 ID")
 		return
 	}
 	if err := h.invites.Revoke(id); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invite_revoke_failed", err.Error())
 		return
 	}
 	// 无 Detail、不存码片段（spec §3）

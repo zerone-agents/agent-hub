@@ -32,9 +32,9 @@ func respondToolError(c *gin.Context, err error) {
 	}
 	switch {
 	case errors.Is(err, agent.ErrToolNotFound), errors.Is(err, agent.ErrAgentNotFound):
-		respondError(c, http.StatusNotFound, err.Error())
+		respondError(c, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, agent.ErrToolStorageDisabled):
-		respondError(c, http.StatusServiceUnavailable, err.Error())
+		respondError(c, http.StatusServiceUnavailable, "service_unavailable", err.Error())
 	case errors.Is(err, agent.ErrInvalidToolName),
 		errors.Is(err, agent.ErrToolNameExists),
 		errors.Is(err, agent.ErrToolIsBuiltin),
@@ -42,10 +42,10 @@ func respondToolError(c *gin.Context, err error) {
 		errors.Is(err, agent.ErrToolFileEmpty),
 		errors.Is(err, agent.ErrToolFileTooLarge),
 		errors.Is(err, agent.ErrToolArtifactMissing):
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 	default:
 		log.Printf("[ToolHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -77,7 +77,7 @@ func (h *ToolHandler) Get(c *gin.Context) {
 func parseToolFile(c *gin.Context) (input *services.ToolFileInput, closeFn func()) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
+		respondError(c, http.StatusBadRequest, "invalid_tool_file", "工具文件不能为空（仅支持 .ts/.mts/.js/.mjs 单文件，≤5 MiB）")
 		return nil, nil
 	}
 	return &services.ToolFileInput{
@@ -91,7 +91,7 @@ func parseToolFile(c *gin.Context) (input *services.ToolFileInput, closeFn func(
 func (h *ToolHandler) Create(c *gin.Context) {
 	name := c.PostForm("name")
 	if name == "" {
-		respondError(c, http.StatusBadRequest, "name 参数不能为空")
+		respondError(c, http.StatusBadRequest, "name_required", "name 参数不能为空")
 		return
 	}
 	in, closeFn := parseToolFile(c)
@@ -118,7 +118,7 @@ func (h *ToolHandler) Create(c *gin.Context) {
 func (h *ToolHandler) Update(c *gin.Context) {
 	var input services.UpdateToolInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	t, err := h.service.Update(tenant.GetTenantID(c), c.Param("name"), &input)
@@ -170,7 +170,7 @@ type updateAgentToolsReq struct {
 func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 	var req updateAgentToolsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	if err := h.service.UpdateAgentTools(tenant.GetTenantID(c), c.Param("name"), req.ToolNames); err != nil {

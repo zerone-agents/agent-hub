@@ -52,7 +52,7 @@ func (h *AgentFilesHandler) proxy(c *gin.Context, method, runtimePath string) {
 
 	baseURL, apiKey, _, err := h.svc.ResolveRuntime(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusConflict, "agent not available: "+err.Error())
+		respondError(c, http.StatusConflict, "agent_unavailable", "agent not available: "+err.Error())
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *AgentFilesHandler) proxy(c *gin.Context, method, runtimePath string) {
 	// 记录/部署代次可断言，不携带 X-Expected-Container-Id（runtime 跳过校验）。
 	resp, err := h.svc.RuntimeClient().ProxyFiles(ctx, method, baseURL, apiKey, pathAndQuery, c.GetHeader("Range"), "")
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "runtime unreachable: "+err.Error())
+		respondError(c, http.StatusBadGateway, "runtime_unreachable", "runtime unreachable: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -85,7 +85,7 @@ func (h *AgentFilesHandler) proxy(c *gin.Context, method, runtimePath string) {
 	if resp.StatusCode >= 500 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		respondError(c, http.StatusBadGateway, "runtime unreachable: HTTP "+strconv.Itoa(resp.StatusCode)+": "+string(body))
+		respondError(c, http.StatusBadGateway, "runtime_unreachable", "runtime unreachable: HTTP "+strconv.Itoa(resp.StatusCode)+": "+string(body))
 		return
 	}
 
