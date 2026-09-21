@@ -28,17 +28,17 @@ func (h *ChatHandler) Push(c *gin.Context) {
 	if am, _ := c.Get("auth_method"); am == "chat_push_key" {
 		var req services.PushRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			respondError(c, http.StatusBadRequest, err.Error())
+			respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 			return
 		}
 		resp, err := h.service.PushWithSessionIdentity(&req)
 		if err != nil {
 			if errors.Is(err, services.ErrPushValidation) {
-				respondError(c, http.StatusBadRequest, err.Error())
+				respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 				return
 			}
 			log.Printf("[ChatPush] push-key push failed: %v", err)
-			respondError(c, http.StatusInternalServerError, "internal error")
+			respondError(c, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		c.JSON(http.StatusOK, resp)
@@ -47,13 +47,13 @@ func (h *ChatHandler) Push(c *gin.Context) {
 
 	userID, exists := c.Get("user_id")
 	if !exists {
-		respondError(c, http.StatusUnauthorized, "user not authenticated")
+		respondError(c, http.StatusUnauthorized, "unauthorized", "user not authenticated")
 		return
 	}
 
 	var req services.PushRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 
@@ -62,7 +62,7 @@ func (h *ChatHandler) Push(c *gin.Context) {
 
 	resp, err := h.service.Push(tenant.GetTenantID(c), userID.(string), userName.(string), displayName.(string), &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *ChatHandler) ListSessions(c *gin.Context) {
 
 	resp, err := h.service.ListSessions(tenant.GetTenantID(c), page, pageSize, chatScopeUserID(c))
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
@@ -84,14 +84,14 @@ func (h *ChatHandler) ListSessions(c *gin.Context) {
 func (h *ChatHandler) GetSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		respondError(c, http.StatusBadRequest, "session id is required")
+		respondError(c, http.StatusBadRequest, "session_id_required", "session id is required")
 		return
 	}
 
 	// member 访问他人会话时 GetSessionForUser 查不到 → 404（不暴露存在性）
 	session, err := h.service.GetSession(tenant.GetTenantID(c), sessionID, chatScopeUserID(c))
 	if err != nil {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
 
@@ -101,7 +101,7 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 func (h *ChatHandler) ListMessages(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		respondError(c, http.StatusBadRequest, "session id is required")
+		respondError(c, http.StatusBadRequest, "session_id_required", "session id is required")
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 	// 归属校验失败（member 访问他人会话）或会话不存在 → 404
 	resp, err := h.service.ListMessages(tenant.GetTenantID(c), sessionID, page, pageSize, chatScopeUserID(c))
 	if err != nil {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
 
@@ -120,13 +120,13 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 func (h *ChatHandler) DeleteSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		respondError(c, http.StatusBadRequest, "session id is required")
+		respondError(c, http.StatusBadRequest, "session_id_required", "session id is required")
 		return
 	}
 
 	// member 删他人会话 → 404；admin/maintainer 任意删
 	if err := h.service.DeleteSession(tenant.GetTenantID(c), sessionID, chatScopeUserID(c)); err != nil {
-		respondError(c, http.StatusNotFound, "session not found")
+		respondError(c, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
 

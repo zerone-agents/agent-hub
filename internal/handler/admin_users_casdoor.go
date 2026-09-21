@@ -44,7 +44,7 @@ func NewCasdoorUserHandler(dir UserDirectory, loginURLFn LoginURLBuilder, ar *se
 func (h *CasdoorUserHandler) ListUsers(c *gin.Context) {
 	users, err := h.dir.ListUsers(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "Casdoor 用户查询失败: "+err.Error())
+		respondError(c, http.StatusBadGateway, "casdoor_user_query_failed", "Casdoor 用户查询失败: "+err.Error())
 		return
 	}
 	respondSuccess(c, users)
@@ -59,17 +59,17 @@ func (h *CasdoorUserHandler) UpdateUser(c *gin.Context) {
 		Status string `json:"status"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	if req.Role == "" && req.Status == "" {
-		respondError(c, http.StatusBadRequest, "至少需要提供一个字段")
+		respondError(c, http.StatusBadRequest, "field_required", "至少需要提供一个字段")
 		return
 	}
 	// Validate status before applying any change, so a PATCH with a valid role
 	// plus an invalid status is rejected without side effects.
 	if req.Status != "" && req.Status != "active" && req.Status != "disabled" {
-		respondError(c, http.StatusBadRequest, "无效的 status")
+		respondError(c, http.StatusBadRequest, "invalid_status", "无效的 status")
 		return
 	}
 	if req.Role != "" {
@@ -125,7 +125,7 @@ func (h *CasdoorUserHandler) LoginURL(c *gin.Context) {
 	if err != nil {
 		// 生成失败通常表示本组织未注册 OAuth client（配置缺失），详情给
 		// 管理员排障；与登录入口的 404 中性文案不同，这里是管理端工具。
-		respondError(c, http.StatusBadGateway, "生成登录链接失败: "+err.Error())
+		respondError(c, http.StatusBadGateway, "login_link_failed", "生成登录链接失败: "+err.Error())
 		return
 	}
 	// endpoint 按租户生成、无目标用户（spec §3）
@@ -137,12 +137,12 @@ func (h *CasdoorUserHandler) LoginURL(c *gin.Context) {
 func respondDirectoryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, directory.ErrSelfOperation):
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "self_operation_forbidden", err.Error())
 	case errors.Is(err, directory.ErrInvalidRole):
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_role", err.Error())
 	case errors.Is(err, directory.ErrUserNotFound):
-		respondError(c, http.StatusNotFound, err.Error())
+		respondError(c, http.StatusNotFound, "user_not_found", err.Error())
 	default:
-		respondError(c, http.StatusBadGateway, "Casdoor 操作失败: "+err.Error())
+		respondError(c, http.StatusBadGateway, "casdoor_operation_failed", "Casdoor 操作失败: "+err.Error())
 	}
 }

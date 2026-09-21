@@ -39,11 +39,11 @@ func (h *AgentChatHandler) blockGuestInvisibleAgent(c *gin.Context, agentName st
 	}
 	visible, err := h.svc.AgentGuestVisible(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal error")
+		respondError(c, http.StatusInternalServerError, "internal_error", "internal error")
 		return true
 	}
 	if !visible {
-		respondError(c, http.StatusNotFound, "agent not found")
+		respondError(c, http.StatusNotFound, "agent_not_found", "agent not found")
 		return true
 	}
 	return false
@@ -60,7 +60,7 @@ func (h *AgentChatHandler) ListSessions(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 30)
 	sessions, total, err := h.svc.ListSessions(tenant.GetTenantID(c), userID, agentName, source, page, pageSize)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	respondSuccess(c, gin.H{
@@ -94,7 +94,7 @@ func (h *AgentChatHandler) CreateSession(c *gin.Context) {
 		stringOrEmpty(displayName),
 	)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	respondSuccess(c, sess)
@@ -111,7 +111,7 @@ func (h *AgentChatHandler) ListMessages(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 50)
 	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, agentName, sessionID, page, pageSize)
 	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		respondError(c, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 	respondSuccess(c, gin.H{
@@ -129,7 +129,7 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 
 	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, agentName, sessionID); err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
+		respondError(c, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
 	respondMessage(c, http.StatusOK, "session deleted")
@@ -176,23 +176,23 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	dec := json.NewDecoder(c.Request.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求包含无法识别的字段")
+		respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求包含无法识别的字段")
 		return
 	}
 	// 尾随值（issue #94 review R2 F2）：首个 JSON 值之后必须直接 EOF——
 	// `{"content":"hi"}{"base64":...}` 这类拼接 body 一律 400，不静默取首值。
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); err != io.EOF {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求格式错误")
+		respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请求格式错误")
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请输入文本或添加附件")
+		respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "请输入文本或添加附件")
 		return
 	}
 	if err := services.ValidateAttachmentDescs(req.Attachments); err != nil {
 		log.Printf("[chat] rejected attachment descriptors: session=%s err=%v", sessionID, err)
-		respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
+		respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
 
@@ -203,11 +203,11 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] send message session lookup failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "会话不存在")
+		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "会话不存在")
+		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
 		return
 	}
 	// 2. Resolve runtime URL, API key, and the deployer-reported container id
@@ -220,7 +220,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
 		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
 			tenantID, agentName, sessionID, err)
-		respondError(c, http.StatusConflict, "Agent 暂不可用，请稍后重试")
+		respondError(c, http.StatusConflict, "agent_unavailable", "Agent 暂不可用，请稍后重试")
 		return
 	}
 
@@ -230,7 +230,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if len(req.Attachments) > 0 && containerID == "" {
 		log.Printf("[chat] send rejected, empty container generation: tenant=%s agent=%s session=%s",
 			tenantID, agentName, sessionID)
-		respondError(c, http.StatusServiceUnavailable, "部署状态异常，附件暂不可用，请稍后重试")
+		respondError(c, http.StatusServiceUnavailable, "deployment_unhealthy", "部署状态异常，附件暂不可用，请稍后重试")
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 消息跳过探测。
 	if len(req.Attachments) > 0 {
 		if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
-			respondErrorCode(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
+			respondError(c, http.StatusNotImplemented, chat.ErrCodeRuntimeAttachmentUnsupported,
 				"当前 Runtime 版本不支持附件（需升级到支持代次校验的版本，≥ 2.7.0）")
 			return
 		}
@@ -261,7 +261,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		rec, err := h.svc.GetUploadRecord(tenantID, userID, sessionID, a.ID)
 		if err != nil || rec.Name != a.Name || rec.Mime != a.Mime || rec.Size != a.Size || rec.Path != a.Path ||
 			rec.ContainerID == "" || rec.ContainerID != containerID {
-			respondErrorCode(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
+			respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment,
 				"附件信息无效或已失效，请重新上传")
 			return
 		}
@@ -270,7 +270,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] save user message failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "会话不存在")
+		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
 		return
 	}
 
@@ -329,12 +329,12 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 			// 响应体已在 client 边界丢弃（main #121），日志只留 code+status。
 			log.Printf("[chat] runtime rejected run (pre-run failure): tenant=%s session=%s code=%s status=%d",
 				tenantID, sessionID, code, httpErr.StatusCode)
-			respondErrorCode(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
+			respondError(c, attachmentHTTPStatus(code), code, attachmentCodeMessage(code))
 			return
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
-		respondError(c, http.StatusBadGateway, "Runtime 连接失败，请稍后重试")
+		respondError(c, http.StatusBadGateway, "runtime_unreachable", "Runtime 连接失败，请稍后重试")
 		return
 	}
 	defer rc.Close()
@@ -352,7 +352,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 7. SSE headers + flusher
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		respondError(c, http.StatusInternalServerError, "streaming unsupported")
+		respondError(c, http.StatusInternalServerError, "streaming_unsupported", "streaming unsupported")
 		return
 	}
 

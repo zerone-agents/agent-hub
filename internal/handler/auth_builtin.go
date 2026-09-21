@@ -44,7 +44,7 @@ func NewBuiltinAuthHandler(p *builtin.Provider, users *services.UserService, inv
 func (h *BuiltinAuthHandler) GetMode(c *gin.Context) {
 	initialized, err := h.users.Initialized()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "查询初始化状态失败")
+		respondError(c, http.StatusInternalServerError, "setup_status_failed", "查询初始化状态失败")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
@@ -61,20 +61,20 @@ func (h *BuiltinAuthHandler) Setup(c *gin.Context) {
 		ConfirmPassword string `json:"confirmPassword" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	if req.Password != req.ConfirmPassword {
-		respondError(c, http.StatusBadRequest, "两次输入的密码不一致")
+		respondError(c, http.StatusBadRequest, "password_mismatch", "两次输入的密码不一致")
 		return
 	}
 	user, err := h.users.CreateInitialAdmin(req.Password)
 	if errors.Is(err, services.ErrAlreadyInitialized) {
-		respondError(c, http.StatusConflict, "系统已初始化")
+		respondError(c, http.StatusConflict, "already_initialized", "系统已初始化")
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	// 埋点边界（spec §3.1）：CreateInitialAdmin 成功即记录——此后 IssueTokenPair
@@ -87,7 +87,7 @@ func (h *BuiltinAuthHandler) Setup(c *gin.Context) {
 		audit.ActionSetup, audit.TargetSystem, uid, user.Username))
 	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "签发令牌失败")
+		respondError(c, http.StatusInternalServerError, "issue_token_failed", "签发令牌失败")
 		return
 	}
 	respondSuccess(c, pair)
@@ -101,7 +101,7 @@ func (h *BuiltinAuthHandler) Login(c *gin.Context) {
 		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	user, err := h.users.Authenticate(req.Username, req.Password)
@@ -110,17 +110,17 @@ func (h *BuiltinAuthHandler) Login(c *gin.Context) {
 		// （含锁定场景，uid 未知为空）
 		h.audit.Login(c, "", req.Username, "default", audit.StatusFailure, audit.ReasonInvalidCredentials)
 		if errors.Is(err, services.ErrLocked) {
-			respondError(c, http.StatusTooManyRequests, err.Error())
+			respondError(c, http.StatusTooManyRequests, "rate_limited", err.Error())
 			return
 		}
-		respondError(c, http.StatusUnauthorized, services.ErrInvalidCredentials.Error())
+		respondError(c, http.StatusUnauthorized, "invalid_credentials", services.ErrInvalidCredentials.Error())
 		return
 	}
 	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
 		// 凭校验已通过但会话未建立（spec §3.1：success = 签发完成）
 		h.audit.Login(c, strconv.FormatUint(user.ID, 10), req.Username, "default", audit.StatusFailure, audit.ReasonTokenIssuanceFailed)
-		respondError(c, http.StatusInternalServerError, "签发令牌失败")
+		respondError(c, http.StatusInternalServerError, "issue_token_failed", "签发令牌失败")
 		return
 	}
 	h.audit.Login(c, strconv.FormatUint(user.ID, 10), req.Username, "default", audit.StatusSuccess, "")
@@ -136,7 +136,7 @@ func (h *BuiltinAuthHandler) Refresh(c *gin.Context) {
 		RefreshTokenSnake string `json:"refresh_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "refresh token is required")
+		respondError(c, http.StatusBadRequest, "refresh_token_required", "refresh token is required")
 		return
 	}
 	token := req.RefreshToken
@@ -145,7 +145,7 @@ func (h *BuiltinAuthHandler) Refresh(c *gin.Context) {
 	}
 	pair, err := h.p.RefreshToken(token)
 	if err != nil {
-		respondError(c, http.StatusUnauthorized, "refresh token 无效或已过期")
+		respondError(c, http.StatusUnauthorized, "invalid_refresh_token", "refresh token 无效或已过期")
 		return
 	}
 	respondSuccess(c, pair)
@@ -178,21 +178,21 @@ func (h *BuiltinAuthHandler) Register(c *gin.Context) {
 		DisplayName string `json:"displayName"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	inv, err := h.invites.Validate(req.InviteToken)
 	if err != nil {
-		respondError(c, http.StatusGone, services.ErrInviteInvalid.Error())
+		respondError(c, http.StatusGone, "invalid_invite", services.ErrInviteInvalid.Error())
 		return
 	}
 	user, err := h.users.Create(req.Username, req.Password, req.DisplayName, inv.Role)
 	if errors.Is(err, services.ErrUsernameTaken) {
-		respondError(c, http.StatusConflict, err.Error())
+		respondError(c, http.StatusConflict, "conflict", err.Error())
 		return
 	}
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}
 	if _, err := h.invites.Consume(req.InviteToken); err != nil {
@@ -200,12 +200,12 @@ func (h *BuiltinAuthHandler) Register(c *gin.Context) {
 		// Validate and Consume. Roll back the just-created user so the username
 		// is freed, then report 410.
 		_ = h.users.Delete(user.ID)
-		respondError(c, http.StatusGone, services.ErrInviteInvalid.Error())
+		respondError(c, http.StatusGone, "invalid_invite", services.ErrInviteInvalid.Error())
 		return
 	}
 	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "签发令牌失败")
+		respondError(c, http.StatusInternalServerError, "issue_token_failed", "签发令牌失败")
 		return
 	}
 	respondSuccess(c, pair)
@@ -216,7 +216,7 @@ func (h *BuiltinAuthHandler) Register(c *gin.Context) {
 func (h *BuiltinAuthHandler) InvitePrecheck(c *gin.Context) {
 	inv, err := h.invites.Validate(c.Param("token"))
 	if err != nil {
-		respondError(c, http.StatusGone, services.ErrInviteInvalid.Error())
+		respondError(c, http.StatusGone, "invalid_invite", services.ErrInviteInvalid.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
@@ -234,13 +234,13 @@ func (h *BuiltinAuthHandler) ChangePassword(c *gin.Context) {
 		NewPassword string `json:"newPassword" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "参数不完整")
+		respondError(c, http.StatusBadRequest, "incomplete_parameter", "参数不完整")
 		return
 	}
 	idStr := c.GetString("user_id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		respondError(c, http.StatusUnauthorized, "无效的用户身份")
+		respondError(c, http.StatusUnauthorized, "invalid_user_identity", "无效的用户身份")
 		return
 	}
 	if err := h.users.ChangePassword(id, req.OldPassword, req.NewPassword); err != nil {
@@ -248,7 +248,7 @@ func (h *BuiltinAuthHandler) ChangePassword(c *gin.Context) {
 		if errors.Is(err, services.ErrInvalidCredentials) {
 			status = http.StatusUnauthorized
 		}
-		respondError(c, status, err.Error())
+		respondError(c, status, "login_failed", err.Error())
 		return
 	}
 	// 密码变更已提交生效（spec §3.1）——后续撤销/查询/签发失败不影响本记录。
@@ -258,12 +258,12 @@ func (h *BuiltinAuthHandler) ChangePassword(c *gin.Context) {
 	_ = h.p.RevokeAllForUser(id)
 	user, err := h.users.GetByID(id)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "用户查询失败")
+		respondError(c, http.StatusInternalServerError, "user_query_failed", "用户查询失败")
 		return
 	}
 	pair, err := h.p.IssueTokenPair(user)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "签发令牌失败")
+		respondError(c, http.StatusInternalServerError, "issue_token_failed", "签发令牌失败")
 		return
 	}
 	respondSuccess(c, pair)

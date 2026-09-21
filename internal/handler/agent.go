@@ -51,19 +51,19 @@ func respondAgentError(c *gin.Context, err error) {
 	// Agent 实体——双认会把它们误判为「Agent 不存在」且吞掉诊断日志；
 	// service 层已在 not-found 时包装专属 sentinel）。
 	case errors.Is(err, agent.ErrAgentNotFound):
-		respondError(c, http.StatusNotFound, agent.ErrAgentNotFound.Error())
+		respondError(c, http.StatusNotFound, "agent_not_found", agent.ErrAgentNotFound.Error())
 	case errors.Is(err, provider.ErrProviderNotFound):
 		// provider 域 sentinel 是英文文案（"provider not found"），
 		// HTTP 边界按用户面中文提示返回（外审 #5614465831 P3）。
-		respondError(c, http.StatusNotFound, "Provider 不存在")
+		respondError(c, http.StatusNotFound, "provider_not_found", "Provider 不存在")
 	default:
 		var ve *agent.ValidationError
 		if errors.As(err, &ve) {
-			respondError(c, http.StatusBadRequest, err.Error())
+			respondError(c, http.StatusBadRequest, "invalid_agent_config", err.Error())
 			return
 		}
 		log.Printf("[AgentHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -258,7 +258,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 	// 误删仍有容器的配置。DB not-found 也走此分支（UI 过期边缘场景，刷新自愈）。
 	deployment, err := h.deployerService.GetStatus(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, http.StatusBadGateway, "无法确认部署状态，已阻止删除")
+		respondError(c, http.StatusBadGateway, "deployment_status_uncertain", "无法确认部署状态，已阻止删除")
 		return
 	}
 	if s := deployment.Status; s != "" && s != "not_found" && s != "archived" {
@@ -372,7 +372,7 @@ func (h *AgentHandler) DeployAgent(c *gin.Context) {
 
 	resp, err := h.deployerService.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
+		respondError(c, deployerErrorStatus(err), "deploy_failed", deployerErrorMessage(err))
 		return
 	}
 	h.audit.Simple(c, audit.ActionDeploy, audit.TargetAgent, name, name)
@@ -403,7 +403,7 @@ func (h *AgentHandler) StopDeployment(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.deployerService.Stop(tenant.GetTenantID(c), name); err != nil {
-		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
+		respondError(c, deployerErrorStatus(err), "deploy_stop_failed", deployerErrorMessage(err))
 		return
 	}
 	h.audit.Simple(c, audit.ActionStop, audit.TargetAgent, name, name)
@@ -415,7 +415,7 @@ func (h *AgentHandler) StartDeployment(c *gin.Context) {
 
 	resp, err := h.deployerService.Start(tenant.GetTenantID(c), name)
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
+		respondError(c, deployerErrorStatus(err), "deploy_start_failed", deployerErrorMessage(err))
 		return
 	}
 	h.audit.Simple(c, audit.ActionStart, audit.TargetAgent, name, name)
@@ -433,7 +433,7 @@ func (h *AgentHandler) DeleteDeployment(c *gin.Context) {
 		err = h.deployerService.Delete(tenant.GetTenantID(c), name)
 	}
 	if err != nil {
-		respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
+		respondError(c, deployerErrorStatus(err), "deploy_delete_failed", deployerErrorMessage(err))
 		return
 	}
 	h.audit.Simple(c, audit.ActionUndeploy, audit.TargetAgent, name, name)

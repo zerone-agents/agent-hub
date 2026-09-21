@@ -44,13 +44,13 @@ func runtimeAttachmentContractMet(status int, code string) bool {
 func respondAttachmentError(c *gin.Context, err error) {
 	var attErr *chat.AttachmentError
 	if errors.As(err, &attErr) {
-		respondErrorCode(c, attachmentHTTPStatus(attErr.Code), attErr.Code, attErr.Message)
+		respondError(c, attachmentHTTPStatus(attErr.Code), attErr.Code, attErr.Message)
 		return
 	}
 	// Details of non-domain errors stay out of the response body but are
 	// logged at this aggregation point so production 500s remain diagnosable.
 	log.Printf("attachment upload failed: %v", err)
-	respondError(c, http.StatusInternalServerError, "上传失败，请稍后重试")
+	respondError(c, http.StatusInternalServerError, "upload_failed", "上传失败，请稍后重试")
 }
 
 // runtimeAttachmentCode parses a runtime error body {"error","code"} and

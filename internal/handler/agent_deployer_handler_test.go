@@ -58,7 +58,7 @@ func deployHandlerForTest(dep deployerForTest) gin.HandlerFunc {
 
 		resp, err := dep.Deploy(tenant.GetTenantID(c), name, force, rotateKey)
 		if err != nil {
-			respondError(c, deployerErrorStatus(err), deployerErrorMessage(err))
+			respondError(c, deployerErrorStatus(err), "deploy_failed", deployerErrorMessage(err))
 			return
 		}
 		respondSuccess(c, resp)
