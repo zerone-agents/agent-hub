@@ -37,20 +37,20 @@ func NewProviderHandler(service *services.ProviderService, multiragClient provid
 func respondProviderError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, provider.ErrProviderNotFound):
-		respondError(c, http.StatusNotFound, "not_found", err.Error())
+		respondError(c, http.StatusNotFound, ErrCodeNotFound, err.Error())
 	case errors.Is(err, provider.ErrMultiRAGConfigMissing):
-		respondError(c, http.StatusServiceUnavailable, "multirag_not_configured", "MultiRAG 未配置")
+		respondError(c, http.StatusServiceUnavailable, ErrCodeMultiragNotConfigured, "MultiRAG 未配置")
 	default:
 		var ve *provider.ValidationError
 		if errors.As(err, &ve) {
 			// 返回完整错误链（err.Error() 而非 ve.Error()）：批量校验的
 			// 外层 wrap 携带模型索引/名称上下文（defaultModels[i](id)），
 			// 只取内层消息会丢失用户识别目标（review #5599426234 P3）。
-			respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 			return
 		}
 		log.Printf("[ProviderHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -82,7 +82,7 @@ func (h *ProviderHandler) List(c *gin.Context) {
 func (h *ProviderHandler) Get(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 
@@ -130,7 +130,7 @@ func (h *ProviderHandler) ListAdmin(c *gin.Context) {
 func parseTypeQuery(c *gin.Context) (typeFilter string, ok bool) {
 	typeFilter = c.Query("type")
 	if typeFilter != "" && typeFilter != string(provider.TypeLLM) && typeFilter != string(provider.TypeOCR) && typeFilter != string(provider.TypeEmbedding) && typeFilter != string(provider.TypeVLM) && typeFilter != "chat" {
-		respondError(c, http.StatusBadRequest, "unsupported_type", fmt.Sprintf("type 不支持: %s（可选: llm, ocr, embedding, vlm, chat）", typeFilter))
+		respondError(c, http.StatusBadRequest, ErrCodeUnsupportedType, fmt.Sprintf("type 不支持: %s（可选: llm, ocr, embedding, vlm, chat）", typeFilter))
 		return "", false
 	}
 	return typeFilter, true
@@ -155,7 +155,7 @@ type createProviderRequest struct {
 func (h *ProviderHandler) Create(c *gin.Context) {
 	var req createProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 
@@ -199,13 +199,13 @@ type updateProviderRequest struct {
 func (h *ProviderHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 
 	var req updateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 
@@ -233,7 +233,7 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 func (h *ProviderHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 
@@ -249,7 +249,7 @@ func (h *ProviderHandler) Delete(c *gin.Context) {
 func (h *ProviderHandler) Probe(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 
@@ -281,7 +281,7 @@ type probeConfigRequest struct {
 func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 	var req probeConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 
@@ -318,7 +318,7 @@ func (h *ProviderHandler) ListRuntimeConfig(c *gin.Context) {
 func (h *ProviderHandler) RevealAPIKey(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 
@@ -364,12 +364,12 @@ type createModelRequest struct {
 func (h *ProviderHandler) AddModel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 	var req createModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	dto, err := h.service.AddModel(tenant.GetTenantID(c), id, &services.AddModelInput{
@@ -399,13 +399,13 @@ type updateModelRequest struct {
 func (h *ProviderHandler) UpdateModel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 	selectionID := c.Param("selectionId")
 	var req updateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	dto, err := h.service.UpdateModel(tenant.GetTenantID(c), id, selectionID, &services.UpdateModelInput{
@@ -427,7 +427,7 @@ func (h *ProviderHandler) UpdateModel(c *gin.Context) {
 func (h *ProviderHandler) DeleteModel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 	selectionID := c.Param("selectionId")
@@ -455,7 +455,7 @@ type syncToMultiRAGRequest struct {
 func (h *ProviderHandler) SyncToMultiRAG(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 	var req syncToMultiRAGRequest

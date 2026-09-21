@@ -28,17 +28,17 @@ func NewMcpHandler(svc *services.McpService) *McpHandler {
 func respondMcpError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, mcp.ErrMcpNotFound):
-		respondError(c, http.StatusNotFound, "mcp_not_found", mcp.ErrMcpNotFound.Error())
+		respondError(c, http.StatusNotFound, ErrCodeMcpNotFound, mcp.ErrMcpNotFound.Error())
 	case errors.Is(err, agent.ErrAgentNotFound):
-		respondError(c, http.StatusNotFound, "agent_not_found", agent.ErrAgentNotFound.Error())
+		respondError(c, http.StatusNotFound, ErrCodeAgentNotFound, agent.ErrAgentNotFound.Error())
 	default:
 		var ve *mcp.ValidationError
 		if errors.As(err, &ve) {
-			respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 			return
 		}
 		log.Printf("[McpHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -68,7 +68,7 @@ func (h *McpHandler) Get(c *gin.Context) {
 func (h *McpHandler) Create(c *gin.Context) {
 	var input services.CreateMcpInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	item, err := h.service.Create(tenant.GetTenantID(c), &input)
@@ -83,7 +83,7 @@ func (h *McpHandler) Update(c *gin.Context) {
 	name := c.Param("name")
 	var input services.UpdateMcpInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	item, err := h.service.Update(tenant.GetTenantID(c), name, &input)
@@ -128,7 +128,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 	agentName := c.Param("name")
 	var req updateAgentMcpsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.UpdateAgentMcps(tenant.GetTenantID(c), agentName, req.McpNames); err != nil {
@@ -141,7 +141,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 func (h *McpHandler) ProbeByConfig(c *gin.Context) {
 	var input services.McpProbeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	result, err := h.service.ProbeByConfig(c.Request.Context(), &input)
@@ -169,7 +169,7 @@ func (h *McpHandler) ProbeByName(c *gin.Context) {
 func (h *McpHandler) GetClientMcpsByAgent(c *gin.Context) {
 	agentName := c.Query("agent")
 	if agentName == "" {
-		respondError(c, http.StatusBadRequest, "agent_query_required", "缺少 agent 查询参数")
+		respondError(c, http.StatusBadRequest, ErrCodeAgentQueryRequired, "缺少 agent 查询参数")
 		return
 	}
 	items, err := h.service.GetClientMcpsByAgent(tenant.GetTenantID(c), agentName)

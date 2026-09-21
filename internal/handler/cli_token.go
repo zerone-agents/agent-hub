@@ -31,12 +31,12 @@ func (h *CLITokenHandler) Issue(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 	var req issueTokenReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "name_required", "缺少必填字段 name")
+		respondError(c, http.StatusBadRequest, ErrCodeNameRequired, "缺少必填字段 name")
 		return
 	}
 	result, err := h.svc.Issue(userID, req.Name, req.TTLDays)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	// Target 记 token 名而非值：明文 token 只在响应体出现一次（spec §3）。
@@ -49,7 +49,7 @@ func (h *CLITokenHandler) List(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 	tokens, err := h.svc.List(userID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 	respondSuccess(c, gin.H{"items": tokens})
@@ -61,11 +61,11 @@ func (h *CLITokenHandler) Revoke(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_id", "invalid id")
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidId, "invalid id")
 		return
 	}
 	if err := h.svc.Revoke(id, userID); err != nil {
-		respondError(c, http.StatusNotFound, "token_not_found", "token not found")
+		respondError(c, http.StatusNotFound, ErrCodeTokenNotFound, "token not found")
 		return
 	}
 	h.audit.Simple(c, audit.ActionCliTokenRevoke, audit.TargetToken, idStr, "")

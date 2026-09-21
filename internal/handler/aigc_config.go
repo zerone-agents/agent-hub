@@ -23,7 +23,7 @@ func (h *AigcConfigHandler) Get(c *gin.Context) {
 	tenantID := tenant.GetTenantID(c)
 	dto, err := h.svc.Get(tenantID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 	respondSuccess(c, dto)
@@ -37,13 +37,13 @@ type saveAigcConfigReq struct {
 func (h *AigcConfigHandler) Save(c *gin.Context) {
 	var req saveAigcConfigReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "aigc_fields_required", "uscc and companyName are required")
+		respondError(c, http.StatusBadRequest, ErrCodeAigcFieldsRequired, "uscc and companyName are required")
 		return
 	}
 	tenantID := tenant.GetTenantID(c)
 	dto, rcpt, err := h.svc.Save(tenantID, req.USCC, req.CompanyName)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	// 幂等保存（ChangedFields=[]）仍记录事件：操作意图本身可审计（Task 9 语义）。
@@ -54,7 +54,7 @@ func (h *AigcConfigHandler) Save(c *gin.Context) {
 func (h *AigcConfigHandler) RotateKey(c *gin.Context) {
 	dto, err := h.svc.RotateKey(tenant.GetTenantID(c))
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	h.audit.Simple(c, audit.ActionAigcRotateKey, audit.TargetAigcConfig, tenant.GetTenantID(c), "")
@@ -63,7 +63,7 @@ func (h *AigcConfigHandler) RotateKey(c *gin.Context) {
 
 func (h *AigcConfigHandler) Delete(c *gin.Context) {
 	if err := h.svc.Delete(tenant.GetTenantID(c)); err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 	h.audit.Simple(c, audit.ActionAigcDelete, audit.TargetAigcConfig, tenant.GetTenantID(c), "")

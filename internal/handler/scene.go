@@ -29,17 +29,17 @@ func NewSceneHandler(service *services.SceneService) *SceneHandler {
 func respondSceneError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, scene.ErrSceneNotFound):
-		respondError(c, http.StatusNotFound, "scene_not_found", scene.ErrSceneNotFound.Error())
+		respondError(c, http.StatusNotFound, ErrCodeSceneNotFound, scene.ErrSceneNotFound.Error())
 	case errors.Is(err, scene.ErrSceneExists), errors.Is(err, scene.ErrAgentNotFound):
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 	default:
 		var ve *scene.ValidationError
 		if errors.As(err, &ve) {
-			respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 			return
 		}
 		log.Printf("[SceneHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, "服务器内部错误，请稍后重试")
 	}
 }
 

@@ -97,7 +97,7 @@ func (h *KnowledgeHandler) ListDatasets(c *gin.Context) {
 func (h *KnowledgeHandler) CreateDataset(c *gin.Context) {
 	var req knowledge.DatasetMutationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	dataset, err := h.service.CreateDataset(c.Request.Context(), tenant.GetTenantID(c), req)
@@ -120,7 +120,7 @@ func (h *KnowledgeHandler) GetDataset(c *gin.Context) {
 func (h *KnowledgeHandler) UpdateDataset(c *gin.Context) {
 	var req knowledge.DatasetMutationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	dataset, err := h.service.UpdateDataset(c.Request.Context(), tenant.GetTenantID(c), c.Param("datasetId"), req)
@@ -134,7 +134,7 @@ func (h *KnowledgeHandler) UpdateDataset(c *gin.Context) {
 func (h *KnowledgeHandler) DeleteDatasets(c *gin.Context) {
 	var req knowledge.DeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.DeleteDatasets(c.Request.Context(), tenant.GetTenantID(c), req); err != nil {
@@ -170,7 +170,7 @@ func (h *KnowledgeHandler) UploadDocuments(c *gin.Context) {
 	contentType := c.GetHeader("Content-Type")
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
-		respondError(c, http.StatusBadRequest, "multipart_required", "上传请求必须是 multipart/form-data")
+		respondError(c, http.StatusBadRequest, ErrCodeMultipartRequired, "上传请求必须是 multipart/form-data")
 		return
 	}
 	documents, err := h.service.UploadDocuments(c.Request.Context(), c.Param("datasetId"), knowledge.UploadRequest{
@@ -206,7 +206,7 @@ func (h *KnowledgeHandler) GetImage(c *gin.Context) {
 func (h *KnowledgeHandler) UpdateDocument(c *gin.Context) {
 	var req knowledge.DocumentUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	document, err := h.service.UpdateDocument(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), req)
@@ -220,7 +220,7 @@ func (h *KnowledgeHandler) UpdateDocument(c *gin.Context) {
 func (h *KnowledgeHandler) DeleteDocuments(c *gin.Context) {
 	var req knowledge.DeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.DeleteDocuments(c.Request.Context(), c.Param("datasetId"), req); err != nil {
@@ -245,7 +245,7 @@ func (r documentIDsRequest) ids() []string {
 func (h *KnowledgeHandler) ParseDocuments(c *gin.Context) {
 	var req documentIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.ParseDocuments(c.Request.Context(), c.Param("datasetId"), req.ids()); err != nil {
@@ -258,7 +258,7 @@ func (h *KnowledgeHandler) ParseDocuments(c *gin.Context) {
 func (h *KnowledgeHandler) StopParsingDocuments(c *gin.Context) {
 	var req documentIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.StopParsingDocuments(c.Request.Context(), c.Param("datasetId"), req.ids()); err != nil {
@@ -286,7 +286,7 @@ func (h *KnowledgeHandler) ListChunks(c *gin.Context) {
 func (h *KnowledgeHandler) CreateChunk(c *gin.Context) {
 	var req knowledge.ChunkMutationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	chunk, err := h.service.CreateChunk(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), req)
@@ -300,7 +300,7 @@ func (h *KnowledgeHandler) CreateChunk(c *gin.Context) {
 func (h *KnowledgeHandler) UpdateChunk(c *gin.Context) {
 	var req knowledge.ChunkMutationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	chunk, err := h.service.UpdateChunk(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), c.Param("chunkId"), req)
@@ -314,7 +314,7 @@ func (h *KnowledgeHandler) UpdateChunk(c *gin.Context) {
 func (h *KnowledgeHandler) DeleteChunks(c *gin.Context) {
 	var req knowledge.DeleteChunksRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.DeleteChunks(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), req); err != nil {
@@ -343,12 +343,12 @@ func (r switchChunksRequest) availableValue() (bool, bool) {
 func (h *KnowledgeHandler) SwitchChunks(c *gin.Context) {
 	var req switchChunksRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	available, ok := req.availableValue()
 	if !ok {
-		respondError(c, http.StatusBadRequest, "availability_required", "available 或 available_int 必填")
+		respondError(c, http.StatusBadRequest, ErrCodeAvailabilityRequired, "available 或 available_int 必填")
 		return
 	}
 	if err := h.service.SwitchChunks(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), req.ChunkIDs, available); err != nil {
@@ -361,7 +361,7 @@ func (h *KnowledgeHandler) SwitchChunks(c *gin.Context) {
 func (h *KnowledgeHandler) Retrieval(c *gin.Context) {
 	var req knowledge.RetrievalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	result, err := h.service.Retrieval(c.Request.Context(), req)
@@ -384,7 +384,7 @@ func respondKnowledgeError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"datasets": datasets}})
 		return
 	}
-	respondError(c, knowledge.StatusCode(err), "knowledge_error", err.Error())
+	respondError(c, knowledge.StatusCode(err), ErrCodeKnowledgeError, err.Error())
 }
 
 func respondStream(c *gin.Context, stream *knowledge.StreamResult, fallbackContentType string) {
