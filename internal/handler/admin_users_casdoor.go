@@ -141,7 +141,7 @@ func respondDirectoryError(c *gin.Context, err error) {
 	case errors.Is(err, directory.ErrInvalidRole):
 		respondError(c, http.StatusBadRequest, "invalid_role", err.Error())
 	case errors.Is(err, directory.ErrUserNotFound):
-		respondError(c, http.StatusNotFound, "invalid_role", err.Error())
+		respondError(c, http.StatusNotFound, "user_not_found", err.Error())
 	default:
 		respondError(c, http.StatusBadGateway, "casdoor_operation_failed", "Casdoor 操作失败: "+err.Error())
 	}
