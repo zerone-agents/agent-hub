@@ -76,8 +76,8 @@ export function buildEmbeddingCandidates(
   }
 
   return buildGroups({
-    'MultiRAG 已有': multiragOptions,
-    '本地待同步': localOptions,
+    'knowledge.candidates.multirag': multiragOptions,
+    'knowledge.candidates.local': localOptions,
   })
 }
 
@@ -124,9 +124,9 @@ export function buildLayoutCandidates(
   }
 
   return buildGroups({
-    '内置': builtinOptions,
-    'MultiRAG 已有': multiragOptions,
-    '本地待同步': localOptions,
+    'knowledge.candidates.builtin': builtinOptions,
+    'knowledge.candidates.multirag': multiragOptions,
+    'knowledge.candidates.local': localOptions,
   })
 }
 

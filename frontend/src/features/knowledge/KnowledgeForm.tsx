@@ -91,11 +91,14 @@ export interface SelectOptionGroup {
   options: { label: string; value: string }[];
 }
 
+// 分组 label 是 i18n 资源 key（candidates.ts 构造期写入），此处直调 i18next
+// 翻译（模块级纯函数拿不到 hook t；调用方的 useMemo 已依赖 t，语言切换
+// 会触发重算）。选项 label 是动态数据（模型名等），不经 t()。
 export function groupsToAntdOptions(
   groups: CandidateGroup[],
 ): SelectOptionGroup[] {
   return groups.map((g) => ({
-    label: g.label,
+    label: i18next.t(g.label),
     options: g.options.map((o) => ({ label: o.label, value: o.value })),
   }));
 }
