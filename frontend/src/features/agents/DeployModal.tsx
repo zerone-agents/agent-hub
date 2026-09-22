@@ -758,7 +758,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
 
         {/* 部署进度：loading（POST 在飞）时也显示，步骤完全由实时状态驱动 */}
         {(loading || (status && deploymentStatus !== 'not_found' && deploymentStatus !== 'archived')) && (
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 16 }} className="deploy-steps">
             {(() => {
               const current = loading && !status ? 1 : getStepIndex(deploymentStatus, status?.health)
               return (
