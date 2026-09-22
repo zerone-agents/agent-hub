@@ -42,7 +42,10 @@ const en = {
     justNow: 'just now',
     minutesAgo: '{{n}} minutes ago',
     hoursAgo: '{{n}} hours ago',
-    daysAgo: '{{n}} days ago'
+    daysAgo: '{{n}} days ago',
+    minutesLater: 'in {{n}} minutes',
+    hoursLater: 'in {{n}} hours',
+    daysLater: 'in {{n}} days'
   },
   // antd Form validateMessages: values keep antd's ${label}/${min} syntax —
   // i18next interpolation is {{}} by default; ${} passes through to antd.

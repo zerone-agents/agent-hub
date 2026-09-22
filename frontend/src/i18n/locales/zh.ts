@@ -40,7 +40,10 @@ const zh = {
     justNow: '刚刚',
     minutesAgo: '{{n}} 分钟前',
     hoursAgo: '{{n}} 小时前',
-    daysAgo: '{{n}} 天前'
+    daysAgo: '{{n}} 天前',
+    minutesLater: '{{n}} 分钟后',
+    hoursLater: '{{n}} 小时后',
+    daysLater: '{{n}} 天后'
   },
   // antd Form validateMessages：值保留 antd 的 ${label}/${min} 语法——
   // i18next 默认插值为 {{}}，${} 原样透传给 antd 替换。
