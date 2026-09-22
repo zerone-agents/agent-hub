@@ -167,6 +167,13 @@ button {
   }
 }
 
+/* DeployModal 步骤条：标题不折行。antd 的步骤连接线（title::after，定位在
+   left:100%）依赖单行标题——英文标题折行占满 item 宽度时，连接线被 item 的
+   overflow:hidden 裁掉，导致连接线消失。 */
+.deploy-steps .ant-steps-item-title {
+  white-space: nowrap;
+}
+
 /* DeployModal 步骤条动效（轻量）：当前步骤呼吸脉冲，完成步骤打勾弹入 */
 .deploy-step-icon {
   display: inline-flex;
