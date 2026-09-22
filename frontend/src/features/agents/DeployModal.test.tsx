@@ -168,6 +168,33 @@ describe('DeployModal', () => {
     expect(screen.queryByRole('link', { name: /API 文档/ })).not.toBeInTheDocument()
   })
 
+  it('points API doc link to the English docs when UI language is en', async () => {
+    const { default: i18n } = await import('@/i18n')
+    const prev = i18n.language
+    await i18n.changeLanguage('en')
+    try {
+      vi.mocked(agentApi.getDeployment).mockResolvedValue(
+        mockResponse(
+          makeStatus({
+            status: 'running',
+            health: 'healthy',
+            hostPort: 8080,
+            runtimeUrl: 'http://localhost:8080',
+          })
+        ) as never
+      )
+
+      render(<DeployModal agent={makeAgent()} providers={providers} open={true} onClose={vi.fn()} />)
+
+      await waitFor(() => {
+        const link = screen.getByRole('link', { name: /API Docs/ })
+        expect(link).toHaveAttribute('href', 'https://docs.zerone.run/en/runtime/api-reference')
+      })
+    } finally {
+      await i18n.changeLanguage(prev)
+    }
+  })
+
   it('resolves relative runtimeUrl against current origin for display and copy', async () => {
     const writeText = vi.fn()
     // userEvent.setup() unconditionally installs its own navigator.clipboard stub

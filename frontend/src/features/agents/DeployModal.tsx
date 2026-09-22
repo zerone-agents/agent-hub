@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 // buildStatusLine 是组件外纯函数，直调 i18next
-import i18next from '@/i18n'
+import i18next, { normalizeLanguage } from '@/i18n'
 import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography, message } from 'antd'
 import {
   RocketIcon,
@@ -31,8 +31,8 @@ import { tokens as tk } from '@/styles/tokens'
 
 const { Text } = Typography
 
-// Runtime 对外 HTTP 接口文档（官方文档站，中文）。展示在 API 信息卡片标题行右侧。
-const RUNTIME_API_DOC_URL = 'https://docs.zerone.run/zh/runtime/api-reference'
+// Runtime 对外 HTTP 接口文档（官方文档站）。路径段按当前界面语言拼接（zh/en）。
+const RUNTIME_API_DOC_BASE = 'https://docs.zerone.run'
 
 /**
  * No-Kong mode returns a hub-relative runtime path — casdoor shape
@@ -222,9 +222,10 @@ const useStyles = createStyles(({ css }) => ({
     gap: 4px;
     font-size: 12px;
     font-weight: 500;
-    color: var(--accent);
+    color: var(--primary);
     text-decoration: none;
     &:hover {
+      color: var(--primary-hover);
       text-decoration: underline;
     }
     svg {
@@ -305,7 +306,7 @@ function isMidState(s: DeploymentStatus | null): boolean {
 }
 
 export default function DeployModal({ agent, providers, open, onClose }: DeployModalProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { styles } = useStyles()
   const canWrite = useCanWrite()
   const queryClient = useQueryClient()
@@ -707,7 +708,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               <div className={styles.capabilityTitle} style={{ marginBottom: 0 }}>{t('agents.deploy.apiInfo')}</div>
               <a
                 className={styles.apiDocLink}
-                href={RUNTIME_API_DOC_URL}
+                href={`${RUNTIME_API_DOC_BASE}/${normalizeLanguage(i18n.language)}/runtime/api-reference`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
