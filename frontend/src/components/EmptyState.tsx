@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
-import { Empty, Button } from 'antd'
+import { Empty } from 'antd'
 import { createStyles } from 'antd-style'
+import PrimaryButton from '@/components/PrimaryButton'
 
 const useStyles = createStyles(({ css }) => ({
   wrapper: css`
@@ -30,9 +31,9 @@ export default function EmptyState({ description, image, action }: EmptyStatePro
         image={image ?? undefined}
       />
       {action && (
-        <Button type="primary" style={{ marginTop: 16 }} onClick={action.onClick}>
+        <PrimaryButton style={{ marginTop: 16 }} onClick={action.onClick}>
           {action.label}
-        </Button>
+        </PrimaryButton>
       )}
     </div>
   )

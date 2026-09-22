@@ -53,6 +53,7 @@ import {
   useSwitchChunks,
 } from "@/queries/useKnowledge";
 import { useCanWrite } from "@/hooks/useCanWrite";
+import PrimaryButton from "@/components/PrimaryButton";
 import { tokens as t } from "@/styles/tokens";
 
 const useStyles = createStyles(({ css }) => ({
@@ -577,14 +578,13 @@ function ChunkEditor({
       extra={
         <Space>
           <Button onClick={onClose}>{t('common.cancel')}</Button>
-          <Button
-            type="primary"
+          <PrimaryButton
             loading={submitting}
             aria-label={editing ? i18next.t('knowledge.chunks.saveAria') : i18next.t('knowledge.chunks.createAria')}
             onClick={submit}
           >
             {editing ? i18next.t('knowledge.chunks.save') : i18next.t('knowledge.chunks.create')}
-          </Button>
+          </PrimaryButton>
         </Space>
       }
     >
@@ -837,13 +837,12 @@ export default function KnowledgeChunksPage() {
                 {t('knowledge.chunks.refresh')}
               </Button>
               {canWrite && (
-                <Button
-                  type="primary"
+                <PrimaryButton
                   icon={<PlusIcon size={16} weight="bold" />}
                   onClick={openCreate}
                 >
                   {t('knowledge.chunks.createChunk')}
-                </Button>
+                </PrimaryButton>
               )}
             </div>
           </div>

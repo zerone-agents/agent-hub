@@ -1,12 +1,13 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Button, Spin } from "antd";
+import { Form, Spin } from "antd";
 import { createStyles } from "antd-style";
 import { useParams } from "react-router";
 import { useKnowledgeDetail, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useMultiragModels } from "@/queries/useMultirag";
 import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
 import { useCanWrite } from "@/hooks/useCanWrite";
+import PrimaryButton from "@/components/PrimaryButton";
 import { parseApiError } from "@/api/client";
 import { tokens as tk } from "@/styles/tokens";
 import {
@@ -164,13 +165,12 @@ export default function KnowledgeSettingsPage() {
         />
         <div className={styles.foot}>
           {canWrite && (
-            <Button
-              type="primary"
+            <PrimaryButton
               onClick={handleSave}
               loading={updateKnowledge.isPending}
             >
               {t('knowledge.settings.save')}
-            </Button>
+            </PrimaryButton>
           )}
         </div>
       </Form>
