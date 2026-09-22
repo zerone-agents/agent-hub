@@ -50,7 +50,7 @@ func respondAttachmentError(c *gin.Context, err error) {
 	// Details of non-domain errors stay out of the response body but are
 	// logged at this aggregation point so production 500s remain diagnosable.
 	log.Printf("attachment upload failed: %v", err)
-	respondError(c, http.StatusInternalServerError, "upload_failed", "上传失败，请稍后重试")
+	respondError(c, http.StatusInternalServerError, ErrCodeUploadFailed, "上传失败，请稍后重试")
 }
 
 // runtimeAttachmentCode parses a runtime error body {"error","code"} and

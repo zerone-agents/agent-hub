@@ -48,11 +48,11 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] upload session lookup failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	// containerID 在上传请求发起前取得：记录天然绑定实际处理上传的容器
@@ -61,7 +61,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] upload resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
-		respondError(c, http.StatusConflict, "agent_unavailable", "Agent 暂不可用，请稍后重试")
+		respondError(c, http.StatusConflict, ErrCodeAgentUnavailable, "Agent 暂不可用，请稍后重试")
 		return
 	}
 	// 空 containerID fail-closed（issue #94 review R4 P1-2）：deployer 未报告
@@ -71,7 +71,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	if containerID == "" {
 		log.Printf("[chat] upload rejected, empty container generation: tenant=%s agent=%s session=%s",
 			tenantID, agentName, sessionID)
-		respondError(c, http.StatusServiceUnavailable, "deployment_unhealthy", "部署状态异常，附件暂不可用，请稍后重试")
+		respondError(c, http.StatusServiceUnavailable, ErrCodeDeploymentUnhealthy, "部署状态异常，附件暂不可用，请稍后重试")
 		return
 	}
 	if !h.svc.AttachmentsSupportedAt(c.Request.Context(), baseURL) {
@@ -141,10 +141,10 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 		// runtime 未产生可透传的响应（连接失败/超时等传输错误）。
 		if res.err != nil {
 			log.Printf("[chat] upload relay aborted, transport error: session=%s err=%v", sessionID, res.err)
-			respondError(c, http.StatusBadGateway, "upload_service_unavailable", "上传服务暂时不可用")
+			respondError(c, http.StatusBadGateway, ErrCodeUploadServiceUnavailable, "上传服务暂时不可用")
 			return
 		}
-		respondError(c, http.StatusBadGateway, "upload_service_unavailable", "上传服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeUploadServiceUnavailable, "上传服务暂时不可用")
 		return
 	}
 	_ = pw.Close()
@@ -152,7 +152,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	res := <-done
 	if res.err != nil {
 		log.Printf("[chat] upload runtime transport error: session=%s err=%v", sessionID, res.err)
-		respondError(c, http.StatusBadGateway, "upload_service_unavailable", "上传服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeUploadServiceUnavailable, "上传服务暂时不可用")
 		return
 	}
 	defer res.resp.Body.Close()
@@ -247,20 +247,20 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 			// 本身（json err 不含内容），session/status 足以定位。
 			log.Printf("[chat] unparseable runtime upload response: session=%s status=%d len=%d err=%v",
 				sessionID, resp.StatusCode, len(body), err)
-			respondError(c, http.StatusBadGateway, "upload_service_error", "上传服务响应异常")
+			respondError(c, http.StatusBadGateway, ErrCodeUploadServiceError, "上传服务响应异常")
 			return
 		}
 		for _, f := range parsed.Files {
 			if err := services.ValidateAttachmentDesc(f); err != nil {
 				log.Printf("[chat] invalid descriptor in runtime upload response: session=%s err=%v", sessionID, err)
-				respondError(c, http.StatusBadGateway, "upload_service_error", "上传服务响应异常")
+				respondError(c, http.StatusBadGateway, ErrCodeUploadServiceError, "上传服务响应异常")
 				return
 			}
 		}
 		if err := h.svc.SaveUploadRecords(tenantID, userID, sessionID, containerID, parsed.Files); err != nil {
 			log.Printf("[chat] persist upload records failed: tenant=%s session=%s user=%s err=%v",
 				tenantID, sessionID, userID, err)
-			respondError(c, http.StatusBadGateway, "upload_failed", "上传失败，请稍后重试")
+			respondError(c, http.StatusBadGateway, ErrCodeUploadFailed, "上传失败，请稍后重试")
 			return
 		}
 		respondCreated(c, gin.H{"files": parsed.Files})
@@ -283,7 +283,7 @@ func (h *AgentChatHandler) respondUploadResult(c *gin.Context, resp *http.Respon
 		// 配对不符）不得驱动附件域恢复动作，与 send/download 全路径一致，
 		// 统一落下方中性 502（readErr 仅传输层错误串，不含 body 内容）。
 		log.Printf("[chat] runtime upload failed: session=%s status=%d readErr=%v", sessionID, resp.StatusCode, readErr)
-		respondError(c, http.StatusBadGateway, "upload_service_unavailable", "上传服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeUploadServiceUnavailable, "上传服务暂时不可用")
 	}
 }
 
@@ -308,11 +308,11 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] attachment content session lookup failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	if err := services.ValidateUploadsPath(pathParam); err != nil {
@@ -323,7 +323,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
-		respondError(c, http.StatusConflict, "agent_unavailable", "Agent 暂不可用，请稍后重试")
+		respondError(c, http.StatusConflict, ErrCodeAgentUnavailable, "Agent 暂不可用，请稍后重试")
 		return
 	}
 	// 空 containerID 显式早退（issue #94 review R4 P1-2）：SessionHasAttachment
@@ -332,7 +332,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 	if containerID == "" {
 		log.Printf("[chat] attachment content rejected, empty container generation: tenant=%s agent=%s session=%s",
 			tenantID, agentName, sessionID)
-		respondError(c, http.StatusNotFound, "temp_file_unavailable", "临时文件已不可用")
+		respondError(c, http.StatusNotFound, ErrCodeTempFileUnavailable, "临时文件已不可用")
 		return
 	}
 	// 部署代次绑定（issue #94 review R3）：上传记录只授权创建它的容器代次
@@ -344,7 +344,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		log.Printf("[chat] attachment record lookup failed: session=%s path=%q err=%v", sessionID, pathParam, err)
 	}
 	if err != nil || !known {
-		respondError(c, http.StatusNotFound, "attachment_not_found", "附件不存在")
+		respondError(c, http.StatusNotFound, ErrCodeAttachmentNotFound, "附件不存在")
 		return
 	}
 
@@ -354,7 +354,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		"/v1/files/content?path="+url.QueryEscape(pathParam), "", containerID)
 	if err != nil {
 		log.Printf("[chat] attachment content transport error: session=%s path=%q err=%v", sessionID, pathParam, err)
-		respondError(c, http.StatusBadGateway, "attachment_service_unavailable", "附件服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeAttachmentServiceUnavailable, "附件服务暂时不可用")
 		return
 	}
 	defer resp.Body.Close()
@@ -370,7 +370,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		_, _ = io.Copy(c.Writer, resp.Body)
 	case resp.StatusCode == http.StatusNotFound:
 		// runtime 容器重建后文件丢失（附件生命周期 = 容器生命周期）
-		respondError(c, http.StatusNotFound, "temp_file_unavailable", "临时文件已不可用")
+		respondError(c, http.StatusNotFound, ErrCodeTempFileUnavailable, "临时文件已不可用")
 	case resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusServiceUnavailable:
 		// status+code 契约透传（review round 7；round 8 改共享单一来源）：
 		// 有限读取、白名单 code 且 runtimeAttachmentContractMet 逐对核验
@@ -385,10 +385,10 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		}
 		log.Printf("[chat] attachment content rejected without contract code: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)
-		respondError(c, http.StatusBadGateway, "attachment_service_unavailable", "附件服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeAttachmentServiceUnavailable, "附件服务暂时不可用")
 	default:
 		log.Printf("[chat] attachment content runtime error: session=%s path=%q status=%d",
 			sessionID, pathParam, resp.StatusCode)
-		respondError(c, http.StatusBadGateway, "attachment_service_unavailable", "附件服务暂时不可用")
+		respondError(c, http.StatusBadGateway, ErrCodeAttachmentServiceUnavailable, "附件服务暂时不可用")
 	}
 }

@@ -39,11 +39,11 @@ func (h *AgentChatHandler) blockGuestInvisibleAgent(c *gin.Context, agentName st
 	}
 	visible, err := h.svc.AgentGuestVisible(tenant.GetTenantID(c), agentName)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", "internal error")
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, "internal error")
 		return true
 	}
 	if !visible {
-		respondError(c, http.StatusNotFound, "agent_not_found", "agent not found")
+		respondError(c, http.StatusNotFound, ErrCodeAgentNotFound, "agent not found")
 		return true
 	}
 	return false
@@ -60,7 +60,7 @@ func (h *AgentChatHandler) ListSessions(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 30)
 	sessions, total, err := h.svc.ListSessions(tenant.GetTenantID(c), userID, agentName, source, page, pageSize)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 	respondSuccess(c, gin.H{
@@ -94,7 +94,7 @@ func (h *AgentChatHandler) CreateSession(c *gin.Context) {
 		stringOrEmpty(displayName),
 	)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 	respondSuccess(c, sess)
@@ -111,7 +111,7 @@ func (h *AgentChatHandler) ListMessages(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 50)
 	msgs, total, err := h.svc.GetMessages(tenant.GetTenantID(c), userID, agentName, sessionID, page, pageSize)
 	if err != nil {
-		respondError(c, http.StatusNotFound, "not_found", err.Error())
+		respondError(c, http.StatusNotFound, ErrCodeNotFound, err.Error())
 		return
 	}
 	respondSuccess(c, gin.H{
@@ -129,7 +129,7 @@ func (h *AgentChatHandler) DeleteSession(c *gin.Context) {
 	userID := c.MustGet("user_id").(string)
 
 	if err := h.svc.DeleteSession(tenant.GetTenantID(c), userID, agentName, sessionID); err != nil {
-		respondError(c, http.StatusNotFound, "not_found", err.Error())
+		respondError(c, http.StatusNotFound, ErrCodeNotFound, err.Error())
 		return
 	}
 	respondMessage(c, http.StatusOK, "session deleted")
@@ -203,11 +203,11 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] send message session lookup failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	if sess.AgentID != agentName {
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 	// 2. Resolve runtime URL, API key, and the deployer-reported container id
@@ -220,7 +220,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
 		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
 			tenantID, agentName, sessionID, err)
-		respondError(c, http.StatusConflict, "agent_unavailable", "Agent 暂不可用，请稍后重试")
+		respondError(c, http.StatusConflict, ErrCodeAgentUnavailable, "Agent 暂不可用，请稍后重试")
 		return
 	}
 
@@ -230,7 +230,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if len(req.Attachments) > 0 && containerID == "" {
 		log.Printf("[chat] send rejected, empty container generation: tenant=%s agent=%s session=%s",
 			tenantID, agentName, sessionID)
-		respondError(c, http.StatusServiceUnavailable, "deployment_unhealthy", "部署状态异常，附件暂不可用，请稍后重试")
+		respondError(c, http.StatusServiceUnavailable, ErrCodeDeploymentUnhealthy, "部署状态异常，附件暂不可用，请稍后重试")
 		return
 	}
 
@@ -270,7 +270,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		log.Printf("[chat] save user message failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
-		respondError(c, http.StatusNotFound, "session_not_found", "会话不存在")
+		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 		}
 		h.saveErrorMessage(tenantID, userID, sessionID, "Runtime 连接失败："+err.Error())
 		log.Printf("[chat] runtime stream failed: tenant=%s session=%s err=%v", tenantID, sessionID, err)
-		respondError(c, http.StatusBadGateway, "runtime_unreachable", "Runtime 连接失败，请稍后重试")
+		respondError(c, http.StatusBadGateway, ErrCodeRuntimeUnreachable, "Runtime 连接失败，请稍后重试")
 		return
 	}
 	defer rc.Close()
@@ -352,7 +352,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 7. SSE headers + flusher
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		respondError(c, http.StatusInternalServerError, "streaming_unsupported", "streaming unsupported")
+		respondError(c, http.StatusInternalServerError, ErrCodeStreamingUnsupported, "streaming unsupported")
 		return
 	}
 

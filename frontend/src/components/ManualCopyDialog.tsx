@@ -24,6 +24,7 @@ export function showManualCopy(text: string) {
   if (showHandler) {
     showHandler(text)
   } else {
+    // eslint-disable-next-line no-restricted-syntax -- console 开发日志非用户面文案（P2 披露的豁免点）
     console.warn('[ManualCopyDialog] host 未挂载，无法展示手动复制框')
   }
 }

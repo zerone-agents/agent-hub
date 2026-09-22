@@ -254,6 +254,7 @@ export default function AgentListPage() {
   // DB 列默认空字符串，?? 不会回退空串，必须显式判空）
   const groupedAgents = useMemo(() => {
     const grouped = filteredAgents.reduce<Record<string, Agent[] | undefined>>((acc, agent) => {
+      // eslint-disable-next-line no-restricted-syntax -- 「默认分组」是数据 fallback/排序比较/显示层比对的哨兵值——显示层已走 t()（P4 决策①）
       const group = agent.group?.trim() ? agent.group : '默认分组'
       acc[group] ??= []
       acc[group].push(agent)
@@ -267,7 +268,9 @@ export default function AgentListPage() {
   // 排序：默认分组放最后
   const sortedGroups = useMemo(() => {
     return Object.keys(groupedAgents).sort((a, b) => {
+      // eslint-disable-next-line no-restricted-syntax -- 「默认分组」是数据 fallback/排序比较/显示层比对的哨兵值——显示层已走 t()（P4 决策①）
       if (a === '默认分组') return 1
+      // eslint-disable-next-line no-restricted-syntax -- 「默认分组」是数据 fallback/排序比较/显示层比对的哨兵值——显示层已走 t()（P4 决策①）
       if (b === '默认分组') return -1
       return a.localeCompare(b)
     })
@@ -657,6 +660,7 @@ export default function AgentListPage() {
           <div key={group} className={styles.section}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionGroupTitle}>
+                {/* eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对哨兵值，本处已走 t()（P4 决策①） */}
                 <span>{group === '默认分组' ? t('agents.defaultGroup') : group}</span>
                 <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>

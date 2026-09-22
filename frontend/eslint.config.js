@@ -65,6 +65,30 @@ export default tseslint.config(
     }
   },
   {
+    // i18n 防回流（#149 P6）：src 业务代码的中文字面量/JSX 文本必须走
+    // t()/i18next.t() + src/i18n/locales 资源。豁免：测试文件（断言用中文）、
+    // locales 资源本体；确需保留中文的点（双语数据设计/逻辑哨兵值/console
+    // 日志）在行内 eslint-disable-next-line 并注明理由。
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.*', 'src/i18n/locales/**', 'src/test/**'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'Literal[value=/\\p{Script=Han}/u]',
+          message: 'i18n: 字符串字面量含中文——抽取到 src/i18n/locales 并走 t()/i18next.t()（确需保留请 eslint-disable-next-line 并注明理由，见 #149）。'
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\p{Script=Han}/u]',
+          message: 'i18n: 模板字符串含中文——改用 t() 插值 {{var}}（确需保留请 eslint-disable-next-line 并注明理由，见 #149）。'
+        },
+        {
+          selector: 'JSXText[value=/\\p{Script=Han}/u]',
+          message: 'i18n: JSX 文本含中文——抽取到 src/i18n/locales 并用 {t(\'...\')}（见 #149）。'
+        }
+      ]
+    }
+  },
+  {
     // Relax type-aware rules in test files — mocks and fixtures legitimately
     // use `any`, non-null assertions, and floating promises.
     files: ['**/*.test.{ts,tsx}', 'src/test/**'],

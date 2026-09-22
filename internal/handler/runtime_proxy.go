@@ -85,13 +85,13 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 		if perr.Code == http.StatusMethodNotAllowed && perr.AllowHeader != "" {
 			c.Header("Allow", perr.AllowHeader)
 		}
-		respondError(c, perr.Code, "runtime_proxy_error", perr.Reason)
+		respondError(c, perr.Code, ErrCodeRuntimeProxyError, perr.Reason)
 		auditRuntimeProxy(c, org, agentName, perr.Code, start, "")
 		return
 	}
 	upstream, err := url.Parse(decision.UpstreamBase)
 	if err != nil { // unreachable: base is JoinHostPort-built from validated parts
-		respondError(c, http.StatusBadGateway, "runtime_unreachable", "runtime upstream unavailable")
+		respondError(c, http.StatusBadGateway, ErrCodeRuntimeUnreachable, "runtime upstream unavailable")
 		auditRuntimeProxy(c, org, agentName, http.StatusBadGateway, start, "")
 		return
 	}

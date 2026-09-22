@@ -130,10 +130,23 @@ export function unwrapResponse<T>(res: { data: unknown }): T {
  * accept `message` for compatibility with third-party services that use
  * the more common REST shape.
  */
+// snake_case 稳定码 → camelCase 资源键（invalid_parameter → invalidParameter）。
+function errCodeToKey(code: string): string {
+  return code.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase())
+}
+
 export function parseApiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status
-    const data = err.response?.data as { error?: string; message?: string } | undefined
+    const data = err.response?.data as { error?: string; message?: string; code?: string } | undefined
+
+    // 稳定码翻译（#149 P5 双写契约 / #175 勘误口径）：仅 en 模式且码命中
+    // apiErrors 键时用翻译——zh 模式下后端 error 本就是更具体的中文原文，
+    // 通用翻译会降级信息；语义码未建键的过渡期 exists 检测后回落原文。
+    if (data?.code && i18next.language !== 'zh') {
+      const key = `apiErrors.${errCodeToKey(data.code)}`
+      if (i18next.exists(key)) return i18next.t(key)
+    }
 
     // Prefer the backend's `error` field; fall back to `message` for
     // third-party / proxy responses.
@@ -143,6 +156,9 @@ export function parseApiError(err: unknown): string {
     if (status === 401) return i18next.t('apiErrors.unauthorized')
     if (status === 403) return i18next.t('apiErrors.forbidden')
     if (status === 404) return i18next.t('apiErrors.notFound')
+    if (status === 409) return i18next.t('apiErrors.conflict')
+    if (status === 429) return i18next.t('apiErrors.rateLimited')
+    if (status === 400) return i18next.t('apiErrors.invalidParameter')
     if (status && status >= 500) return i18next.t('apiErrors.serverBusy')
     if (err.code === 'ECONNABORTED') return i18next.t('apiErrors.timeout')
     if (!err.response) return i18next.t('apiErrors.networkError')

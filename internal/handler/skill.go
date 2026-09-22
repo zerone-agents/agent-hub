@@ -30,19 +30,19 @@ func NewSkillHandler(service *services.SkillService) *SkillHandler {
 func respondSkillError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, skill.ErrSkillNotFound), errors.Is(err, skill.ErrSkillFileNotFound):
-		respondError(c, http.StatusNotFound, "not_found", err.Error())
+		respondError(c, http.StatusNotFound, ErrCodeNotFound, err.Error())
 	case errors.Is(err, agent.ErrAgentNotFound):
-		respondError(c, http.StatusNotFound, "agent_not_found", agent.ErrAgentNotFound.Error())
+		respondError(c, http.StatusNotFound, ErrCodeAgentNotFound, agent.ErrAgentNotFound.Error())
 	case errors.Is(err, skill.ErrInvalidSkillFile), errors.Is(err, skill.ErrFileTooLarge):
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 	default:
 		var ve *skill.ValidationError
 		if errors.As(err, &ve) {
-			respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 			return
 		}
 		log.Printf("[SkillHandler] internal error: %v", err)
-		respondError(c, http.StatusInternalServerError, "internal_error", "服务器内部错误，请稍后重试")
+		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, "服务器内部错误，请稍后重试")
 	}
 }
 
@@ -120,7 +120,7 @@ func (h *SkillHandler) ListAdmin(c *gin.Context) {
 func (h *SkillHandler) Create(c *gin.Context) {
 	name := c.PostForm("name")
 	if name == "" {
-		respondError(c, http.StatusBadRequest, "name_required", "name 参数不能为空")
+		respondError(c, http.StatusBadRequest, ErrCodeNameRequired, "name 参数不能为空")
 		return
 	}
 
@@ -132,7 +132,7 @@ func (h *SkillHandler) Create(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		respondError(c, http.StatusBadRequest, "upload_failed", "文件上传失败: "+err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeUploadFailed, "文件上传失败: "+err.Error())
 		return
 	}
 	defer file.Close()
@@ -169,13 +169,13 @@ func (h *SkillHandler) Update(c *gin.Context) {
 
 	var req updateSkillRequest
 	if err := c.ShouldBind(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil && err != http.ErrMissingFile {
-		respondError(c, http.StatusBadRequest, "upload_failed", "文件上传失败: "+err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeUploadFailed, "文件上传失败: "+err.Error())
 		return
 	}
 	if file != nil {
@@ -229,7 +229,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 	agentName := c.Param("name")
 	var req updateAgentSkillsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid_parameter", err.Error())
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
 	if err := h.service.UpdateAgentSkills(tenant.GetTenantID(c), agentName, req.SkillNames); err != nil {

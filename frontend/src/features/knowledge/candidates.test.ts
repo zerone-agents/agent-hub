@@ -28,10 +28,10 @@ describe('buildEmbeddingCandidates', () => {
     const result = buildEmbeddingCandidates(multirag, localProviders)
     // Expect 2 groups: 'MultiRAG 已有' with 1 option, '本地待同步' with 1 option (bge-large-zh)
     expect(result).toHaveLength(2)
-    const mrGroup = result.find(g => g.label === 'MultiRAG 已有')!
+    const mrGroup = result.find(g => g.label === 'knowledge.candidates.multirag')!
     expect(mrGroup.options).toHaveLength(1)
     expect(mrGroup.options[0].value).toBe('multirag:bge-m3@Anthropic')
-    const localGroup = result.find(g => g.label === '本地待同步')!
+    const localGroup = result.find(g => g.label === 'knowledge.candidates.local')!
     expect(localGroup.options).toHaveLength(1)
     expect(localGroup.options[0].value).toBe('local:42:bge-large-zh')
   })
@@ -57,12 +57,12 @@ describe('buildLayoutCandidates', () => {
     ]
     const result = buildLayoutCandidates(multirag, localProviders)
     expect(result).toHaveLength(3)
-    const builtinGroup = result.find(g => g.label === '内置')!
+    const builtinGroup = result.find(g => g.label === 'knowledge.candidates.builtin')!
     expect(builtinGroup.options.map(o => o.value)).toEqual(['builtin:DeepDOC', 'builtin:Plain Text'])
-    const mrGroup = result.find(g => g.label === 'MultiRAG 已有')!
+    const mrGroup = result.find(g => g.label === 'knowledge.candidates.multirag')!
     expect(mrGroup.options).toHaveLength(1)
     expect(mrGroup.options[0].value).toBe('multirag:MinerU')
-    const localGroup = result.find(g => g.label === '本地待同步')!
+    const localGroup = result.find(g => g.label === 'knowledge.candidates.local')!
     expect(localGroup.options).toHaveLength(1)
     expect(localGroup.options[0].value).toBe('local:7:paddleocr')
   })
@@ -81,7 +81,7 @@ describe('buildLayoutCandidates', () => {
       },
     ]
     const result = buildLayoutCandidates(multirag, localProviders)
-    const localGroup = result.find(g => g.label === '本地待同步')
+    const localGroup = result.find(g => g.label === 'knowledge.candidates.local')
     // MinerU factory is already in MultiRAG, so local entry is dropped.
     // If local group exists, it must be empty.
     if (localGroup) {

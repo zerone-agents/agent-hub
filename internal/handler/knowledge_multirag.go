@@ -35,7 +35,7 @@ type MultiRAGModel struct {
 func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 	typeFilter := c.Query("type")
 	if typeFilter == "" {
-		respondError(c, http.StatusBadRequest, "type_query_required", "type query param required (embedding|ocr|...)")
+		respondError(c, http.StatusBadRequest, ErrCodeTypeQueryRequired, "type query param required (embedding|ocr|...)")
 		return
 	}
 
