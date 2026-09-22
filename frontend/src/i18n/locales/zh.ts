@@ -512,6 +512,7 @@ const zh = {
       skillsBlock: '技能',
       kbBlock: '知识库',
       apiInfo: 'API 信息',
+      apiDocLink: 'API 文档',
       copyUrl: '复制 URL',
       copied: '已复制',
       show: '显示',

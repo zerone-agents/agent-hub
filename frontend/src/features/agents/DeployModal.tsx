@@ -14,6 +14,8 @@ import {
   EyeSlashIcon,
   CopyIcon,
   PlayIcon,
+  BookOpenIcon,
+  ArrowSquareOutIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
@@ -28,6 +30,9 @@ import type { Provider } from '@/api/providers'
 import { tokens as tk } from '@/styles/tokens'
 
 const { Text } = Typography
+
+// Runtime 对外 HTTP 接口文档（官方文档站，中文）。展示在 API 信息卡片标题行右侧。
+const RUNTIME_API_DOC_URL = 'https://docs.zerone.run/zh/runtime/api-reference'
 
 /**
  * No-Kong mode returns a hub-relative runtime path — casdoor shape
@@ -204,6 +209,27 @@ const useStyles = createStyles(({ css }) => ({
     color: ${tk.success};
     font-size: 11px;
     flex-shrink: 0;
+  `,
+  apiTitleRow: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  `,
+  apiDocLink: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
+    }
+    svg {
+      flex-shrink: 0;
+    }
   `,
   footer: css`
     display: flex;
@@ -677,7 +703,19 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         {/* Agent API 信息：部署成功后显示 URL 和 API Key */}
         {isRunning && status?.runtimeUrl && (
           <div className={styles.apiCard}>
-            <div className={styles.capabilityTitle}>{t('agents.deploy.apiInfo')}</div>
+            <div className={styles.apiTitleRow}>
+              <div className={styles.capabilityTitle} style={{ marginBottom: 0 }}>{t('agents.deploy.apiInfo')}</div>
+              <a
+                className={styles.apiDocLink}
+                href={RUNTIME_API_DOC_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <BookOpenIcon size={13} />
+                {t('agents.deploy.apiDocLink')}
+                <ArrowSquareOutIcon size={11} />
+              </a>
+            </div>
             <div className={styles.apiRow}>
               <span className={styles.apiLabel}>URL</span>
               <span className={styles.apiValue}>{absoluteRuntimeUrl(status.runtimeUrl)}</span>
