@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 // buildStatusLine 是组件外纯函数，直调 i18next
-import i18next from '@/i18n'
+import i18next, { normalizeLanguage } from '@/i18n'
 import { Modal, Button, Steps, Alert, Checkbox, Tag, Space, Typography, message } from 'antd'
 import {
   RocketIcon,
@@ -14,6 +14,8 @@ import {
   EyeSlashIcon,
   CopyIcon,
   PlayIcon,
+  BookOpenIcon,
+  ArrowSquareOutIcon,
 } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import { useQueryClient } from '@tanstack/react-query'
@@ -28,6 +30,9 @@ import type { Provider } from '@/api/providers'
 import { tokens as tk } from '@/styles/tokens'
 
 const { Text } = Typography
+
+// Runtime 对外 HTTP 接口文档（官方文档站）。路径段按当前界面语言拼接（zh/en）。
+const RUNTIME_API_DOC_BASE = 'https://docs.zerone.run'
 
 /**
  * No-Kong mode returns a hub-relative runtime path — casdoor shape
@@ -205,6 +210,28 @@ const useStyles = createStyles(({ css }) => ({
     font-size: 11px;
     flex-shrink: 0;
   `,
+  apiTitleRow: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  `,
+  apiDocLink: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--primary);
+    text-decoration: none;
+    &:hover {
+      color: var(--primary-hover);
+      text-decoration: underline;
+    }
+    svg {
+      flex-shrink: 0;
+    }
+  `,
   footer: css`
     display: flex;
     gap: 8px;
@@ -279,7 +306,7 @@ function isMidState(s: DeploymentStatus | null): boolean {
 }
 
 export default function DeployModal({ agent, providers, open, onClose }: DeployModalProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { styles } = useStyles()
   const canWrite = useCanWrite()
   const queryClient = useQueryClient()
@@ -677,7 +704,19 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
         {/* Agent API 信息：部署成功后显示 URL 和 API Key */}
         {isRunning && status?.runtimeUrl && (
           <div className={styles.apiCard}>
-            <div className={styles.capabilityTitle}>{t('agents.deploy.apiInfo')}</div>
+            <div className={styles.apiTitleRow}>
+              <div className={styles.capabilityTitle} style={{ marginBottom: 0 }}>{t('agents.deploy.apiInfo')}</div>
+              <a
+                className={styles.apiDocLink}
+                href={`${RUNTIME_API_DOC_BASE}/${normalizeLanguage(i18n.language)}/runtime/api-reference`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <BookOpenIcon size={13} />
+                {t('agents.deploy.apiDocLink')}
+                <ArrowSquareOutIcon size={11} />
+              </a>
+            </div>
             <div className={styles.apiRow}>
               <span className={styles.apiLabel}>URL</span>
               <span className={styles.apiValue}>{absoluteRuntimeUrl(status.runtimeUrl)}</span>

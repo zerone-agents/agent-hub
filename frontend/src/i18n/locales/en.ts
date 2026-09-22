@@ -514,6 +514,7 @@ const en = {
       skillsBlock: 'Skills',
       kbBlock: 'Knowledge',
       apiInfo: 'API Info',
+      apiDocLink: 'API Docs',
       copyUrl: 'Copy URL',
       copied: 'Copied',
       show: 'Show',
