@@ -764,7 +764,7 @@ export default function DeployModal({ agent, providers, open, onClose }: DeployM
               return (
                 <Steps
                   size="small"
-                  labelPlacement="vertical"
+                  titlePlacement="vertical"
                   current={current}
                   status={
                     deploymentStatus === 'error' || status?.health === 'unhealthy'
