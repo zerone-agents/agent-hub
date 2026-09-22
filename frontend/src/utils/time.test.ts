@@ -34,4 +34,20 @@ describe('formatTime', () => {
   it('returns empty string for invalid input', () => {
     expect(formatTime('not-a-date')).toBe('')
   })
+
+  it('returns X 分钟后 for minutes in the future', () => {
+    expect(formatTime('2026-06-17T12:05:00Z')).toBe('5 分钟后')
+  })
+
+  it('returns X 小时后 for hours in the future', () => {
+    expect(formatTime('2026-06-17T15:00:00Z')).toBe('3 小时后')
+  })
+
+  it('returns X 天后 for days in the future', () => {
+    expect(formatTime('2026-06-19T12:00:00Z')).toBe('2 天后')
+  })
+
+  it('falls back to YYYY-MM-DD for > 30 days in the future', () => {
+    expect(formatTime('2026-09-15T12:00:00Z')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
 })
