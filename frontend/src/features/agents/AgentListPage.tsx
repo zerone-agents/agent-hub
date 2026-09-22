@@ -659,10 +659,8 @@ export default function AgentListPage() {
         sortedGroups.map(group => (
           <div key={group} className={styles.section}>
             <div className={styles.sectionHeader}>
-              // eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对的哨兵值（跨行条件表达式节点）——本处已走 t()（P4 决策①）
               <div className={styles.sectionGroupTitle}>
-                // eslint-disable-next-line no-restricted-syntax -- 「默认分组」是数据 fallback/排序比较/显示层比对的哨兵值——显示层已走 t()（P4 决策①）
-                // eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对的哨兵值（跨行条件表达式节点）——本处已走 t()（P4 决策①）
+                {/* eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对哨兵值，本处已走 t()（P4 决策①） */}
                 <span>{group === '默认分组' ? t('agents.defaultGroup') : group}</span>
                 <span className={styles.sectionCount}>{(groupedAgents[group] ?? []).length}</span>
               </div>

@@ -140,10 +140,8 @@ export default function ChatHomePage() {
         ) : (
           groupedSections.map((section) => (
             <section key={section.name} className={styles.section}>
-              // eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对的哨兵值（跨行条件表达式节点）——本处已走 t()（P4 决策①）
               <div className={styles.sectionTitle}>
-                // eslint-disable-next-line no-restricted-syntax -- 「默认分组」是数据 fallback/排序比较的哨兵值——显示层已走 t()（P4 决策①）
-                // eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对的哨兵值（跨行条件表达式节点）——本处已走 t()（P4 决策①）
+                {/* eslint-disable-next-line no-restricted-syntax -- 「默认分组」显示层比对哨兵值，本处已走 t()（P4 决策①） */}
                 <span>{section.name === '默认分组' ? t('agentChat.defaultGroup') : section.name}</span>
                 <span className={styles.sectionCount}>{section.agents.length}</span>
               </div>
