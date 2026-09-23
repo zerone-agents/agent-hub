@@ -34,10 +34,10 @@
    2. 品牌区
    ============================================================ */
 
-img.panel-logo {
-  width: 280px !important;
-  margin-bottom: 18px !important;
-  padding: 0 6px 0 0 !important;
+/* Casdoor 4.x（shadcn/ui 前端）：登录页应用 logo，原尺寸被 h-10 压到 40px 高 */
+img.h-10.max-w-full.object-contain {
+  height: 80px !important;
+  width: auto !important;
 }
 
 /* ============================================================
@@ -126,6 +126,11 @@ input:-webkit-autofill:active {
 .signup-form a:hover,
 .forget-content a:hover {
   color: #c86042 !important;
+}
+
+.login-forget-password {
+  margin-top: 0px !important;
+  width: 100% !important;
 }
 
 /* ============================================================
