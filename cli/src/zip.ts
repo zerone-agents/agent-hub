@@ -83,7 +83,14 @@ export async function validateSkillDir(dir: string): Promise<ValidateResult> {
         continue;
       }
 
-      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      // Normalise CRLF so the "---" delimiter check is line-ending-agnostic,
+      // mirroring the Hub validator (skill_validator.go) and the SDK's
+      // parseSkillMarkdown (agent-sdk/src/skills/yaml.ts). Without this,
+      // bundles containing CRLF files (e.g. ljg-skills' ljg-plain/ljg-word)
+      // are falsely rejected even though the Hub accepts them and the
+      // runtime registers them.
+      const normalized = content.replace(/\r\n/g, "\n");
+      const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---/);
       if (!fmMatch) {
         errors.push(`${relPath}: frontmatter 缺失或未闭合（必须以 --- 开头并以 --- 结束）`);
         skills.push(entry);
