@@ -112,25 +112,37 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 	}
 }
 
-// buildCallbackRedirect 构造落地 URL："/static"+redirect 经 url.Parse 后
-// Query().Set 注入 token/refreshToken（与 redirect 自带 query 正确合并），
-// hash 保持在末尾；解析异常回退 /static/（失败闭合）。
+// buildCallbackRedirect 构造落地 URL："/static"+redirect 的 query/hash 保留
+// （伪造的 token/refreshToken query 参数先剥离），签发的凭证只写入 URL
+// fragment。fragment 不会被浏览器发往服务器，因此 token 不进网关/代理的
+// access log、不受请求行长度限制（JWT 随用户数据增长，issue #185）；前端
+// consumeAuthParams 同时兼容新 fragment 与旧 query 两种载体。解析异常回退
+// "/static/"（失败闭合）。
 func buildCallbackRedirect(redirectPath, accessToken, refreshToken string) string {
 	u, err := url.Parse("/static" + redirectPath)
 	if err != nil || !strings.HasPrefix(u.Path, "/static") {
 		u = &url.URL{Path: "/static/"}
 	}
 	q := u.Query()
-	// redirect 自带的认证参数必须先剥离：token 会被下方 Set 覆盖，但
+	// redirect 自带的认证参数必须先剥离：token 会被下方 fragment 覆盖，但
 	// refreshToken 仅在服务端签发时写回——不 Del 会让 crafted 链接的伪造
 	// refreshToken 存活到落地 URL（会话固定边缘，final review Important）。
 	q.Del("token")
 	q.Del("refreshToken")
-	q.Set("token", accessToken)
-	if refreshToken != "" {
-		q.Set("refreshToken", refreshToken)
-	}
 	u.RawQuery = q.Encode()
+
+	creds := url.Values{}
+	creds.Set("token", accessToken)
+	if refreshToken != "" {
+		creds.Set("refreshToken", refreshToken)
+	}
+	// redirect 自带 hash 保留（如 "f"），认证参数以 "&" 续接——
+	// URLSearchParams 两种形态都能解析出 token。
+	if existing := u.Fragment; existing != "" {
+		u.Fragment = existing + "&" + creds.Encode()
+	} else {
+		u.Fragment = creds.Encode()
+	}
 	return u.String()
 }
 

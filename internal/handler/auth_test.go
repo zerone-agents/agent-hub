@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"control-panel/internal/application/services"
@@ -62,16 +63,17 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 	require.Equal(t, "orga", rows[0].TenantID) // org 已知 → 正常落库，非空租户
 }
 
-// TestBuildCallbackRedirect callback 落地 URL 构造：query 合并、hash 置尾、
-// token 始终可被 URLSearchParams 提取（review 第 3 项）。
+// TestBuildCallbackRedirect callback 落地 URL 构造：token 只进 fragment
+// （不进 query，避免网关请求行长度限制与 access log 泄漏，issue #185）；
+// redirect 自带 query/hash 保留，伪造的认证参数被剥离。
 func TestBuildCallbackRedirect(t *testing.T) {
 	cases := []struct{ name, redirect, want string }{
-		{"默认根路径", "/", "/static/?token=t1"},
-		{"聊天首页", "/agents/chat", "/static/agents/chat?token=t1"},
-		{"带 query", "/agents/chat?x=1", "/static/agents/chat?token=t1&x=1"},
-		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?token=t1&x=1#f"},
-		{"仅 hash", "/agents/chat#f", "/static/agents/chat?token=t1#f"},
-		{"剥离 redirect 自带的认证参数", "/agents/chat?refreshToken=evil&token=evil", "/static/agents/chat?token=t1"},
+		{"默认根路径", "/", "/static/#token=t1"},
+		{"聊天首页", "/agents/chat", "/static/agents/chat#token=t1"},
+		{"带 query", "/agents/chat?x=1", "/static/agents/chat?x=1#token=t1"},
+		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?x=1#f&token=t1"},
+		{"仅 hash", "/agents/chat#f", "/static/agents/chat#f&token=t1"},
+		{"剥离 redirect 自带的认证参数", "/agents/chat?refreshToken=evil&token=evil", "/static/agents/chat#token=t1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,10 +81,18 @@ func TestBuildCallbackRedirect(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
+			// token 不得出现在 query 中（fragment 之前的部分）
+			query := got
+			if i := strings.Index(got, "#"); i >= 0 {
+				query = got[:i]
+			}
+			if strings.Contains(query, "token") {
+				t.Fatalf("token leaked into query: %q", got)
+			}
 		})
 	}
-	// refreshToken 存在时追加
-	if got := buildCallbackRedirect("/", "t1", "r1"); got != "/static/?refreshToken=r1&token=t1" && got != "/static/?token=t1&refreshToken=r1" {
+	// refreshToken 存在时一并进 fragment
+	if got := buildCallbackRedirect("/", "t1", "r1"); got != "/static/#refreshToken=r1&token=t1" {
 		t.Fatalf("refreshToken missing: %q", got)
 	}
 }
