@@ -42,13 +42,16 @@ jobs:
           TAG_VERSION="${GITHUB_REF_NAME#cli-v}"
           echo "Publishing version $TAG_VERSION (from tag $GITHUB_REF_NAME)"
           # Update package.json to match tag version
-          bun run -e "const pkg = require('./package.json'); pkg.version = '$TAG_VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n')"
+          # (node, not `bun run -e`: Bun's run subcommand has no -e flag — it
+          # prints usage and exits 0, silently leaving the version untouched,
+          # which made the first tag-triggered publish 403 on 0.3.2)
+          node -e "const pkg = require('./package.json'); pkg.version = '$TAG_VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n')"
 
       - name: Set version from manual input
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
         run: |
           echo "Publishing version ${{ inputs.version }}"
-          bun run -e "const pkg = require('./package.json'); pkg.version = '${{ inputs.version }}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n')"
+          node -e "const pkg = require('./package.json'); pkg.version = '${{ inputs.version }}'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n')"
 
       - name: Show current version
         run: cat package.json | grep '"version"'
