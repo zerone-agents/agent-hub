@@ -87,6 +87,21 @@ describe("validateSkillDir", () => {
     expect(result.skills[0].description).toBe("Commit changes");
   });
 
+  test("CRLF line endings in frontmatter are accepted (SDK/Hub normalize)", async () => {
+    mkdirSync(join(tmpDir, "plain"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, "plain", "SKILL.md"),
+      "---\r\nname: plain\r\ndescription: CRLF skill\r\n---\r\n# Plain",
+    );
+    const { validateSkillDir } = await import(`../../src/zip.ts?t=${Date.now()}`);
+    const result = await validateSkillDir(tmpDir);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0].name).toBe("plain");
+    expect(result.skills[0].description).toBe("CRLF skill");
+  });
+
   test("bundle of multiple nested SKILL.md at various depths all valid", async () => {
     mkdirSync(join(tmpDir, "commit"), { recursive: true });
     mkdirSync(join(tmpDir, "team", "review"), { recursive: true });
