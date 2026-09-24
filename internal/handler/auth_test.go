@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -68,16 +69,18 @@ func TestCallback_TokenExchangeErrorNeutralMessage(t *testing.T) {
 // redirect 自带 query/hash 保留，伪造的认证参数被剥离。
 func TestBuildCallbackRedirect(t *testing.T) {
 	cases := []struct{ name, redirect, want string }{
-		{"默认根路径", "/", "/static/#token=t1"},
-		{"聊天首页", "/agents/chat", "/static/agents/chat#token=t1"},
-		{"带 query", "/agents/chat?x=1", "/static/agents/chat?x=1#token=t1"},
-		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?x=1#f&token=t1"},
-		{"仅 hash", "/agents/chat#f", "/static/agents/chat#f&token=t1"},
-		{"剥离 redirect 自带的认证参数", "/agents/chat?refreshToken=evil&token=evil", "/static/agents/chat#token=t1"},
+		{"默认根路径", "/", "/static/#refreshToken=r1&token=t1"},
+		{"聊天首页", "/agents/chat", "/static/agents/chat#refreshToken=r1&token=t1"},
+		{"带 query", "/agents/chat?x=1", "/static/agents/chat?x=1#refreshToken=r1&token=t1"},
+		{"带 query 与 hash", "/agents/chat?x=1#f", "/static/agents/chat?x=1#f&refreshToken=r1&token=t1"},
+		{"仅 hash", "/agents/chat#f", "/static/agents/chat#f&refreshToken=r1&token=t1"},
+		{"剥离 redirect 自带的认证参数", "/agents/chat?refreshToken=evil&token=evil", "/static/agents/chat#refreshToken=r1&token=t1"},
+		{"剥离 redirect fragment 自带的伪造凭证", "/agents/chat#token=evil&refreshToken=evil2", "/static/agents/chat#refreshToken=r1&token=t1"},
+		{"fragment 业务段与伪造凭证混合", "/agents/chat#f&token=evil", "/static/agents/chat#f&refreshToken=r1&token=t1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildCallbackRedirect(tc.redirect, "t1", "")
+			got := buildCallbackRedirect(tc.redirect, "t1", "r1")
 			if got != tc.want {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
@@ -89,11 +92,25 @@ func TestBuildCallbackRedirect(t *testing.T) {
 			if strings.Contains(query, "token") {
 				t.Fatalf("token leaked into query: %q", got)
 			}
+			// 前端语义（URLSearchParams.get 取第一个值）必须解析到真实凭证；
+			// URLSearchParams 与 url.ParseQuery 均为 first-wins 解析。
+			frag := got
+			if i := strings.Index(got, "#"); i >= 0 {
+				frag = got[i+1:]
+			}
+			params, err := url.ParseQuery(frag)
+			require.NoError(t, err)
+			if params.Get("token") != "t1" {
+				t.Fatalf("URLSearchParams first token = %q, want t1 (%q)", params.Get("token"), got)
+			}
+			if params.Get("refreshToken") != "r1" {
+				t.Fatalf("URLSearchParams first refreshToken = %q, want r1 (%q)", params.Get("refreshToken"), got)
+			}
 		})
 	}
-	// refreshToken 存在时一并进 fragment
-	if got := buildCallbackRedirect("/", "t1", "r1"); got != "/static/#refreshToken=r1&token=t1" {
-		t.Fatalf("refreshToken missing: %q", got)
+	// refreshToken 缺省时 fragment 只有 token
+	if got := buildCallbackRedirect("/", "t1", ""); got != "/static/#token=t1" {
+		t.Fatalf("token-only fragment wrong: %q", got)
 	}
 }
 

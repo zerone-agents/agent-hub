@@ -136,13 +136,21 @@ func buildCallbackRedirect(redirectPath, accessToken, refreshToken string) strin
 	if refreshToken != "" {
 		creds.Set("refreshToken", refreshToken)
 	}
-	// redirect 自带 hash 保留（如 "f"），认证参数以 "&" 续接——
-	// URLSearchParams 两种形态都能解析出 token。
-	if existing := u.Fragment; existing != "" {
-		u.Fragment = existing + "&" + creds.Encode()
-	} else {
-		u.Fragment = creds.Encode()
+	// redirect 自带 hash 保留（如 "f"），但必须先按 "&" 分段剥离其中的伪造
+	// token/refreshToken 段：真实凭证续接在末尾，前端 URLSearchParams
+	// first-wins 会取到伪造值（会话固定，review Important，与 query 的
+	// q.Del 对等）。不用 url.Values 重建——那会把裸 hash "f" 变成 "f="。
+	segments := make([]string, 0, 2)
+	if u.Fragment != "" {
+		for _, seg := range strings.Split(u.Fragment, "&") {
+			if seg == "" || strings.HasPrefix(seg, "token=") || strings.HasPrefix(seg, "refreshToken=") {
+				continue
+			}
+			segments = append(segments, seg)
+		}
 	}
+	segments = append(segments, creds.Encode())
+	u.Fragment = strings.Join(segments, "&")
 	return u.String()
 }
 
