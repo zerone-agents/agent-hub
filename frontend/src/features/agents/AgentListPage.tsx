@@ -823,7 +823,7 @@ export default function AgentListPage() {
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          t('agents.modals.skillHint')
+          {t('agents.modals.skillHint')}
         </p>
         <Select
           mode="multiple"
@@ -861,7 +861,7 @@ export default function AgentListPage() {
         }
       >
         <p style={{ marginBottom: 14, fontSize: 13, color: 'var(--text-secondary)' }}>
-          t('agents.modals.mcpHint')
+          {t('agents.modals.mcpHint')}
         </p>
         {mcps.length === 0 ? (
           <Empty description={t('agents.modals.mcpEmpty')} />
@@ -919,7 +919,7 @@ export default function AgentListPage() {
               if (!hit) {
                 return (
                   <p style={{ marginBottom: 14, fontSize: 13, color: '#dc2626' }}>
-                    t('agents.modals.offlineWarning')
+                    {t('agents.modals.offlineWarning')}
                   </p>
                 )
               }
@@ -1007,7 +1007,7 @@ export default function AgentListPage() {
               if (selectedProvider.fields.length === 0) {
                 return (
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    t('agents.modals.noConnParams')
+                    {t('agents.modals.noConnParams')}
                   </p>
                 )
               }
