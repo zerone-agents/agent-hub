@@ -112,9 +112,4 @@ cli.register(SkillUpdateCommand);
 cli.register(SkillDeleteCommand);
 cli.register(SkillDownloadCommand);
 
-// Exit via `process.exitCode` (natural exit) rather than `cli.runExit()`'s
-// `process.exit()`, so pending stdout/stderr writes are not cut short.
-// (Large command output is additionally written synchronously — see
-// output/stdout.ts.)
-const exitCode = await cli.run(process.argv.slice(2));
-process.exitCode = exitCode;
+cli.runExit(process.argv.slice(2));

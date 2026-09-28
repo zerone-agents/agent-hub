@@ -3,14 +3,17 @@ import { writeSync } from "node:fs";
 /**
  * Write text to stdout, looping until the full payload is flushed.
  *
- * Why not `console.log`: Bun's async stdout path can drop the tail of large
- * writes when stdout is a pipe (reproduced with `skill list --output json`
- * > 64KB piped from a non-TTY parent: output cut exactly at the 65536-byte
- * pipe buffer boundary).
+ * Replacement for `console.log` on the command-output path: with the async
+ * console path, a large piped payload was reproducibly truncated at exactly
+ * the 65536-byte pipe buffer boundary in one consumer context (Python
+ * subprocess capture), while the same payload through a shell pipe was
+ * complete. The exact Bun-internal trigger was not isolated; writing
+ * synchronously removes the dependency on that path.
  *
- * Why the EAGAIN retry: when stdout is a pipe it is non-blocking, so a
- * write into a full pipe fails with EAGAIN until the consumer drains it.
- * Retrying with a short sleep delivers the whole payload.
+ * EAGAIN: stdout is non-blocking when it is a pipe, so a write into a full
+ * pipe is retried (short sleep) until the consumer drains it.
+ * EPIPE: the consumer closed the pipe (e.g. `| head`) — stop quietly,
+ * matching the behaviour before this change.
  */
 export function writeStdout(text: string): void {
   const buf = Buffer.from(text, "utf-8");
@@ -24,6 +27,9 @@ export function writeStdout(text: string): void {
       if (code === "EAGAIN" || message.includes("EAGAIN")) {
         Bun.sleepSync(5);
         continue;
+      }
+      if (code === "EPIPE" || message.includes("EPIPE")) {
+        return;
       }
       throw err;
     }
