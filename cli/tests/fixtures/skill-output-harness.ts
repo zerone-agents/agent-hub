@@ -21,6 +21,9 @@ mock.module("../../src/config", () => ({
     Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
   ),
 }));
+mock.module("../../src/output/stdout", () => ({
+  writeStdout: () => {},
+}));
 
 const commands = await import("../../src/commands/skill");
 const CommandClass = (commands as Record<string, new () => any>)[className];

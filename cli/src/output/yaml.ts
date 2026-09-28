@@ -1,4 +1,6 @@
 import { stringify } from "yaml";
+import { writeStdout } from "./stdout";
+
 export function outputYaml(data: unknown): void {
-  console.log(stringify(data));
+  writeStdout(stringify(data) + "\n");
 }

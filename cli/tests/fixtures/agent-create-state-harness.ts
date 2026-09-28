@@ -19,6 +19,9 @@ mock.module("../../src/config", () => ({
     Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
   ),
 }));
+mock.module("../../src/output/stdout", () => ({
+  writeStdout: () => {},
+}));
 
 const dir = mkdtempSync(join(tmpdir(), "agent-create-state-"));
 const file = join(dir, "agent.yaml");
