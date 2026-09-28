@@ -11,7 +11,7 @@ import { setAuthRole } from '@/test/auth-store-mock'
 vi.mock('@/stores/auth', async () => (await import('@/test/auth-store-mock')).createAuthStoreMock())
 
 const mockSkills: Skill[] = [
-  { id: 1, name: 'webapp', type: 'expert', title: 'Web应用', titleEn: 'Web App', description: 'Web 应用测试', descriptionEn: '', url: 'https://example.com/f.zip', fileHash: 'abcdef1234567890', fileSize: 10240, createdAt: '2026-06-10T10:00:00Z', updatedAt: '' },
+  { id: 1, name: 'webapp', type: 'expert', title: 'Web应用', titleEn: 'Web App', description: 'Web 应用测试', descriptionEn: '', url: 'https://example.com/f.zip', fileHash: 'abcdef1234567890', fileSize: 10240, createdAt: '2026-06-10T10:00:00Z', updatedAt: '2026-06-15T08:30:00Z' },
   { id: 2, name: 'cli', type: 'community', title: 'CLI工具', titleEn: 'CLI Tool', description: '命令行工具', descriptionEn: '', url: '', fileHash: '', fileSize: 0, createdAt: '2026-06-12T10:00:00Z', updatedAt: '' }
 ]
 
@@ -52,6 +52,24 @@ describe('SkillListPage', () => {
     // Card titles
     expect(screen.getByText('Web应用')).toBeInTheDocument()
     expect(screen.getByText('CLI工具')).toBeInTheDocument()
+  })
+
+  it('card footer prefers updatedAt over createdAt', () => {
+    render(
+      <ConfigProvider theme={antdTheme}>
+        <MemoryRouter>
+          <SkillListPage />
+        </MemoryRouter>
+      </ConfigProvider>
+    )
+
+    // >30 days old renders as YYYY-MM-DD (see utils/time.ts)
+    // webapp: updatedAt 2026-06-15 wins over createdAt 2026-06-10
+    expect(screen.getByText('2026-06-15')).toBeInTheDocument()
+    // cli: updatedAt empty → falls back to createdAt 2026-06-12
+    expect(screen.getByText('2026-06-12')).toBeInTheDocument()
+    // webapp's createdAt is not shown when updatedAt exists
+    expect(screen.queryByText('2026-06-10')).not.toBeInTheDocument()
   })
 
   it('member: hides create/edit/delete but still sees skills and download', () => {
