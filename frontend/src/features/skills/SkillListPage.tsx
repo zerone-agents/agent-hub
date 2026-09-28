@@ -138,7 +138,7 @@ export default function SkillListPage() {
           </div>
         ) : null
       }
-      footerLeft={formatTime(skill.createdAt)}
+      footerLeft={formatTime(skill.updatedAt || skill.createdAt)}
       footerRight={
         <div style={{ display: 'flex', gap: 2 }}>
           <button
