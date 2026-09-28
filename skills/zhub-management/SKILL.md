@@ -136,6 +136,39 @@ For YAML output (single objects): `--output yaml`
    zhub skill get <skill-name>
    ```
 
+**Bundle (composite skill) uploads** — a directory containing multiple
+nested `SKILL.md` files (e.g. a suite repo's `skills/` directory) is
+packed and uploaded as one entry; the runtime registers every nested
+skill automatically:
+
+1. Verify every nested `SKILL.md` has frontmatter with `name` +
+   `description` (the CLI validates all of them and reports per-file
+   errors; CRLF line endings are accepted).
+2. `--name` is required for bundles — there is no single frontmatter to
+   read it from. Metadata has no frontmatter fallback either, so pass
+   `--description`/`--description-en` explicitly:
+   ```bash
+   zhub skill create --from-dir ./my-suite/skills/ \
+     --name my-suite \
+     --title "套件中文名" \
+     --title-en "Suite Title" \
+     --description "中文描述" \
+     --description-en "English description" \
+     --output json
+   ```
+3. Update an existing bundle in place (the zip is replaced wholesale):
+   ```bash
+   zhub skill update my-suite --from-dir ./my-suite/skills/ --output json
+   ```
+4. Verify — download the zip and count the nested `SKILL.md` entries:
+   ```bash
+   zhub skill download my-suite --output json
+   ```
+
+Bundle notes: 50MB size cap; `.git`, `node_modules`, `dist`, `build` are
+excluded automatically; sub-skills added upstream are included on the
+next `update` without any extra config.
+
 ### 3.3 "Test a provider"
 
 **Mode A — test a stored provider:**
@@ -256,6 +289,7 @@ zhub agent undeploy <name> --purge  # permanently delete
 - **Deleting an agent doesn't auto-undeploy**: Always `zhub agent undeploy <name>` before `zhub agent delete <name>`.
 - **Skill zip excludes hidden dirs**: `.git`, `node_modules`, `dist`, `build` are automatically excluded from the zip.
 - **Skill name must be globally unique**: Check with `zhub skill list` before creating.
+- **Bundle uploads require `--name`**: A directory with multiple nested `SKILL.md` files uploads as one entry and the runtime registers every nested skill. There is no single frontmatter to read the name from, so `--name` is mandatory; pass `--description`/`--description-en` explicitly too (no frontmatter fallback for bundles).
 - **Agent YAML has two supported shapes**: `id` is required when creating an agent and optional when updating one. Prefer native `config` with `title`, `description`, `modelId`, and other configuration nested beneath it. The compatible flat shape accepts `title`, `description`, `model`, `systemPrompt`, `maxTurns`, and `permissionMode`; `model` maps to `config.modelId`, and `name` remains a legacy Chinese-title alias. Do not define the same normalized field in flat and nested form because the CLI rejects conflicts. See `references/agent.yaml`.
 - **Agent update ID must match when provided**: In `zhub agent update <name> --file agent.yaml`, an optional YAML `id` must exactly match positional `<name>`. Agent update accepts `--file`, not `--json`.
 - **Agent platform flags**: On create, `--desktop`/`--no-desktop` and `--mobile`/`--no-mobile` override YAML `desktop`/`mobile`; both default to false when omitted. `--default`/`--no-default` overrides YAML `isDefault`, with native last-argument-wins behavior. Update takes state from YAML and leaves omitted state fields unchanged.
@@ -322,6 +356,10 @@ zhub skill update <name> --from-dir <dir> [--title T] [--title-en T] [--descript
 zhub skill delete <name>
 zhub skill download <name> [--output json|text]
 ```
+
+`--from-dir <dir>` accepts both single-skill directories (one top-level
+`SKILL.md`) and bundle directories (multiple nested `SKILL.md` anywhere in
+the tree). For bundles, `--name` is required on create.
 
 ### Tool (5 commands)
 ```
