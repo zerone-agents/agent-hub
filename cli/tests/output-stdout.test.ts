@@ -21,13 +21,14 @@ describe("writeStdout", () => {
     expect(out.endsWith("END\n")).toBe(true);
   });
 
-  // Stopped-reader variant: the consumer sleeps before draining, so the pipe
-  // stays full and writeStdout's EAGAIN retry loop runs for the whole sleep
-  // window (the fast spawnSync test may never trigger EAGAIN because Bun
-  // consumers drain eagerly). Not discriminating against the old
-  // console.log path — the original truncation only reproduced with the
-  // real CLI (see #191 for the discriminating harness) — but it
-  // deterministically covers the retry loop that is the heart of the fix.
+  // Stopped-reader variant: the consumer sleeps before draining; asserts
+  // the payload still arrives in full while the pipe is not being read
+  // (confirmed to hold). Scope notes from the #190 review counting
+  // experiments: this is not discriminating against the old console.log
+  // path, and the bare-fixture shape can complete in a single writeSync
+  // without hitting EAGAIN — the retry loop is driven by real-CLI
+  // contexts, which the #191 harness will cover as its first true
+  // regression test.
   test("delivers the full payload while the consumer stops reading (EAGAIN retry loop)", () => {
     const fixture = join(import.meta.dir, "fixtures", "stdout-large-harness.ts");
     const script = `bun ${JSON.stringify(fixture)} | { sleep 2; cat; }`;
