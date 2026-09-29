@@ -452,7 +452,7 @@ describe("agent create/update invalid YAML side effects", () => {
       fetchCalls: number;
     };
     expect(observed.code).toBe(2);
-    expect(observed.errors).toContain("错误：");
+    expect(observed.errors).toContain("Error: ");
     expect(observed.fetchCalls).toBe(0);
   });
 });
@@ -496,7 +496,7 @@ describe("agent delete command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/agents/old-agent");
     expect(calls[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已删除");
+    expect(logs.join("\n")).toContain("Deleted");
   });
 });
 
@@ -580,7 +580,7 @@ describe("agent set-mcps command", () => {
       console.log = origLog;
     }
 
-    expect(logs).toContain("已设置 2 个 MCP");
+    expect(logs).toContain("Set 2 MCPs");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/agents/research-agent/mcps");
@@ -797,10 +797,10 @@ describe("agent undeploy command", () => {
     }
 
     expect((fetchMock.mock.calls as any[][])[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已归档");
+    expect(logs.join("\n")).toContain("Archived");
   });
 
-  test("undeploy --purge prints 彻底删除", async () => {
+  test("undeploy --purge prints Permanently deleted", async () => {
     mock.module("ofetch", () => ({
       ofetch: mock(() => Promise.resolve({ success: true })),
       FetchError: class FetchError extends Error {},
@@ -822,7 +822,7 @@ describe("agent undeploy command", () => {
       console.log = origLog;
     }
 
-    expect(logs.join("\n")).toContain("彻底删除");
+    expect(logs.join("\n")).toContain("Permanently deleted");
   });
 });
 

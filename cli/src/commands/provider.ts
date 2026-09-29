@@ -48,9 +48,9 @@ function renderProbeResult(r: { success: boolean; latencyMs: number; error?: str
     return;
   }
   if (r.success) {
-    console.log(`✓ 连接成功 · ${r.latencyMs}ms`);
+    console.log(`✓ connected · ${r.latencyMs}ms`);
   } else {
-    console.log(`✗ 连接失败 · ${r.error ?? "未知错误"}`);
+    console.log(`✗ connection failed · ${r.error ?? "Unknown error"}`);
   }
 }
 
@@ -62,7 +62,7 @@ function loadInput(file?: string, json?: string): Record<string, unknown> {
   if (json) {
     return JSON.parse(json);
   }
-  process.stderr.write("错误：必须提供 --file 或 --json\n");
+  process.stderr.write("Error: must provide --file or --json\n");
   process.exit(2);
 }
 
@@ -70,7 +70,7 @@ function loadInput(file?: string, json?: string): Record<string, unknown> {
 
 export class ProviderListCommand extends Command {
   static paths = [["provider", "list"]];
-  static usage = Command.Usage({ description: "列出所有 provider" });
+  static usage = Command.Usage({ description: "List all providers" });
 
   output = Option.String("--output", "table");
 
@@ -83,7 +83,7 @@ export class ProviderListCommand extends Command {
 
 export class ProviderGetCommand extends Command {
   static paths = [["provider", "get"]];
-  static usage = Command.Usage({ description: "查看 provider 详情（含可用模型）" });
+  static usage = Command.Usage({ description: "View provider details (with available models)" });
 
   id = Option.String();
   output = Option.String("--output", "yaml");
@@ -99,10 +99,10 @@ export class ProviderGetCommand extends Command {
 
 export class ProviderCreateCommand extends Command {
   static paths = [["provider", "create"]];
-  static usage = Command.Usage({ description: "创建 provider" });
+  static usage = Command.Usage({ description: "Create a provider" });
 
-  file = Option.String("--file", { description: "provider.yaml 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 定义" });
+  file = Option.String("--file", { description: "Path to provider.yaml" });
+  json = Option.String("--json", { description: "Inline JSON definition" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
@@ -115,11 +115,11 @@ export class ProviderCreateCommand extends Command {
 
 export class ProviderUpdateCommand extends Command {
   static paths = [["provider", "update"]];
-  static usage = Command.Usage({ description: "更新 provider" });
+  static usage = Command.Usage({ description: "Update a provider" });
 
   id = Option.String();
-  file = Option.String("--file", { description: "更新用的 YAML 文件" });
-  json = Option.String("--json", { description: "内联 JSON" });
+  file = Option.String("--file", { description: "YAML file for the update" });
+  json = Option.String("--json", { description: "Inline JSON" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
@@ -132,13 +132,13 @@ export class ProviderUpdateCommand extends Command {
 
 export class ProviderDeleteCommand extends Command {
   static paths = [["provider", "delete"]];
-  static usage = Command.Usage({ description: "删除 provider" });
+  static usage = Command.Usage({ description: "Delete a provider" });
 
   id = Option.String();
 
   async execute(): Promise<number> {
     await deleteProvider(Number(this.id));
-    console.log(`已删除 provider：${this.id}`);
+    console.log(`Deleted provider: ${this.id}`);
     return 0;
   }
 }
@@ -148,16 +148,16 @@ export class ProviderDeleteCommand extends Command {
 export class ProviderProbeCommand extends Command {
   static paths = [["provider", "probe"]];
   static usage = Command.Usage({
-    description: "探测 provider 连通性（支持探测已保存的 provider 或自定义配置）",
+    description: "Probe provider connectivity (stored provider or custom config)",
   });
 
   // Mode 1: probe <id> — test a stored provider
   id = Option.String({ required: false });
   // Mode 2: probe --base-url X --api-key Y --protocol Z — test custom config
-  baseUrl = Option.String("--base-url", { description: "自定义 baseUrl（不使用已保存 provider）" });
-  apiKey = Option.String("--api-key", { description: "API Key（仅自定义模式）" });
-  protocol = Option.String("--protocol", { description: "协议：anthropic | openai（仅自定义模式）" });
-  authStyle = Option.String("--auth-style", { description: "认证风格，默认 api_key" });
+  baseUrl = Option.String("--base-url", { description: "Custom baseUrl (skip stored provider)" });
+  apiKey = Option.String("--api-key", { description: "API Key (custom mode only)" });
+  protocol = Option.String("--protocol", { description: "Protocol: anthropic | openai (custom mode only)" });
+  authStyle = Option.String("--auth-style", { description: "Auth style, defaults to api_key" });
   output = Option.String("--output", "text");
 
   async execute(): Promise<number> {
@@ -166,7 +166,7 @@ export class ProviderProbeCommand extends Command {
     if (this.baseUrl) {
       // Mode 2: custom config probe
       if (!this.apiKey || !this.protocol) {
-        process.stderr.write("错误：--base-url 模式必须同时提供 --api-key 和 --protocol\n");
+        process.stderr.write("Error: --base-url mode requires both --api-key and --protocol\n");
         return 2;
       }
       result = await probeProviderConfig({
@@ -179,7 +179,7 @@ export class ProviderProbeCommand extends Command {
       // Mode 1: stored provider probe
       result = await probeProvider(Number(this.id));
     } else {
-      process.stderr.write("错误：请提供 provider ID 或 --base-url 进行探测\n");
+      process.stderr.write("Error: provide a provider ID or --base-url to probe\n");
       return 2;
     }
 

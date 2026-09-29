@@ -3,7 +3,7 @@ import { writeStdout } from "./stdout";
 
 export function outputTable(rows: Record<string, unknown>[], columns: string[]): void {
   if (rows.length === 0) {
-    writeStdout("(无数据)\n");
+    writeStdout("(no data)\n");
     return;
   }
   const table = new Table({ head: columns });

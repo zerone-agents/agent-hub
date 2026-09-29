@@ -40,10 +40,10 @@ export async function apiRequest<T = unknown>(path: string, opts: RequestOptions
     if (e instanceof FetchError) {
       const status = e.response?.status ?? 0;
       const msg = (e.data as { error?: string })?.error ?? e.message;
-      process.stderr.write(`错误：${msg}\n`);
+      process.stderr.write(`Error: ${msg}\n`);
       process.exit(exitFromHttpStatus(status));
     }
-    process.stderr.write(`无法连接到 ${profile.serverUrl}，检查网络或 server_url 配置\n`);
+    process.stderr.write(`Cannot connect to ${profile.serverUrl}, check network or server_url config\n`);
     process.exit(EXIT.NETWORK_ERROR);
   }
 }

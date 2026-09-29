@@ -117,8 +117,8 @@ async function uploadToolPackage(
     return response as Tool;
   } catch (e: any) {
     const status = e?.response?.status ?? 0;
-    const msg = e?.data?.error ?? e?.message ?? "上传失败";
-    process.stderr.write(`错误：${msg}\n`);
+    const msg = e?.data?.error ?? e?.message ?? "Upload failed";
+    process.stderr.write(`Error: ${msg}\n`);
     process.exit(exitFromHttpStatus(status) || EXIT.SERVER_ERROR);
   }
 }

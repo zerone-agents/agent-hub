@@ -123,17 +123,17 @@ config:
 
 describe("parseAgentYaml validation", () => {
   const cases: Array<[string, string, string, string?]> = [
-    ["config is scalar", "id: researcher\nconfig: invalid\n", "config 必须是对象"],
-    ["config.config exists", "id: researcher\nconfig:\n  config: {}\n", "不允许 config.config"],
-    ["flat and nested title", "id: researcher\ntitle:\n  zh: flat\nconfig:\n  title:\n    zh: nested\n", "title 同时出现在"],
-    ["flat model and nested modelId", "id: researcher\nmodel: flat\nconfig:\n  modelId: nested\n", "modelId 同时出现在"],
-    ["title is scalar", "id: researcher\ntitle: invalid\n", "title 必须是字符串映射"],
-    ["description has non-string value", "id: researcher\ndescription:\n  zh: valid\n  en: 42\n", "description 必须是字符串映射"],
-    ["missing id on create", "name: Researcher\n", "必须包含 id"],
-    ["non-string id on update", "id: 42\n", "id 必须是字符串", "researcher"],
-    ["id differs from expectedName", "id: writer\n", "与命令参数不一致", "researcher"],
-    ["desktop is not boolean", "id: researcher\ndesktop: yes\n", "desktop 必须是布尔值"],
-    ["isDefault is not boolean", "id: researcher\nisDefault: 1\n", "isDefault 必须是布尔值"],
+    ["config is scalar", "id: researcher\nconfig: invalid\n", "config must be an object"],
+    ["config.config exists", "id: researcher\nconfig:\n  config: {}\n", "config.config is not allowed"],
+    ["flat and nested title", "id: researcher\ntitle:\n  zh: flat\nconfig:\n  title:\n    zh: nested\n", "title appears in both"],
+    ["flat model and nested modelId", "id: researcher\nmodel: flat\nconfig:\n  modelId: nested\n", "modelId appears in both"],
+    ["title is scalar", "id: researcher\ntitle: invalid\n", "title must be a string map"],
+    ["description has non-string value", "id: researcher\ndescription:\n  zh: valid\n  en: 42\n", "description must be a string map"],
+    ["missing id on create", "name: Researcher\n", "must contain an id"],
+    ["non-string id on update", "id: 42\n", "id must be a string", "researcher"],
+    ["id differs from expectedName", "id: writer\n", "does not match the command argument", "researcher"],
+    ["desktop is not boolean", "id: researcher\ndesktop: yes\n", "desktop must be a boolean"],
+    ["isDefault is not boolean", "id: researcher\nisDefault: 1\n", "isDefault must be a boolean"],
   ];
 
   for (const [name, yaml, message, expectedName] of cases) {
@@ -153,7 +153,7 @@ extensions:
   control-panel:
     providerId: extension
 `);
-    expect(() => parseAgentYaml(file)).toThrow("providerId 同时出现在");
+    expect(() => parseAgentYaml(file)).toThrow("providerId appears in both");
   });
 
   test("rejects unknown top-level metadata that conflicts with native config", () => {
@@ -163,7 +163,7 @@ config:
   futureField: native
 futureField: top-level
 `);
-    expect(() => parseAgentYaml(file)).toThrow("futureField 同时出现在");
+    expect(() => parseAgentYaml(file)).toThrow("futureField appears in both");
   });
 
   test("rejects extension metadata that conflicts with unknown top-level metadata", () => {
@@ -174,6 +174,6 @@ extensions:
     futureField: extension
 futureField: top-level
 `);
-    expect(() => parseAgentYaml(file)).toThrow("futureField 同时出现在");
+    expect(() => parseAgentYaml(file)).toThrow("futureField appears in both");
   });
 });

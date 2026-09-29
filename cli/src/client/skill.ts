@@ -116,8 +116,8 @@ async function uploadPackage(
     return response as Skill;
   } catch (e: any) {
     const status = e?.response?.status ?? 0;
-    const msg = e?.data?.error ?? e?.message ?? "上传失败";
-    process.stderr.write(`错误：${msg}\n`);
+    const msg = e?.data?.error ?? e?.message ?? "Upload failed";
+    process.stderr.write(`Error: ${msg}\n`);
     process.exit(exitFromHttpStatus(status) || EXIT.SERVER_ERROR);
   }
 }
@@ -155,10 +155,10 @@ async function skillRequest<T>(path: string, opts: RequestOptions = {}): Promise
     if (e?.response) {
       const status = e.response.status ?? 0;
       const msg = e.data?.error ?? e.message;
-      process.stderr.write(`错误：${msg}\n`);
+      process.stderr.write(`Error: ${msg}\n`);
       process.exit(exitFromHttpStatus(status));
     }
-    process.stderr.write(`无法连接到 ${profile.serverUrl}\n`);
+    process.stderr.write(`Cannot connect to ${profile.serverUrl}\n`);
     process.exit(EXIT.NETWORK_ERROR);
   }
 }

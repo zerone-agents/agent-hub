@@ -160,7 +160,7 @@ describe("mcp list command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -369,7 +369,7 @@ describe("mcp create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("必须提供 --file 或 --json");
+      expect(errs.join("")).toContain("must provide --file or --json");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -394,7 +394,7 @@ describe("mcp create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -419,7 +419,7 @@ describe("mcp create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("无法读取或解析输入文件/JSON");
+      expect(errs.join("")).toContain("cannot read or parse input file/JSON");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -444,7 +444,7 @@ describe("mcp create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("无法读取或解析输入文件/JSON");
+      expect(errs.join("")).toContain("cannot read or parse input file/JSON");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -522,7 +522,7 @@ describe("mcp update command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("必须提供 --file 或 --json");
+      expect(errs.join("")).toContain("must provide --file or --json");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -556,7 +556,7 @@ describe("mcp delete command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/mcps/filesystem");
     expect(calls[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已删除 MCP：filesystem");
+    expect(logs.join("\n")).toContain("Deleted MCP: filesystem");
   });
 });
 
@@ -585,7 +585,7 @@ describe("mcp probe command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("必须提供 MCP name 或 --file 或 --json");
+      expect(errs.join("")).toContain("must provide MCP name or --file or --json");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -617,7 +617,7 @@ describe("mcp probe command", () => {
     expect(calls[0][0]).toContain("/api/v1/admin/mcps/filesystem/probe");
     expect(calls[0][1].method).toBe("POST");
     const out = logs.join("\n");
-    expect(out).toContain("探测成功");
+    expect(out).toContain("probe OK");
     expect(out).toContain("test_tool");
   });
 
@@ -685,7 +685,7 @@ describe("mcp probe command", () => {
     }
 
     const out = logs.join("\n");
-    expect(out).toContain("探测失败");
+    expect(out).toContain("probe failed");
     expect(out).toContain("Connection refused");
   });
 });

@@ -43,7 +43,7 @@ export async function getActiveProfile(): Promise<Profile> {
   const cfg = await loadConfig();
   const p = cfg.profiles[cfg.currentProfile];
   if (!p) {
-    process.stderr.write("未登录。请先运行：zhub login --url <server> --token <cli_xxx>\n");
+    process.stderr.write("Not logged in. Run: zhub login --url <server> --token <cli_xxx>\n");
     process.exit(3);
   }
   return p;
