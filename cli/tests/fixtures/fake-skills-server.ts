@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 /**
  * Fake skills API server for the pipe-truncation test (#191).
  *
