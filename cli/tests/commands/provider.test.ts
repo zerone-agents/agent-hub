@@ -223,7 +223,7 @@ describe("provider probe command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/providers/1/probe");
     expect(calls[0][1].method).toBe("POST");
-    expect(logs.join("\n")).toContain("连接成功");
+    expect(logs.join("\n")).toContain("connected");
     expect(logs.join("\n")).toContain("234");
   });
 
@@ -339,6 +339,6 @@ describe("provider delete command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/providers/3");
     expect(calls[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已删除");
+    expect(logs.join("\n")).toContain("Deleted");
   });
 });

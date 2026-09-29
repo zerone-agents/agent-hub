@@ -196,7 +196,7 @@ describe("tool list command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -334,7 +334,7 @@ describe("tool get command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -505,7 +505,7 @@ describe("tool create command", () => {
     expect(code).toBe(2);
 
     process.stderr.write = origErr as any;
-    expect(errs.join("")).toContain("必须提供 --file 或 --json");
+    expect(errs.join("")).toContain("must provide --file or --json");
   });
 
   test("returns error 2 with invalid --output", async () => {
@@ -527,7 +527,7 @@ describe("tool create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -553,7 +553,7 @@ describe("tool create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("无法读取或解析输入文件/JSON");
+      expect(errs.join("")).toContain("cannot read or parse input file/JSON");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -579,7 +579,7 @@ describe("tool create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("无法读取或解析输入文件/JSON");
+      expect(errs.join("")).toContain("cannot read or parse input file/JSON");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -605,7 +605,7 @@ describe("tool create command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("无法读取或解析输入文件/JSON");
+      expect(errs.join("")).toContain("cannot read or parse input file/JSON");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -818,7 +818,7 @@ describe("tool update command", () => {
     expect(code).toBe(2);
 
     process.stderr.write = origErr as any;
-    expect(errs.join("")).toContain("必须提供 --file 或 --json");
+    expect(errs.join("")).toContain("must provide --file or --json");
   });
 
   test("returns error 2 with invalid --output", async () => {
@@ -841,7 +841,7 @@ describe("tool update command", () => {
     try {
       const code = await cmd.execute();
       expect(code).toBe(2);
-      expect(errs.join("")).toContain("--output 必须是 table / json / yaml");
+      expect(errs.join("")).toContain("--output must be one of table / json / yaml");
     } finally {
       process.stderr.write = origErr as any;
     }
@@ -875,7 +875,7 @@ describe("tool delete command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/tools/calculator");
     expect(calls[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已删除");
+    expect(logs.join("\n")).toContain("Deleted");
   });
 });
 

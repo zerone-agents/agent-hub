@@ -50,13 +50,13 @@ function renderProbeResult(result: McpProbeResult, output: string) {
     outputYaml(result);
   } else {
     if (result.status === "unsupported") {
-      console.log("状态：暂不支持探测（SSE transport）");
+      console.log("Status: probe not yet supported (SSE transport)");
     } else if (result.status === "failed") {
-      console.log("状态：探测失败");
-      console.log(`错误：${result.error || ""}`);
+      console.log("Status: probe failed");
+      console.log(`Error: ${result.error || ""}`);
     } else {
-      console.log("状态：探测成功");
-      console.log(`tools 数量：${result.tools?.length ?? 0}`);
+      console.log("Status: probe OK");
+      console.log(`Tools count: ${result.tools?.length ?? 0}`);
       result.tools?.forEach((t) => console.log(`  - ${t.name}`));
     }
   }
@@ -68,7 +68,7 @@ function loadInput(file?: string, json?: string): Record<string, unknown> | null
       const raw = readFileSync(file, "utf-8");
       const parsed = parse(raw);
       if (!isRecord(parsed)) {
-        process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+        process.stderr.write("Error: cannot read or parse input file/JSON\n");
         return null;
       }
       return parsed;
@@ -76,7 +76,7 @@ function loadInput(file?: string, json?: string): Record<string, unknown> | null
     if (json) {
       const parsed = JSON.parse(json);
       if (!isRecord(parsed)) {
-        process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+        process.stderr.write("Error: cannot read or parse input file/JSON\n");
         return null;
       }
       return parsed;
@@ -84,14 +84,14 @@ function loadInput(file?: string, json?: string): Record<string, unknown> | null
     // Caller must validate before calling loadInput
     return null;
   } catch (err) {
-    process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+    process.stderr.write("Error: cannot read or parse input file/JSON\n");
     return null;
   }
 }
 
 export class McpListCommand extends Command {
   static paths = [["mcp", "list"]];
-  static usage = Command.Usage({ description: "列出所有 MCP" });
+  static usage = Command.Usage({ description: "List all MCPs" });
 
   output = Option.String("--output", "table");
 
@@ -108,7 +108,7 @@ export class McpListCommand extends Command {
 
 export class McpGetCommand extends Command {
   static paths = [["mcp", "get"]];
-  static usage = Command.Usage({ description: "查看 MCP 详情" });
+  static usage = Command.Usage({ description: "View MCP details" });
 
   name = Option.String();
   output = Option.String("--output", "yaml");
@@ -126,10 +126,10 @@ export class McpGetCommand extends Command {
 
 export class McpCreateCommand extends Command {
   static paths = [["mcp", "create"]];
-  static usage = Command.Usage({ description: "创建 MCP" });
+  static usage = Command.Usage({ description: "Create an MCP" });
 
-  file = Option.String("--file", { description: "mcp.yaml 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 定义" });
+  file = Option.String("--file", { description: "Path to mcp.yaml" });
+  json = Option.String("--json", { description: "Inline JSON definition" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
@@ -138,7 +138,7 @@ export class McpCreateCommand extends Command {
       return invalid;
     }
     if (!this.file && !this.json) {
-      process.stderr.write("错误：必须提供 --file 或 --json\n");
+      process.stderr.write("Error: must provide --file or --json\n");
       return 2;
     }
     const body = loadInput(this.file, this.json);
@@ -149,7 +149,7 @@ export class McpCreateCommand extends Command {
     // Auto-probe before create
     const probeResult = await probeMcpByConfig(body as unknown as McpProbeInput);
     if (probeResult.status !== "success") {
-      process.stderr.write(`探测失败：${probeResult.error || ""}\n`);
+      process.stderr.write(`Probe failed: ${probeResult.error || ""}\n`);
       return 1;
     }
 
@@ -162,11 +162,11 @@ export class McpCreateCommand extends Command {
 
 export class McpUpdateCommand extends Command {
   static paths = [["mcp", "update"]];
-  static usage = Command.Usage({ description: "更新 MCP" });
+  static usage = Command.Usage({ description: "Update an MCP" });
 
   name = Option.String();
-  file = Option.String("--file", { description: "mcp.yaml 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 定义" });
+  file = Option.String("--file", { description: "Path to mcp.yaml" });
+  json = Option.String("--json", { description: "Inline JSON definition" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
@@ -175,7 +175,7 @@ export class McpUpdateCommand extends Command {
       return invalid;
     }
     if (!this.file && !this.json) {
-      process.stderr.write("错误：必须提供 --file 或 --json\n");
+      process.stderr.write("Error: must provide --file or --json\n");
       return 2;
     }
     const body = loadInput(this.file, this.json);
@@ -192,7 +192,7 @@ export class McpUpdateCommand extends Command {
     if (configChanged) {
       const probeResult = await probeMcp(this.name);
       if (probeResult.status !== "success") {
-        process.stderr.write(`探测失败：${probeResult.error || ""}\n`);
+        process.stderr.write(`Probe failed: ${probeResult.error || ""}\n`);
         return 1;
       }
     }
@@ -205,24 +205,24 @@ export class McpUpdateCommand extends Command {
 
 export class McpDeleteCommand extends Command {
   static paths = [["mcp", "delete"]];
-  static usage = Command.Usage({ description: "删除 MCP" });
+  static usage = Command.Usage({ description: "Delete an MCP" });
 
   name = Option.String();
 
   async execute(): Promise<number> {
     await deleteMcp(this.name);
-    console.log(`已删除 MCP：${this.name}`);
+    console.log(`Deleted MCP: ${this.name}`);
     return 0;
   }
 }
 
 export class McpProbeCommand extends Command {
   static paths = [["mcp", "probe"]];
-  static usage = Command.Usage({ description: "探测 MCP 并获取 tools 列表" });
+  static usage = Command.Usage({ description: "Probe an MCP and list its tools" });
 
   name = Option.String({ required: false });
-  file = Option.String("--file", { description: "mcp.yaml 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 定义" });
+  file = Option.String("--file", { description: "Path to mcp.yaml" });
+  json = Option.String("--json", { description: "Inline JSON definition" });
   output = Option.String("--output", "table");
 
   async execute(): Promise<number> {
@@ -230,7 +230,7 @@ export class McpProbeCommand extends Command {
     if (invalid !== null) return invalid;
 
     if (!this.name && !this.file && !this.json) {
-      process.stderr.write("错误：必须提供 MCP name 或 --file 或 --json\n");
+      process.stderr.write("Error: must provide MCP name or --file or --json\n");
       return 2;
     }
 

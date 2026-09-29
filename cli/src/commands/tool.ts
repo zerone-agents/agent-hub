@@ -51,7 +51,7 @@ function loadInput(file?: string, json?: string): Record<string, unknown> | null
       const raw = readFileSync(file, "utf-8");
       const parsed = parse(raw);
       if (!isRecord(parsed)) {
-        process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+        process.stderr.write("Error: cannot read or parse input file/JSON\n");
         return null;
       }
       return parsed;
@@ -59,21 +59,21 @@ function loadInput(file?: string, json?: string): Record<string, unknown> | null
     if (json) {
       const parsed = JSON.parse(json);
       if (!isRecord(parsed)) {
-        process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+        process.stderr.write("Error: cannot read or parse input file/JSON\n");
         return null;
       }
       return parsed;
     }
     return null;
   } catch (err) {
-    process.stderr.write("错误：无法读取或解析输入文件/JSON\n");
+    process.stderr.write("Error: cannot read or parse input file/JSON\n");
     return null;
   }
 }
 
 export class ToolListCommand extends Command {
   static paths = [["tool", "list"]];
-  static usage = Command.Usage({ description: "列出所有 tool" });
+  static usage = Command.Usage({ description: "List all tools" });
 
   output = Option.String("--output", "table");
 
@@ -90,7 +90,7 @@ export class ToolListCommand extends Command {
 
 export class ToolGetCommand extends Command {
   static paths = [["tool", "get"]];
-  static usage = Command.Usage({ description: "查看 tool 详情" });
+  static usage = Command.Usage({ description: "View tool details" });
 
   name = Option.String();
   output = Option.String("--output", "yaml");
@@ -108,36 +108,36 @@ export class ToolGetCommand extends Command {
 
 export class ToolCreateCommand extends Command {
   static paths = [["tool", "create"]];
-  static usage = Command.Usage({ description: "创建自定义工具（单文件上传）" });
+  static usage = Command.Usage({ description: "Create a custom tool (single file upload)" });
 
-  file = Option.String("--file", { description: "工具元数据 YAML/JSON 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 元数据（name/title/description/descriptionEn）" });
-  source = Option.String("--source", { description: "工具源文件路径（.ts/.mts/.js/.mjs，必填）" });
+  file = Option.String("--file", { description: "Tool metadata YAML/JSON file path" });
+  json = Option.String("--json", { description: "Inline JSON metadata (name/title/description/descriptionEn)" });
+  source = Option.String("--source", { description: "Tool source file path (.ts/.mts/.js/.mjs, required)" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);
     if (invalid !== null) return invalid;
     if (!this.file && !this.json) {
-      process.stderr.write("错误：必须提供 --file 或 --json（元数据）\n");
+      process.stderr.write("Error: must provide --file or --json (metadata)\n");
       return 2;
     }
     if (!this.source) {
-      process.stderr.write("错误：必须提供 --source（工具源文件路径）\n");
+      process.stderr.write("Error: must provide --source (tool source file path)\n");
       return 2;
     }
     const body = loadInput(this.file, this.json);
     if (!body) return 2;
     const name = typeof body.name === "string" ? body.name : "";
     if (!name) {
-      process.stderr.write("错误：元数据中缺少 name\n");
+      process.stderr.write("Error: metadata is missing name\n");
       return 2;
     }
     let fileBuffer: Buffer;
     try {
       fileBuffer = readFileSync(this.source);
     } catch {
-      process.stderr.write(`错误：无法读取源文件 ${this.source}\n`);
+      process.stderr.write(`Error: cannot read source file ${this.source}\n`);
       return 2;
     }
     const t = await createTool({
@@ -161,11 +161,11 @@ const UPDATE_ALLOWED_FIELDS = new Set(["name", "title", "description", "descript
 
 export class ToolUpdateCommand extends Command {
   static paths = [["tool", "update"]];
-  static usage = Command.Usage({ description: "更新 tool" });
+  static usage = Command.Usage({ description: "Update a tool" });
 
   name = Option.String();
-  file = Option.String("--file", { description: "tool.yaml 文件路径" });
-  json = Option.String("--json", { description: "内联 JSON 定义" });
+  file = Option.String("--file", { description: "Path to tool.yaml" });
+  json = Option.String("--json", { description: "Inline JSON definition" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
@@ -174,7 +174,7 @@ export class ToolUpdateCommand extends Command {
       return invalid;
     }
     if (!this.file && !this.json) {
-      process.stderr.write("错误：必须提供 --file 或 --json\n");
+      process.stderr.write("Error: must provide --file or --json\n");
       return 2;
     }
     const body = loadInput(this.file, this.json);
@@ -184,7 +184,7 @@ export class ToolUpdateCommand extends Command {
     const unknown = Object.keys(body).filter((k) => !UPDATE_ALLOWED_FIELDS.has(k));
     if (unknown.length > 0) {
       process.stderr.write(
-        `错误：不支持的元数据字段：${unknown.join(", ")}（tool update 仅支持 title/description/descriptionEn，name 由命令行指定并忽略）\n`,
+        `Error: unsupported metadata field(s): ${unknown.join(", ")} (tool update supports only title/description/descriptionEn; name is taken from the CLI and ignored)\n`,
       );
       return 2;
     }
@@ -194,7 +194,7 @@ export class ToolUpdateCommand extends Command {
     const badType = Object.keys(body).filter((k) => k !== "name" && typeof body[k] !== "string");
     if (badType.length > 0) {
       process.stderr.write(
-        `错误：字段类型不正确：${badType.join(", ")}（tool update 的 title/description/descriptionEn 必须为字符串）\n`,
+        `Error: invalid field type: ${badType.join(", ")} (tool update title/description/descriptionEn must be strings)\n`,
       );
       return 2;
     }
@@ -210,37 +210,37 @@ export class ToolUpdateCommand extends Command {
 
 export class ToolDeleteCommand extends Command {
   static paths = [["tool", "delete"]];
-  static usage = Command.Usage({ description: "删除 tool" });
+  static usage = Command.Usage({ description: "Delete a tool" });
 
   name = Option.String();
 
   async execute(): Promise<number> {
     await deleteTool(this.name);
-    console.log(`已删除 tool：${this.name}`);
+    console.log(`Deleted tool: ${this.name}`);
     return 0;
   }
 }
 
 export class ToolUploadCommand extends Command {
   static paths = [["tool", "upload"]];
-  static usage = Command.Usage({ description: "补传/替换自定义工具文件" });
+  static usage = Command.Usage({ description: "Upload/replace custom tool file" });
 
   name = Option.String();
-  source = Option.String("--source", { description: "工具源文件路径（必填）" });
+  source = Option.String("--source", { description: "Tool source file path (required)" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);
     if (invalid !== null) return invalid;
     if (!this.source) {
-      process.stderr.write("错误：必须提供 --source（工具源文件路径）\n");
+      process.stderr.write("Error: must provide --source (tool source file path)\n");
       return 2;
     }
     let fileBuffer: Buffer;
     try {
       fileBuffer = readFileSync(this.source);
     } catch {
-      process.stderr.write(`错误：无法读取源文件 ${this.source}\n`);
+      process.stderr.write(`Error: cannot read source file ${this.source}\n`);
       return 2;
     }
     const t = await uploadToolFile(this.name, { fileBuffer, fileName: basename(this.source) });
@@ -251,7 +251,7 @@ export class ToolUploadCommand extends Command {
 
 export class ToolDownloadCommand extends Command {
   static paths = [["tool", "download"]];
-  static usage = Command.Usage({ description: "获取自定义工具下载地址" });
+  static usage = Command.Usage({ description: "Get custom tool download URL" });
 
   name = Option.String();
 
@@ -259,7 +259,7 @@ export class ToolDownloadCommand extends Command {
     const res = await downloadTool(this.name);
     console.log(res.url);
     if (res.expiresIn > 0) {
-      process.stderr.write(`有效期 ${res.expiresIn} 秒\n`);
+      process.stderr.write(`Valid for ${res.expiresIn}s\n`);
     }
     return 0;
   }

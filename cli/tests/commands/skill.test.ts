@@ -171,8 +171,8 @@ describe("validateSkillDir", () => {
     const result = await validateSkillDir(tmpDir);
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual([
-      "a/SKILL.md: frontmatter 缺少 name 字段",
-      "b/SKILL.md: frontmatter 缺少 description 字段",
+      "a/SKILL.md: frontmatter is missing the name field",
+      "b/SKILL.md: frontmatter is missing the description field",
     ]);
   });
 
@@ -430,7 +430,7 @@ describe("skill update command", () => {
       // No wrapper: SKILL.md is at archive root, not under "published/skill/".
       expect(zip.file("SKILL.md")).not.toBeNull();
       expect(JSON.parse(logs[0]).data.name).toBe("published/skill");
-      expect(errors.join("")).toContain("已更新 skill：published/skill");
+      expect(errors.join("")).toContain("Updated skill: published/skill");
     } finally {
       console.log = origLog;
       process.stderr.write = origWrite;
@@ -529,7 +529,7 @@ describe("skill create command", () => {
       expect(await cmd.execute()).toBe(2);
       // Name check fires before directory validation now — directory is valid
       // but the command still fails because --name is required.
-      expect(errors.join("")).toContain("必须用 --name");
+      expect(errors.join("")).toContain("--name is required");
       // Validation did NOT run (no "SKILL.md" error, since dir is valid).
       expect(errors.join("")).not.toContain("SKILL.md");
     } finally {
@@ -568,7 +568,7 @@ describe("skill delete command", () => {
     const calls = fetchMock.mock.calls as any[][];
     expect(calls[0][0]).toContain("/api/v1/admin/skills/old-skill");
     expect(calls[0][1].method).toBe("DELETE");
-    expect(logs.join("\n")).toContain("已删除");
+    expect(logs.join("\n")).toContain("Deleted");
   });
 });
 

@@ -51,7 +51,7 @@ describe("zhub skill commands", () => {
   test("skill update is registered", async () => {
     const result = await runZhub(["skill", "update", "demo"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("必须提供 --from-dir");
+    expect(result.stderr).toContain("must provide --from-dir");
     expect(result.stderr).not.toContain("Command not found");
   });
 

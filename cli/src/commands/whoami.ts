@@ -30,7 +30,7 @@ function roleLabel(r: string | CasdoorRole): string {
 export class WhoamiCommand extends Command {
   static paths = [["whoami"]];
   static usage = Command.Usage({
-    description: "显示当前 profile、server URL、用户信息",
+    description: "Show current profile, server URL, and user info",
   });
 
   async execute(): Promise<number> {
@@ -38,7 +38,7 @@ export class WhoamiCommand extends Command {
     const profileName = cfg.currentProfile;
     const profile = cfg.profiles[profileName];
     if (!profile) {
-      process.stderr.write("未登录\n");
+      process.stderr.write("Not logged in\n");
       return 3;
     }
     const tokenMask = profile.token.slice(0, 12) + "...";
@@ -49,7 +49,7 @@ export class WhoamiCommand extends Command {
     const info = await apiRequest<UserInfo>("/auth/userinfo");
     const name = info.display_name || info.username || info.id;
     const roles = (info.roles ?? []).map(roleLabel).filter(Boolean);
-    const rolesStr = roles.length ? roles.join(",") : "(无角色)";
+    const rolesStr = roles.length ? roles.join(",") : "(no role)";
     console.log(`User:       ${name} (${rolesStr})`);
     return 0;
   }

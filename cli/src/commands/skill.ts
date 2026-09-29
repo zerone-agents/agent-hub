@@ -50,17 +50,17 @@ async function prepareSkillUpload(
   requestedName?: string,
 ): Promise<PreparedSkillUpload | null> {
   if (!requestedName) {
-    process.stderr.write("错误：必须用 --name 指定 skill 名称\n");
+    process.stderr.write("Error: --name is required to specify the skill name\n");
     return null;
   }
   const result = await validateSkillDir(fromDir);
   if (!result.valid) {
-    for (const err of result.errors) process.stderr.write(`错误：${err}\n`);
+    for (const err of result.errors) process.stderr.write(`Error: ${err}\n`);
     return null;
   }
-  process.stderr.write(`正在打包...（找到 ${result.skills.length} 个 SKILL.md）\n`);
+  process.stderr.write(`Packing... (found ${result.skills.length} SKILL.md files)\n`);
   const zipBuffer = await packDir(fromDir, requestedName);
-  process.stderr.write(`已打包 ${zipBuffer.length} 字节\n`);
+  process.stderr.write(`Packed ${zipBuffer.length} bytes\n`);
   return { skillName: requestedName, zipBuffer };
 }
 
@@ -68,10 +68,10 @@ async function prepareSkillUpload(
 
 export class SkillListCommand extends Command {
   static paths = [["skill", "list"]];
-  static usage = Command.Usage({ description: "列出所有 skill" });
+  static usage = Command.Usage({ description: "List all skills" });
 
   output = Option.String("--output", "table");
-  type = Option.String("--type", { description: "按类型筛选（expert / community）" });
+  type = Option.String("--type", { description: "Filter by type (expert / community)" });
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);
@@ -86,7 +86,7 @@ export class SkillListCommand extends Command {
 
 export class SkillGetCommand extends Command {
   static paths = [["skill", "get"]];
-  static usage = Command.Usage({ description: "查看 skill 详情" });
+  static usage = Command.Usage({ description: "View skill details" });
 
   name = Option.String();
   output = Option.String("--output", "yaml");
@@ -105,23 +105,23 @@ export class SkillGetCommand extends Command {
 export class SkillCreateCommand extends Command {
   static paths = [["skill", "create"]];
   static usage = Command.Usage({
-    description: "从目录打包并上传 skill（目录必须包含 SKILL.md）",
+    description: "Pack and upload a skill from a directory (must contain SKILL.md)",
   });
 
-  fromDir = Option.String("--from-dir", { description: "skill 目录路径" });
+  fromDir = Option.String("--from-dir", { description: "Skill directory path" });
   name = Option.String("--name", { description: "Skill name (required)" });
   title = Option.String("--title", { description: "Display title (defaults to the --name value)" });
-  titleEn = Option.String("--title-en", { description: "英文展示名" });
-  description = Option.String("--description", { description: "中文描述" });
-  descriptionEn = Option.String("--description-en", { description: "英文描述" });
-  type = Option.String("--type", { description: "类型，默认 community" });
+  titleEn = Option.String("--title-en", { description: "English display title" });
+  description = Option.String("--description", { description: "Description (Chinese)" });
+  descriptionEn = Option.String("--description-en", { description: "English description" });
+  type = Option.String("--type", { description: "Type, defaults to community" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);
     if (invalid !== null) return invalid;
     if (!this.fromDir) {
-      process.stderr.write("错误：必须提供 --from-dir 参数\n");
+      process.stderr.write("Error: must provide --from-dir\n");
       return 1;
     }
 
@@ -129,7 +129,7 @@ export class SkillCreateCommand extends Command {
     if (!prepared) return 2;
     const { skillName } = prepared;
 
-    process.stderr.write("正在上传...\n");
+    process.stderr.write("Uploading...\n");
     const created = await createSkill({
       name: skillName,
       title: this.title || skillName,
@@ -141,7 +141,7 @@ export class SkillCreateCommand extends Command {
     });
 
     renderSkill(created, this.output);
-    process.stderr.write(`✓ 已创建 skill：${skillName}\n`);
+    process.stderr.write(`✓ Created skill: ${skillName}\n`);
     return 0;
   }
 }
@@ -150,27 +150,27 @@ export class SkillCreateCommand extends Command {
 
 export class SkillUpdateCommand extends Command {
   static paths = [["skill", "update"]];
-  static usage = Command.Usage({ description: "从目录打包并更新 skill" });
+  static usage = Command.Usage({ description: "Pack and update a skill from a directory" });
 
   name = Option.String();
-  fromDir = Option.String("--from-dir", { description: "skill 目录路径" });
-  title = Option.String("--title", { description: "展示名" });
-  titleEn = Option.String("--title-en", { description: "英文展示名" });
-  description = Option.String("--description", { description: "中文描述" });
-  descriptionEn = Option.String("--description-en", { description: "英文描述" });
-  type = Option.String("--type", { description: "类型" });
+  fromDir = Option.String("--from-dir", { description: "Skill directory path" });
+  title = Option.String("--title", { description: "Display title" });
+  titleEn = Option.String("--title-en", { description: "English display title" });
+  description = Option.String("--description", { description: "Description (Chinese)" });
+  descriptionEn = Option.String("--description-en", { description: "English description" });
+  type = Option.String("--type", { description: "Type" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);
     if (invalid !== null) return invalid;
     if (!this.fromDir) {
-      process.stderr.write("错误：必须提供 --from-dir 参数\n");
+      process.stderr.write("Error: must provide --from-dir\n");
       return 1;
     }
     const prepared = await prepareSkillUpload(this.fromDir, this.name);
     if (!prepared) return 2;
-    process.stderr.write("正在上传...\n");
+    process.stderr.write("Uploading...\n");
     const updated = await updateSkill(this.name, {
       title: this.title || undefined,
       titleEn: this.titleEn,
@@ -180,20 +180,20 @@ export class SkillUpdateCommand extends Command {
       zipBuffer: prepared.zipBuffer,
     });
     renderSkill(updated, this.output);
-    process.stderr.write(`✓ 已更新 skill：${this.name}\n`);
+    process.stderr.write(`✓ Updated skill: ${this.name}\n`);
     return 0;
   }
 }
 
 export class SkillDeleteCommand extends Command {
   static paths = [["skill", "delete"]];
-  static usage = Command.Usage({ description: "删除 skill" });
+  static usage = Command.Usage({ description: "Delete a skill" });
 
   name = Option.String();
 
   async execute(): Promise<number> {
     await deleteSkill(this.name);
-    console.log(`已删除 skill：${this.name}`);
+    console.log(`Deleted skill: ${this.name}`);
     return 0;
   }
 }
@@ -202,7 +202,7 @@ export class SkillDeleteCommand extends Command {
 
 export class SkillDownloadCommand extends Command {
   static paths = [["skill", "download"]];
-  static usage = Command.Usage({ description: "获取 skill 下载链接" });
+  static usage = Command.Usage({ description: "Get a skill download URL" });
 
   name = Option.String();
   output = Option.String("--output", "table");
@@ -214,7 +214,7 @@ export class SkillDownloadCommand extends Command {
     if (this.output === "json") {
       outputJson(result);
     } else {
-      console.log(`下载链接（${result.expiresIn}秒内有效）：`);
+      console.log(`Download URL (valid ${result.expiresIn}s):`);
       console.log(result.url);
     }
     return 0;

@@ -112,7 +112,7 @@ describe("whoami command", () => {
     expect(out).toContain("bob (viewer)");
   });
 
-  test("shows (无角色) when roles array is empty", async () => {
+  test("shows ((no role)) when roles array is empty", async () => {
     const fakeUserinfo = {
       success: true,
       data: {
@@ -141,6 +141,6 @@ describe("whoami command", () => {
       console.log = origLog;
     }
 
-    expect(logs.join("\n")).toContain("nobody ((无角色))");
+    expect(logs.join("\n")).toContain("nobody ((no role))");
   });
 });

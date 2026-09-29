@@ -83,7 +83,7 @@ async function renderDeployment(d: DeploymentInfo, output: string) {
     console.log(`Runtime:   ${resolveRuntimeUrl(d.runtimeUrl, serverUrl)}`);
   }
   if (d.hostPort) console.log(`Port:      ${d.hostPort}`);
-  if (d.deployedAt) console.log(`Deployed:  ${d.deployedAt}`);
+  if (d.deployedAt) console.log(`Deployed: ${d.deployedAt}`);
   if (d.message) console.log(`Message:   ${d.message}`);
 }
 
@@ -91,10 +91,10 @@ async function renderDeployment(d: DeploymentInfo, output: string) {
 
 export class AgentListCommand extends Command {
   static paths = [["agent", "list"]];
-  static usage = Command.Usage({ description: "列出所有 agent" });
+  static usage = Command.Usage({ description: "List all agents" });
 
-  desktop = Option.Boolean("--desktop", false, { description: "只看桌面端代理" });
-  mobile = Option.Boolean("--mobile", false, { description: "只看手机端代理" });
+  desktop = Option.Boolean("--desktop", false, { description: "Show desktop agents only" });
+  mobile = Option.Boolean("--mobile", false, { description: "Show mobile agents only" });
   output = Option.String("--output", "table");
 
   async execute(): Promise<number> {
@@ -108,7 +108,7 @@ export class AgentListCommand extends Command {
 
 export class AgentGetCommand extends Command {
   static paths = [["agent", "get"]];
-  static usage = Command.Usage({ description: "查看单个 agent 详情" });
+  static usage = Command.Usage({ description: "View a single agent's details" });
 
   name = Option.String();
   output = Option.String("--output", "yaml");
@@ -124,19 +124,19 @@ export class AgentGetCommand extends Command {
 
 export class AgentCreateCommand extends Command {
   static paths = [["agent", "create"]];
-  static usage = Command.Usage({ description: "从 YAML 定义文件创建 agent" });
+  static usage = Command.Usage({ description: "Create an agent from a YAML definition file" });
 
-  file = Option.String("--file", { description: "agent.yaml 文件路径" });
+  file = Option.String("--file", { description: "Path to agent.yaml" });
   output = Option.String("--output", "yaml");
-  desktop = Option.Boolean("--desktop", { description: "上架为桌面端代理；--no-desktop 取消" });
-  mobile = Option.Boolean("--mobile", { description: "上架为手机端代理；--no-mobile 取消" });
+  desktop = Option.Boolean("--desktop", { description: "Publish as desktop agent; --no-desktop to disable" });
+  mobile = Option.Boolean("--mobile", { description: "Publish as mobile agent; --no-mobile to disable" });
   default = Option.Boolean("--default", {
-    description: "设为默认 agent；使用 --no-default 取消默认",
+    description: "Set as default agent; use --no-default to unset",
   });
 
   async execute(): Promise<number> {
     if (!this.file) {
-      process.stderr.write("错误：缺少 --file 参数\n");
+      process.stderr.write("Error: missing --file parameter\n");
       return 1;
     }
     try {
@@ -152,7 +152,7 @@ export class AgentCreateCommand extends Command {
       return 0;
     } catch (error) {
       if (error instanceof AgentYamlError) {
-        process.stderr.write(`错误：${error.message}\n`);
+        process.stderr.write(`Error: ${error.message}\n`);
         return 2;
       }
       throw error;
@@ -162,15 +162,15 @@ export class AgentCreateCommand extends Command {
 
 export class AgentUpdateCommand extends Command {
   static paths = [["agent", "update"]];
-  static usage = Command.Usage({ description: "更新 agent 配置" });
+  static usage = Command.Usage({ description: "Update agent configuration" });
 
   name = Option.String();
-  file = Option.String("--file", { description: "更新用的 agent.yaml 文件路径" });
+  file = Option.String("--file", { description: "Path to agent.yaml for the update" });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
     if (!this.file) {
-      process.stderr.write("错误：缺少 --file 参数\n");
+      process.stderr.write("Error: missing --file parameter\n");
       return 1;
     }
     try {
@@ -185,7 +185,7 @@ export class AgentUpdateCommand extends Command {
       return 0;
     } catch (error) {
       if (error instanceof AgentYamlError) {
-        process.stderr.write(`错误：${error.message}\n`);
+        process.stderr.write(`Error: ${error.message}\n`);
         return 2;
       }
       throw error;
@@ -195,14 +195,14 @@ export class AgentUpdateCommand extends Command {
 
 export class AgentDeleteCommand extends Command {
   static paths = [["agent", "delete"]];
-  static usage = Command.Usage({ description: "删除 agent" });
+  static usage = Command.Usage({ description: "Delete an agent" });
 
   name = Option.String();
-  force = Option.Boolean("--force", false, { description: "跳过确认" });
+  force = Option.Boolean("--force", false, { description: "Skip confirmation" });
 
   async execute(): Promise<number> {
     await deleteAgent(this.name);
-    console.log(`已删除 agent：${this.name}`);
+    console.log(`Deleted agent: ${this.name}`);
     return 0;
   }
 }
@@ -211,56 +211,56 @@ export class AgentDeleteCommand extends Command {
 
 export class AgentSetSubagentsCommand extends Command {
   static paths = [["agent", "set-subagents"]];
-  static usage = Command.Usage({ description: "设置 agent 的子 agent 列表" });
+  static usage = Command.Usage({ description: "Set agent subagent list" });
 
   name = Option.String();
   subagents = Option.Rest({ required: 0 });
 
   async execute(): Promise<number> {
     await setAgentSubagents(this.name, this.subagents);
-    console.log(`已设置 ${this.subagents.length} 个子 agent`);
+    console.log(`Set ${this.subagents.length} subagents`);
     return 0;
   }
 }
 
 export class AgentSetToolsCommand extends Command {
   static paths = [["agent", "set-tools"]];
-  static usage = Command.Usage({ description: "设置 agent 的工具列表" });
+  static usage = Command.Usage({ description: "Set agent tool list" });
 
   name = Option.String();
   tools = Option.Rest({ required: 0 });
 
   async execute(): Promise<number> {
     await setAgentTools(this.name, this.tools);
-    console.log(`已设置 ${this.tools.length} 个工具`);
+    console.log(`Set ${this.tools.length} tools`);
     return 0;
   }
 }
 
 export class AgentSetMcpsCommand extends Command {
   static paths = [["agent", "set-mcps"]];
-  static usage = Command.Usage({ description: "设置 agent 绑定的 MCP 列表" });
+  static usage = Command.Usage({ description: "Set agent MCP list" });
 
   name = Option.String();
   mcpNames = Option.Rest({ required: 0 });
 
   async execute(): Promise<number> {
     await setAgentMcps(this.name, this.mcpNames);
-    console.log(`已设置 ${this.mcpNames.length} 个 MCP`);
+    console.log(`Set ${this.mcpNames.length} MCPs`);
     return 0;
   }
 }
 
 export class AgentSetSkillsCommand extends Command {
   static paths = [["agent", "set-skills"]];
-  static usage = Command.Usage({ description: "设置 agent 的技能列表" });
+  static usage = Command.Usage({ description: "Set agent skill list" });
 
   name = Option.String();
   skills = Option.Rest({ required: 0 });
 
   async execute(): Promise<number> {
     await setAgentSkills(this.name, this.skills);
-    console.log(`已设置 ${this.skills.length} 个技能`);
+    console.log(`Set ${this.skills.length} skills`);
     return 0;
   }
 }
@@ -269,10 +269,10 @@ export class AgentSetSkillsCommand extends Command {
 
 export class AgentDeployCommand extends Command {
   static paths = [["agent", "deploy"]];
-  static usage = Command.Usage({ description: "部署 agent（创建运行时容器）" });
+  static usage = Command.Usage({ description: "Deploy agent (create runtime container)" });
 
   name = Option.String();
-  force = Option.Boolean("--force", false, { description: "强制重新部署" });
+  force = Option.Boolean("--force", false, { description: "Force redeploy" });
   output = Option.String("--output", "text");
 
   async execute(): Promise<number> {
@@ -284,21 +284,21 @@ export class AgentDeployCommand extends Command {
 
 export class AgentUndeployCommand extends Command {
   static paths = [["agent", "undeploy"]];
-  static usage = Command.Usage({ description: "下线 agent（归档，保留数据）" });
+  static usage = Command.Usage({ description: "Undeploy agent (archive, keep data)" });
 
   name = Option.String();
-  purge = Option.Boolean("--purge", false, { description: "彻底删除，不保留数据" });
+  purge = Option.Boolean("--purge", false, { description: "Permanently delete, no data retention" });
 
   async execute(): Promise<number> {
     await undeployAgent(this.name, this.purge);
-    console.log(this.purge ? `已彻底删除部署：${this.name}` : `已归档部署：${this.name}`);
+    console.log(this.purge ? `Permanently deleted deployment: ${this.name}` : `Archived deployment: ${this.name}`);
     return 0;
   }
 }
 
 export class AgentStartCommand extends Command {
   static paths = [["agent", "start"]];
-  static usage = Command.Usage({ description: "启动已停止的 agent" });
+  static usage = Command.Usage({ description: "Start a stopped agent" });
 
   name = Option.String();
   output = Option.String("--output", "text");
@@ -312,20 +312,20 @@ export class AgentStartCommand extends Command {
 
 export class AgentStopCommand extends Command {
   static paths = [["agent", "stop"]];
-  static usage = Command.Usage({ description: "停止运行中的 agent" });
+  static usage = Command.Usage({ description: "Stop a running agent" });
 
   name = Option.String();
 
   async execute(): Promise<number> {
     await stopAgent(this.name);
-    console.log(`已停止 agent：${this.name}`);
+    console.log(`Stopped agent: ${this.name}`);
     return 0;
   }
 }
 
 export class AgentStatusCommand extends Command {
   static paths = [["agent", "status"]];
-  static usage = Command.Usage({ description: "查看 agent 部署状态" });
+  static usage = Command.Usage({ description: "View agent deployment status" });
 
   name = Option.String();
   output = Option.String("--output", "text");

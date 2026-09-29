@@ -70,7 +70,7 @@ export async function validateSkillDir(dir: string): Promise<ValidateResult> {
     .sort();
 
   if (matches.length === 0) {
-    errors.push("缺少 SKILL.md 文件");
+    errors.push("Missing SKILL.md file");
   } else {
     for (const relPath of matches) {
       const entry: SkillEntry = { path: relPath };
@@ -78,7 +78,7 @@ export async function validateSkillDir(dir: string): Promise<ValidateResult> {
       try {
         content = await readFile(join(dir, relPath), "utf-8");
       } catch (err) {
-        errors.push(`${relPath}: 读取失败 (${(err as Error).message})`);
+        errors.push(`${relPath}: read failed (${(err as Error).message})`);
         skills.push(entry);
         continue;
       }
@@ -92,18 +92,18 @@ export async function validateSkillDir(dir: string): Promise<ValidateResult> {
       const normalized = content.replace(/\r\n/g, "\n");
       const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---/);
       if (!fmMatch) {
-        errors.push(`${relPath}: frontmatter 缺失或未闭合（必须以 --- 开头并以 --- 结束）`);
+        errors.push(`${relPath}: frontmatter missing or unclosed (must start with --- and end with ---)`);
         skills.push(entry);
         continue;
       }
       const fm = parse(fmMatch[1]) as Record<string, unknown>;
       if (!fm.name) {
-        errors.push(`${relPath}: frontmatter 缺少 name 字段`);
+        errors.push(`${relPath}: frontmatter is missing the name field`);
       } else {
         entry.name = String(fm.name);
       }
       if (!fm.description) {
-        errors.push(`${relPath}: frontmatter 缺少 description 字段`);
+        errors.push(`${relPath}: frontmatter is missing the description field`);
       } else {
         entry.description = String(fm.description);
       }
@@ -113,7 +113,7 @@ export async function validateSkillDir(dir: string): Promise<ValidateResult> {
 
   const totalSize = await dirSize(dir);
   if (totalSize > MAX_SIZE) {
-    errors.push(`目录大小 ${(totalSize / 1024 / 1024).toFixed(1)}MB 超过上限 50MB`);
+    errors.push(`directory size ${(totalSize / 1024 / 1024).toFixed(1)}MB exceeds limit 50MB`);
   }
 
   return { valid: errors.length === 0, errors, skills };
@@ -126,7 +126,7 @@ async function dirSize(dir: string): Promise<number> {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
     // Dir missing/unreadable — treat as zero size so validateSkillDir can
-    // still surface the more useful "缺少 SKILL.md" error rather than crash.
+    // still surface the more useful "Missing SKILL.md" error rather than crash.
     return 0;
   }
   for (const entry of entries) {

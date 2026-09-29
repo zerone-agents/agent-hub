@@ -48,7 +48,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function validateStringMap(key: "title" | "description", value: unknown): void {
   if (!isRecord(value) || Object.values(value).some((item) => typeof item !== "string")) {
-    throw new AgentYamlError(`${key} 必须是字符串映射`);
+    throw new AgentYamlError(`${key} must be a string map`);
   }
 }
 
@@ -59,7 +59,7 @@ function addConfigValue(
   source: string,
 ): void {
   if (Object.hasOwn(config, key)) {
-    throw new AgentYamlError(`${key} 同时出现在 config 和${source}`);
+    throw new AgentYamlError(`${key} appears in both config and ${source}`);
   }
   if (key === "title" || key === "description") {
     validateStringMap(key, value);
@@ -76,39 +76,39 @@ export function parseAgentYaml(
     parsed = parse(readFileSync(filePath, "utf8"));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new AgentYamlError(`无法读取或解析 YAML 文件 ${filePath}: ${message}`);
+    throw new AgentYamlError(`Cannot read or parse YAML file ${filePath}: ${message}`);
   }
 
   if (!isRecord(parsed)) {
-    throw new AgentYamlError(`YAML 文件为空或格式错误: ${filePath}`);
+    throw new AgentYamlError(`YAML file is empty or malformed: ${filePath}`);
   }
 
   if (expectedName === undefined) {
     if (typeof parsed.id !== "string" || parsed.id.length === 0) {
-      throw new AgentYamlError("agent.yaml 必须包含 id 字段（agent 标识名）");
+      throw new AgentYamlError("agent.yaml must contain an id field (agent identifier)");
     }
   } else if (Object.hasOwn(parsed, "id")) {
     if (typeof parsed.id !== "string") {
-      throw new AgentYamlError("agent.yaml id 必须是字符串");
+      throw new AgentYamlError("agent.yaml id must be a string");
     }
     if (parsed.id !== expectedName) {
-      throw new AgentYamlError(`agent.yaml id “${parsed.id}” 与命令参数不一致（应为 “${expectedName}”）`);
+      throw new AgentYamlError(`agent.yaml id "${parsed.id}" does not match the command argument (expected "${expectedName}")`);
     }
   }
 
   for (const key of ["desktop", "mobile", "isDefault"] as const) {
     if (parsed[key] !== undefined && typeof parsed[key] !== "boolean") {
-      throw new AgentYamlError(`${key} 必须是布尔值`);
+      throw new AgentYamlError(`${key} must be a boolean`);
     }
   }
 
   if (parsed.config !== undefined && !isRecord(parsed.config)) {
-    throw new AgentYamlError("config 必须是对象");
+    throw new AgentYamlError("config must be an object");
   }
 
   const nativeConfig = (parsed.config ?? {}) as Record<string, unknown>;
   if (Object.hasOwn(nativeConfig, "config")) {
-    throw new AgentYamlError("不允许 config.config");
+    throw new AgentYamlError("config.config is not allowed");
   }
 
   const config = { ...nativeConfig };
@@ -122,7 +122,7 @@ export function parseAgentYaml(
     if (flatKey === "title" || flatKey === "description") {
       validateStringMap(flatKey, value);
     }
-    addConfigValue(config, normalizedKey, value, `顶层 ${flatKey}`);
+    addConfigValue(config, normalizedKey, value, `top-level ${flatKey}`);
   }
 
   if (!Object.hasOwn(config, "title") && typeof parsed.name === "string") {
@@ -131,12 +131,12 @@ export function parseAgentYaml(
 
   if (parsed.extensions !== undefined) {
     if (!isRecord(parsed.extensions)) {
-      throw new AgentYamlError("extensions 必须是对象");
+      throw new AgentYamlError("extensions must be an object");
     }
     const controlPanel = parsed.extensions["control-panel"];
     if (controlPanel !== undefined) {
       if (!isRecord(controlPanel)) {
-        throw new AgentYamlError("extensions.control-panel 必须是对象");
+        throw new AgentYamlError("extensions.control-panel must be an object");
       }
       for (const [key, value] of Object.entries(controlPanel)) {
         addConfigValue(config, key, value, " extensions.control-panel");
@@ -147,7 +147,7 @@ export function parseAgentYaml(
   const flatKeys = new Set(FLAT_ALIASES.keys());
   for (const [key, value] of Object.entries(parsed)) {
     if (RESERVED_KEYS.has(key) || flatKeys.has(key)) continue;
-    addConfigValue(config, key, value, `顶层 ${key}`);
+    addConfigValue(config, key, value, `top-level ${key}`);
   }
 
   const result: ParsedAgentDefinition = { name: expectedName ?? (parsed.id as string), config };
