@@ -109,8 +109,8 @@ export class SkillCreateCommand extends Command {
   });
 
   fromDir = Option.String("--from-dir", { description: "skill 目录路径" });
-  name = Option.String("--name", { description: "skill 标识名（必填）" });
-  title = Option.String("--title", { description: "展示名（默认取 --name 值）" });
+  name = Option.String("--name", { description: "Skill name (required)" });
+  title = Option.String("--title", { description: "Display title (defaults to the --name value)" });
   titleEn = Option.String("--title-en", { description: "英文展示名" });
   description = Option.String("--description", { description: "中文描述" });
   descriptionEn = Option.String("--description-en", { description: "英文描述" });
