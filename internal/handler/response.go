@@ -24,11 +24,23 @@ func respondCreated(c *gin.Context, data interface{}) {
 // (kept verbatim for existing clients & tests) and a stable machine-readable
 // code (issue #149 i18n 方案 B 双写：P6 前端按 code 翻译，error 过渡期保留).
 func respondError(c *gin.Context, code int, errCode, msg string) {
-	c.JSON(code, gin.H{
+	// 单一信封定义（PR #204 评审）：无参数错误 = params 为 nil 的特例。
+	respondErrorWithParams(c, code, errCode, msg, nil)
+}
+
+// respondErrorWithParams extends respondError with interpolation params for
+// the frontend en-mode translation (issue #201 B 档：error 中文原文 + code
+// 稳定码 + params 插值参数；params 为空时键省略，保持旧载荷形状不变).
+func respondErrorWithParams(c *gin.Context, code int, errCode, msg string, params map[string]string) {
+	body := gin.H{
 		"success": false,
 		"error":   msg,
 		"code":    errCode,
-	})
+	}
+	if len(params) > 0 {
+		body["params"] = params
+	}
+	c.JSON(code, body)
 }
 
 func respondMessage(c *gin.Context, code int, msg string) {

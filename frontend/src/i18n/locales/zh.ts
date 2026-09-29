@@ -34,7 +34,27 @@ const zh = {
     timeout: '请求超时，请检查网络',
     networkError: '网络连接失败',
     operationFailed: '操作失败，请重试',
-    uploadFailed: '上传失败'
+    uploadFailed: '上传失败',
+    // agent 域专属校验码（issue #201 B 档，与 errcodes.go 逐字一致）；
+    // zh 模式下 parseApiError 直出后端 error 原文，此处键仅为 zh/en 同构
+    agentNameRequired: 'Agent 标识不能为空',
+    agentNameTooLong: 'Agent 标识长度不能超过 {{limit}} 个字符',
+    agentNameInvalid: 'Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾',
+    agentNameExists: 'Agent "{{name}}" 已存在',
+    agentNotFound: 'Agent 不存在或已被删除',
+    subagentNotFound: '子 Agent "{{name}}" 不存在',
+    subagentSelfReference: '子 Agent 不能与主 Agent 相同',
+    systemPromptRequired: 'systemPrompt 不能为空',
+    configKeyRenamed: '配置项 {{oldKey}} 已更名为 {{newKey}}，请更新调用方后重试',
+    // PR #204 评审补充：400 引用拆键 + 表单高频路径码
+    agentReferenceNotFound: 'Agent "{{name}}" 不存在',
+    invalidPermissionMode: '无效的 permissionMode: {{value}}，可选值: auto, plan, bypassPermissions',
+    maxTurnsNegative: 'maxTurns 不能为负数',
+    maxTurnsTooLarge: 'maxTurns 不能超过 {{limit}}',
+    providerIdNotFound: 'providerId {{providerId}} 不存在',
+    modelSelectionNotFound: 'providerId {{providerId}} 下不存在 selection_id 为 {{selectionId}} 的模型',
+    modelNotFound: 'providerId {{providerId}} 下不存在模型 {{model}}',
+    modelTypeMismatch: '模型 {{model}} 不是 LLM/VLM 类型（实际: {{actual}}），无法绑定到 Agent'
   },
   time: {
     justNow: '刚刚',

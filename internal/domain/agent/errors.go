@@ -6,19 +6,71 @@ import (
 	"strings"
 )
 
+// StableCode 稳定错误码命名类型（PR #204 评审建议）：构造 NewCodedValidationErrorf
+// 时以码常量为唯一合法入参，裸字符串变量拼错在编译期即被拒绝（字面量仍可
+// 隐式转换，配合 handler 侧钉住测试防漂移）。
+type StableCode string
+
 // ValidationError 标记用户面校验错误（请求参数/领域规则不合法）：
 // HTTP 边界（respondAgentError）返回 400 + 原文中文文案；与之相对，
 // 内部诊断（DB/加解密等基础设施包装）走 500 中性文案，完整错误链只在
 // 服务端日志（issue #95 P2：handler 边界分流）。
 type ValidationError struct {
 	msg string
+	// code 稳定错误码（issue #201 B 档）：非空时 HTTP 边界按码下发而非
+	// 笼统的 invalid_agent_config；空串 = 未分类，回落粗码。
+	code StableCode
+	// params 前端 en 翻译的插值参数（值一律 string，不透传任意类型）。
+	params map[string]string
 }
 
 func (e *ValidationError) Error() string { return e.msg }
 
+// StableCode 返回稳定错误码；空串表示未分类（回落 invalid_agent_config）。
+func (e *ValidationError) StableCode() StableCode { return e.code }
+
+// Params 返回插值参数；nil 表示无参数。
+func (e *ValidationError) Params() map[string]string { return e.params }
+
 func NewValidationErrorf(format string, args ...any) error {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
 }
+
+// NewCodedValidationErrorf 构造携带稳定错误码与插值参数的校验错误
+// （issue #201 B 档）：msg 仍为中文原文（zh 模式直出、信息不降级），
+// code/params 供前端 en 模式按 apiErrors.<code> 键插值翻译。code 必须
+// 注册于 internal/handler/errcodes.go；params 值只能是 string。
+func NewCodedValidationErrorf(code StableCode, params map[string]string, format string, args ...any) error {
+	return &ValidationError{msg: fmt.Sprintf(format, args...), code: code, params: params}
+}
+
+// 稳定错误码常量（issue #201 B 档 + PR #204 评审补充）：services 层构造
+// NewCodedValidationErrorf 时引用；值必须与 internal/handler/errcodes.go
+// 注册表及前端 apiErrors.* 键逐字一致（#149 P5 双写契约；两注册表由
+// TestErrcodes_RegistryPinsDomainAgentCodes 钉死防漂移）。
+const (
+	CodeAgentNameRequired StableCode = "agent_name_required"
+	CodeAgentNameTooLong  StableCode = "agent_name_too_long"
+	CodeAgentNameInvalid  StableCode = "agent_name_invalid"
+	CodeAgentNameExists   StableCode = "agent_name_exists"
+	CodeAgentNotFound     StableCode = "agent_not_found"
+	// CodeAgentReferenceNotFound 400 校验路径专用（DeleteAgent/
+	// UpdateSubagents 引用的 Agent 不存在，带 name 插值）；与 404 sentinel
+	// 的 CodeAgentNotFound 拆键，避免共用文案丢失插值（PR #204 评审）。
+	CodeAgentReferenceNotFound StableCode = "agent_reference_not_found"
+	CodeSubagentNotFound       StableCode = "subagent_not_found"
+	CodeSubagentSelfReference  StableCode = "subagent_self_reference"
+	CodeSystemPromptRequired   StableCode = "system_prompt_required"
+	CodeConfigKeyRenamed       StableCode = "config_key_renamed"
+	// 表单高频路径（PR #204 评审补充）
+	CodeInvalidPermissionMode  StableCode = "invalid_permission_mode"
+	CodeMaxTurnsNegative       StableCode = "max_turns_negative"
+	CodeMaxTurnsTooLarge       StableCode = "max_turns_too_large"
+	CodeProviderIdNotFound     StableCode = "provider_id_not_found"
+	CodeModelSelectionNotFound StableCode = "model_selection_not_found"
+	CodeModelNotFound          StableCode = "model_not_found"
+	CodeModelTypeMismatch      StableCode = "model_type_mismatch"
+)
 
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按
 // fmt.Errorf("%w: %s", ErrAgentNotFound, name) 包装，handler 用 errors.Is 映射

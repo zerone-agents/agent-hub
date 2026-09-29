@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -144,6 +145,9 @@ func TestAgentHandler_Create_Validation400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾")
 	require.NotContains(t, respBody, "服务器内部错误")
+	// #201 B 档：标识格式错误携带专属稳定码，en 模式按码翻译。
+	env := decodeErrEnvelope(t, w)
+	require.Equal(t, "agent_name_invalid", env.Code)
 }
 
 // TestAgentHandler_List_InternalError500Neutral 锁定 List（GetDesktopAgents）
@@ -191,6 +195,10 @@ func TestAgentHandler_Create_NameConflict400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "Agent 'builder-a' 已存在")
 	require.NotContains(t, respBody, "服务器内部错误")
+	// #201 B 档：重名错误携带 agent_name_exists 码与 name 插值参数。
+	env := decodeErrEnvelope(t, w)
+	require.Equal(t, "agent_name_exists", env.Code)
+	require.Equal(t, "builder-a", env.Params["name"])
 }
 
 // TestAgentHandler_UpdateSubagents_MainAgentNotFound400 锁定 UpdateSubagents
@@ -211,6 +219,88 @@ func TestAgentHandler_UpdateSubagents_MainAgentNotFound400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "Agent 'ghost-parent' 不存在")
 	require.NotContains(t, respBody, "服务器内部错误")
+	// #201 B 档 + PR #204 评审拆键：400 校验路径（引用的 Agent 不存在）用
+	// agent_reference_not_found 带 name 插值（en 键带 {{name}}）；agent_not_found
+	// 保留给 404 sentinel 路径（无 name 可插，共用会丢失插值信息）。
+	env := decodeErrEnvelope(t, w)
+	require.Equal(t, "agent_reference_not_found", env.Code)
+	require.Equal(t, "ghost-parent", env.Params["name"])
+}
+
+// agentErrEnvelope / decodeErrEnvelope 解析错误响应体以断言稳定码与
+// 插值参数（issue #201 B 档双写契约：code + params）。
+type agentErrEnvelope struct {
+	Success bool              `json:"success"`
+	Error   string            `json:"error"`
+	Code    string            `json:"code"`
+	Params  map[string]string `json:"params"`
+}
+
+func decodeErrEnvelope(t *testing.T, w *httptest.ResponseRecorder) agentErrEnvelope {
+	t.Helper()
+	var env agentErrEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	return env
+}
+
+// TestAgentHandler_UpdateSubagents_CodedValidation400 锁定 #201 B 档：
+// 子 Agent 不存在 / 自引用两条校验错误携带专属稳定码与插值参数（前端
+// en 模式按 apiErrors.<code> 插值翻译），而非笼统的 invalid_agent_config。
+// 两条路径都在 ReplaceSubagents 前失败，无需 tools 表。
+func TestAgentHandler_UpdateSubagents_CodedValidation400(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	seedAgentRow(t, db, "worker-m")
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
+	r := newAgentErrorRouter(h)
+
+	put := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/worker-m/subagents", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("subagent not found carries name param", func(t *testing.T) {
+		w := put(`{"subagents":["ghost-sub"]}`)
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Contains(t, w.Body.String(), "子 Agent 'ghost-sub' 不存在")
+		env := decodeErrEnvelope(t, w)
+		require.Equal(t, "subagent_not_found", env.Code)
+		require.Equal(t, "ghost-sub", env.Params["name"])
+	})
+
+	t.Run("self reference has no params", func(t *testing.T) {
+		w := put(`{"subagents":["worker-m"]}`)
+		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Contains(t, w.Body.String(), "子 Agent 不能与主 Agent 相同")
+		env := decodeErrEnvelope(t, w)
+		require.Equal(t, "subagent_self_reference", env.Code)
+		require.Empty(t, env.Params)
+	})
+}
+
+// TestAgentHandler_Create_RenamedConfigKey400 锁定 #201 B 档：旧 key 哨兵
+// （maxSessionTurns → maxSessionQueries）携带 config_key_renamed 码与
+// oldKey/newKey 插值参数。
+func TestAgentHandler_Create_RenamedConfigKey400(t *testing.T) {
+	setupAgentErrorTestDB(t)
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
+	r := newAgentErrorRouter(h)
+
+	body := `{"name":"builder-b","config":{"systemPrompt":"hello","maxSessionTurns":50}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), "maxSessionTurns")
+	env := decodeErrEnvelope(t, w)
+	require.Equal(t, "config_key_renamed", env.Code)
+	require.Equal(t, "maxSessionTurns", env.Params["oldKey"])
+	require.Equal(t, "maxSessionQueries", env.Params["newKey"])
 }
 
 // ensureSubagentToolTables creates the tools + agent_tools join table via raw

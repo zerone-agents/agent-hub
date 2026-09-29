@@ -46,6 +46,28 @@ const (
 	ErrCodeProviderNotFound        = "provider_not_found"
 	ErrCodeSceneNotFound           = "scene_not_found"
 	ErrCodeSessionNotFound         = "session_not_found"
+	// agent 域专属校验码（issue #201 B 档 + PR #204 评审补充）：由 services
+	// 层 NewCodedValidationErrorf 构造（码常量见 domain/agent/errors.go），
+	// respondAgentError 分派读 ve.StableCode()，此处字面量收录保持注册表
+	// 完整；agent_not_found 复用上方既有码（404 sentinel 专用，400 校验
+	// 路径用 agent_reference_not_found 拆键带 name 插值）。两注册表由
+	// TestErrcodes_RegistryPinsDomainAgentCodes 钉死防漂移。
+	ErrCodeAgentNameExists        = "agent_name_exists"
+	ErrCodeAgentNameInvalid       = "agent_name_invalid"
+	ErrCodeAgentNameRequired      = "agent_name_required"
+	ErrCodeAgentNameTooLong       = "agent_name_too_long"
+	ErrCodeAgentReferenceNotFound = "agent_reference_not_found"
+	ErrCodeConfigKeyRenamed       = "config_key_renamed"
+	ErrCodeSubagentNotFound       = "subagent_not_found"
+	ErrCodeSubagentSelfReference  = "subagent_self_reference"
+	ErrCodeSystemPromptRequired   = "system_prompt_required"
+	ErrCodeInvalidPermissionMode  = "invalid_permission_mode"
+	ErrCodeMaxTurnsNegative       = "max_turns_negative"
+	ErrCodeMaxTurnsTooLarge       = "max_turns_too_large"
+	ErrCodeProviderIdNotFound     = "provider_id_not_found"
+	ErrCodeModelSelectionNotFound = "model_selection_not_found"
+	ErrCodeModelNotFound          = "model_not_found"
+	ErrCodeModelTypeMismatch      = "model_type_mismatch"
 	// deploy
 	ErrCodeDeployDeleteFailed        = "deploy_delete_failed"
 	ErrCodeDeployFailed              = "deploy_failed"

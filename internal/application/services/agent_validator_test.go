@@ -92,6 +92,79 @@ func TestValidateAgentName(t *testing.T) {
 	}
 }
 
+// codedCode extracts the stable code + interpolation params from a coded
+// ValidationError（PR #204 评审补充：表单路径码断言用）。
+func codedCode(t *testing.T, err error) (agent.StableCode, map[string]string) {
+	t.Helper()
+	var ve *agent.ValidationError
+	require.ErrorAs(t, err, &ve)
+	return ve.StableCode(), ve.Params()
+}
+
+// TestValidateConfig_FormPathStableCodes pins the PR #204 review-round-2
+// form-path codes: permissionMode / maxTurns / providerId / model binding
+// carry dedicated stable codes with interpolation params instead of falling
+// back to the coarse invalid_agent_config.
+func TestValidateConfig_FormPathStableCodes(t *testing.T) {
+	t.Run("invalid permissionMode carries value param", func(t *testing.T) {
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{"permissionMode": "yolo"}))
+		require.Equal(t, agent.StableCode("invalid_permission_mode"), code)
+		require.Equal(t, map[string]string{"value": "yolo"}, params)
+	})
+
+	t.Run("negative maxTurns", func(t *testing.T) {
+		// JSON 解码形态：数字装箱为 float64（int 字面量会跳过 .(float64) 断言）
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{"maxTurns": float64(-1)}))
+		require.Equal(t, agent.StableCode("max_turns_negative"), code)
+		require.Empty(t, params)
+	})
+
+	t.Run("maxTurns above bound carries limit param", func(t *testing.T) {
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{"maxTurns": float64(501)}))
+		require.Equal(t, agent.StableCode("max_turns_too_large"), code)
+		require.Equal(t, map[string]string{"limit": "500"}, params)
+	})
+
+	t.Run("provider does not exist carries providerId param", func(t *testing.T) {
+		setupAgentValidatorTestDB(t)
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(999), "modelId": "any",
+		}))
+		require.Equal(t, agent.StableCode("provider_id_not_found"), code)
+		require.Equal(t, map[string]string{"providerId": "999"}, params)
+	})
+
+	t.Run("model not found carries providerId+model", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "ghost",
+		}))
+		require.Equal(t, agent.StableCode("model_not_found"), code)
+		require.Equal(t, map[string]string{"providerId": "1", "model": "ghost"}, params)
+	})
+
+	t.Run("model type mismatch carries model+actual", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		require.NoError(t, db.Create(&providerdomain.ProviderModel{
+			ProviderID: 1, SelectionID: "emb", ModelID: "embedding-3",
+			DisplayName: "Emb", ModelType: "embedding", Status: "1",
+		}).Error)
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "embedding-3",
+		}))
+		require.Equal(t, agent.StableCode("model_type_mismatch"), code)
+		require.Equal(t, map[string]string{"model": "embedding-3", "actual": "embedding"}, params)
+	})
+}
+
 // TestAgentDeployerService_NormalizesNameOnBoundary is the regression test
 // for the original symptom: control-panel stored the user's original casing
 // but deployer registered the lowercased/hyphenated form, so subsequent
