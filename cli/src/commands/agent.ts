@@ -83,7 +83,7 @@ async function renderDeployment(d: DeploymentInfo, output: string) {
     console.log(`Runtime:   ${resolveRuntimeUrl(d.runtimeUrl, serverUrl)}`);
   }
   if (d.hostPort) console.log(`Port:      ${d.hostPort}`);
-  if (d.deployedAt) console.log(`Deployed:  ${d.deployedAt}`);
+  if (d.deployedAt) console.log(`Deployed: ${d.deployedAt}`);
   if (d.message) console.log(`Message:   ${d.message}`);
 }
 
