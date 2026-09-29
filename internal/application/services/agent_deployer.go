@@ -1080,9 +1080,10 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 // loadAgentGraph resolves the deploy closure of root: root plus its directly
 // mounted subagents, each as a complete AgentDefinition. Runtime delegation
 // depth is fixed at one level: a child's own mounts are a pure config-layer
-// concern and are silently ignored here (its subagent references are cleared
-// before shipping), so the config layer may express any layout without
-// breaking deploys. Dangling references still fail explicitly.
+// concern and are silently ignored here — including back-references to the
+// root and references to agents that do not exist (no lookup happens on the
+// child level) — so the config layer may express any layout without breaking
+// deploys. Root-level dangling references still fail explicitly.
 func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID string, rootCfg *agent.AgentConfig) ([]deployer.AgentDefinition, error) {
 	// The root's deployer graph identity is its bare agent id (issue #114);
 	// a subagent with the same name would collide as a duplicate agents[]
@@ -1124,9 +1125,9 @@ func (s *AgentDeployerService) loadAgentGraph(ctx context.Context, tenantID stri
 
 // buildCreateRequest builds the deployer v3 CreateAgentRequest: the complete
 // agent graph resolved by loadAgentGraph plus the runtime-global provider
-// config (and AIGC / chat-pushback sections). Graph violations — missing,
-// cyclic or too-deep mounts, per-agent capability errors — fail the deploy
-// explicitly inside loadAgentGraph.
+// config (and AIGC / chat-pushback sections). Graph violations — root-level
+// dangling references, per-agent capability errors — fail the deploy
+// explicitly inside loadAgentGraph; a child's own mounts are silently ignored.
 func (s *AgentDeployerService) buildCreateRequest(
 	ctx context.Context,
 	tenantID string,

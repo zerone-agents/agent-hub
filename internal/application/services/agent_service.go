@@ -599,9 +599,10 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 		}
 	}
 
-	// 挂载深度不再在配置层限制：运行时固定一层委托（loadAgentGraph 对子
-	// Agent 自身的挂载列表静默忽略），但配置允许任意布局，不能反过来
-	// 约束控制台的 Agent 编排。
+	// Mount depth is no longer constrained at the config layer: the runtime
+	// delegates one level only (loadAgentGraph silently ignores a child's own
+	// mount list at deploy time), so configuration may express any layout —
+	// the console's agent orchestration is never restricted by it.
 	if err := s.repo.ReplaceSubagents(cfg.ID, subagentIDs); err != nil {
 		return err
 	}

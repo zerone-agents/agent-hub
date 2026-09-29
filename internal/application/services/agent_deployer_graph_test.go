@@ -553,6 +553,20 @@ func TestLoadAgentGraph_NestedMountsIgnored(t *testing.T) {
 		childA := nodes[1]
 		require.NotContains(t, childA, "subagents", "back-reference to root must be dropped")
 	})
+
+	// Ghost grandchild: no lookup happens on the child level (the mount list
+	// is cleared without traversal), so a dangling child-level reference
+	// passes silently — unlike a root-level dangling mount, which fails.
+	t.Run("child mounts a nonexistent agent (dangling, silently ignored)", func(t *testing.T) {
+		fx := buildGraphFixture(t)
+		fx.world.subagents[fx.childA.ID] = []string{"ghost-grandchild"}
+
+		body, _ := deployGraphParent(t, fx)
+		nodes := graphAgents(t, body)
+		require.Len(t, nodes, 3, "dangling grandchild must not appear nor fail the deploy")
+		childA := nodes[1]
+		require.NotContains(t, childA, "subagents", "dangling grandchild reference must be dropped")
+	})
 }
 
 // TestDeploy_FailFastOnCapabilityArtifacts is review F4 (issue #111): a node
