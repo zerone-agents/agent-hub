@@ -57,7 +57,7 @@ func TestSeedBuiltins_IsIdempotent(t *testing.T) {
 	toolRepo := repository.NewToolRepository()
 	tools, err := toolRepo.ListAll("")
 	require.NoError(t, err)
-	assert.Len(t, tools, 3, "expected exactly Skill/Task/MultiTask after two SeedBuiltins runs")
+	assert.Len(t, tools, 5, "expected exactly Skill/Task/MultiTask + Memory/MemorySearch after two SeedBuiltins runs")
 }
 
 // TestSeedBuiltins_PreservesExistingSkillWhenAddingTasks covers the production
