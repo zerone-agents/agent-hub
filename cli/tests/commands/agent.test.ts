@@ -332,6 +332,7 @@ describe("agent state metadata", () => {
     (cmd as any).desktop = undefined;
     (cmd as any).mobile = undefined;
     (cmd as any).default = undefined;
+    (cmd as any).guest = undefined;
 
     const origLog = console.log;
     console.log = () => {};
@@ -346,6 +347,7 @@ describe("agent state metadata", () => {
       desktopEnabled: false,
       mobileEnabled: false,
       isDefault: false,
+      guestEnabled: false,
     });
   });
 
@@ -372,7 +374,7 @@ describe("agent state metadata", () => {
   });
 
   test.each([
-    ["forwards present state", "desktop: false\nmobile: true\nisDefault: true\n", { desktopEnabled: false, mobileEnabled: true, isDefault: true }],
+    ["forwards present state", "desktop: false\nmobile: true\nisDefault: true\nguest: true\n", { desktopEnabled: false, mobileEnabled: true, isDefault: true, guestEnabled: true }],
     ["omits absent state", "", {}],
   ])("update %s", async (_label, stateYaml, expectedState) => {
     const yamlPath = writeTempYaml(`id: state-agent\n${stateYaml}`);
@@ -872,5 +874,46 @@ describe("resolveRuntimeUrl", () => {
 
   test("serverUrl 缺失 → 相对路径原样返回（不误报）", () => {
     expect(resolveRuntimeUrl("/runtime/default/test", "")).toBe("/runtime/default/test");
+  });
+});
+
+describe("agent guest flag", () => {
+  beforeEach(() => {
+    mock.module("../../src/config", () => ({
+      ...realConfig,
+      getActiveProfile: mock(() =>
+        Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
+      ),
+    }));
+  });
+
+  test.each([
+    ["file value", false, undefined, false],
+    ["positive CLI overrides", false, true, true],
+    ["negative CLI overrides", true, false, false],
+  ])("create resolves guest %s", async (_label, fileGuest, guest, expected) => {
+    const yamlPath = writeTempYaml(`id: guest-agent\nguest: ${fileGuest}\n`);
+    const fetchMock = setupWriteMocks({ id: 1, name: "guest-agent" });
+    const { AgentCreateCommand } = await import(
+      `../../src/commands/agent.ts?guest=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentCreateCommand();
+    (cmd as any).file = yamlPath;
+    (cmd as any).output = "yaml";
+    (cmd as any).desktop = undefined;
+    (cmd as any).mobile = undefined;
+    (cmd as any).default = undefined;
+    (cmd as any).guest = guest;
+
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      console.log = origLog;
+      rmSync(join(yamlPath, ".."), { recursive: true });
+    }
+
+    expect((fetchMock.mock.calls as any[][])[0][1].body.guestEnabled).toBe(expected);
   });
 });

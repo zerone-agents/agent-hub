@@ -7,6 +7,7 @@ export interface ParsedAgentDefinition {
   desktopEnabled?: boolean;
   mobileEnabled?: boolean;
   isDefault?: boolean;
+  guestEnabled?: boolean;
 }
 
 export class AgentYamlError extends Error {
@@ -35,6 +36,7 @@ const RESERVED_KEYS = new Set([
   "desktop",
   "mobile",
   "isDefault",
+  "guest",
   "extensions",
   "allowedTools",
   "subagents",
@@ -96,7 +98,7 @@ export function parseAgentYaml(
     }
   }
 
-  for (const key of ["desktop", "mobile", "isDefault"] as const) {
+  for (const key of ["desktop", "mobile", "isDefault", "guest"] as const) {
     if (parsed[key] !== undefined && typeof parsed[key] !== "boolean") {
       throw new AgentYamlError(`${key} must be a boolean`);
     }
@@ -154,5 +156,6 @@ export function parseAgentYaml(
   if (typeof parsed.desktop === "boolean") result.desktopEnabled = parsed.desktop;
   if (typeof parsed.mobile === "boolean") result.mobileEnabled = parsed.mobile;
   if (typeof parsed.isDefault === "boolean") result.isDefault = parsed.isDefault;
+  if (typeof parsed.guest === "boolean") result.guestEnabled = parsed.guest;
   return result;
 }

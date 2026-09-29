@@ -33,6 +33,7 @@ function agentToRow(a: Agent): Record<string, unknown> {
     desktop: a.desktopEnabled ?? false,
     mobile: a.mobileEnabled ?? false,
     default: a.isDefault ?? false,
+    guest: a.guestEnabled ?? false,
   };
 }
 
@@ -133,6 +134,9 @@ export class AgentCreateCommand extends Command {
   default = Option.Boolean("--default", {
     description: "Set as default agent; use --no-default to unset",
   });
+  guest = Option.Boolean("--guest", {
+    description: "Open agent to guests; use --no-guest to disable",
+  });
 
   async execute(): Promise<number> {
     if (!this.file) {
@@ -147,6 +151,7 @@ export class AgentCreateCommand extends Command {
         desktopEnabled: this.desktop ?? body.desktopEnabled ?? false,
         mobileEnabled: this.mobile ?? body.mobileEnabled ?? false,
         isDefault: this.default ?? body.isDefault ?? false,
+        guestEnabled: this.guest ?? body.guestEnabled ?? false,
       });
       renderAgent(agent, this.output);
       return 0;
@@ -180,6 +185,7 @@ export class AgentUpdateCommand extends Command {
         ...(parsed.desktopEnabled !== undefined ? { desktopEnabled: parsed.desktopEnabled } : {}),
         ...(parsed.mobileEnabled !== undefined ? { mobileEnabled: parsed.mobileEnabled } : {}),
         ...(parsed.isDefault !== undefined ? { isDefault: parsed.isDefault } : {}),
+        ...(parsed.guestEnabled !== undefined ? { guestEnabled: parsed.guestEnabled } : {}),
       });
       renderAgent(agent, this.output);
       return 0;

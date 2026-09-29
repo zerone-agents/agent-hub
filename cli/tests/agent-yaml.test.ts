@@ -177,3 +177,35 @@ futureField: top-level
     expect(() => parseAgentYaml(file)).toThrow("futureField appears in both");
   });
 });
+
+describe("parseAgentYaml guest flag", () => {
+  test("top-level guest maps to guestEnabled state", () => {
+    const file = yamlFile(`
+id: guest-agent
+guest: true
+`);
+    expect(parseAgentYaml(file)).toMatchObject({
+      name: "guest-agent",
+      guestEnabled: true,
+      config: {},
+    });
+  });
+
+  test("guest is not folded into config", () => {
+    const file = yamlFile(`
+id: guest-agent
+guest: false
+`);
+    const parsed = parseAgentYaml(file);
+    expect(parsed.config).not.toHaveProperty("guest");
+    expect(parsed.guestEnabled).toBe(false);
+  });
+
+  test("guest must be a boolean", () => {
+    const file = yamlFile(`
+id: guest-agent
+guest: yes
+`);
+    expect(() => parseAgentYaml(file)).toThrow("guest must be a boolean");
+  });
+});
