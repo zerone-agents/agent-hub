@@ -305,25 +305,76 @@ func migrateToolsSource() error {
 
 // migrateMemoryToolsBuiltin 把 Memory / MemorySearch 两条 zerone 自建工具行
 // 归一为内置预设：source → builtin、tenant_id → 共享域（”）、清空制品字段
-// （builtin 无制品语义，ArtifactStatus 恒 ready）。SDK 侧这两个工具是条件
-// 挂载的内置件（runtime 绑定 MemoryService 时生效），Hub 无需制品文件。
-// SessionSearch 是 ZeroneApp 侧 defineTool 自建工具，不在此列，保持 custom。
-// 幂等：转换后 WHERE 条件不再命中，重启无副作用。
+// （builtin 无制品语义，ArtifactStatus 恒 ready）并按预设文案归一元数据
+// （存量 custom 行大概率缺 DescriptionEn，SeedBuiltins 存在即跳过不会补）。
+// SDK 侧这两个工具是条件挂载的内置件（runtime 绑定 MemoryService 时生效），
+// Hub 无需制品文件。SessionSearch 是 ZeroneApp 侧 defineTool 自建工具，
+// 不在此列，保持 custom。
+//
+// 同名多行防撞（uk_tools_tenant_name）：自建多组织部署中 ('acme','Memory')
+// 与 ('beta','Memory') 在组合索引下合法共存，朴素归一会同时写入共享域撞
+// 唯一索引 → 启动失败。因此每个名字只把 MIN(id) 的那一行（跨租户域+共享域
+// 合并取）归一进共享域；其余同名 custom 行**原地保留**——不删除（agent_tools
+// FK OnDelete RESTRICT，删绑定行会启动失败）、不劫持（租户自建实现继续按
+// TenantWithShared 优先解析，行为不变）。
+//
+// 幂等：转换后 keeper 不再满足 source=custom，重跑不命中。
 func migrateMemoryToolsBuiltin() error {
-	if err := DB.Model(&agent.Tool{}).
-		Where("name IN ?", []string{"Memory", "MemorySearch"}).
-		Where("source = ?", agent.ToolSourceCustom).
-		Updates(map[string]interface{}{
-			"source":    agent.ToolSourceBuiltin,
-			"tenant_id": "",
-			"file_name": "",
-			"file_url":  "",
-			"file_hash": "",
-			"file_size": 0,
-		}).Error; err != nil {
-		return fmt.Errorf("convert memory tools to builtin: %w", err)
+	for _, spec := range memoryToolMigrationSpecs {
+		// keeper 选择（防撞 uk_tools_tenant_name）：
+		//   1) 共享域已有同名 custom 行 → 就地转换它，租户行一律不动；
+		//   2) 否则取租户域 MIN(id)（派生表绕 MySQL 1093，sqlite 兼容）。
+		// 每个名字最多一行进入/停留在共享域，其余同名行原地保留。
+		if err := DB.Exec(
+			`UPDATE tools SET source = ?, title = ?, description = ?, description_en = ?,
+				file_name = '', file_url = '', file_hash = '', file_size = 0
+			WHERE tenant_id = '' AND name = ? AND source = ?`,
+			agent.ToolSourceBuiltin, spec.title, spec.description, spec.descriptionEn,
+			spec.name, agent.ToolSourceCustom,
+		).Error; err != nil {
+			return fmt.Errorf("convert shared %s tool to builtin: %w", spec.name, err)
+		}
+		if err := DB.Exec(
+			`UPDATE tools SET source = ?, tenant_id = '', title = ?, description = ?, description_en = ?,
+				file_name = '', file_url = '', file_hash = '', file_size = 0
+			WHERE name = ? AND source = ? AND tenant_id != ''
+			AND id = (SELECT keep_id FROM (SELECT MIN(id) AS keep_id FROM tools WHERE name = ? AND source = ? AND tenant_id != '') dt)
+			AND NOT EXISTS (SELECT 1 FROM tools WHERE tenant_id = '' AND name = ?)`,
+			agent.ToolSourceBuiltin, spec.title, spec.description, spec.descriptionEn,
+			spec.name, agent.ToolSourceCustom, spec.name, agent.ToolSourceCustom, spec.name,
+		).Error; err != nil {
+			return fmt.Errorf("convert tenant %s tool to builtin: %w", spec.name, err)
+		}
 	}
 	return nil
+}
+
+// memoryToolMigrationSpecs 是 migrateMemoryToolsBuiltin 的冻结名单+文案。
+// 一次性迁移须冻结范围与文案（引用 presetToolSpecs 会引入
+// pkg/database → application/services 反向依赖，且活名单扩名会误伤）。
+var memoryToolMigrationSpecs = []struct {
+	name          string
+	title         string
+	description   string
+	descriptionEn string
+}{
+	{"Memory", "长期记忆", "跨会话读写长期记忆，仅保留对未来工作有复用价值的稳定信息。", "Store and revise durable information in long-term memory across sessions"},
+	{"MemorySearch", "记忆检索", "检索持久记忆中先前存储的记录，支持短语句或用 | 分隔的 OR 候选词。", "Recall records stored in persistent memory, using short phrases or |-separated OR candidates"},
+}
+
+// presetToolNamesV1 是 migrateMcpToolsSkillsScenesTenantID 归零 UPDATE 的
+// 冻结名单快照（Memory/MemorySearch 扩容前的 18 个预设）。一次性迁移的
+// 归零范围必须冻结：活名单（agent.PresetToolNames）扩名后，仍处于本迁移
+// 触发态（旧 uk_name 索引存在 / 存在遗留未回填行）的库会把新名字的租户
+// custom 行提前扫入共享域——在 migrateMemoryToolsBuiltin 的 MIN 去重之前
+// 撞 uk_tools_tenant_name 导致启动失败。新名字的归一由
+// migrateMemoryToolsBuiltin（带去重）独立负责。
+var presetToolNamesV1 = []string{
+	"Skill", "Task", "MultiTask",
+	"Bash", "Read", "Write", "Edit", "Glob", "Grep",
+	"WebFetch", "WebSearch", "AskUserQuestion",
+	"CronCreate", "CronDelete", "CronList",
+	"Config", "TodoWrite", "FindTool",
 }
 
 // migrateProviderSplit copies rows from the legacy vendor_presets backup
@@ -1025,11 +1076,12 @@ func migrateMcpToolsSkillsScenesTenantID() error {
 			return fmt.Errorf("reset builtin mcp_servers to shared: %w", err)
 		}
 		// tools 的 SeedIfEmpty/SeedBuiltins 预设行没有 is_builtin 标志，按
-		// agent.PresetToolNames 固定名单一并归入共享模板——名单与 seeding
-		// 同源维护，新增预设工具两处自动同步。
-		placeholders := make([]string, len(agent.PresetToolNames))
-		args := make([]interface{}, len(agent.PresetToolNames))
-		for i, name := range agent.PresetToolNames {
+		// presetToolNamesV1 冻结快照一并归入共享模板。必须用冻结名单而非
+		// 活名单 agent.PresetToolNames：扩名会把新名字（如 Memory）的租户
+		// custom 行提前归零进共享域，撞 uk_tenant_name（见 v1 定义处注释）。
+		placeholders := make([]string, len(presetToolNamesV1))
+		args := make([]interface{}, len(presetToolNamesV1))
+		for i, name := range presetToolNamesV1 {
 			placeholders[i] = "?"
 			args[i] = name
 		}

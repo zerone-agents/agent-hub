@@ -12,6 +12,8 @@ import (
 
 func setupMemoryToolsMigrationDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	oldDB := DB
+	t.Cleanup(func() { DB = oldDB })
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
@@ -92,4 +94,66 @@ func TestMigrateMemoryToolsBuiltin_Idempotent(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&agent.Tool{}).Where("name = ?", "Memory").Count(&count).Error)
 	require.Equal(t, int64(1), count)
+}
+
+func TestMigrateMemoryToolsBuiltin_SameNameMultiRowNoIndexCollision(t *testing.T) {
+	db := setupMemoryToolsMigrationDB(t)
+
+	// 自建多组织部署形态：两租户同名 custom 行在 uk(tenant_id,name) 下合法共存，
+	// 再加一条共享域同名行——朴素归一会同时写 tenant_id='' 撞唯一索引。
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Memory", TenantID: "acme", Source: agent.ToolSourceCustom, Title: "租户A的记忆",
+	}).Error)
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Memory", TenantID: "beta", Source: agent.ToolSourceCustom, Title: "租户B的记忆",
+	}).Error)
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Memory", TenantID: "", Source: agent.ToolSourceCustom, Title: "共享旧行",
+	}).Error)
+
+	// 不返回错误（不撞 uk_tools_tenant_name）。
+	require.NoError(t, migrateMemoryToolsBuiltin())
+
+	// 共享域恰好一行、source=builtin。
+	var shared []agent.Tool
+	require.NoError(t, db.Where("name = ? AND tenant_id = ''", "Memory").Find(&shared).Error)
+	require.Len(t, shared, 1)
+	require.Equal(t, agent.ToolSourceBuiltin, shared[0].Source)
+
+	// 其余行原地保留为租户 custom（不被劫持、不删除——agent_tools FK RESTRICT）。
+	var acme, beta agent.Tool
+	require.NoError(t, db.Where("name = ? AND tenant_id = ?", "Memory", "acme").First(&acme).Error)
+	require.NoError(t, db.Where("name = ? AND tenant_id = ?", "Memory", "beta").First(&beta).Error)
+	if shared[0].ID != acme.ID {
+		require.Equal(t, agent.ToolSourceCustom, acme.Source)
+	}
+	if shared[0].ID != beta.ID {
+		require.Equal(t, agent.ToolSourceCustom, beta.Source)
+	}
+}
+
+func TestMigrateMemoryToolsBuiltin_NormalizesMetadata(t *testing.T) {
+	db := setupMemoryToolsMigrationDB(t)
+
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "Memory", TenantID: "acme", Source: agent.ToolSourceCustom,
+		Title: "旧标题", Description: "旧描述", // DescriptionEn 缺失
+	}).Error)
+
+	require.NoError(t, migrateMemoryToolsBuiltin())
+
+	var memory agent.Tool
+	require.NoError(t, db.Where("name = ?", "Memory").First(&memory).Error)
+	require.Equal(t, "长期记忆", memory.Title)
+	require.NotEmpty(t, memory.Description)
+	require.NotEmpty(t, memory.DescriptionEn)
+}
+
+// TestPresetToolNamesV1_FrozenForLegacyMigration v1 冻结名单是 18 个旧预设、
+// 不含新扩名字——防止有人「顺手同步」回活名单，重新引入提前归零撞索引风险。
+func TestPresetToolNamesV1_FrozenForLegacyMigration(t *testing.T) {
+	require.Len(t, presetToolNamesV1, 18)
+	require.NotContains(t, presetToolNamesV1, "Memory")
+	require.NotContains(t, presetToolNamesV1, "MemorySearch")
+	require.Contains(t, presetToolNamesV1, "FindTool")
 }
