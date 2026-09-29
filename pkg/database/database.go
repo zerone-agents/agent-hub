@@ -339,7 +339,7 @@ func migrateMemoryToolsBuiltin() error {
 				file_name = '', file_url = '', file_hash = '', file_size = 0
 			WHERE name = ? AND source = ? AND tenant_id != ''
 			AND id = (SELECT keep_id FROM (SELECT MIN(id) AS keep_id FROM tools WHERE name = ? AND source = ? AND tenant_id != '') dt)
-			AND NOT EXISTS (SELECT 1 FROM tools WHERE tenant_id = '' AND name = ?)`,
+			AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM tools WHERE tenant_id = '' AND name = ?) probe)`,
 			agent.ToolSourceBuiltin, spec.title, spec.description, spec.descriptionEn,
 			spec.name, agent.ToolSourceCustom, spec.name, agent.ToolSourceCustom, spec.name,
 		).Error; err != nil {
