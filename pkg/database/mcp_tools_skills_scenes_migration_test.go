@@ -138,13 +138,14 @@ func TestMigrateMcpToolsSkillsScenes_NewInstallNoOp(t *testing.T) {
 	require.Equal(t, map[string]string{"Skill": "", "Bash": ""}, tenantIDsByTable(t, db, "tools"))
 }
 
-// TestPresetToolNames_ExpandedTo18 预设清单 18 个且含 9 个新名字（防回退）。
-func TestPresetToolNames_ExpandedTo18(t *testing.T) {
-	require.Len(t, agent.PresetToolNames, 18)
+// TestPresetToolNames_ExpandedTo20 预设清单 20 个且含 11 个新名字（防回退）。
+func TestPresetToolNames_ExpandedTo20(t *testing.T) {
+	require.Len(t, agent.PresetToolNames, 20)
 	for _, name := range []string{
 		"WebFetch", "WebSearch", "AskUserQuestion",
 		"CronCreate", "CronDelete", "CronList",
 		"Config", "TodoWrite", "FindTool",
+		"Memory", "MemorySearch",
 	} {
 		require.Contains(t, agent.PresetToolNames, name)
 	}

@@ -237,6 +237,10 @@ func AutoMigrate(backfillTenant string) error {
 		return fmt.Errorf("migrate tools source column: %w", err)
 	}
 
+	if err := migrateMemoryToolsBuiltin(); err != nil {
+		return fmt.Errorf("migrate memory tools to builtin: %w", err)
+	}
+
 	log.Println("Database migration completed successfully")
 	return nil
 }
@@ -295,6 +299,29 @@ func migrateToolsSource() error {
 		Where("source = ? AND is_default = ?", agent.ToolSourceCustom, true).
 		Update("is_default", false).Error; err != nil {
 		return fmt.Errorf("clear is_default on custom tools: %w", err)
+	}
+	return nil
+}
+
+// migrateMemoryToolsBuiltin 把 Memory / MemorySearch 两条 zerone 自建工具行
+// 归一为内置预设：source → builtin、tenant_id → 共享域（”）、清空制品字段
+// （builtin 无制品语义，ArtifactStatus 恒 ready）。SDK 侧这两个工具是条件
+// 挂载的内置件（runtime 绑定 MemoryService 时生效），Hub 无需制品文件。
+// SessionSearch 是 ZeroneApp 侧 defineTool 自建工具，不在此列，保持 custom。
+// 幂等：转换后 WHERE 条件不再命中，重启无副作用。
+func migrateMemoryToolsBuiltin() error {
+	if err := DB.Model(&agent.Tool{}).
+		Where("name IN ?", []string{"Memory", "MemorySearch"}).
+		Where("source = ?", agent.ToolSourceCustom).
+		Updates(map[string]interface{}{
+			"source":    agent.ToolSourceBuiltin,
+			"tenant_id": "",
+			"file_name": "",
+			"file_url":  "",
+			"file_hash": "",
+			"file_size": 0,
+		}).Error; err != nil {
+		return fmt.Errorf("convert memory tools to builtin: %w", err)
 	}
 	return nil
 }

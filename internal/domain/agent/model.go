@@ -114,9 +114,10 @@ func (t *Tool) ArtifactStatus() string {
 func (t *Tool) IsBuiltin() bool { return t.Source == ToolSourceBuiltin }
 
 // PresetToolNames 是以共享模板行（tenant_id=”）写入 tools 表的全部预设
-// 工具名单，来源 = ToolService.SeedBuiltins（前三个：Skill/Task/MultiTask）
-// + ToolService.SeedIfEmpty（其余十五个：Bash 等六个基础工具 + WebFetch 等
-// 九个平台能力型工具，Memory/SessionSearch/MemorySearch 仍属 zerone 自建）。
+// 工具名单，来源 = ToolService.SeedBuiltins（前五个：Skill/Task/MultiTask
+// + Memory/MemorySearch，SDK 条件挂载的内置件）+ ToolService.SeedIfEmpty
+// （其余：Bash 等六个基础工具 + WebFetch 等平台能力型工具）。
+// SessionSearch 仍属 zerone 自建（ZeroneApp 侧 defineTool，仅 Desktop）。
 // pkg/database 的租户迁移按此名单把旧存量预设行归零为共享——seeding 与
 // 迁移两边必须同源引用本常量，新增预设工具时只改这里。
 var PresetToolNames = []string{
@@ -125,6 +126,7 @@ var PresetToolNames = []string{
 	"WebFetch", "WebSearch", "AskUserQuestion",
 	"CronCreate", "CronDelete", "CronList",
 	"Config", "TodoWrite", "FindTool",
+	"Memory", "MemorySearch",
 }
 
 // AgentTool 是 Agent 与自定义工具的绑定关系。

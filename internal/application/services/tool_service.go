@@ -58,6 +58,11 @@ var presetToolSpecs = []presetToolSpec{
 	{agent.Tool{Name: "Config", Title: "配置管理", Description: "获取或设置配置值，支持会话级别的设置管理。", DescriptionEn: "Get or set configuration values, with session-scoped settings support", IsDefault: false}, false},
 	{agent.Tool{Name: "TodoWrite", Title: "待办事项", Description: "创建并管理当前会话的结构化任务列表，跟踪任务进度和状态。", DescriptionEn: "Create and manage a structured task list for the current session, tracking progress and status", IsDefault: false}, false},
 	{agent.Tool{Name: "FindTool", Title: "查找工具", Description: "查找尚未加载的可用工具，支持关键词搜索或精确名称选择。", DescriptionEn: "Find and activate tools that exist but are not yet loaded, by exact name or keyword search", IsDefault: false}, false},
+	// Memory 双件（issue #61）：SDK 内置、条件挂载（runtime 绑定 MemoryService
+	// 时生效）。seedAlways=true 走 SeedBuiltins 幂等补种——存量库表非空，
+	// SeedIfEmpty 不会补行；存量自建 custom 行由 pkg/database 迁移归一。
+	{agent.Tool{Name: "Memory", Title: "长期记忆", Description: "跨会话读写长期记忆，仅保留对未来工作有复用价值的稳定信息。", DescriptionEn: "Store and revise durable information in long-term memory across sessions", IsDefault: false}, true},
+	{agent.Tool{Name: "MemorySearch", Title: "记忆检索", Description: "检索持久记忆中先前存储的记录，支持短语句或用 | 分隔的 OR 候选词。", DescriptionEn: "Recall records stored in persistent memory, using short phrases or |-separated OR candidates", IsDefault: false}, true},
 }
 
 func init() {
