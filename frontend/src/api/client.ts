@@ -138,14 +138,17 @@ function errCodeToKey(code: string): string {
 export function parseApiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status
-    const data = err.response?.data as { error?: string; message?: string; code?: string } | undefined
+    const data = err.response?.data as
+      | { error?: string; message?: string; code?: string; params?: Record<string, string> }
+      | undefined
 
-    // 稳定码翻译（#149 P5 双写契约 / #175 勘误口径）：仅 en 模式且码命中
-    // apiErrors 键时用翻译——zh 模式下后端 error 本就是更具体的中文原文，
-    // 通用翻译会降级信息；语义码未建键的过渡期 exists 检测后回落原文。
+    // 稳定码翻译（#149 P5 双写契约 / #175 勘误口径；#201 B 档插值参数）：
+    // 仅 en 模式且码命中 apiErrors 键时用翻译（params 透传 i18next 插值）——
+    // zh 模式下后端 error 本就是更具体的中文原文，通用翻译会降级信息；
+    // 语义码未建键的过渡期 exists 检测后回落原文。
     if (data?.code && i18next.language !== 'zh') {
       const key = `apiErrors.${errCodeToKey(data.code)}`
-      if (i18next.exists(key)) return i18next.t(key)
+      if (i18next.exists(key)) return i18next.t(key, data.params ?? {})
     }
 
     // Prefer the backend's `error` field; fall back to `message` for

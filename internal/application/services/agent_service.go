@@ -414,7 +414,8 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, fmt.Errorf("check agent existence failed: %w", err)
 	}
 	if exists {
-		return nil, agent.NewValidationErrorf("Agent '%s' 已存在", input.Name)
+		return nil, agent.NewCodedValidationErrorf(agent.CodeAgentNameExists,
+			map[string]string{"name": input.Name}, "Agent '%s' 已存在", input.Name)
 	}
 
 	if err := ValidateCreateConfig(input.Config); err != nil {
@@ -568,7 +569,8 @@ func (s *AgentService) handleDefaultUpdate(tenantID string, agentID uint64, isDe
 func (s *AgentService) DeleteAgent(tenantID, name string) error {
 	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return agent.NewValidationErrorf("Agent '%s' 不存在", name)
+		return agent.NewCodedValidationErrorf(agent.CodeAgentNotFound,
+			map[string]string{"name": name}, "Agent '%s' 不存在", name)
 	}
 
 	return s.repo.Delete(tenantID, cfg.ID)
@@ -581,21 +583,23 @@ func (s *AgentService) DeleteAgent(tenantID, name string) error {
 func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames []string) error {
 	cfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
-		return agent.NewValidationErrorf("Agent '%s' 不存在", agentName)
+		return agent.NewCodedValidationErrorf(agent.CodeAgentNotFound,
+			map[string]string{"name": agentName}, "Agent '%s' 不存在", agentName)
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
 	for _, subName := range subagentNames {
 		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
-			return agent.NewValidationErrorf("子 Agent '%s' 不存在", subName)
+			return agent.NewCodedValidationErrorf(agent.CodeSubagentNotFound,
+				map[string]string{"name": subName}, "子 Agent '%s' 不存在", subName)
 		}
 		subagentIDs = append(subagentIDs, subCfg.ID)
 	}
 
 	for _, subName := range subagentNames {
 		if subName == agentName {
-			return agent.NewValidationErrorf("子 Agent 不能与主 Agent 相同")
+			return agent.NewCodedValidationErrorf(agent.CodeSubagentSelfReference, nil, "子 Agent 不能与主 Agent 相同")
 		}
 	}
 
@@ -618,7 +622,9 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	// （issue #111）。在任何字段解包前拒绝，保证调用方不会拿到部分解包的
 	// 半成品 cfg。
 	if _, exists := config["maxSessionTurns"]; exists {
-		return agent.NewValidationErrorf("配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
+		return agent.NewCodedValidationErrorf(agent.CodeConfigKeyRenamed,
+			map[string]string{"oldKey": "maxSessionTurns", "newKey": "maxSessionQueries"},
+			"配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
 	}
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v

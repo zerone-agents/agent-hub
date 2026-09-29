@@ -26,13 +26,15 @@ var validAgentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`
 
 func ValidateAgentName(name string) error {
 	if name == "" {
-		return agent.NewValidationErrorf("Agent 标识不能为空")
+		return agent.NewCodedValidationErrorf(agent.CodeAgentNameRequired, nil, "Agent 标识不能为空")
 	}
 	if len(name) > 64 {
-		return agent.NewValidationErrorf("Agent 标识长度不能超过 64 个字符")
+		return agent.NewCodedValidationErrorf(agent.CodeAgentNameTooLong,
+			map[string]string{"limit": "64"}, "Agent 标识长度不能超过 64 个字符")
 	}
 	if !validAgentNamePattern.MatchString(name) {
-		return agent.NewValidationErrorf("Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾")
+		return agent.NewCodedValidationErrorf(agent.CodeAgentNameInvalid, nil,
+			"Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾")
 	}
 	return nil
 }
@@ -74,7 +76,7 @@ func ValidateCreateConfig(config map[string]interface{}) error {
 		return agent.NewValidationErrorf("config 不能为空")
 	}
 	if v, ok := config["systemPrompt"].(string); !ok || v == "" {
-		return agent.NewValidationErrorf("systemPrompt 不能为空")
+		return agent.NewCodedValidationErrorf(agent.CodeSystemPromptRequired, nil, "systemPrompt 不能为空")
 	}
 	return ValidateConfig(config)
 }

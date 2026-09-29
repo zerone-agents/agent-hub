@@ -34,7 +34,18 @@ const zh = {
     timeout: '请求超时，请检查网络',
     networkError: '网络连接失败',
     operationFailed: '操作失败，请重试',
-    uploadFailed: '上传失败'
+    uploadFailed: '上传失败',
+    // agent 域专属校验码（issue #201 B 档，与 errcodes.go 逐字一致）；
+    // zh 模式下 parseApiError 直出后端 error 原文，此处键仅为 zh/en 同构
+    agentNameRequired: 'Agent 标识不能为空',
+    agentNameTooLong: 'Agent 标识长度不能超过 {{limit}} 个字符',
+    agentNameInvalid: 'Agent 标识只能包含小写字母、数字和连字符，必须以字母开头，连字符不能连续或出现在首尾',
+    agentNameExists: 'Agent "{{name}}" 已存在',
+    agentNotFound: 'Agent 不存在或已被删除',
+    subagentNotFound: '子 Agent "{{name}}" 不存在',
+    subagentSelfReference: '子 Agent 不能与主 Agent 相同',
+    systemPromptRequired: 'systemPrompt 不能为空',
+    configKeyRenamed: '配置项 {{oldKey}} 已更名为 {{newKey}}，请更新调用方后重试'
   },
   time: {
     justNow: '刚刚',

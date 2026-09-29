@@ -1,9 +1,44 @@
 package agent
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+// TestValidationErrorCodedContract pins the #201 B-tier contract: a coded
+// validation error carries a stable code plus string interpolation params
+// next to the verbatim Chinese message, while the legacy constructor stays
+// uncoded (HTTP boundary falls back to the coarse invalid_agent_config).
+func TestValidationErrorCodedContract(t *testing.T) {
+	plain := NewValidationErrorf("子 Agent '%s' 不存在", "ghost")
+	var ve *ValidationError
+	if !errors.As(plain, &ve) {
+		t.Fatal("NewValidationErrorf must return *ValidationError")
+	}
+	if ve.StableCode() != "" {
+		t.Fatalf("legacy constructor must stay uncoded, got code %q", ve.StableCode())
+	}
+	if ve.Params() != nil {
+		t.Fatalf("legacy constructor must carry no params, got %v", ve.Params())
+	}
+
+	coded := NewCodedValidationErrorf("subagent_not_found",
+		map[string]string{"name": "ghost"},
+		"子 Agent '%s' 不存在", "ghost")
+	if !errors.As(coded, &ve) {
+		t.Fatal("NewCodedValidationErrorf must return *ValidationError")
+	}
+	if ve.StableCode() != "subagent_not_found" {
+		t.Fatalf("stable code = %q, want subagent_not_found", ve.StableCode())
+	}
+	if got := ve.Params()["name"]; got != "ghost" {
+		t.Fatalf("params[name] = %q, want ghost", got)
+	}
+	if coded.Error() != "子 Agent 'ghost' 不存在" {
+		t.Fatalf("message = %q, want 子 Agent 'ghost' 不存在", coded.Error())
+	}
+}
 
 func TestDatasetInUseError_ErrorListsDatasetsWithAgents(t *testing.T) {
 	err := &DatasetInUseError{Datasets: []DatasetInUseItem{

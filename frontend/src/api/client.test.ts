@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import axios from 'axios'
+import i18next from '@/i18n'
 import { parseApiError } from './client'
 
 describe('parseApiError', () => {
@@ -75,5 +76,53 @@ describe('parseApiError', () => {
 
   it('returns fallback for unknown shapes', () => {
     expect(parseApiError('weird')).toBe('操作失败，请重试')
+  })
+})
+
+describe('parseApiError 稳定码翻译（#201 B 档：en 模式按码插值翻译）', () => {
+  const prevLang = i18next.language
+  afterEach(async () => {
+    await i18next.changeLanguage(prevLang)
+  })
+
+  it('en 模式：命中码键时用插值翻译（params 透传）', async () => {
+    await i18next.changeLanguage('en')
+    const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 400,
+      data: { success: false, error: "子 Agent 'ghost' 不存在", code: 'subagent_not_found', params: { name: 'ghost' } }
+    } as any)
+    expect(parseApiError(err)).toBe('Subagent "ghost" does not exist')
+  })
+
+  it('en 模式：无插值的码键不带 params 也能翻译', async () => {
+    await i18next.changeLanguage('en')
+    const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 400,
+      data: { success: false, error: "Agent 'ghost-parent' 不存在", code: 'agent_not_found', params: { name: 'ghost-parent' } }
+    } as any)
+    expect(parseApiError(err)).toBe('Agent does not exist or has been deleted')
+  })
+
+  it('en 模式：旧 key 哨兵码插值 oldKey/newKey', async () => {
+    await i18next.changeLanguage('en')
+    const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 400,
+      data: {
+        success: false,
+        error: '配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试',
+        code: 'config_key_renamed',
+        params: { oldKey: 'maxSessionTurns', newKey: 'maxSessionQueries' }
+      }
+    } as any)
+    expect(parseApiError(err)).toBe('Config key maxSessionTurns has been renamed to maxSessionQueries, please update and retry')
+  })
+
+  it('zh 模式：带码错误仍直出后端中文原文（信息不降级）', async () => {
+    await i18next.changeLanguage('zh')
+    const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 400,
+      data: { success: false, error: "子 Agent 'ghost' 不存在", code: 'subagent_not_found', params: { name: 'ghost' } }
+    } as any)
+    expect(parseApiError(err)).toBe("子 Agent 'ghost' 不存在")
   })
 })

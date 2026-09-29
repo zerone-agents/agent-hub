@@ -36,7 +36,18 @@ const en = {
     timeout: 'Request timed out, please check your network',
     networkError: 'Network connection failed',
     operationFailed: 'Operation failed, please retry',
-    uploadFailed: 'Upload failed'
+    uploadFailed: 'Upload failed',
+    // agent 域专属校验码（issue #201 B 档，与 errcodes.go 逐字一致；
+    // {{}} 为 i18next 插值，参数由后端 params 字段透传）
+    agentNameRequired: 'Agent identifier is required',
+    agentNameTooLong: 'Agent identifier must be at most {{limit}} characters',
+    agentNameInvalid: 'Agent identifier can only contain lowercase letters, digits and hyphens, must start with a letter, and hyphens cannot be consecutive or at the ends',
+    agentNameExists: 'Agent "{{name}}" already exists',
+    agentNotFound: 'Agent does not exist or has been deleted',
+    subagentNotFound: 'Subagent "{{name}}" does not exist',
+    subagentSelfReference: 'An agent cannot mount itself as a subagent',
+    systemPromptRequired: 'System prompt is required',
+    configKeyRenamed: 'Config key {{oldKey}} has been renamed to {{newKey}}, please update and retry'
   },
   time: {
     justNow: 'just now',

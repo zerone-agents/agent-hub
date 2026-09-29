@@ -12,13 +12,48 @@ import (
 // 服务端日志（issue #95 P2：handler 边界分流）。
 type ValidationError struct {
 	msg string
+	// code 稳定错误码（issue #201 B 档）：非空时 HTTP 边界按码下发而非
+	// 笼统的 invalid_agent_config；空串 = 未分类，回落粗码。
+	code string
+	// params 前端 en 翻译的插值参数（值一律 string，不透传任意类型）。
+	params map[string]string
 }
 
 func (e *ValidationError) Error() string { return e.msg }
 
+// StableCode 返回稳定错误码；空串表示未分类（回落 invalid_agent_config）。
+func (e *ValidationError) StableCode() string { return e.code }
+
+// Params 返回插值参数；nil 表示无参数。
+func (e *ValidationError) Params() map[string]string { return e.params }
+
 func NewValidationErrorf(format string, args ...any) error {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
 }
+
+// NewCodedValidationErrorf 构造携带稳定错误码与插值参数的校验错误
+// （issue #201 B 档）：msg 仍为中文原文（zh 模式直出、信息不降级），
+// code/params 供前端 en 模式按 apiErrors.<code> 键插值翻译。code 必须
+// 注册于 internal/handler/errcodes.go；params 值只能是 string。
+func NewCodedValidationErrorf(code string, params map[string]string, format string, args ...any) error {
+	return &ValidationError{msg: fmt.Sprintf(format, args...), code: code, params: params}
+}
+
+// 稳定错误码常量（issue #201 B 档）：services 层构造 NewCodedValidationErrorf
+// 时引用；值必须与 internal/handler/errcodes.go 注册表及前端 apiErrors.*
+// 键逐字一致（#149 P5 双写契约；wire 值由 handler 测试钉死，handler 侧
+// 保留字面量注册以避免 services→handler 反向依赖）。
+const (
+	CodeAgentNameRequired     = "agent_name_required"
+	CodeAgentNameTooLong      = "agent_name_too_long"
+	CodeAgentNameInvalid      = "agent_name_invalid"
+	CodeAgentNameExists       = "agent_name_exists"
+	CodeAgentNotFound         = "agent_not_found"
+	CodeSubagentNotFound      = "subagent_not_found"
+	CodeSubagentSelfReference = "subagent_self_reference"
+	CodeSystemPromptRequired  = "system_prompt_required"
+	CodeConfigKeyRenamed      = "config_key_renamed"
+)
 
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按
 // fmt.Errorf("%w: %s", ErrAgentNotFound, name) 包装，handler 用 errors.Is 映射
