@@ -301,7 +301,7 @@ func graphSourceNames(t *testing.T, node map[string]any, key string) []string {
 
 // TestDeploy_AgentGraph is the happy-path matrix (brief Step 1 assertions
 // 1-6 and 8). Assertion 7 lives in TestLoadAgentGraph_ValidationMatrix and
-// assertion 9 in TestUpdateSubagents_OneLevelInvariants. Assertion 10 (review
+// assertion 9 in TestUpdateSubagents_NestedMountsAllowed. Assertion 10 (review
 // F1) locks the per-node deployment identity on the knowledge MCP headers.
 func TestDeploy_AgentGraph(t *testing.T) {
 	t.Run("1: body is rootAgentId + agents[] with no legacy top-level keys", func(t *testing.T) {
@@ -471,6 +471,9 @@ func TestDeploy_AgentGraph(t *testing.T) {
 
 // TestLoadAgentGraph_ValidationMatrix is brief assertion 7: every graph
 // violation fails the deploy explicitly, before any deployer create call.
+// Nested mounts (child's own list, including back-references to the root)
+// are NOT violations anymore — runtime ignores them silently; see
+// TestLoadAgentGraph_NestedMountsIgnored.
 func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -492,20 +495,6 @@ func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 				fx.world.subagents[fx.parent.ID] = []string{"parent"}
 			},
 			errPart: "不能挂载自己",
-		},
-		{
-			name: "cycle",
-			mutate: func(fx *graphFixture) {
-				fx.world.subagents[fx.childA.ID] = []string{"parent"}
-			},
-			errPart: "互相挂载",
-		},
-		{
-			name: "depth: child mounts its own subagent",
-			mutate: func(fx *graphFixture) {
-				fx.world.subagents[fx.childA.ID] = []string{"child-b"}
-			},
-			errPart: "仅支持一层委托",
 		},
 		{
 			// The issue #114 analogue of the old deploy-key collision (see
@@ -534,6 +523,36 @@ func TestLoadAgentGraph_ValidationMatrix(t *testing.T) {
 			require.False(t, f.postCalled, "deployer create must not be called on graph violation")
 		})
 	}
+}
+
+// TestLoadAgentGraph_NestedMountsIgnored pins the relaxed delegation rule:
+// runtime depth stays fixed at one level, but a child's own mount list —
+// whether a deeper grandchild (child-a→child-b) or a back-reference cycle
+// (child-a→parent) — is a pure config concern. The deploy must succeed with
+// the nested references dropped from the child's definition instead of
+// failing the whole graph.
+func TestLoadAgentGraph_NestedMountsIgnored(t *testing.T) {
+	t.Run("child mounts a grandchild", func(t *testing.T) {
+		fx := buildGraphFixture(t)
+		fx.world.subagents[fx.childA.ID] = []string{"child-b"}
+
+		body, _ := deployGraphParent(t, fx)
+		nodes := graphAgents(t, body)
+		require.Len(t, nodes, 3, "grandchild must not become a 4th graph entry")
+		childA := nodes[1]
+		require.NotContains(t, childA, "subagents", "child's nested mount refs must be dropped (omitempty)")
+	})
+
+	t.Run("child mounts the root (cycle)", func(t *testing.T) {
+		fx := buildGraphFixture(t)
+		fx.world.subagents[fx.childA.ID] = []string{"parent"}
+
+		body, _ := deployGraphParent(t, fx)
+		nodes := graphAgents(t, body)
+		require.Len(t, nodes, 3)
+		childA := nodes[1]
+		require.NotContains(t, childA, "subagents", "back-reference to root must be dropped")
+	})
 }
 
 // TestDeploy_FailFastOnCapabilityArtifacts is review F4 (issue #111): a node
@@ -620,10 +639,13 @@ func TestLoadAgentGraph_BareIDCollision(t *testing.T) {
 	require.Contains(t, err.Error(), "parent-x")
 }
 
-// TestUpdateSubagents_OneLevelInvariants is brief assertion 9: the mount
-// entrypoint keeps the persisted graph within one delegation level.
-func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
-	t.Run("mounted parent cannot mount others", func(t *testing.T) {
+// TestUpdateSubagents_NestedMountsAllowed pins the relaxed config rule: the
+// mount entrypoint no longer enforces one delegation level — an agent that is
+// itself mounted may mount others, and an agent with its own children may be
+// mounted. Runtime depth stays fixed at one level by dropping nested mounts
+// at deploy time (loadAgentGraph), not by constraining the config layout.
+func TestUpdateSubagents_NestedMountsAllowed(t *testing.T) {
+	t.Run("a mounted agent may mount its own children", func(t *testing.T) {
 		setupSubagentToolsTestDB(t)
 		agentRepo := repository.NewAgentRepository()
 		require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "grand"}))
@@ -636,21 +658,21 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceSubagents(grand.ID, []uint64{parent.ID}))
 
 		svc := NewAgentService("test-encryption-key", "")
-		err = svc.UpdateSubagents("default", "parent", []string{"child"})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "已被其他 Agent 挂载")
+		require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child"}))
 
 		subs, err := agentRepo.GetSubagents(parent.ID)
 		require.NoError(t, err)
-		require.Empty(t, subs, "rejected update must not touch bindings")
+		require.Equal(t, []string{"child"}, subs, "nested binding must persist")
 	})
 
-	t.Run("cannot mount an agent that already mounts others", func(t *testing.T) {
+	t.Run("an agent with its own children may be mounted", func(t *testing.T) {
 		setupSubagentToolsTestDB(t)
 		agentRepo := repository.NewAgentRepository()
 		require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "parent"}))
 		require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "child"}))
 		require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "grandchild"}))
+		parent, err := agentRepo.GetByName("default", "parent")
+		require.NoError(t, err)
 		child, err := agentRepo.GetByName("default", "child")
 		require.NoError(t, err)
 		grandchild, err := agentRepo.GetByName("default", "grandchild")
@@ -658,12 +680,14 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, agentRepo.ReplaceSubagents(child.ID, []uint64{grandchild.ID}))
 
 		svc := NewAgentService("test-encryption-key", "")
-		err = svc.UpdateSubagents("default", "parent", []string{"child"})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "自身已挂载子 Agent")
+		require.NoError(t, svc.UpdateSubagents("default", "parent", []string{"child"}))
+
+		subs, err := agentRepo.GetSubagents(parent.ID)
+		require.NoError(t, err)
+		require.Equal(t, []string{"child"}, subs, "mounting a parent-with-children must persist")
 	})
 
-	t.Run("clearing a mounted parent's own list stays allowed (remediation)", func(t *testing.T) {
+	t.Run("clearing an agent's own list stays allowed", func(t *testing.T) {
 		setupSubagentToolsTestDB(t)
 		agentRepo := repository.NewAgentRepository()
 		require.NoError(t, agentRepo.Create("default", &agent.AgentConfig{Name: "grand"}))
@@ -675,7 +699,7 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 		require.NoError(t, err)
 		child, err := agentRepo.GetByName("default", "child")
 		require.NoError(t, err)
-		// Legacy state predating the invariant: grand→parent→child.
+		// Nested config state: grand→parent→child.
 		require.NoError(t, agentRepo.ReplaceSubagents(grand.ID, []uint64{parent.ID}))
 		require.NoError(t, agentRepo.ReplaceSubagents(parent.ID, []uint64{child.ID}))
 
@@ -684,6 +708,6 @@ func TestUpdateSubagents_OneLevelInvariants(t *testing.T) {
 
 		subs, err := agentRepo.GetSubagents(parent.ID)
 		require.NoError(t, err)
-		require.Empty(t, subs, "clearing must actually clear the legacy violation")
+		require.Empty(t, subs, "clearing must actually clear the list")
 	})
 }

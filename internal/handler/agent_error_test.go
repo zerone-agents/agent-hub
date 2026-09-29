@@ -213,16 +213,57 @@ func TestAgentHandler_UpdateSubagents_MainAgentNotFound400(t *testing.T) {
 	require.NotContains(t, respBody, "服务器内部错误")
 }
 
-// TestAgentHandler_UpdateSubagents_ParentMounted400 锁定一层委托规则原文：
-// 已被其他 Agent 挂载的 Agent 不能再挂载子 Agent（issue #111 委托深度=1）。
-// 前置：parent-a 挂载 worker-b（直插 agent_subagents 行），再 PUT
-// worker-b 挂载 cand-c → 命中 "Agent %q 已被其他 Agent 挂载…" 400 回归。
-func TestAgentHandler_UpdateSubagents_ParentMounted400(t *testing.T) {
+// ensureSubagentToolTables creates the tools + agent_tools join table via raw
+// SQL and seeds the two shared builtin rows (tenant_id=”) that
+// syncSubagentToolBindings resolves on the 200 path of UpdateSubagents.
+// Raw SQL mirrors the services fixture (subagent_tools_test.go): AutoMigrate
+// cannot be used because Tool and AgentConfig both declare uk_name and the
+// index namespace is global on SQLite.
+func ensureSubagentToolTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		`CREATE TABLE IF NOT EXISTS tools (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name VARCHAR(64) NOT NULL,
+			tenant_id VARCHAR(64) NOT NULL DEFAULT '',
+			title VARCHAR(128) DEFAULT '',
+			description TEXT,
+			description_en TEXT,
+			is_default INTEGER NOT NULL DEFAULT 0,
+			source VARCHAR(16) NOT NULL DEFAULT 'custom',
+			file_name VARCHAR(255),
+			file_url VARCHAR(512),
+			file_hash VARCHAR(128),
+			file_size INTEGER,
+			created_at DATETIME,
+			updated_at DATETIME
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS tools_uk_tenant_name ON tools(tenant_id, name)`,
+		`CREATE TABLE IF NOT EXISTS agent_tools (
+			agent_id INTEGER NOT NULL,
+			tool_id INTEGER NOT NULL,
+			created_at DATETIME,
+			PRIMARY KEY (agent_id, tool_id)
+		)`,
+		`INSERT INTO tools (name, tenant_id, title, is_default) VALUES ('Task', '', 'Task', 1)`,
+		`INSERT INTO tools (name, tenant_id, title, is_default) VALUES ('MultiTask', '', 'MultiTask', 1)`,
+	} {
+		require.NoError(t, db.Exec(stmt).Error)
+	}
+}
+
+// TestAgentHandler_UpdateSubagents_MountedAgentMayMountChildren 锁定放宽后
+// 的规则回归：已被其他 Agent 挂载的 Agent 也能配置自己的子 Agent（配置层
+// 不再限制委托深度，运行时在部署时静默忽略嵌套挂载）。前置：parent-a 挂载
+// worker-b（直插 agent_subagents 行），PUT worker-b 挂载 cand-c → 200 且
+// 绑定落库，绝不能再回到 "Agent %q 已被其他 Agent 挂载…" 400。
+func TestAgentHandler_UpdateSubagents_MountedAgentMayMountChildren(t *testing.T) {
 	db := setupAgentErrorTestDB(t)
 	require.NoError(t, db.AutoMigrate(&agent.AgentSubagent{}))
+	ensureSubagentToolTables(t, db)
 	parent := seedAgentRow(t, db, "parent-a")
 	worker := seedAgentRow(t, db, "worker-b")
-	seedAgentRow(t, db, "cand-c")
+	cand := seedAgentRow(t, db, "cand-c")
 	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: parent.ID, SubagentID: worker.ID}).Error)
 
 	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
@@ -234,20 +275,25 @@ func TestAgentHandler_UpdateSubagents_ParentMounted400(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
-	respBody := w.Body.String()
-	require.Contains(t, respBody, `Agent \"worker-b\" 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）`)
-	require.NotContains(t, respBody, "服务器内部错误")
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), "子 Agent 关系已更新")
+
+	var cnt int64
+	require.NoError(t, db.Model(&agent.AgentSubagent{}).Where("agent_id = ?", worker.ID).Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt, "nested binding must persist")
+	require.NoError(t, db.Model(&agent.AgentSubagent{}).Where("agent_id = ? AND subagent_id = ?", worker.ID, cand.ID).Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt, "worker-b → cand-c binding expected")
 }
 
-// TestAgentHandler_UpdateSubagents_SubagentMounted400 锁定一层委托规则原文
-// 的另一侧：自身已挂载子 Agent 的 Agent 不能再被挂载。前置：worker-y 已挂载
-// child-z，PUT parent-x 挂载 worker-y → 命中
-// "Agent %q 自身已挂载子 Agent…" 400 回归。
-func TestAgentHandler_UpdateSubagents_SubagentMounted400(t *testing.T) {
+// TestAgentHandler_UpdateSubagents_AgentWithChildrenMayBeMounted 锁定放宽后
+// 规则的另一侧：自身已挂载子 Agent 的 Agent 也能被别的 Agent 挂载。前置：
+// worker-y 已挂载 child-z，PUT parent-x 挂载 worker-y → 200 且绑定落库，
+// 绝不能再回到 "Agent %q 自身已挂载子 Agent…" 400。
+func TestAgentHandler_UpdateSubagents_AgentWithChildrenMayBeMounted(t *testing.T) {
 	db := setupAgentErrorTestDB(t)
 	require.NoError(t, db.AutoMigrate(&agent.AgentSubagent{}))
-	seedAgentRow(t, db, "parent-x")
+	ensureSubagentToolTables(t, db)
+	parent := seedAgentRow(t, db, "parent-x")
 	worker := seedAgentRow(t, db, "worker-y")
 	child := seedAgentRow(t, db, "child-z")
 	require.NoError(t, db.Create(&agent.AgentSubagent{AgentID: worker.ID, SubagentID: child.ID}).Error)
@@ -261,10 +307,12 @@ func TestAgentHandler_UpdateSubagents_SubagentMounted400(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
-	respBody := w.Body.String()
-	require.Contains(t, respBody, `Agent \"worker-y\" 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）`)
-	require.NotContains(t, respBody, "服务器内部错误")
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), "子 Agent 关系已更新")
+
+	var cnt int64
+	require.NoError(t, db.Model(&agent.AgentSubagent{}).Where("agent_id = ? AND subagent_id = ?", parent.ID, worker.ID).Count(&cnt).Error)
+	require.Equal(t, int64(1), cnt, "parent-x → worker-y binding expected")
 }
 
 // TestAgentHandler_UpdateAgentKnowledge_MissingBuiltinMcp500Neutral 锁定

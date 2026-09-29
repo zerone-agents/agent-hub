@@ -585,14 +585,12 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
-	resolved := make([]*agent.AgentConfig, 0, len(subagentNames))
 	for _, subName := range subagentNames {
 		subCfg, err := s.repo.GetByName(tenantID, subName)
 		if err != nil {
 			return agent.NewValidationErrorf("子 Agent '%s' 不存在", subName)
 		}
 		subagentIDs = append(subagentIDs, subCfg.ID)
-		resolved = append(resolved, subCfg)
 	}
 
 	for _, subName := range subagentNames {
@@ -601,27 +599,9 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 		}
 	}
 
-	// One delegation level only (issue #111; runtime depth is fixed at one):
-	// an agent that is already mounted cannot mount others, and an agent
-	// that already mounts others cannot be mounted. Legacy states that
-	// predate this invariant still fail explicitly at deploy time
-	// (loadAgentGraph); clearing an agent's own list stays allowed so such
-	// violations remain fixable from the console.
-	if len(subagentNames) > 0 {
-		if parentIsMounted, err := s.repo.ExistsSubagentBinding(cfg.ID); err != nil {
-			return err
-		} else if parentIsMounted {
-			return agent.NewValidationErrorf("Agent %q 已被其他 Agent 挂载，不能再挂载子 Agent（运行时仅支持一层委托）", agentName)
-		}
-		for _, subCfg := range resolved {
-			if n, err := s.repo.CountSubagentsOf(subCfg.ID); err != nil {
-				return err
-			} else if n > 0 {
-				return agent.NewValidationErrorf("Agent %q 自身已挂载子 Agent，不能再被挂载（运行时仅支持一层委托）", subCfg.Name)
-			}
-		}
-	}
-
+	// 挂载深度不再在配置层限制：运行时固定一层委托（loadAgentGraph 对子
+	// Agent 自身的挂载列表静默忽略），但配置允许任意布局，不能反过来
+	// 约束控制台的 Agent 编排。
 	if err := s.repo.ReplaceSubagents(cfg.ID, subagentIDs); err != nil {
 		return err
 	}
