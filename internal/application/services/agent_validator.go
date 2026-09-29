@@ -74,7 +74,7 @@ func NormalizeAgentName(name string) string {
 
 func ValidateCreateConfig(config map[string]interface{}) error {
 	if config == nil {
-		return agent.NewValidationErrorf("config 不能为空")
+		return agent.NewCodedValidationErrorf(agent.CodeConfigRequired, nil, "config 不能为空")
 	}
 	if v, ok := config["systemPrompt"].(string); !ok || v == "" {
 		return agent.NewCodedValidationErrorf(agent.CodeSystemPromptRequired, nil, "systemPrompt 不能为空")
@@ -84,7 +84,7 @@ func ValidateCreateConfig(config map[string]interface{}) error {
 
 func ValidateConfig(config map[string]interface{}) error {
 	if config == nil {
-		return agent.NewValidationErrorf("config 不能为空")
+		return agent.NewCodedValidationErrorf(agent.CodeConfigRequired, nil, "config 不能为空")
 	}
 
 	if pm, ok := config["permissionMode"].(string); ok && pm != "" {
@@ -119,19 +119,23 @@ func ValidateConfig(config map[string]interface{}) error {
 	}
 
 	if v, ok := config["icon"].(string); ok && len(v) > 512 {
-		return agent.NewValidationErrorf("icon URL 长度不能超过 512 个字符")
+		return agent.NewCodedValidationErrorf(agent.CodeIconFieldTooLong,
+			map[string]string{"field": "icon", "limit": "512"}, "icon URL 长度不能超过 512 个字符")
 	}
 
 	if v, ok := config["iconName"].(string); ok && len(v) > 64 {
-		return agent.NewValidationErrorf("iconName 长度不能超过 64 个字符")
+		return agent.NewCodedValidationErrorf(agent.CodeIconFieldTooLong,
+			map[string]string{"field": "iconName", "limit": "64"}, "iconName 长度不能超过 64 个字符")
 	}
 
 	if v, ok := config["iconColor"].(string); ok && len(v) > 32 {
-		return agent.NewValidationErrorf("iconColor 长度不能超过 32 个字符")
+		return agent.NewCodedValidationErrorf(agent.CodeIconFieldTooLong,
+			map[string]string{"field": "iconColor", "limit": "32"}, "iconColor 长度不能超过 32 个字符")
 	}
 
 	if v, ok := config["iconBgColor"].(string); ok && len(v) > 64 {
-		return agent.NewValidationErrorf("iconBgColor 长度不能超过 64 个字符")
+		return agent.NewCodedValidationErrorf(agent.CodeIconFieldTooLong,
+			map[string]string{"field": "iconBgColor", "limit": "64"}, "iconBgColor 长度不能超过 64 个字符")
 	}
 
 	// 模型绑定校验
@@ -164,7 +168,8 @@ func ValidateConfig(config map[string]interface{}) error {
 
 	if len(fieldOverrides) > 0 {
 		if providerID == nil {
-			return agent.NewValidationErrorf("fieldOverrides 需要 providerId 同时存在")
+			return agent.NewCodedValidationErrorf(agent.CodeFieldOverridesRequiresProvider, nil,
+				"fieldOverrides 需要 providerId 同时存在")
 		}
 		if err := validateFieldOverridesKeys(*providerID, fieldOverrides); err != nil {
 			return err
@@ -194,24 +199,31 @@ func parseDisallowedTools(raw []interface{}) ([]string, error) {
 		maxDisallowedToolChars = 128
 	)
 	if len(raw) > maxDisallowedTools {
-		return nil, agent.NewValidationErrorf("disallowedTools 条目数不能超过 %d", maxDisallowedTools)
+		return nil, agent.NewCodedValidationErrorf(agent.CodeDisallowedToolsTooMany,
+			map[string]string{"limit": strconv.Itoa(maxDisallowedTools)},
+			"disallowedTools 条目数不能超过 %d", maxDisallowedTools)
 	}
 	seen := make(map[string]bool, len(raw))
 	items := make([]string, 0, len(raw))
 	for i, item := range raw {
 		s, ok := item.(string)
 		if !ok {
-			return nil, agent.NewValidationErrorf("disallowedTools[%d] 必须是字符串", i)
+			return nil, agent.NewCodedValidationErrorf(agent.CodeDisallowedToolsInvalidItem,
+				map[string]string{"index": strconv.Itoa(i)}, "disallowedTools[%d] 必须是字符串", i)
 		}
 		trimmed := strings.TrimSpace(s)
 		if trimmed == "" {
-			return nil, agent.NewValidationErrorf("disallowedTools[%d] trim 后不能为空", i)
+			return nil, agent.NewCodedValidationErrorf(agent.CodeDisallowedToolsInvalidItem,
+				map[string]string{"index": strconv.Itoa(i)}, "disallowedTools[%d] trim 后不能为空", i)
 		}
 		if len(trimmed) > maxDisallowedToolChars {
-			return nil, agent.NewValidationErrorf("disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
+			return nil, agent.NewCodedValidationErrorf(agent.CodeDisallowedToolsEntryTooLong,
+				map[string]string{"index": strconv.Itoa(i), "limit": strconv.Itoa(maxDisallowedToolChars)},
+				"disallowedTools[%d] 长度不能超过 %d 个字符", i, maxDisallowedToolChars)
 		}
 		if seen[trimmed] {
-			return nil, agent.NewValidationErrorf("disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
+			return nil, agent.NewCodedValidationErrorf(agent.CodeDisallowedToolsDuplicate,
+				map[string]string{"entry": trimmed}, "disallowedTools[%d] 与其他条目重复：%s", i, trimmed)
 		}
 		seen[trimmed] = true
 		items = append(items, trimmed)
@@ -316,7 +328,8 @@ func validateFieldOverridesKeys(providerID uint64, overrides map[string]interfac
 
 	for k := range overrides {
 		if !allowedKeys[k] {
-			return agent.NewValidationErrorf("fieldOverrides 包含非法 key: %s", k)
+			return agent.NewCodedValidationErrorf(agent.CodeFieldOverridesInvalidKey,
+				map[string]string{"key": k}, "fieldOverrides 包含非法 key: %s", k)
 		}
 	}
 

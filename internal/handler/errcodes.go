@@ -68,6 +68,16 @@ const (
 	ErrCodeModelSelectionNotFound = "model_selection_not_found"
 	ErrCodeModelNotFound          = "model_not_found"
 	ErrCodeModelTypeMismatch      = "model_type_mismatch"
+	// #205 长尾补齐：config / icon / fieldOverrides / disallowedTools / Probe
+	ErrCodeConfigRequired                 = "config_required"
+	ErrCodeIconFieldTooLong               = "icon_field_too_long"
+	ErrCodeFieldOverridesRequiresProvider = "field_overrides_requires_provider"
+	ErrCodeFieldOverridesInvalidKey       = "field_overrides_invalid_key"
+	ErrCodeDisallowedToolsTooMany         = "disallowed_tools_too_many"
+	ErrCodeDisallowedToolsInvalidItem     = "disallowed_tools_invalid_item"
+	ErrCodeDisallowedToolsEntryTooLong    = "disallowed_tools_entry_too_long"
+	ErrCodeDisallowedToolsDuplicate       = "disallowed_tools_duplicate"
+	ErrCodeProviderNotBound               = "provider_not_bound"
 	// deploy
 	ErrCodeDeployDeleteFailed        = "deploy_delete_failed"
 	ErrCodeDeployFailed              = "deploy_failed"

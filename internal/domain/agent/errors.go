@@ -70,6 +70,16 @@ const (
 	CodeModelSelectionNotFound StableCode = "model_selection_not_found"
 	CodeModelNotFound          StableCode = "model_not_found"
 	CodeModelTypeMismatch      StableCode = "model_type_mismatch"
+	// 长尾补齐（issue #205）：config / icon / fieldOverrides / disallowedTools / Probe
+	CodeConfigRequired                 StableCode = "config_required"
+	CodeIconFieldTooLong               StableCode = "icon_field_too_long"
+	CodeFieldOverridesRequiresProvider StableCode = "field_overrides_requires_provider"
+	CodeFieldOverridesInvalidKey       StableCode = "field_overrides_invalid_key"
+	CodeDisallowedToolsTooMany         StableCode = "disallowed_tools_too_many"
+	CodeDisallowedToolsInvalidItem     StableCode = "disallowed_tools_invalid_item"
+	CodeDisallowedToolsEntryTooLong    StableCode = "disallowed_tools_entry_too_long"
+	CodeDisallowedToolsDuplicate       StableCode = "disallowed_tools_duplicate"
+	CodeProviderNotBound               StableCode = "provider_not_bound"
 )
 
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按

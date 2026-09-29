@@ -54,7 +54,17 @@ const zh = {
     providerIdNotFound: 'providerId {{providerId}} 不存在',
     modelSelectionNotFound: 'providerId {{providerId}} 下不存在 selection_id 为 {{selectionId}} 的模型',
     modelNotFound: 'providerId {{providerId}} 下不存在模型 {{model}}',
-    modelTypeMismatch: '模型 {{model}} 不是 LLM/VLM 类型（实际: {{actual}}），无法绑定到 Agent'
+    modelTypeMismatch: '模型 {{model}} 不是 LLM/VLM 类型（实际: {{actual}}），无法绑定到 Agent',
+    // #205 长尾补齐
+    configRequired: 'config 不能为空',
+    iconFieldTooLong: '{{field}} 长度不能超过 {{limit}} 个字符',
+    fieldOverridesRequiresProvider: 'fieldOverrides 需要 providerId 同时存在',
+    fieldOverridesInvalidKey: 'fieldOverrides 包含非法 key: {{key}}',
+    disallowedToolsTooMany: 'disallowedTools 条目数不能超过 {{limit}}',
+    disallowedToolsInvalidItem: 'disallowedTools[{{index}}] 必须是非空字符串',
+    disallowedToolsEntryTooLong: 'disallowedTools[{{index}}] 长度不能超过 {{limit}} 个字符',
+    disallowedToolsDuplicate: 'disallowedTools 存在重复条目：{{entry}}',
+    providerNotBound: 'Agent 未绑定 Provider'
   },
   time: {
     justNow: '刚刚',

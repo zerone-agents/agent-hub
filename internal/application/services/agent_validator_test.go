@@ -165,6 +165,87 @@ func TestValidateConfig_FormPathStableCodes(t *testing.T) {
 	})
 }
 
+// TestValidateConfig_LongTailStableCodes pins the #205 long-tail codes: the
+// remaining uncoded validator sites (config/icon/fieldOverrides/
+// disallowedTools) carry dedicated stable codes instead of falling back to
+// the coarse invalid_agent_config.
+func TestValidateConfig_LongTailStableCodes(t *testing.T) {
+	t.Run("config nil carries config_required", func(t *testing.T) {
+		code, _ := codedCode(t, ValidateConfig(nil))
+		require.Equal(t, agent.StableCode("config_required"), code)
+		code, _ = codedCode(t, ValidateCreateConfig(nil))
+		require.Equal(t, agent.StableCode("config_required"), code)
+	})
+
+	t.Run("icon fields carry icon_field_too_long with field+limit", func(t *testing.T) {
+		cases := []struct {
+			field string
+			value string
+			limit string
+		}{
+			{"icon", strings.Repeat("a", 513), "512"},
+			{"iconName", strings.Repeat("a", 65), "64"},
+			{"iconColor", strings.Repeat("a", 33), "32"},
+			{"iconBgColor", strings.Repeat("a", 65), "64"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.field, func(t *testing.T) {
+				code, params := codedCode(t, ValidateConfig(map[string]interface{}{tc.field: tc.value}))
+				require.Equal(t, agent.StableCode("icon_field_too_long"), code)
+				require.Equal(t, map[string]string{"field": tc.field, "limit": tc.limit}, params)
+			})
+		}
+	})
+
+	t.Run("fieldOverrides without providerId carries field_overrides_requires_provider", func(t *testing.T) {
+		code, _ := codedCode(t, ValidateConfig(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{"baseUrl": "x"},
+		}))
+		require.Equal(t, agent.StableCode("field_overrides_requires_provider"), code)
+	})
+
+	t.Run("fieldOverrides invalid key carries key param", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+			Fields: `[{"key":"baseUrl"}]`,
+		}).Error)
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+			"providerId":     float64(1),
+			"fieldOverrides": map[string]interface{}{"ghost": "x"},
+		}))
+		require.Equal(t, agent.StableCode("field_overrides_invalid_key"), code)
+		require.Equal(t, map[string]string{"key": "ghost"}, params)
+	})
+
+	t.Run("disallowedTools five shapes carry dedicated codes", func(t *testing.T) {
+		over := make([]interface{}, 65)
+		for i := range over {
+			over[i] = fmt.Sprintf("tool-%d", i)
+		}
+		code, params := codedCode(t, ValidateConfig(map[string]interface{}{"disallowedTools": over}))
+		require.Equal(t, agent.StableCode("disallowed_tools_too_many"), code)
+		require.Equal(t, map[string]string{"limit": "64"}, params)
+
+		code, params = codedCode(t, ValidateConfig(map[string]interface{}{"disallowedTools": []interface{}{"Bash", 42}}))
+		require.Equal(t, agent.StableCode("disallowed_tools_invalid_item"), code)
+		require.Equal(t, map[string]string{"index": "1"}, params)
+
+		code, params = codedCode(t, ValidateConfig(map[string]interface{}{"disallowedTools": []interface{}{"Bash", "   "}}))
+		require.Equal(t, agent.StableCode("disallowed_tools_invalid_item"), code)
+		require.Equal(t, map[string]string{"index": "1"}, params)
+
+		code, params = codedCode(t, ValidateConfig(map[string]interface{}{"disallowedTools": []interface{}{strings.Repeat("a", 129)}}))
+		require.Equal(t, agent.StableCode("disallowed_tools_entry_too_long"), code)
+		require.Equal(t, map[string]string{"index": "0", "limit": "128"}, params)
+
+		code, params = codedCode(t, ValidateConfig(map[string]interface{}{"disallowedTools": []interface{}{"Bash", " Bash "}}))
+		require.Equal(t, agent.StableCode("disallowed_tools_duplicate"), code)
+		require.Equal(t, map[string]string{"entry": "Bash"}, params)
+	})
+}
+
 // TestAgentDeployerService_NormalizesNameOnBoundary is the regression test
 // for the original symptom: control-panel stored the user's original casing
 // but deployer registered the lowercased/hyphenated form, so subsequent

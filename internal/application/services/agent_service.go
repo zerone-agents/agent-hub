@@ -326,7 +326,7 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 		resolvedProviderID = a.ProviderID
 	}
 	if resolvedProviderID == nil {
-		return nil, agent.NewValidationErrorf("Agent 未绑定 Provider")
+		return nil, agent.NewCodedValidationErrorf(agent.CodeProviderNotBound, nil, "Agent 未绑定 Provider")
 	}
 
 	p, err := s.providerSvc.repo.GetByID(tenantID, *resolvedProviderID)
