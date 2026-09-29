@@ -17,7 +17,6 @@ import { stringify } from "yaml";
 describe("pipe truncation (discriminating)", () => {
   let serverProc: ReturnType<typeof Bun.spawn> | undefined;
   let tmpHome: string | undefined;
-  let expectedByteLength: number;
 
   beforeAll(async () => {
     const serverScript = join(
@@ -50,32 +49,6 @@ describe("pipe truncation (discriminating)", () => {
     if (!serverReady) {
       throw new Error("Fake server failed to start within 2s");
     }
-
-    // Compute expected payload size (100 skills, same as server fixture).
-    const probeSkills = Array.from({ length: 100 }, (_, i) => ({
-      id: i + 1,
-      name: `discriminating-skill-${i}`,
-      type: "community",
-      title: `Discriminating Skill ${i}`,
-      titleEn: "",
-      description:
-        `A skill description long enough to push the total JSON payload ` +
-        `well past the 65536-byte pipe buffer boundary. Entry #${i}. ` +
-        `This payload exercises the real CLI stdout write path under ` +
-        `pipe backpressure, which is the only consumer shape that ` +
-        `reproduces the original truncation (bare fixtures pass because ` +
-        `Bun consumers drain eagerly — see #190 review). `.repeat(2),
-      descriptionEn: "",
-      url: `https://example.test/skills/discriminating-skill-${i}.zip`,
-      fileHash: "a".repeat(64),
-      fileSize: 12345 + i,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-01T00:00:00Z",
-    }));
-    expectedByteLength = Buffer.byteLength(
-      JSON.stringify({ data: probeSkills, meta: {} }),
-      "utf-8",
-    );
 
     // Set up temp HOME with CLI config.
     tmpHome = mkdtempSync(join(tmpdir(), "zhub-e2e-"));
@@ -111,7 +84,7 @@ describe("pipe truncation (discriminating)", () => {
       // does not block it.
       const script =
         `HOME=${tmpHome} bun ${JSON.stringify(cliPath)} ` +
-        `skill list --output json 2>/dev/null | { sleep 1; cat; }`;
+        `skill list --output json 2>/dev/null | { sleep 2; cat; }`;
 
       const result = Bun.spawnSync(["bash", "-c", script], {
         stdout: "pipe",
