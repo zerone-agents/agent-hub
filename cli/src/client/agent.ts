@@ -22,6 +22,7 @@ export interface Agent {
   desktopEnabled?: boolean;
   mobileEnabled?: boolean;
   isDefault?: boolean;
+  guestEnabled?: boolean;
   subagents?: string[];
   tools?: string[];
   skills?: string[];
@@ -54,6 +55,7 @@ export async function createAgent(body: {
   desktopEnabled?: boolean;
   mobileEnabled?: boolean;
   isDefault?: boolean;
+  guestEnabled?: boolean;
 }): Promise<Agent> {
   return apiRequest<Agent>("/api/v1/admin/agents", { method: "POST", body });
 }
@@ -65,6 +67,7 @@ export async function updateAgent(
     desktopEnabled?: boolean;
     mobileEnabled?: boolean;
     isDefault?: boolean;
+    guestEnabled?: boolean;
   },
 ): Promise<Agent> {
   return apiRequest<Agent>(`/api/v1/admin/agents/${encodeURIComponent(name)}`, {
