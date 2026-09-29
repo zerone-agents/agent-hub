@@ -47,7 +47,16 @@ const en = {
     subagentNotFound: 'Subagent "{{name}}" does not exist',
     subagentSelfReference: 'An agent cannot mount itself as a subagent',
     systemPromptRequired: 'System prompt is required',
-    configKeyRenamed: 'Config key {{oldKey}} has been renamed to {{newKey}}, please update and retry'
+    configKeyRenamed: 'Config key {{oldKey}} has been renamed to {{newKey}}, please update and retry',
+    // PR #204 评审补充：400 引用拆键 + 表单高频路径码
+    agentReferenceNotFound: 'Agent "{{name}}" does not exist',
+    invalidPermissionMode: 'Invalid permissionMode: {{value}} (allowed: auto, plan, bypassPermissions)',
+    maxTurnsNegative: 'maxTurns cannot be negative',
+    maxTurnsTooLarge: 'maxTurns cannot exceed {{limit}}',
+    providerIdNotFound: 'Provider {{providerId}} does not exist',
+    modelSelectionNotFound: 'No model with selection_id {{selectionId}} exists under provider {{providerId}}',
+    modelNotFound: 'Model {{model}} does not exist under provider {{providerId}}',
+    modelTypeMismatch: 'Model {{model}} is not an LLM/VLM model (actual: {{actual}}) and cannot be bound to an agent'
   },
   time: {
     justNow: 'just now',

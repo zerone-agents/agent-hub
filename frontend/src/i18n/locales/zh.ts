@@ -45,7 +45,16 @@ const zh = {
     subagentNotFound: '子 Agent "{{name}}" 不存在',
     subagentSelfReference: '子 Agent 不能与主 Agent 相同',
     systemPromptRequired: 'systemPrompt 不能为空',
-    configKeyRenamed: '配置项 {{oldKey}} 已更名为 {{newKey}}，请更新调用方后重试'
+    configKeyRenamed: '配置项 {{oldKey}} 已更名为 {{newKey}}，请更新调用方后重试',
+    // PR #204 评审补充：400 引用拆键 + 表单高频路径码
+    agentReferenceNotFound: 'Agent "{{name}}" 不存在',
+    invalidPermissionMode: '无效的 permissionMode: {{value}}，可选值: auto, plan, bypassPermissions',
+    maxTurnsNegative: 'maxTurns 不能为负数',
+    maxTurnsTooLarge: 'maxTurns 不能超过 {{limit}}',
+    providerIdNotFound: 'providerId {{providerId}} 不存在',
+    modelSelectionNotFound: 'providerId {{providerId}} 下不存在 selection_id 为 {{selectionId}} 的模型',
+    modelNotFound: 'providerId {{providerId}} 下不存在模型 {{model}}',
+    modelTypeMismatch: '模型 {{model}} 不是 LLM/VLM 类型（实际: {{actual}}），无法绑定到 Agent'
   },
   time: {
     justNow: '刚刚',

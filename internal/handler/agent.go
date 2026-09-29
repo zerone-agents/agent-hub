@@ -62,7 +62,7 @@ func respondAgentError(c *gin.Context, err error) {
 			// #201 B 档：带专属稳定码的校验错误按码下发（附插值参数），
 			// 前端 en 模式按 apiErrors.<code> 翻译；未分类回落粗码。
 			if code := ve.StableCode(); code != "" {
-				respondErrorWithParams(c, http.StatusBadRequest, code, err.Error(), ve.Params())
+				respondErrorWithParams(c, http.StatusBadRequest, string(code), err.Error(), ve.Params())
 				return
 			}
 			respondError(c, http.StatusBadRequest, ErrCodeInvalidAgentConfig, err.Error())

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"control-panel/internal/domain/agent"
@@ -88,7 +89,8 @@ func ValidateConfig(config map[string]interface{}) error {
 
 	if pm, ok := config["permissionMode"].(string); ok && pm != "" {
 		if !validPermissionModes[pm] {
-			return agent.NewValidationErrorf("无效的 permissionMode: %s，可选值: auto, plan, bypassPermissions", pm)
+			return agent.NewCodedValidationErrorf(agent.CodeInvalidPermissionMode,
+				map[string]string{"value": pm}, "无效的 permissionMode: %s，可选值: auto, plan, bypassPermissions", pm)
 		}
 	}
 
@@ -99,10 +101,11 @@ func ValidateConfig(config map[string]interface{}) error {
 	const maxTurnsUpperBound = 500
 	if v, ok := config["maxTurns"].(float64); ok {
 		if v < 0 {
-			return agent.NewValidationErrorf("maxTurns 不能为负数")
+			return agent.NewCodedValidationErrorf(agent.CodeMaxTurnsNegative, nil, "maxTurns 不能为负数")
 		}
 		if v > maxTurnsUpperBound {
-			return agent.NewValidationErrorf("maxTurns 不能超过 %d", maxTurnsUpperBound)
+			return agent.NewCodedValidationErrorf(agent.CodeMaxTurnsTooLarge,
+				map[string]string{"limit": strconv.Itoa(maxTurnsUpperBound)}, "maxTurns 不能超过 %d", maxTurnsUpperBound)
 		}
 	}
 
@@ -240,7 +243,8 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 		return fmt.Errorf("read provider failed: %w", err)
 	}
 	if exists == 0 {
-		return agent.NewValidationErrorf("providerId %d 不存在", providerID)
+		return agent.NewCodedValidationErrorf(agent.CodeProviderIdNotFound,
+			map[string]string{"providerId": strconv.FormatUint(providerID, 10)}, "providerId %d 不存在", providerID)
 	}
 
 	if modelID == "" && modelSelectionID == "" {
@@ -259,15 +263,21 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 	err := query.Select("model_type").Row().Scan(&modelType)
 	if err == sql.ErrNoRows {
 		if modelSelectionID != "" {
-			return agent.NewValidationErrorf("providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
+			return agent.NewCodedValidationErrorf(agent.CodeModelSelectionNotFound,
+				map[string]string{"providerId": strconv.FormatUint(providerID, 10), "selectionId": modelSelectionID},
+				"providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
 		}
-		return agent.NewValidationErrorf("providerId %d 下不存在模型 %s", providerID, modelID)
+		return agent.NewCodedValidationErrorf(agent.CodeModelNotFound,
+			map[string]string{"providerId": strconv.FormatUint(providerID, 10), "model": modelID},
+			"providerId %d 下不存在模型 %s", providerID, modelID)
 	}
 	if err != nil {
 		return fmt.Errorf("read provider_models failed: %w", err)
 	}
 	if modelType != string(providerdomain.TypeLLM) && modelType != string(providerdomain.TypeVLM) {
-		return agent.NewValidationErrorf("模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
+		return agent.NewCodedValidationErrorf(agent.CodeModelTypeMismatch,
+			map[string]string{"model": modelID, "actual": modelType},
+			"模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
 	}
 	return nil
 }
@@ -284,7 +294,9 @@ func validateFieldOverridesKeys(providerID uint64, overrides map[string]interfac
 		Select("fields").
 		Row().Scan(&fieldsJSON)
 	if err == sql.ErrNoRows {
-		return agent.NewValidationErrorf("providerId %d 不存在，无法验证 fieldOverrides", providerID)
+		return agent.NewCodedValidationErrorf(agent.CodeProviderIdNotFound,
+			map[string]string{"providerId": strconv.FormatUint(providerID, 10)},
+			"providerId %d 不存在，无法验证 fieldOverrides", providerID)
 	}
 	if err != nil {
 		return fmt.Errorf("read provider fields failed: %w", err)

@@ -219,10 +219,11 @@ func TestAgentHandler_UpdateSubagents_MainAgentNotFound400(t *testing.T) {
 	respBody := w.Body.String()
 	require.Contains(t, respBody, "Agent 'ghost-parent' 不存在")
 	require.NotContains(t, respBody, "服务器内部错误")
-	// #201 B 档：主 Agent 不存在携带 agent_not_found 码与 name 插值参数
-	// （en 键不带插值，与 404 sentinel 路径共用同一文案）。
+	// #201 B 档 + PR #204 评审拆键：400 校验路径（引用的 Agent 不存在）用
+	// agent_reference_not_found 带 name 插值（en 键带 {{name}}）；agent_not_found
+	// 保留给 404 sentinel 路径（无 name 可插，共用会丢失插值信息）。
 	env := decodeErrEnvelope(t, w)
-	require.Equal(t, "agent_not_found", env.Code)
+	require.Equal(t, "agent_reference_not_found", env.Code)
 	require.Equal(t, "ghost-parent", env.Params["name"])
 }
 

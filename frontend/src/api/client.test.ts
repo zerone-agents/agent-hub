@@ -94,13 +94,38 @@ describe('parseApiError 稳定码翻译（#201 B 档：en 模式按码插值翻�
     expect(parseApiError(err)).toBe('Subagent "ghost" does not exist')
   })
 
-  it('en 模式：无插值的码键不带 params 也能翻译', async () => {
+  it('en 模式：404 sentinel 码 agent_not_found 无插值（通用文案）', async () => {
+    await i18next.changeLanguage('en')
+    const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 404,
+      data: { success: false, error: 'Agent 不存在', code: 'agent_not_found' }
+    } as any)
+    expect(parseApiError(err)).toBe('Agent does not exist or has been deleted')
+  })
+
+  it('en 模式：400 引用拆键 agent_reference_not_found 带 name 插值（PR #204 评审）', async () => {
     await i18next.changeLanguage('en')
     const err = new axios.AxiosError('bad', 'ERR_BAD_REQUEST', undefined, undefined, {
       status: 400,
-      data: { success: false, error: "Agent 'ghost-parent' 不存在", code: 'agent_not_found', params: { name: 'ghost-parent' } }
+      data: { success: false, error: "Agent 'ghost-parent' 不存在", code: 'agent_reference_not_found', params: { name: 'ghost-parent' } }
     } as any)
-    expect(parseApiError(err)).toBe('Agent does not exist or has been deleted')
+    expect(parseApiError(err)).toBe('Agent "ghost-parent" does not exist')
+  })
+
+  it('en 键存在性契约：agent 域全部稳定码都有 apiErrors 键（防注册表/键漂移）', async () => {
+    await i18next.changeLanguage('en')
+    // 与 domain/agent/errors.go 码常量清单保持同步（17 项）
+    const codes = [
+      'agent_name_required', 'agent_name_too_long', 'agent_name_invalid', 'agent_name_exists',
+      'agent_not_found', 'agent_reference_not_found', 'subagent_not_found', 'subagent_self_reference',
+      'system_prompt_required', 'config_key_renamed', 'invalid_permission_mode', 'max_turns_negative',
+      'max_turns_too_large', 'provider_id_not_found', 'model_selection_not_found', 'model_not_found',
+      'model_type_mismatch'
+    ]
+    for (const code of codes) {
+      const key = `apiErrors.${code.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase())}`
+      expect(i18next.exists(key), `missing en key ${key} for code ${code}`).toBe(true)
+    }
   })
 
   it('en 模式：旧 key 哨兵码插值 oldKey/newKey', async () => {

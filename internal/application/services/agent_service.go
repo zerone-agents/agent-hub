@@ -569,7 +569,7 @@ func (s *AgentService) handleDefaultUpdate(tenantID string, agentID uint64, isDe
 func (s *AgentService) DeleteAgent(tenantID, name string) error {
 	cfg, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
-		return agent.NewCodedValidationErrorf(agent.CodeAgentNotFound,
+		return agent.NewCodedValidationErrorf(agent.CodeAgentReferenceNotFound,
 			map[string]string{"name": name}, "Agent '%s' 不存在", name)
 	}
 
@@ -583,7 +583,7 @@ func (s *AgentService) DeleteAgent(tenantID, name string) error {
 func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames []string) error {
 	cfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
-		return agent.NewCodedValidationErrorf(agent.CodeAgentNotFound,
+		return agent.NewCodedValidationErrorf(agent.CodeAgentReferenceNotFound,
 			map[string]string{"name": agentName}, "Agent '%s' 不存在", agentName)
 	}
 
