@@ -137,7 +137,7 @@ export class ToolCreateCommand extends Command {
     try {
       fileBuffer = readFileSync(this.source);
     } catch {
-      process.stderr.write(`Error: cannot read source file  ${this.source}\n`);
+      process.stderr.write(`Error: cannot read source file ${this.source}\n`);
       return 2;
     }
     const t = await createTool({
@@ -184,8 +184,7 @@ export class ToolUpdateCommand extends Command {
     const unknown = Object.keys(body).filter((k) => !UPDATE_ALLOWED_FIELDS.has(k));
     if (unknown.length > 0) {
       process.stderr.write(
-        `Error: unsupported metadata field(s): ${unknown.join(", ")} (tool update supports only title/description/descriptionEn; name is taken from the CLI and ignored)
-`,
+        `Error: unsupported metadata field(s): ${unknown.join(", ")} (tool update supports only title/description/descriptionEn; name is taken from the CLI and ignored)\n`,
       );
       return 2;
     }
@@ -195,8 +194,7 @@ export class ToolUpdateCommand extends Command {
     const badType = Object.keys(body).filter((k) => k !== "name" && typeof body[k] !== "string");
     if (badType.length > 0) {
       process.stderr.write(
-        `Error: invalid field type: ${badType.join(", ")} (tool update title/description/descriptionEn must be strings)
-`,
+        `Error: invalid field type: ${badType.join(", ")} (tool update title/description/descriptionEn must be strings)\n`,
       );
       return 2;
     }
@@ -242,7 +240,7 @@ export class ToolUploadCommand extends Command {
     try {
       fileBuffer = readFileSync(this.source);
     } catch {
-      process.stderr.write(`Error: cannot read source file  ${this.source}\n`);
+      process.stderr.write(`Error: cannot read source file ${this.source}\n`);
       return 2;
     }
     const t = await uploadToolFile(this.name, { fileBuffer, fileName: basename(this.source) });
@@ -261,8 +259,7 @@ export class ToolDownloadCommand extends Command {
     const res = await downloadTool(this.name);
     console.log(res.url);
     if (res.expiresIn > 0) {
-      process.stderr.write(`Valid for ${res.expiresIn}s
-`);
+      process.stderr.write(`Valid for ${res.expiresIn}s\n`);
     }
     return 0;
   }

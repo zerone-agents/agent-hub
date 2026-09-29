@@ -58,7 +58,7 @@ async function prepareSkillUpload(
     for (const err of result.errors) process.stderr.write(`Error: ${err}\n`);
     return null;
   }
-  process.stderr.write(`Packing... (found  ${result.skills.length} SKILL.md files)\n`);
+  process.stderr.write(`Packing... (found ${result.skills.length} SKILL.md files)\n`);
   const zipBuffer = await packDir(fromDir, requestedName);
   process.stderr.write(`Packed ${zipBuffer.length} bytes\n`);
   return { skillName: requestedName, zipBuffer };

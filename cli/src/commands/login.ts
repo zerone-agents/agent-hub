@@ -13,7 +13,7 @@ export class LoginCommand extends Command {
 
   async execute(): Promise<number> {
     if (!this.token.startsWith("cli_")) {
-      process.stderr.write("Error: token must start with 'cli_'. Generate one in the control-panel web UI (CLI Tokens page).\n");
+      process.stderr.write("Error: token must start with 'cli_'. Generate one in the Hub web console (CLI Tokens page).\n");
       return 2;
     }
     const cfg = await loadConfig();

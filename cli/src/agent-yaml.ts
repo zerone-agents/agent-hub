@@ -76,7 +76,7 @@ export function parseAgentYaml(
     parsed = parse(readFileSync(filePath, "utf8"));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new AgentYamlError(`Cannot read or parse YAML file  ${filePath}: ${message}`);
+    throw new AgentYamlError(`Cannot read or parse YAML file ${filePath}: ${message}`);
   }
 
   if (!isRecord(parsed)) {
@@ -92,7 +92,7 @@ export function parseAgentYaml(
       throw new AgentYamlError("agent.yaml id must be a string");
     }
     if (parsed.id !== expectedName) {
-      throw new AgentYamlError(`agent.yaml id “${parsed.id}” does not match the command argument (expected “${expectedName}”）`);
+      throw new AgentYamlError(`agent.yaml id "${parsed.id}" does not match the command argument (expected "${expectedName}")`);
     }
   }
 
@@ -122,7 +122,7 @@ export function parseAgentYaml(
     if (flatKey === "title" || flatKey === "description") {
       validateStringMap(flatKey, value);
     }
-    addConfigValue(config, normalizedKey, value, `top-level  ${flatKey}`);
+    addConfigValue(config, normalizedKey, value, `top-level ${flatKey}`);
   }
 
   if (!Object.hasOwn(config, "title") && typeof parsed.name === "string") {
@@ -147,7 +147,7 @@ export function parseAgentYaml(
   const flatKeys = new Set(FLAT_ALIASES.keys());
   for (const [key, value] of Object.entries(parsed)) {
     if (RESERVED_KEYS.has(key) || flatKeys.has(key)) continue;
-    addConfigValue(config, key, value, `top-level  ${key}`);
+    addConfigValue(config, key, value, `top-level ${key}`);
   }
 
   const result: ParsedAgentDefinition = { name: expectedName ?? (parsed.id as string), config };
