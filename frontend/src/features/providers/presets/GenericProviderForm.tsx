@@ -286,8 +286,8 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
         const values = form.getFieldsValue(['lockedApiKey', 'baseUrl', 'protocol', 'authStyle']) as {
           lockedApiKey?: string
           baseUrl?: string
-          protocol?: string
-          authStyle?: string
+          protocol?: Provider['protocol']
+          authStyle?: Provider['authStyle']
         }
         const res = await probeProvider.mutateAsync({
           id: editingProvider.id,

@@ -94,12 +94,13 @@ export interface ProbeConfig {
 }
 
 // ProbeOverride carries the edit form's unsaved values into the by-id probe.
-// Non-empty fields replace the stored provider values for this probe only.
+// Non-empty fields replace the stored provider values for this probe only;
+// unknown protocol/authStyle values are rejected with 400 by the backend.
 export interface ProbeOverride {
   apiKey?: string
   baseUrl?: string
-  protocol?: string
-  authStyle?: string
+  protocol?: Provider['protocol']
+  authStyle?: Provider['authStyle']
   models?: CatalogModel[]
 }
 

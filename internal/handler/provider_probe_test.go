@@ -27,9 +27,10 @@ type probeUpstreamCall struct {
 }
 
 // setupProviderProbeRouter seeds one stored provider (anthropic + api_key,
-// pointing at a recording httptest upstream) and registers the by-id probe
-// endpoint. The edit form is supposed to test unsaved values, so its overrides
-// must win over the stored config; without overrides the stored config wins.
+// pointing at a recording httptest upstream) and registers both probe
+// endpoints. The edit form is supposed to test unsaved values, so its
+// overrides must win over the stored config; without overrides the stored
+// config wins.
 func setupProviderProbeRouter(t *testing.T) (*gin.Engine, chan probeUpstreamCall, string) {
 	t.Helper()
 
@@ -69,11 +70,12 @@ func setupProviderProbeRouter(t *testing.T) (*gin.Engine, chan probeUpstreamCall
 	gin.SetMode(gin.TestMode)
 	h := NewProviderHandler(services.NewProviderService(providerModelsTestKey), nil, newHandlerTestAuditRecorder(t))
 	router := gin.New()
+	router.POST("/api/v1/admin/providers/probe", h.ProbeConfig)
 	router.POST("/api/v1/admin/providers/:id/probe", h.Probe)
 	return router, calls, upstream.URL
 }
 
-func postProbe(t *testing.T, router *gin.Engine, body interface{}) *httptest.ResponseRecorder {
+func postProbePath(t *testing.T, router *gin.Engine, path string, body interface{}) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *bytes.Reader
 	if body == nil {
@@ -83,11 +85,16 @@ func postProbe(t *testing.T, router *gin.Engine, body interface{}) *httptest.Res
 		require.NoError(t, err)
 		reader = bytes.NewReader(b)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/providers/1/probe", reader)
+	req := httptest.NewRequest(http.MethodPost, path, reader)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
+}
+
+func postProbe(t *testing.T, router *gin.Engine, body interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+	return postProbePath(t, router, "/api/v1/admin/providers/1/probe", body)
 }
 
 func expectProbeCall(t *testing.T, calls chan probeUpstreamCall) probeUpstreamCall {
@@ -98,6 +105,15 @@ func expectProbeCall(t *testing.T, calls chan probeUpstreamCall) probeUpstreamCa
 	case <-time.After(3 * time.Second):
 		t.Fatal("probe never reached the upstream")
 		return probeUpstreamCall{}
+	}
+}
+
+func expectNoProbeCall(t *testing.T, calls chan probeUpstreamCall) {
+	t.Helper()
+	select {
+	case call := <-calls:
+		t.Fatalf("rejected probe must not reach the upstream, got %+v", call)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -146,4 +162,92 @@ func TestProviderHandler_Probe_WithoutOverridesUsesStoredConfig(t *testing.T) {
 	require.Equal(t, "/v1/messages", call.Path)
 	require.Equal(t, "sk-stored-secret", call.APIKey)
 	require.Empty(t, call.Authz)
+}
+
+// TestProviderHandler_Probe_PartialOverrideFallsBackPerField 钉住稀疏覆盖语义：
+// 只覆盖 protocol 时 authStyle 回落库值；只覆盖 authStyle 时 protocol 回落库值。
+func TestProviderHandler_Probe_PartialOverrideFallsBackPerField(t *testing.T) {
+	t.Run("protocol override only keeps stored auth style", func(t *testing.T) {
+		router, calls, upstreamURL := setupProviderProbeRouter(t)
+
+		rec := postProbe(t, router, map[string]interface{}{
+			"baseUrl":  upstreamURL,
+			"protocol": string(provider.ProtocolOpenAI),
+		})
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+		call := expectProbeCall(t, calls)
+		require.Equal(t, http.MethodGet, call.Method)
+		require.Equal(t, "/models", call.Path)
+		require.Equal(t, "sk-stored-secret", call.APIKey, "authStyle 未覆盖时应回落库中 api_key")
+		require.Empty(t, call.Authz)
+	})
+
+	t.Run("auth style override only keeps stored protocol", func(t *testing.T) {
+		router, calls, _ := setupProviderProbeRouter(t)
+
+		rec := postProbe(t, router, map[string]interface{}{
+			"authStyle": string(provider.AuthStyleAuthToken),
+		})
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+		call := expectProbeCall(t, calls)
+		require.Equal(t, http.MethodPost, call.Method, "protocol 未覆盖时应回落库中 anthropic")
+		require.Equal(t, "/v1/messages", call.Path)
+		require.Equal(t, "Bearer sk-stored-secret", call.Authz)
+		require.Empty(t, call.APIKey)
+	})
+}
+
+// TestProviderHandler_Probe_RejectsUnknownOverrideEnums 钉住枚举校验：未知
+// protocol/authStyle 覆盖直接 400、不打上游 —— 不再由 doProbe 的默认分支静默
+// 回退 anthropic 产生「按所选 protocol 探测成功」的假象（评审反例 protocol=azure）。
+func TestProviderHandler_Probe_RejectsUnknownOverrideEnums(t *testing.T) {
+	router, calls, _ := setupProviderProbeRouter(t)
+
+	rec := postProbe(t, router, map[string]interface{}{"protocol": "azure"})
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "azure")
+
+	rec = postProbe(t, router, map[string]interface{}{"authStyle": "bearer_typo"})
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "bearer_typo")
+
+	expectNoProbeCall(t, calls)
+}
+
+// TestProviderHandler_ProbeConfig_RejectsUnknownEnums 无 id 探测通道与 by-id
+// 通道一致拒绝未知枚举，合法值不误伤。
+func TestProviderHandler_ProbeConfig_RejectsUnknownEnums(t *testing.T) {
+	router, calls, upstreamURL := setupProviderProbeRouter(t)
+
+	bad := map[string]interface{}{
+		"baseUrl":   upstreamURL,
+		"apiKey":    "sk-x",
+		"protocol":  "azure",
+		"authStyle": string(provider.AuthStyleAPIKey),
+	}
+	rec := postProbePath(t, router, "/api/v1/admin/providers/probe", bad)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "azure")
+
+	bad = map[string]interface{}{
+		"baseUrl":   upstreamURL,
+		"apiKey":    "sk-x",
+		"protocol":  string(provider.ProtocolOpenAI),
+		"authStyle": "bearer_typo",
+	}
+	rec = postProbePath(t, router, "/api/v1/admin/providers/probe", bad)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "bearer_typo")
+
+	valid := map[string]interface{}{
+		"baseUrl":   upstreamURL,
+		"apiKey":    "sk-x",
+		"protocol":  string(provider.ProtocolOpenAI),
+		"authStyle": string(provider.AuthStyleAPIKey),
+	}
+	rec = postProbePath(t, router, "/api/v1/admin/providers/probe", valid)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	expectProbeCall(t, calls)
 }

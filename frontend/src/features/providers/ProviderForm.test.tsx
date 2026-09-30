@@ -19,6 +19,16 @@ vi.mock("@/queries/useProviders", () => ({
   useProviderAttrRules: () => ({ data: {} }),
 }));
 
+// The component calls message.success/error after a probe; mock them so the
+// antd Notification state update doesn't fire React act() warnings in jsdom.
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>();
+  return {
+    ...actual,
+    message: { ...actual.message, success: vi.fn(), error: vi.fn() },
+  };
+});
+
 const editingProvider: Provider = {
   id: 1,
   key: "test-provider",
