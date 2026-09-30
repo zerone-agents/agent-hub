@@ -253,21 +253,43 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 		return
 	}
 
-	type probeOverrideRequest struct {
-		APIKey  string                  `json:"apiKey"`
-		BaseURL string                  `json:"baseUrl"`
-		Models  []provider.CatalogModel `json:"models"`
-	}
-	var overrideReq probeOverrideRequest
+	var override services.ProbeOverride
 	// Body is optional; ignore bind errors when no body is sent.
-	_ = c.ShouldBindJSON(&overrideReq)
+	_ = c.ShouldBindJSON(&override)
+	if override.Protocol != "" && !isSupportedProtocol(override.Protocol) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: anthropic, openai, mineru, paddleocr）", override.Protocol))
+		return
+	}
+	if override.AuthStyle != "" && !isSupportedAuthStyle(override.AuthStyle) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: api_key, auth_token, no_auth）", override.AuthStyle))
+		return
+	}
 
-	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
+	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, override)
 	if err != nil {
 		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)
+}
+
+// isSupportedProtocol / isSupportedAuthStyle 为探测端点钉住枚举白名单：未知值
+// 在 handler 层直接 400，不再落入 doProbe 的默认分支静默回退 anthropic/Bearer
+// —— 那会产生「按所选 protocol 探测成功」的假象。
+func isSupportedProtocol(v string) bool {
+	switch provider.Protocol(v) {
+	case provider.ProtocolAnthropic, provider.ProtocolOpenAI, provider.ProtocolMinerU, provider.ProtocolPaddleOCR:
+		return true
+	}
+	return false
+}
+
+func isSupportedAuthStyle(v string) bool {
+	switch provider.AuthStyle(v) {
+	case provider.AuthStyleAPIKey, provider.AuthStyleAuthToken, provider.AuthStyleNoAuth:
+		return true
+	}
+	return false
 }
 
 type probeConfigRequest struct {
@@ -292,6 +314,14 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 	authStyle := req.AuthStyle
 	if authStyle == "" {
 		authStyle = string(provider.AuthStyleAPIKey)
+	}
+	if !isSupportedProtocol(protocol) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: anthropic, openai, mineru, paddleocr）", protocol))
+		return
+	}
+	if !isSupportedAuthStyle(authStyle) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: api_key, auth_token, no_auth）", authStyle))
+		return
 	}
 
 	result := h.service.ProbeConfig(req.BaseURL, req.APIKey, protocol, authStyle, req.Models)

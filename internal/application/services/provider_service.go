@@ -646,12 +646,23 @@ func (s *ProviderService) Delete(tenantID string, id uint64) error {
 
 // ── Probe ───────────────────────────────────────────────────────
 
-// ProbeWithOverride probes a provider. If apiKeyOverride matches the masked form of the
-// stored key (or is empty), the real stored key is used; otherwise apiKeyOverride is used.
-// baseURLOverride (when non-empty) replaces the stored BaseURL, so an edited-but-unsaved
-// URL can be tested from the form. modelsOverride (when non-empty) replaces the stored
-// model list for the same reason.
-func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOverride, baseURLOverride string, modelsOverride []provider.CatalogModel) (*ProbeResult, error) {
+// ProbeOverride carries optional overrides for a stored-provider probe: the edit
+// form sends its unsaved values this way. Empty fields fall back to the stored
+// provider values. protocol/authStyle are validated against the known enums in
+// the handler before reaching here.
+type ProbeOverride struct {
+	APIKey    string                  `json:"apiKey"`
+	BaseURL   string                  `json:"baseUrl"`
+	Protocol  string                  `json:"protocol"`
+	AuthStyle string                  `json:"authStyle"`
+	Models    []provider.CatalogModel `json:"models"`
+}
+
+// ProbeWithOverride probes a provider. If override.APIKey matches the masked form of the
+// stored key (or is empty), the real stored key is used; otherwise override.APIKey is used.
+// The other non-empty override fields replace the stored values for this probe only, so an
+// edited-but-unsaved form can be tested without saving first.
+func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, override ProbeOverride) (*ProbeResult, error) {
 	summary, err := s.repo.GetByID(tenantID, id)
 	if err != nil {
 		return nil, provider.ErrProviderNotFound
@@ -666,17 +677,27 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 		return nil, fmt.Errorf("decrypt LockedAPIKey failed: %w", err)
 	}
 
-	apiKey := apiKeyOverride
+	apiKey := override.APIKey
 	if apiKey == "" || apiKey == maskSecret(storedKey) {
 		apiKey = storedKey
 	}
 
 	baseURL := p.BaseURL()
-	if baseURLOverride != "" {
-		baseURL = baseURLOverride
+	if override.BaseURL != "" {
+		baseURL = override.BaseURL
 	}
 
-	models := modelsOverride
+	protocol := p.Protocol()
+	if override.Protocol != "" {
+		protocol = override.Protocol
+	}
+
+	authStyle := p.AuthStyle()
+	if override.AuthStyle != "" {
+		authStyle = override.AuthStyle
+	}
+
+	models := override.Models
 	if len(models) == 0 {
 		rows, err := s.repo.ListModels(tenantID, id)
 		if err != nil {
@@ -685,7 +706,7 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 		models = toCatalogModels(rows)
 	}
 
-	return s.doProbe(baseURL, apiKey, p.Protocol(), p.AuthStyle(), models), nil
+	return s.doProbe(baseURL, apiKey, protocol, authStyle, models), nil
 }
 
 func (s *ProviderService) ProbeConfig(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {
@@ -701,13 +722,25 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 
 	switch protocol {
 	case string(provider.ProtocolOpenAI):
-		req, err = http.NewRequest("GET", base+"/models", nil)
+		// 已配置模型时真实 ping 一次 /chat/completions：GET /models 只验证连通+鉴权，
+		// 端点不支持 openai chat schema 时会假成功（真实调用才 400，用户实测反例）。
+		// 未配置模型时退化为 GET /models 连通性检查（此时无法验证 chat schema）。
+		if len(models) > 0 && models[0].ModelID != "" {
+			body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, models[0].ModelID)
+			req, err = http.NewRequest("POST", base+"/chat/completions", strings.NewReader(body))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+		} else {
+			req, err = http.NewRequest("GET", base+"/models", nil)
+		}
 	case string(provider.ProtocolMinerU):
 		req, err = http.NewRequest("GET", base+"/health", nil)
 	case string(provider.ProtocolPaddleOCR):
 		req, err = http.NewRequest("GET", base+"/health", nil)
 	default:
-		// Anthropic-compatible
+		// Anthropic-compatible。handler 已做枚举校验，未知 protocol 在入站即被拒，
+		// 仅 anthropic 系列会走到 default。
 		modelID := "claude-sonnet-4-20250514"
 		if len(models) > 0 && models[0].ModelID != "" {
 			modelID = models[0].ModelID
@@ -730,6 +763,7 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 	case string(provider.AuthStyleNoAuth):
 		// no auth header
 	default:
+		// 未知 authStyle 在 handler 层已被拒；default 仅作兜底。
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
