@@ -32,3 +32,16 @@ type InviteDetail struct {
 type AigcConfigDetail struct {
 	ChangedFields []aigc.AigcConfigField `json:"changedFields"`
 }
+
+// BindingDetail：agent 挂载关系变更（issue #210）。Kind 为资源类型
+// （skill / tool / mcp），Names 为本次写入后的完整名单。
+type BindingDetail struct {
+	Kind  string   `json:"kind"`
+	Names []string `json:"names"`
+}
+
+// AgentUpdateDetail：agent.update 的变更字段名（仅字段名，不含值——
+// 字段值可能含敏感配置，spec §5.4 白名单原则）。
+type AgentUpdateDetail struct {
+	Fields []string `json:"fields"`
+}

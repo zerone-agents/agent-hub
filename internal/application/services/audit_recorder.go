@@ -162,6 +162,16 @@ func (r *AuditRecorder) AigcSaved(c *gin.Context, changed []aigc.AigcConfigField
 	r.Record(c, audit.AigcSavedEvent(audit.Actor{}, changed))
 }
 
+// BindingsUpdated：agent.update_bindings（issue #210）。kind ∈ skill/tool/mcp。
+func (r *AuditRecorder) BindingsUpdated(c *gin.Context, kind, agentName string, names []string) {
+	r.Record(c, audit.BindingsUpdatedEvent(audit.Actor{}, kind, agentName, names))
+}
+
+// AgentUpdated：agent.update，只记变更字段名。
+func (r *AuditRecorder) AgentUpdated(c *gin.Context, name string, fields []string) {
+	r.Record(c, audit.AgentUpdatedEvent(audit.Actor{}, name, fields))
+}
+
 // ---- legacy formatter（spec §5.5：stdout 逐字保留 provider.go 现输出，动态字段转义）----
 
 func (r *AuditRecorder) RevealKeyLegacy(c *gin.Context, providerID uint64) {

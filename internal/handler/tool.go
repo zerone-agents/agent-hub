@@ -146,6 +146,7 @@ func (h *ToolHandler) UploadFile(c *gin.Context) {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionToolUploadFile, audit.TargetTool, t.Name, t.Name)
 	respondSuccess(c, t)
 }
 
@@ -183,6 +184,7 @@ func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.BindingsUpdated(c, "tool", c.Param("name"), req.ToolNames)
 	respondMessage(c, http.StatusOK, "Agent Tool 关系已更新")
 }
 

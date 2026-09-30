@@ -41,12 +41,19 @@ func categoryOf(action Action) Category {
 		return CatInvite
 	case ActionRevealKey, ActionSyncMultirag:
 		return CatProvider
-	case ActionDeploy, ActionStop, ActionStart, ActionUndeploy, ActionDelete:
+	case ActionDeploy, ActionStop, ActionStart, ActionUndeploy, ActionDelete,
+		ActionAgentCreate, ActionAgentUpdate, ActionAgentUpdateBindings:
 		return CatAgent
 	case ActionCliTokenIssue, ActionCliTokenRevoke:
 		return CatToken
 	case ActionAigcSave, ActionAigcDelete, ActionAigcRotateKey:
 		return CatAigc
+	case ActionSkillCreate, ActionSkillUpdate, ActionSkillDelete:
+		return CatSkill
+	case ActionToolCreate, ActionToolUpdate, ActionToolDelete, ActionToolUploadFile:
+		return CatTool
+	case ActionMcpCreate, ActionMcpUpdate, ActionMcpDelete:
+		return CatMcp
 	default:
 		return Category(strings.SplitN(string(action), ".", 2)[0])
 	}
@@ -91,5 +98,24 @@ func AigcSavedEvent(a Actor, changed []aigc.AigcConfigField) Entry {
 	return Entry{
 		Actor: a, Category: CatAigc, Action: ActionAigcSave, TargetType: TargetAigcConfig,
 		Status: StatusSuccess, Detail: AigcConfigDetail{ChangedFields: changed},
+	}
+}
+
+// BindingsUpdatedEvent：agent 挂载关系变更（issue #210）。target 是 agent 名
+// 本体，Detail 携带资源类型与写入后的完整名单。
+func BindingsUpdatedEvent(a Actor, kind, agentName string, names []string) Entry {
+	return Entry{
+		Actor: a, Category: CatAgent, Action: ActionAgentUpdateBindings, TargetType: TargetAgent,
+		TargetID: agentName, TargetName: agentName, Status: StatusSuccess,
+		Detail: BindingDetail{Kind: kind, Names: names},
+	}
+}
+
+// AgentUpdatedEvent：agent.update 记录本次请求涉及的顶层字段名。
+func AgentUpdatedEvent(a Actor, name string, fields []string) Entry {
+	return Entry{
+		Actor: a, Category: CatAgent, Action: ActionAgentUpdate, TargetType: TargetAgent,
+		TargetID: name, TargetName: name, Status: StatusSuccess,
+		Detail: AgentUpdateDetail{Fields: fields},
 	}
 }

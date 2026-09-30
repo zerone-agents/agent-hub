@@ -206,6 +206,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.audit.Simple(c, audit.ActionAgentCreate, audit.TargetAgent, resp.Name, resp.Name)
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    resp,
@@ -246,10 +247,35 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		return
 	}
 
+	h.audit.AgentUpdated(c, resp.Name, changedAgentFields(&req))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// changedAgentFields 收集 update 请求中出现的顶层字段名（仅字段名，不含值）。
+func changedAgentFields(req *updateAgentReq) []string {
+	fields := make([]string, 0, 6)
+	if req.Config != nil {
+		fields = append(fields, "config")
+	}
+	if req.DesktopEnabled != nil {
+		fields = append(fields, "desktopEnabled")
+	}
+	if req.MobileEnabled != nil {
+		fields = append(fields, "mobileEnabled")
+	}
+	if req.GuestEnabled != nil {
+		fields = append(fields, "guestEnabled")
+	}
+	if req.IsDefault != nil {
+		fields = append(fields, "isDefault")
+	}
+	if req.Source != "" {
+		fields = append(fields, "source")
+	}
+	return fields
 }
 
 func (h *AgentHandler) Delete(c *gin.Context) {
