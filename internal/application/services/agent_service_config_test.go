@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -126,6 +127,41 @@ func TestFieldOverridesMaskedSecretRoundTrip(t *testing.T) {
 		stored, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, "")
 		require.NoError(t, err)
 		assert.Equal(t, "sk-brand-new-key-9999", stored["api_key"])
+	})
+
+	t.Run("无 providerId 的明文存储路径同样还原", func(t *testing.T) {
+		// 无 providerId 的旧数据 fieldOverrides 明文存储，但读侧 else 分支
+		// （modelToConfigMap）仍对 api_key 打掩码；还原须回退到明文解析。
+		cfg := &agent.AgentConfig{
+			FieldOverrides: `{"api_key":"` + realKey + `","base_url":"https://old.example.com"}`,
+		}
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{"api_key": masked},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		var stored map[string]string
+		require.NoError(t, json.Unmarshal([]byte(cfg.FieldOverrides), &stored))
+		assert.Equal(t, realKey, stored["api_key"], "plaintext path: masked echo must resolve back to the stored secret")
+	})
+
+	t.Run("非 api_key 字段不还原（与读侧打掩码范围对齐）", func(t *testing.T) {
+		// 读侧只对 api_key 打掩码；非 secret 字段的字面值即使恰好等于掩码
+		// 形态也必须按新值存储，不得误回退。
+		cfg := newCfg()
+		maskedBaseURL := maskSecret("https://old.example.com")
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{
+				"api_key":  masked,
+				"base_url": maskedBaseURL,
+			},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		stored, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, "")
+		require.NoError(t, err)
+		assert.Equal(t, realKey, stored["api_key"])
+		assert.Equal(t, maskedBaseURL, stored["base_url"], "non-secret keys are stored as-is, never restored")
 	})
 
 	t.Run("无既有 overrides 时不做还原", func(t *testing.T) {

@@ -84,20 +84,27 @@ export function parseSetArgs(args: string[]): SetPair[] {
   return args.map(parseSetArg);
 }
 
-function setConfigPath(
-  config: Record<string, unknown>,
-  rawPath: string,
-  value: unknown,
-): void {
+// config 路径解析：剥可选的 config. 前缀、按点号分段、config 顶层
+// model 别名归一为 modelId。setConfigPath 与 unreflectedSetKeys 共用，
+// 防两处规则漂移。
+export function configPathSegments(rawPath: string): string[] {
   const path = rawPath.startsWith("config.") ? rawPath.slice("config.".length) : rawPath;
   const segments = path.split(".");
   if (segments.some((s) => s.length === 0)) {
     throw new SetPatchError(`invalid --set key "${rawPath}": empty path segment`);
   }
-  const first = segments[0];
-  if (segments.length === 1 && CONFIG_ALIASES.has(first)) {
-    segments[0] = CONFIG_ALIASES.get(first)!;
+  if (segments.length === 1 && CONFIG_ALIASES.has(segments[0])) {
+    segments[0] = CONFIG_ALIASES.get(segments[0])!;
   }
+  return segments;
+}
+
+function setConfigPath(
+  config: Record<string, unknown>,
+  rawPath: string,
+  value: unknown,
+): void {
+  const segments = configPathSegments(rawPath);
   let node = config;
   for (const segment of segments.slice(0, -1)) {
     const next = node[segment];
@@ -114,6 +121,43 @@ function setConfigPath(
     }
   }
   node[segments[segments.length - 1]] = value;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    return keysA.length === keysB.length && keysA.every((k) => deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+// 后端 update 只识别固定 schema 的 config key（unpackConfigToModel），未知
+// key 会被静默丢弃。update 返回后逐条比对 --set 的 config 路径是否体现在
+// 响应里，把「静默无效果」变成显式警告。api_key 叶子跳过——读侧对其打
+// 掩码，无法与明文新值比对。
+export function unreflectedSetKeys(
+  agentConfig: Record<string, unknown> | undefined,
+  pairs: SetPair[],
+): string[] {
+  const missing: string[] = [];
+  for (const { key, value } of pairs) {
+    if (FLAG_ALIASES.has(key)) continue;
+    const segments = configPathSegments(key);
+    if (segments[segments.length - 1] === "api_key") continue;
+    let node: unknown = agentConfig;
+    for (const segment of segments) {
+      node = isRecord(node) ? node[segment] : undefined;
+    }
+    if (!deepEqual(node, value)) {
+      missing.push(key);
+    }
+  }
+  return missing;
 }
 
 // 把一组已解析的 --set 键值依序合并到 currentConfig 的深拷贝上。

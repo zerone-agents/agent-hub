@@ -708,12 +708,24 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		// 更新（provider_service.go LockedAPIKey 比较）和本文件 probe 路径
 		// （resolvedKey == maskSecret(overrideKey)）同一约定：入参等于已存
 		// 值的掩码形态即视为「未修改」，还原为已存值。
-		if priorFieldOverrides != "" && priorProviderID != nil {
-			if existing, err := decryptFieldOverrides(priorFieldOverrides, *priorProviderID, encryptionKey); err == nil {
-				for k, val := range overrides {
-					if ex, ok := existing[k]; ok && ex != "" && val == maskSecret(ex) {
-						overrides[k] = ex
-					}
+		if priorFieldOverrides != "" {
+			var existing map[string]string
+			if priorProviderID != nil {
+				if dec, err := decryptFieldOverrides(priorFieldOverrides, *priorProviderID, encryptionKey); err == nil {
+					existing = dec
+				}
+			} else {
+				// 无 providerId 的旧数据按明文 JSON 存储（下方 else 分支同样
+				// 明文写回），读侧 else 分支仍对 api_key 打掩码，必须回退到
+				// 明文解析取旧值，否则该路径下掩码串会被明文写回。
+				_ = json.Unmarshal([]byte(priorFieldOverrides), &existing)
+			}
+			// 还原范围与读侧打掩码的 key 严格对齐（modelToConfigMap 只对
+			// api_key 打掩码），避免非 secret 字段的字面值恰好等于掩码形态
+			// 时被误回退。
+			if ex, ok := existing["api_key"]; ok && ex != "" {
+				if val, set := overrides["api_key"]; set && val == maskSecret(ex) {
+					overrides["api_key"] = ex
 				}
 			}
 		}

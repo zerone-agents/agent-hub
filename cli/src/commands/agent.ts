@@ -1,5 +1,5 @@
 import { Command, Option } from "clipanion";
-import { SetPatchError, buildSetUpdate, parseSetArgs } from "../agent-set";
+import { SetPatchError, buildSetUpdate, parseSetArgs, unreflectedSetKeys } from "../agent-set";
 import { AgentYamlError, parseAgentYaml } from "../agent-yaml";
 import { getActiveProfile } from "../config";
 import { outputJson } from "../output/json";
@@ -217,6 +217,18 @@ export class AgentUpdateCommand extends Command {
           pairs,
         );
         const agent = await updateAgent(this.name, update);
+        // 后端只识别固定 schema 的 config key，未知 key 静默丢弃——把
+        // 响应与 --set 逐条比对，无效果时显式警告（exit code 仍为 0，
+        // 更新本身已成功）。
+        const unreflected = unreflectedSetKeys(
+          (agent.config ?? {}) as Record<string, unknown>,
+          pairs,
+        );
+        if (unreflected.length > 0) {
+          process.stderr.write(
+            `Warning: --set key(s) not reflected in server config (unknown key?): ${unreflected.join(", ")}\n`,
+          );
+        }
         renderAgent(agent, this.output);
         return 0;
       } catch (error) {

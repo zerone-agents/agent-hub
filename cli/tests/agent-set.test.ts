@@ -1,5 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { SetPatchError, buildSetUpdate, parseSetArg, parseSetArgs } from "../src/agent-set";
+import {
+  SetPatchError,
+  buildSetUpdate,
+  parseSetArg,
+  parseSetArgs,
+  unreflectedSetKeys,
+} from "../src/agent-set";
 
 // issue #202 方案 A：agent update --set 增量补丁的纯函数层（不触网）。
 // 合并语义契约：
@@ -131,5 +137,49 @@ describe("buildSetUpdate", () => {
   test("currentConfig 缺失时从空对象起步", () => {
     const update = build(undefined, "maxTurns=100");
     expect(update.config).toEqual({ maxTurns: 100 });
+  });
+});
+
+describe("unreflectedSetKeys", () => {
+  // 后端 update 只识别固定 schema 的 config key；响应比对把「未知 key
+  // 静默无效果」变成显式警告。
+  test("已生效的 key 不报", () => {
+    const pairs = parseSetArgs(["maxTurns=100", "title.zh=新", "guest=true"]);
+    const config = { maxTurns: 100, title: { zh: "新", en: "old" } };
+    expect(unreflectedSetKeys(config, pairs)).toEqual([]);
+  });
+
+  test("响应里缺失或值不符的 key 被列出", () => {
+    const pairs = parseSetArgs(["unknownField=bar", "maxTurns=100"]);
+    expect(unreflectedSetKeys({ maxTurns: 100 }, pairs)).toEqual(["unknownField"]);
+    expect(unreflectedSetKeys({ maxTurns: 15 }, pairs)).toEqual([
+      "unknownField",
+      "maxTurns",
+    ]);
+  });
+
+  test("数组与对象按深比较", () => {
+    const pairs = parseSetArgs(["disallowedTools=[Bash, Edit]", "title={zh: 评审}"]);
+    expect(
+      unreflectedSetKeys(
+        { disallowedTools: ["Bash", "Edit"], title: { zh: "评审" } },
+        pairs,
+      ),
+    ).toEqual([]);
+    expect(unreflectedSetKeys({ disallowedTools: ["Edit", "Bash"] }, pairs)).toEqual([
+      "disallowedTools",
+      "title",
+    ]);
+  });
+
+  test("api_key 叶子跳过（读侧掩码无法比对），平台标志不参与", () => {
+    const pairs = parseSetArgs(["fieldOverrides.api_key=sk-new", "guest=true"]);
+    expect(unreflectedSetKeys({}, pairs)).toEqual([]);
+  });
+
+  test("model 别名与 config. 前缀按解析后路径比对", () => {
+    const pairs = parseSetArgs(["model=glm-4.6", "config.group=桌面端"]);
+    expect(unreflectedSetKeys({ modelId: "glm-4.6", group: "桌面端" }, pairs)).toEqual([]);
+    expect(unreflectedSetKeys({}, pairs)).toEqual(["model", "config.group"]);
   });
 });

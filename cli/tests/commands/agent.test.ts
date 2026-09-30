@@ -555,6 +555,48 @@ describe("agent update --set command", () => {
     expect(putCall[1].body).toEqual({ guestEnabled: true });
   });
 
+  test("未知 config key 被后端丢弃时给出警告（更新本身成功）", async () => {
+    // 服务端只识别固定 schema 的 key：mock PUT 原样返回当前 agent，
+    // 模拟 unknownField 被静默丢弃。
+    const fetchMock = mock((_url: string, opts?: any) =>
+      Promise.resolve({ success: true, data: currentAgent }),
+    );
+    mock.module("ofetch", () => ({
+      ofetch: fetchMock,
+      FetchError: class FetchError extends Error {},
+    }));
+    mock.module("../../src/config", () => ({
+      ...realConfig,
+      getActiveProfile: mock(() =>
+        Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
+      ),
+    }));
+
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["unknownField=bar", "maxTurns=15"];
+    (cmd as any).output = "yaml";
+
+    const errs: string[] = [];
+    const origErr = process.stderr.write;
+    process.stderr.write = ((s: string) => { errs.push(s); return true; }) as any;
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      process.stderr.write = origErr;
+      console.log = origLog;
+    }
+
+    expect(errs.join("")).toContain("unknownField");
+    expect(errs.join("")).not.toContain("maxTurns");
+  });
+
   test("非法 --set 在任何 API 调用前报错", async () => {
     const fetchMock = setupSetMocks();
     const { AgentUpdateCommand } = await import(
