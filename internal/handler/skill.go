@@ -7,6 +7,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/tenant"
 
@@ -16,11 +17,12 @@ import (
 // SkillHandler handles HTTP requests for skill CRUD and agent-skill associations.
 type SkillHandler struct {
 	service *services.SkillService
+	audit   *services.AuditRecorder
 }
 
 // NewSkillHandler creates a new SkillHandler with the given service.
-func NewSkillHandler(service *services.SkillService) *SkillHandler {
-	return &SkillHandler{service: service}
+func NewSkillHandler(service *services.SkillService, audit *services.AuditRecorder) *SkillHandler {
+	return &SkillHandler{service: service, audit: audit}
 }
 
 // respondSkillError 映射 Skill 领域错误（issue #95 P2 同款边界分流）：
@@ -152,6 +154,7 @@ func (h *SkillHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.audit.Simple(c, audit.ActionSkillCreate, audit.TargetSkill, sk.Name, sk.Name)
 	respondCreated(c, sk)
 }
 
@@ -199,6 +202,7 @@ func (h *SkillHandler) Update(c *gin.Context) {
 		return
 	}
 
+	h.audit.Simple(c, audit.ActionSkillUpdate, audit.TargetSkill, sk.Name, sk.Name)
 	respondSuccess(c, sk)
 }
 
@@ -216,6 +220,7 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	h.audit.Simple(c, audit.ActionSkillDelete, audit.TargetSkill, name, name)
 	respondMessage(c, http.StatusOK, "技能已删除")
 }
 

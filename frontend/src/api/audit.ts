@@ -1,7 +1,9 @@
 import apiClient, { unwrapResponse } from './client'
 import type { ApiResponse } from '@/types/api'
 
-export type AuditCategory = 'auth' | 'user' | 'invite' | 'provider' | 'agent' | 'token' | 'aigc'
+export type AuditCategory =
+  | 'auth' | 'user' | 'invite' | 'provider' | 'agent' | 'token' | 'aigc'
+  | 'skill' | 'tool' | 'mcp'
 export type AuditStatus = 'success' | 'failure' | 'partial'
 
 // id 为十进制字符串（JS number 超 2^53-1 丢精度；rowKey 依赖 id 身份）——

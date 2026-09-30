@@ -64,7 +64,7 @@ func newSkillErrorRouter(t *testing.T, h *SkillHandler) *gin.Engine {
 func newSkillErrorHandler(t *testing.T) *SkillHandler {
 	t.Helper()
 	return NewSkillHandler(services.NewSkillService(
-		&toolUploaderMock{data: map[string][]byte{}}, ""))
+		&toolUploaderMock{data: map[string][]byte{}}, ""), newHandlerTestAuditRecorder(t))
 }
 
 // buildSkillCreateMultipart builds a multipart create request body with the

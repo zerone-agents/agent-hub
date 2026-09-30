@@ -96,7 +96,7 @@ Query parameters:
 |---|---|---|
 | `page` | `1` | Page number, ≥ 1; invalid → 400 「无效的分页参数」 |
 | `page_size` | `20` | ≥ 1, capped at 100 (values > 100 are clamped, not rejected); invalid → 400 「无效的分页参数」 |
-| `category` | — | Exact match: `auth` \| `user` \| `invite` \| `provider` \| `agent` \| `token` \| `aigc` |
+| `category` | — | Exact match: `auth` \| `user` \| `invite` \| `provider` \| `agent` \| `token` \| `aigc` \| `skill` \| `tool` \| `mcp` |
 | `action` | — | Exact match, e.g. `user.update_role` |
 | `user` | — | Fuzzy match on `userName` / `userId` (LIKE `%…%`) |
 | `from`, `to` | — | RFC3339 timestamps; closed interval on `createdAt` (`from` ≤ t ≤ `to`); invalid → 400 「无效的时间范围」 |

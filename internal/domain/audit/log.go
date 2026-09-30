@@ -15,6 +15,9 @@ const (
 	CatAgent    Category = "agent"
 	CatToken    Category = "token"
 	CatAigc     Category = "aigc"
+	CatSkill    Category = "skill"
+	CatTool     Category = "tool"
+	CatMcp      Category = "mcp"
 )
 
 const (
@@ -46,6 +49,18 @@ const (
 	ActionAigcSave      Action = "aigc.save"
 	ActionAigcDelete    Action = "aigc.delete"
 	ActionAigcRotateKey Action = "aigc.rotate_key"
+
+	ActionSkillCreate Action = "skill.create"
+	ActionSkillUpdate Action = "skill.update"
+	ActionSkillDelete Action = "skill.delete"
+
+	ActionToolCreate Action = "tool.create"
+	ActionToolUpdate Action = "tool.update"
+	ActionToolDelete Action = "tool.delete"
+
+	ActionMcpCreate Action = "mcp.create"
+	ActionMcpUpdate Action = "mcp.update"
+	ActionMcpDelete Action = "mcp.delete"
 )
 
 const (
@@ -61,6 +76,9 @@ const (
 	TargetAgent      TargetType = "agent"
 	TargetToken      TargetType = "token"
 	TargetAigcConfig TargetType = "aigc_config"
+	TargetSkill      TargetType = "skill"
+	TargetTool       TargetType = "tool"
+	TargetMcp        TargetType = "mcp"
 	TargetSystem     TargetType = "system"
 )
 

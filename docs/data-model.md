@@ -66,14 +66,14 @@ Per-tenant AIGC content-labeling config (GB 45438-2025), one row per tenant (`uk
 
 ### audit.Log (`audit_logs`)
 
-Append-only audit trail (auth / user / invite / provider / agent lifecycle / CLI token / AIGC writes; query API see api-reference.md → Audit Logs). Retention: never auto-purged, no update/delete API — the application layer is read-only, so plan capacity as a growth table.
+Append-only audit trail (auth / user / invite / provider / agent lifecycle / CLI token / AIGC writes / skill, tool, MCP CRUD; query API see api-reference.md → Audit Logs). Retention: never auto-purged, no update/delete API — the application layer is read-only, so plan capacity as a growth table.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | BIGINT UNSIGNED, auto-increment PK | uint64; the API layer renders it as a decimal string (JS-safe) |
 | `tenant_id` | VARCHAR(64) | tenant scoping (`default` in builtin mode) |
 | `user_id` / `user_name` | VARCHAR(64) | actor identity, denormalized at write time |
-| `category` | VARCHAR(32) | `auth` / `user` / `invite` / `provider` / `agent` / `token` / `aigc` |
+| `category` | VARCHAR(32) | `auth` / `user` / `invite` / `provider` / `agent` / `token` / `aigc` / `skill` / `tool` / `mcp` |
 | `action` | VARCHAR(64) | e.g. `user.update_role` |
 | `target_type` / `target_id` / `target_name` | VARCHAR(32) / VARCHAR(64) / VARCHAR(128) | affected resource, pure-ID snapshot (no FK) |
 | `status` | VARCHAR(16) | `success` / `failure` / `partial` |

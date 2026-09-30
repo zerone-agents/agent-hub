@@ -75,7 +75,7 @@ describe('AuditLogsPage', () => {
     await screen.findByText('user.update_role')
     // antd v6 Select 无 .ant-select-selector；触发器是 role=combobox 的 input（同 UsersPage.test）
     fireEvent.mouseDown(screen.getByRole('combobox'))
-    const option = await screen.findByText('agent', { selector: '.ant-select-item-option-content' })
+    const option = await screen.findByText('Agent', { selector: '.ant-select-item-option-content' })
     fireEvent.click(option)
     await waitFor(() => {
       const call = mocked.mock.calls[mocked.mock.calls.length - 1][0]

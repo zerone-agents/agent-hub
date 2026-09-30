@@ -45,9 +45,10 @@ func newTestMcpServer() *httptest.Server {
 	}))
 }
 
-func setupMcpProbeRouter(svc *services.McpService) *gin.Engine {
+func setupMcpProbeRouter(t *testing.T, svc *services.McpService) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	h := NewMcpHandler(svc)
+	h := NewMcpHandler(svc, newHandlerTestAuditRecorder(t))
 	router := gin.New()
 	router.POST("/api/v1/mcps/probe", h.ProbeByConfig)
 	router.POST("/api/v1/mcps/:name/probe", h.ProbeByName)
@@ -68,7 +69,7 @@ func TestProbeByConfig_Success(t *testing.T) {
 	defer server.Close()
 
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	router := setupMcpProbeRouter(svc)
+	router := setupMcpProbeRouter(t, svc)
 
 	rec := postProbeByConfig(router, map[string]interface{}{
 		"name":          "test",
@@ -95,7 +96,7 @@ func TestProbeByConfig_Success(t *testing.T) {
 
 func TestProbeByConfig_InvalidTransportType(t *testing.T) {
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	router := setupMcpProbeRouter(svc)
+	router := setupMcpProbeRouter(t, svc)
 
 	rec := postProbeByConfig(router, map[string]interface{}{
 		"name":          "test",
@@ -118,7 +119,7 @@ func TestProbeByConfig_InvalidTransportType(t *testing.T) {
 
 func TestProbeByConfig_EmptyURL(t *testing.T) {
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	router := setupMcpProbeRouter(svc)
+	router := setupMcpProbeRouter(t, svc)
 
 	rec := postProbeByConfig(router, map[string]interface{}{
 		"name":          "test",
@@ -141,7 +142,7 @@ func TestProbeByConfig_EmptyURL(t *testing.T) {
 
 func TestProbeByConfig_SSETransport(t *testing.T) {
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	router := setupMcpProbeRouter(svc)
+	router := setupMcpProbeRouter(t, svc)
 
 	rec := postProbeByConfig(router, map[string]interface{}{
 		"name":          "test",
@@ -163,7 +164,7 @@ func TestProbeByConfig_SSETransport(t *testing.T) {
 
 func TestProbeByConfig_MalformedJSON(t *testing.T) {
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	router := setupMcpProbeRouter(svc)
+	router := setupMcpProbeRouter(t, svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mcps/probe", bytes.NewReader([]byte(`{invalid`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -184,7 +185,7 @@ func TestProbeByConfig_MalformedJSON(t *testing.T) {
 // The probe client logic is thoroughly tested in probe_client_test.go.
 func TestProbeByName_Compiled(t *testing.T) {
 	svc := services.NewMcpService("test-key-0123456789abcdef")
-	h := NewMcpHandler(svc)
+	h := NewMcpHandler(svc, newHandlerTestAuditRecorder(t))
 	// Compile-time assertion: ProbeByName exists with correct signature.
 	var _ func(*gin.Context) = h.ProbeByName
 }

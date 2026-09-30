@@ -25,7 +25,7 @@ func setupSkillHandlerRouter(t *testing.T) *gin.Engine {
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
 
-	h := NewSkillHandler(services.NewSkillService(&toolUploaderMock{data: map[string][]byte{}}, "https://cdn.example.com"))
+	h := NewSkillHandler(services.NewSkillService(&toolUploaderMock{data: map[string][]byte{}}, "https://cdn.example.com"), newHandlerTestAuditRecorder(t))
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// 生产租户来自 JWT 中间件 c.Set("tenant_id")（tool_custom_test 同款注入）

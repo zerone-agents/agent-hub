@@ -58,7 +58,7 @@ func newMcpErrorRouter(h *McpHandler) *gin.Engine {
 // 包装，handler 认 sentinel 即可；gorm 英文诊断不得泄漏到响应体）。
 func TestMcpHandler_Get_NotFound404(t *testing.T) {
 	setupMcpErrorTestDB(t)
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/mcps/nonexistent", nil)
@@ -89,7 +89,7 @@ func TestMcpHandler_List_InternalError500Neutral(t *testing.T) {
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(oldOut) })
 
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/mcps", nil)
@@ -110,7 +110,7 @@ func TestMcpHandler_List_InternalError500Neutral(t *testing.T) {
 // handler 调用链 → 400 完整链原文，而不是 500 中性。
 func TestMcpHandler_Create_Validation400(t *testing.T) {
 	setupMcpErrorTestDB(t)
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	body := `{"name":"t-e2e","title":"端到端校验","url":"http://example.com/sse","transportType":"bogus"}`
@@ -144,7 +144,7 @@ func TestMcpHandler_Update_BuiltinTransportType400(t *testing.T) {
 	}
 	require.NoError(t, db.Create(builtin).Error)
 
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	body := `{"transportType":"http"}`
@@ -165,7 +165,7 @@ func TestMcpHandler_Update_BuiltinTransportType400(t *testing.T) {
 // sentinel），runtime 侧不得把「agent 不存在」误判为服务故障（500）。
 func TestMcpHandler_GetClientMcps_AgentNotFound404(t *testing.T) {
 	setupMcpErrorTestDB(t)
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/mcps?agent=ghost-agent", nil)
@@ -186,7 +186,7 @@ func TestMcpHandler_GetClientMcps_AgentNotFound404(t *testing.T) {
 // handler 认 sentinel；gorm 英文诊断不得泄漏。
 func TestMcpHandler_GetAgentMcps_AgentNotFound404(t *testing.T) {
 	setupMcpErrorTestDB(t)
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/agents/ghost/mcps", nil)
@@ -215,7 +215,7 @@ func TestMcpHandler_UpdateAgentMcps_NotFound400(t *testing.T) {
 	}
 	require.NoError(t, db.Create(seed).Error)
 
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	t.Run("agent not found", func(t *testing.T) {
@@ -261,7 +261,7 @@ func TestMcpHandler_UpdateAgentMcps_DBFailure500Neutral(t *testing.T) {
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(oldOut) })
 
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	r := newMcpErrorRouter(h)
 
 	body := `{"mcpNames":["ghost-mcp"]}`
