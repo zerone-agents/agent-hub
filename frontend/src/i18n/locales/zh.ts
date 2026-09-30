@@ -240,6 +240,18 @@ const zh = {
       failure: '失败',
       partial: '部分生效'
     },
+    categories: {
+      auth: '认证',
+      user: '用户',
+      invite: '邀请',
+      provider: '模型供应商',
+      agent: 'Agent',
+      token: 'CLI Token',
+      aigc: 'AIGC 配置',
+      skill: '技能',
+      tool: '工具',
+      mcp: 'MCP'
+    },
     columns: {
       time: '时间',
       user: '用户',

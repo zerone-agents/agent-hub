@@ -1,7 +1,7 @@
 package handler
 
-// Issue #206 RED：skill / tool / mcp 三个域的 create / update / delete
-// 成功路径必须落审计行（此前三域 handler 从未接入 AuditRecorder）。
+// Issue #206：skill / tool / mcp 三个域的 create / update / delete
+// 成功路径必须落审计行（接入前三域 handler 从未接线 AuditRecorder）。
 // fixture 复用同包既有模式：toolUploaderMock（skill_test/tool_custom_test）、
 // buildZip 式内存 zip（services/skill_validator_test 同构，本包自建副本）、
 // 真实 AuditRecorder 落同一内存库（audit_embeds_test.go 的

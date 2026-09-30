@@ -8,17 +8,11 @@ import { auditApi, type AuditCategory, type AuditLog } from '@/api/audit'
 import PageHeader from '@/components/PageHeader'
 import BorderedTable from '@/components/BorderedTable'
 
-const CATEGORY_OPTIONS: { value: AuditCategory; label: string }[] = [
-  { value: 'auth', label: 'auth' },
-  { value: 'user', label: 'user' },
-  { value: 'invite', label: 'invite' },
-  { value: 'provider', label: 'provider' },
-  { value: 'agent', label: 'agent' },
-  { value: 'token', label: 'token' },
-  { value: 'aigc', label: 'aigc' },
-  { value: 'skill', label: 'skill' },
-  { value: 'tool', label: 'tool' },
-  { value: 'mcp', label: 'mcp' }
+// 分类值清单；展示文案走 i18n（audit.categories.*），键缺失时回退原始值——
+// 后端新增分类时前端未同步也不至于显示空白。
+const CATEGORY_VALUES: AuditCategory[] = [
+  'auth', 'user', 'invite', 'provider', 'agent', 'token', 'aigc',
+  'skill', 'tool', 'mcp'
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -92,7 +86,7 @@ export default function AuditLogsPage() {
           placeholder="Category"
           style={{ width: 140 }}
           value={category}
-          options={CATEGORY_OPTIONS}
+          options={CATEGORY_VALUES.map((v) => ({ value: v, label: t(`audit.categories.${v}`, v) }))}
           onChange={(v) => { setCategory(v); setPage(1) }}
         />
         <Input.Search

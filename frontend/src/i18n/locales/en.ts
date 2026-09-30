@@ -239,6 +239,18 @@ const en = {
       failure: 'Failure',
       partial: 'Partial'
     },
+    categories: {
+      auth: 'Auth',
+      user: 'User',
+      invite: 'Invite',
+      provider: 'Provider',
+      agent: 'Agent',
+      token: 'CLI Token',
+      aigc: 'AIGC Config',
+      skill: 'Skill',
+      tool: 'Tool',
+      mcp: 'MCP'
+    },
     columns: {
       time: 'Time',
       user: 'User',
