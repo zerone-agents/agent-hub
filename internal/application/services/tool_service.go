@@ -401,22 +401,25 @@ func (s *ToolService) GetAgentTools(tenantID, agentName string) ([]string, error
 	return s.repo.GetToolsByAgent(agentCfg.ID)
 }
 
-func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []string) error {
+// UpdateAgentTools 用 toolNames 替换 agent 的工具挂载，并返回落库后的生效
+// 名单（并入默认工具 + 去重 + 排序；PR #211 审查项①：审计必须记生效名单，
+// 而非请求列表）。校验失败返回错误且不落库。
+func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []string) ([]string, error) {
 	agentCfg, err := s.getAgentCfg(tenantID, agentName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defaultToolNames, err := s.repo.GetDefaultToolNames(tenantID)
 	if err != nil {
-		return fmt.Errorf("get default tool failed: %w", err)
+		return nil, fmt.Errorf("get default tool failed: %w", err)
 	}
 	toolNames = mergeStringSlices(toolNames, defaultToolNames)
 
 	// 已有关联名单：存量 missing 工具保持挂载合法，仅拒绝「新增」（issue #88）。
 	currentNames, err := s.repo.GetToolsByAgent(agentCfg.ID)
 	if err != nil {
-		return fmt.Errorf("get agent tools failed: %w", err)
+		return nil, fmt.Errorf("get agent tools failed: %w", err)
 	}
 	current := make(map[string]bool, len(currentNames))
 	for _, n := range currentNames {
@@ -428,7 +431,7 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 	for _, toolName := range toolNames {
 		t, err := s.getTool(tenantID, toolName)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if t.Source == agent.ToolSourceCustom &&
 			t.ArtifactStatus() == agent.ToolArtifactMissing && !current[toolName] {
@@ -438,9 +441,12 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 		toolIDs = append(toolIDs, t.ID)
 	}
 	if len(missingNew) > 0 {
-		return fmt.Errorf("%w：%s", agent.ErrToolArtifactMissing, strings.Join(missingNew, "、"))
+		return nil, fmt.Errorf("%w：%s", agent.ErrToolArtifactMissing, strings.Join(missingNew, "、"))
 	}
-	return s.repo.ReplaceAgentTools(agentCfg.ID, toolIDs)
+	if err := s.repo.ReplaceAgentTools(agentCfg.ID, toolIDs); err != nil {
+		return nil, err
+	}
+	return toolNames, nil
 }
 
 // SeedIfEmpty 是系统路径（tenantID=”）：预设行写入为共享行。

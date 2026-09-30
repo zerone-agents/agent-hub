@@ -41,19 +41,12 @@ func categoryOf(action Action) Category {
 		return CatInvite
 	case ActionRevealKey, ActionSyncMultirag:
 		return CatProvider
-	case ActionDeploy, ActionStop, ActionStart, ActionUndeploy, ActionDelete,
-		ActionAgentCreate, ActionAgentUpdate, ActionAgentUpdateBindings:
+	case ActionDeploy, ActionStop, ActionStart, ActionUndeploy, ActionDelete:
 		return CatAgent
 	case ActionCliTokenIssue, ActionCliTokenRevoke:
 		return CatToken
 	case ActionAigcSave, ActionAigcDelete, ActionAigcRotateKey:
 		return CatAigc
-	case ActionSkillCreate, ActionSkillUpdate, ActionSkillDelete:
-		return CatSkill
-	case ActionToolCreate, ActionToolUpdate, ActionToolDelete, ActionToolUploadFile:
-		return CatTool
-	case ActionMcpCreate, ActionMcpUpdate, ActionMcpDelete:
-		return CatMcp
 	default:
 		return Category(strings.SplitN(string(action), ".", 2)[0])
 	}
@@ -103,7 +96,7 @@ func AigcSavedEvent(a Actor, changed []aigc.AigcConfigField) Entry {
 
 // BindingsUpdatedEvent：agent 挂载关系变更（issue #210）。target 是 agent 名
 // 本体，Detail 携带资源类型与写入后的完整名单。
-func BindingsUpdatedEvent(a Actor, kind, agentName string, names []string) Entry {
+func BindingsUpdatedEvent(a Actor, kind BindingKind, agentName string, names []string) Entry {
 	return Entry{
 		Actor: a, Category: CatAgent, Action: ActionAgentUpdateBindings, TargetType: TargetAgent,
 		TargetID: agentName, TargetName: agentName, Status: StatusSuccess,

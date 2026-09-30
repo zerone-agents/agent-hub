@@ -331,13 +331,14 @@ func TestUpdateAgentTools_RejectNewMissing(t *testing.T) {
 	require.NoError(t, database.GetDB().Create(missing).Error)
 
 	// 新增 missing → 拒绝且报出工具名
-	err := svc.UpdateAgentTools("acme", "bot", []string{"Legacy"})
+	_, err := svc.UpdateAgentTools("acme", "bot", []string{"Legacy"})
 	require.ErrorIs(t, err, agent.ErrToolArtifactMissing)
 	require.Contains(t, err.Error(), "Legacy")
 
 	// 已有关联的 missing 保持挂载合法（用户仅未勾选移除其他工具）
 	require.NoError(t, database.GetDB().Create(&agent.AgentTool{AgentID: a.ID, ToolID: missing.ID}).Error)
-	require.NoError(t, svc.UpdateAgentTools("acme", "bot", []string{"Legacy"}))
+	_, err = svc.UpdateAgentTools("acme", "bot", []string{"Legacy"})
+	require.NoError(t, err)
 }
 
 // TestToolOps_NotFoundSentinel 锁定 not-found 契约（Task 3 review Fix 1）：
@@ -372,7 +373,8 @@ func TestToolOps_NotFoundSentinel(t *testing.T) {
 	// UpdateAgentTools 的 per-tool 查找同契约（Agent 本身存在，工具不存在）
 	a := &agent.AgentConfig{Name: "bot", TenantID: "acme", ContentHash: "h", SystemPrompt: "p"}
 	require.NoError(t, database.GetDB().Create(a).Error)
-	require.ErrorIs(t, svc.UpdateAgentTools("acme", "bot", []string{"Ghost"}), agent.ErrToolNotFound)
+	_, err := svc.UpdateAgentTools("acme", "bot", []string{"Ghost"})
+	require.ErrorIs(t, err, agent.ErrToolNotFound)
 }
 
 // issue #123 收敛：工具 409 载荷与知识库/技能/MCP 同构——他租户挂载仅

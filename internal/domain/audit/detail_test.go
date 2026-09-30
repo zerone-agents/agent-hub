@@ -22,6 +22,10 @@ func TestDetailWireKeys(t *testing.T) {
 		{"InviteDetail", InviteDetail{Role: "maintainer", ExpiresInDays: 7}, `{"role":"maintainer","expiresInDays":7}`},
 		{"AigcConfigDetail", AigcConfigDetail{ChangedFields: []aigc.AigcConfigField{aigc.AigcFieldUSCC}}, `{"changedFields":["uscc"]}`},
 		{"AigcConfigDetailEmpty", AigcConfigDetail{ChangedFields: []aigc.AigcConfigField{}}, `{"changedFields":[]}`},
+		{"BindingDetail", BindingDetail{Kind: BindingKindSkill, Names: []string{"a", "b"}}, `{"kind":"skill","names":["a","b"]}`},
+		{"BindingDetailEmptyNames", BindingDetail{Kind: BindingKindMcp, Names: []string{}}, `{"kind":"mcp","names":[]}`},
+		{"AgentUpdateDetail", AgentUpdateDetail{Fields: []string{"config", "desktopEnabled"}}, `{"fields":["config","desktopEnabled"]}`},
+		{"AgentUpdateDetailEmpty", AgentUpdateDetail{Fields: []string{}}, `{"fields":[]}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

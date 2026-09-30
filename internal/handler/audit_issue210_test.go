@@ -107,6 +107,9 @@ func setupAuditBindingsEnv(t *testing.T) (*gin.Engine, *gorm.DB) {
 		FileName: "toolX.ts", FileURL: "tools/toolX.ts", FileHash: "h", FileSize: 1,
 	}).Error)
 	require.NoError(t, db.Create(&agent.Tool{Name: "Skill", TenantID: "", Source: "builtin"}).Error)
+	// 租户默认工具：UpdateAgentTools 会把它并进生效名单——审计必须记生效
+	// 名单而非请求列表（PR #211 审查项①的反例场景）
+	require.NoError(t, db.Create(&agent.Tool{Name: "defaultTool", TenantID: "tenant-a", Source: "builtin", IsDefault: true}).Error)
 	require.NoError(t, db.Create(&mcp.McpServer{Name: "mcp-x", TenantID: "tenant-a", TransportType: "sse", URL: "https://mcp.example.com/sse"}).Error)
 
 	recorder := services.NewAuditRecorder(repository.NewAuditRepository(db))
@@ -138,21 +141,39 @@ func TestAuditAgentBindingUpdates(t *testing.T) {
 	put("/api/v1/admin/agents/bind-me/tools", `{"toolNames":["toolX"]}`)
 	put("/api/v1/admin/agents/bind-me/mcps", `{"mcpNames":["mcp-x"]}`)
 
-	// 三次绑定变更 → 三行 agent.update_bindings，target 均为 agent 名
+	// 三次绑定变更 → 三行 agent.update_bindings，target 均为 agent 名；
+	// tool 行断言的是「生效名单」（含租户默认工具、排序后），不是请求列表
 	require.EqualValues(t, 3, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
 	var rows []audit.Log
 	require.NoError(t, db.Where("action = ?", audit.ActionAgentUpdateBindings).Order("id").Find(&rows).Error)
 
-	wantKinds := []string{"skill", "tool", "mcp"}
-	wantNames := []string{"skill-x", "toolX", "mcp-x"}
+	wantDetails := []string{
+		`{"kind":"skill","names":["skill-x"]}`,
+		`{"kind":"tool","names":["defaultTool","toolX"]}`,
+		`{"kind":"mcp","names":["mcp-x"]}`,
+	}
 	for i, row := range rows {
 		require.Equal(t, audit.CatAgent, row.Category)
 		require.Equal(t, audit.TargetAgent, row.TargetType)
 		require.Equal(t, "bind-me", row.TargetName)
 		require.Equal(t, audit.StatusSuccess, row.Status)
-		require.Contains(t, row.Detail, `"kind":"`+wantKinds[i]+`"`)
-		require.Contains(t, row.Detail, wantNames[i])
+		require.JSONEq(t, wantDetails[i], row.Detail)
 	}
+}
+
+// TestAuditAgentBindingsFailureNoRecord：绑定变更失败（agent 不存在）不落
+// 审计行——记录语义是「成功的管理操作」（PR #211 审查建议：补失败路径）。
+func TestAuditAgentBindingsFailureNoRecord(t *testing.T) {
+	r, db := setupAuditBindingsEnv(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/nonexistent/skills",
+		strings.NewReader(`{"skillNames":["skill-x"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+
+	require.EqualValues(t, 0, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
 }
 
 // ── agent.create / agent.update ─────────────────────────────────────────────

@@ -163,7 +163,7 @@ func (r *AuditRecorder) AigcSaved(c *gin.Context, changed []aigc.AigcConfigField
 }
 
 // BindingsUpdated：agent.update_bindings（issue #210）。kind ∈ skill/tool/mcp。
-func (r *AuditRecorder) BindingsUpdated(c *gin.Context, kind, agentName string, names []string) {
+func (r *AuditRecorder) BindingsUpdated(c *gin.Context, kind audit.BindingKind, agentName string, names []string) {
 	r.Record(c, audit.BindingsUpdatedEvent(audit.Actor{}, kind, agentName, names))
 }
 

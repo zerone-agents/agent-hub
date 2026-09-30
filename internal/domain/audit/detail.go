@@ -33,11 +33,21 @@ type AigcConfigDetail struct {
 	ChangedFields []aigc.AigcConfigField `json:"changedFields"`
 }
 
+// BindingKind 是 agent 挂载关系变更的资源类型闭集（#210 审查建议：
+// 对齐 AigcConfigField 的强类型先例，裸字符串退化在类型层面避免）。
+type BindingKind string
+
+const (
+	BindingKindSkill BindingKind = "skill"
+	BindingKindTool  BindingKind = "tool"
+	BindingKindMcp   BindingKind = "mcp"
+)
+
 // BindingDetail：agent 挂载关系变更（issue #210）。Kind 为资源类型
-// （skill / tool / mcp），Names 为本次写入后的完整名单。
+// （skill / tool / mcp），Names 为本次写入后的完整生效名单。
 type BindingDetail struct {
-	Kind  string   `json:"kind"`
-	Names []string `json:"names"`
+	Kind  BindingKind `json:"kind"`
+	Names []string    `json:"names"`
 }
 
 // AgentUpdateDetail：agent.update 的变更字段名（仅字段名，不含值——

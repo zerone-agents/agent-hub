@@ -137,7 +137,8 @@ func TestToolService_UpdateAgentTools_TenantIsolation(t *testing.T) {
 	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default) VALUES ('a-def', 'org-a', 1)`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO tools (name, tenant_id, is_default, source) VALUES ('shared-def', '', 1, 'builtin')`).Error)
 
-	require.NoError(t, toolSvc.UpdateAgentTools("org-b", "b1", []string{}))
+	_, err := toolSvc.UpdateAgentTools("org-b", "b1", []string{})
+	require.NoError(t, err)
 
 	b1, err := agentRepo.GetByName("org-b", "b1")
 	require.NoError(t, err)

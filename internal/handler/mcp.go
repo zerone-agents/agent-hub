@@ -140,7 +140,7 @@ func (h *McpHandler) UpdateAgentMcps(c *gin.Context) {
 		respondMcpError(c, err)
 		return
 	}
-	h.audit.BindingsUpdated(c, "mcp", agentName, req.McpNames)
+	h.audit.BindingsUpdated(c, audit.BindingKindMcp, agentName, req.McpNames)
 	respondMessage(c, http.StatusOK, "Agent MCP 关系已更新")
 }
 
