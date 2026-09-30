@@ -42,6 +42,10 @@ const (
 	ActionStart    Action = "agent.start"
 	ActionUndeploy Action = "agent.undeploy"
 	ActionDelete   Action = "agent.delete"
+	// #210：agent CRUD 与挂载关系变更
+	ActionAgentCreate         Action = "agent.create"
+	ActionAgentUpdate         Action = "agent.update"
+	ActionAgentUpdateBindings Action = "agent.update_bindings"
 
 	ActionCliTokenIssue  Action = "cli_token.issue"
 	ActionCliTokenRevoke Action = "cli_token.revoke"
@@ -57,6 +61,8 @@ const (
 	ActionToolCreate Action = "tool.create"
 	ActionToolUpdate Action = "tool.update"
 	ActionToolDelete Action = "tool.delete"
+	// #210：制品文件补传/替换
+	ActionToolUploadFile Action = "tool.upload_file"
 
 	ActionMcpCreate Action = "mcp.create"
 	ActionMcpUpdate Action = "mcp.update"

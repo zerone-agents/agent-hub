@@ -241,6 +241,7 @@ func (h *SkillHandler) UpdateAgentSkills(c *gin.Context) {
 		respondSkillError(c, err)
 		return
 	}
+	h.audit.BindingsUpdated(c, audit.BindingKindSkill, agentName, req.SkillNames)
 	respondMessage(c, http.StatusOK, "Agent Skill 关系已更新")
 }
 

@@ -146,6 +146,7 @@ func (h *ToolHandler) UploadFile(c *gin.Context) {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionToolUploadFile, audit.TargetTool, t.Name, t.Name)
 	respondSuccess(c, t)
 }
 
@@ -179,10 +180,12 @@ func (h *ToolHandler) UpdateAgentTools(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, err.Error())
 		return
 	}
-	if err := h.service.UpdateAgentTools(tenant.GetTenantID(c), c.Param("name"), req.ToolNames); err != nil {
+	effectiveNames, err := h.service.UpdateAgentTools(tenant.GetTenantID(c), c.Param("name"), req.ToolNames)
+	if err != nil {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.BindingsUpdated(c, audit.BindingKindTool, c.Param("name"), effectiveNames)
 	respondMessage(c, http.StatusOK, "Agent Tool 关系已更新")
 }
 

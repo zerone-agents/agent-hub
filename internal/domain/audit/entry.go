@@ -93,3 +93,22 @@ func AigcSavedEvent(a Actor, changed []aigc.AigcConfigField) Entry {
 		Status: StatusSuccess, Detail: AigcConfigDetail{ChangedFields: changed},
 	}
 }
+
+// BindingsUpdatedEvent：agent 挂载关系变更（issue #210）。target 是 agent 名
+// 本体，Detail 携带资源类型与写入后的完整名单。
+func BindingsUpdatedEvent(a Actor, kind BindingKind, agentName string, names []string) Entry {
+	return Entry{
+		Actor: a, Category: CatAgent, Action: ActionAgentUpdateBindings, TargetType: TargetAgent,
+		TargetID: agentName, TargetName: agentName, Status: StatusSuccess,
+		Detail: BindingDetail{Kind: kind, Names: names},
+	}
+}
+
+// AgentUpdatedEvent：agent.update 记录本次请求涉及的顶层字段名。
+func AgentUpdatedEvent(a Actor, name string, fields []string) Entry {
+	return Entry{
+		Actor: a, Category: CatAgent, Action: ActionAgentUpdate, TargetType: TargetAgent,
+		TargetID: name, TargetName: name, Status: StatusSuccess,
+		Detail: AgentUpdateDetail{Fields: fields},
+	}
+}

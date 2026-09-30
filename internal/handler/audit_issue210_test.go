@@ -1,0 +1,255 @@
+package handler
+
+// Issue #210：补齐 #206 遗留的三类审计盲区——
+//   1. tool UploadFile（制品替换，实质性内容变更）
+//   2. agent 绑定变更（UpdateAgentSkills / UpdateAgentTools / UpdateAgentMcps）
+//   3. agent create / update
+// 绑定变更归 agent 分类（agent.update_bindings），Detail 记录 kind + 生效名单；
+// agent.update 的 Detail 记录请求中出现的顶层字段名（不含值）。
+// 复用 audit_skill_tool_mcp_test.go 的 auditTestActor / assertAuditRow /
+// openAuditEmbedDB；各域环境在本文件自建（服务层连锁依赖不同）。
+
+import (
+	"bytes"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"control-panel/internal/application/services"
+	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/audit"
+	"control-panel/internal/domain/mcp"
+	"control-panel/internal/domain/skill"
+	repository "control-panel/internal/infrastructure/persistence"
+	"control-panel/pkg/database"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+// ── tool.upload_file ────────────────────────────────────────────────────────
+
+func TestAuditToolUploadFile(t *testing.T) {
+	db := openAuditEmbedDB(t)
+	require.NoError(t, db.AutoMigrate(&agent.Tool{}, &agent.AgentConfig{}, &agent.AgentTool{}, &audit.Log{}))
+	old := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = old })
+
+	recorder := services.NewAuditRecorder(repository.NewAuditRepository(db))
+	h := NewToolHandler(services.NewToolService(&toolUploaderMock{data: map[string][]byte{}}), recorder)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(auditTestActor())
+	r.POST("/api/v1/admin/tools", h.Create)
+	r.PUT("/api/v1/admin/tools/:name/file", h.UploadFile)
+
+	// 先 create 一个工具（其审计行 action 不同，不干扰计数）
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	require.NoError(t, mw.WriteField("name", "uploadAudit"))
+	fw, err := mw.CreateFormFile("file", "uploadAudit.ts")
+	require.NoError(t, err)
+	_, err = fw.Write([]byte("export default { name: 'uploadAudit' }"))
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/tools", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+
+	// 替换制品文件 → 必须落 tool.upload_file 行
+	body.Reset()
+	mw = multipart.NewWriter(&body)
+	fw, err = mw.CreateFormFile("file", "uploadAudit.ts")
+	require.NoError(t, err)
+	_, err = fw.Write([]byte("export default { name: 'uploadAudit', version: 2 }"))
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/tools/uploadAudit/file", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	assertAuditRow(t, db, audit.ActionToolUploadFile, audit.CatTool, audit.TargetTool, "uploadAudit")
+}
+
+// ── agent.update_bindings（skills / tools / mcps 三个端点）─────────────────
+
+func setupAuditBindingsEnv(t *testing.T) (*gin.Engine, *gorm.DB) {
+	t.Helper()
+	db := openAuditEmbedDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&agent.AgentConfig{},
+		&agent.Tool{}, &agent.AgentTool{},
+		&skill.Skill{}, &agent.AgentSkill{},
+		&mcp.McpServer{}, &mcp.AgentMcpServer{},
+		&audit.Log{},
+	))
+	old := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = old })
+
+	// 种子：一个 agent + 各一份可绑定资源；内置 Skill 工具行（共享行
+	// tenant_id=''）是 UpdateAgentSkills 挂载/卸载 Skill tool 的前置
+	require.NoError(t, db.Create(&agent.AgentConfig{
+		Name: "bind-me", TenantID: "tenant-a", SystemPrompt: "p", ContentHash: "h",
+	}).Error)
+	require.NoError(t, db.Create(&skill.Skill{Name: "skill-x", TenantID: "tenant-a", Type: "expert"}).Error)
+	require.NoError(t, db.Create(&agent.Tool{
+		Name: "toolX", TenantID: "tenant-a", Source: "custom",
+		FileName: "toolX.ts", FileURL: "tools/toolX.ts", FileHash: "h", FileSize: 1,
+	}).Error)
+	require.NoError(t, db.Create(&agent.Tool{Name: "Skill", TenantID: "", Source: "builtin"}).Error)
+	// 租户默认工具：UpdateAgentTools 会把它并进生效名单——审计必须记生效
+	// 名单而非请求列表（PR #211 审查项①的反例场景）
+	require.NoError(t, db.Create(&agent.Tool{Name: "defaultTool", TenantID: "tenant-a", Source: "builtin", IsDefault: true}).Error)
+	require.NoError(t, db.Create(&mcp.McpServer{Name: "mcp-x", TenantID: "tenant-a", TransportType: "sse", URL: "https://mcp.example.com/sse"}).Error)
+
+	recorder := services.NewAuditRecorder(repository.NewAuditRepository(db))
+	skillH := NewSkillHandler(services.NewSkillService(&toolUploaderMock{data: map[string][]byte{}}, ""), recorder)
+	toolH := NewToolHandler(services.NewToolService(&toolUploaderMock{data: map[string][]byte{}}), recorder)
+	mcpH := NewMcpHandler(services.NewMcpService("test-key"), recorder)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(auditTestActor())
+	r.PUT("/api/v1/admin/agents/:name/skills", skillH.UpdateAgentSkills)
+	r.PUT("/api/v1/admin/agents/:name/tools", toolH.UpdateAgentTools)
+	r.PUT("/api/v1/admin/agents/:name/mcps", mcpH.UpdateAgentMcps)
+	return r, db
+}
+
+func TestAuditAgentBindingUpdates(t *testing.T) {
+	r, db := setupAuditBindingsEnv(t)
+
+	put := func(path, body string) {
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, "%s body=%s", path, rec.Body.String())
+	}
+
+	put("/api/v1/admin/agents/bind-me/skills", `{"skillNames":["skill-x"]}`)
+	put("/api/v1/admin/agents/bind-me/tools", `{"toolNames":["toolX"]}`)
+	put("/api/v1/admin/agents/bind-me/mcps", `{"mcpNames":["mcp-x"]}`)
+
+	// 三次绑定变更 → 三行 agent.update_bindings，target 均为 agent 名；
+	// tool 行断言的是「生效名单」（含租户默认工具、排序后），不是请求列表
+	require.EqualValues(t, 3, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+	var rows []audit.Log
+	require.NoError(t, db.Where("action = ?", audit.ActionAgentUpdateBindings).Order("id").Find(&rows).Error)
+
+	wantDetails := []string{
+		`{"kind":"skill","names":["skill-x"]}`,
+		`{"kind":"tool","names":["defaultTool","toolX"]}`,
+		`{"kind":"mcp","names":["mcp-x"]}`,
+	}
+	for i, row := range rows {
+		require.Equal(t, audit.CatAgent, row.Category)
+		require.Equal(t, audit.TargetAgent, row.TargetType)
+		require.Equal(t, "bind-me", row.TargetName)
+		require.Equal(t, audit.StatusSuccess, row.Status)
+		require.JSONEq(t, wantDetails[i], row.Detail)
+	}
+}
+
+// TestAuditAgentBindingsFailureNoRecord：绑定变更失败（agent 不存在）不落
+// 审计行——记录语义是「成功的管理操作」（PR #211 审查建议：补失败路径）。
+func TestAuditAgentBindingsFailureNoRecord(t *testing.T) {
+	r, db := setupAuditBindingsEnv(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/nonexistent/skills",
+		strings.NewReader(`{"skillNames":["skill-x"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+
+	require.EqualValues(t, 0, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+}
+
+// TestAuditAgentMcpsFieldRequired：mcp 端点补 binding:"required" 后与
+// skill/tool 对齐——缺字段 {} → 400 且零审计；显式空数组 [] 仍可清空，
+// 审计 names 记为 []（非 null）。PR #211 复审建议项的钉住测试。
+func TestAuditAgentMcpsFieldRequired(t *testing.T) {
+	r, db := setupAuditBindingsEnv(t)
+
+	// {}（缺字段）→ 400，零审计行
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/bind-me/mcps", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.EqualValues(t, 0, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+
+	// []（显式空数组）→ 200 清空，审计 names 为 []
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/bind-me/mcps", strings.NewReader(`{"mcpNames":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.EqualValues(t, 1, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+	row := fetchAuditByAction(t, db, audit.ActionAgentUpdateBindings)
+	require.JSONEq(t, `{"kind":"mcp","names":[]}`, row.Detail)
+}
+
+// ── agent.create / agent.update ─────────────────────────────────────────────
+
+func setupAuditAgentCrudEnv(t *testing.T) (*gin.Engine, *gorm.DB) {
+	t.Helper()
+	db := openAuditEmbedDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&agent.AgentConfig{}, &agent.AgentSubagent{},
+		&agent.Tool{}, &agent.AgentTool{}, // CreateAgent 末尾 BindDefaultToolsToAgent 需要
+		&skill.Skill{}, &agent.AgentSkill{}, // GetAgent 返回 DTO 时 join skills
+		&mcp.McpServer{}, &mcp.AgentMcpServer{}, // 同上，join mcps
+		&agent.AgentKnowledgeDataset{}, // 同上，join datasets
+		&audit.Log{},
+	))
+	old := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = old })
+
+	recorder := services.NewAuditRecorder(repository.NewAuditRepository(db))
+	// Create/Update 不触 deployer，nil 即可（agent_error_test.go 同款取舍）
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, recorder)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(auditTestActor())
+	r.POST("/api/v1/admin/agents", h.Create)
+	r.PUT("/api/v1/admin/agents/:name", h.Update)
+	return r, db
+}
+
+func TestAuditAgentCreateUpdate(t *testing.T) {
+	r, db := setupAuditAgentCrudEnv(t)
+
+	// create
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents",
+		strings.NewReader(`{"name":"audit-agent","config":{"systemPrompt":"p"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	assertAuditRow(t, db, audit.ActionAgentCreate, audit.CatAgent, audit.TargetAgent, "audit-agent")
+
+	// update：开 desktopEnabled → Detail 记录变更字段名
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/audit-agent",
+		strings.NewReader(`{"desktopEnabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assertAuditRow(t, db, audit.ActionAgentUpdate, audit.CatAgent, audit.TargetAgent, "audit-agent")
+	row := fetchAuditByAction(t, db, audit.ActionAgentUpdate)
+	require.Contains(t, row.Detail, "desktopEnabled")
+}
