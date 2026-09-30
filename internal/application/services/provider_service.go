@@ -648,10 +648,10 @@ func (s *ProviderService) Delete(tenantID string, id uint64) error {
 
 // ProbeWithOverride probes a provider. If apiKeyOverride matches the masked form of the
 // stored key (or is empty), the real stored key is used; otherwise apiKeyOverride is used.
-// baseURLOverride (when non-empty) replaces the stored BaseURL, so an edited-but-unsaved
-// URL can be tested from the form. modelsOverride (when non-empty) replaces the stored
-// model list for the same reason.
-func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOverride, baseURLOverride string, modelsOverride []provider.CatalogModel) (*ProbeResult, error) {
+// baseURLOverride / protocolOverride / authStyleOverride (when non-empty) replace the
+// stored values, so an edited-but-unsaved form can be tested without saving first.
+// modelsOverride (when non-empty) replaces the stored model list for the same reason.
+func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOverride, baseURLOverride, protocolOverride, authStyleOverride string, modelsOverride []provider.CatalogModel) (*ProbeResult, error) {
 	summary, err := s.repo.GetByID(tenantID, id)
 	if err != nil {
 		return nil, provider.ErrProviderNotFound
@@ -676,6 +676,16 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 		baseURL = baseURLOverride
 	}
 
+	protocol := p.Protocol()
+	if protocolOverride != "" {
+		protocol = protocolOverride
+	}
+
+	authStyle := p.AuthStyle()
+	if authStyleOverride != "" {
+		authStyle = authStyleOverride
+	}
+
 	models := modelsOverride
 	if len(models) == 0 {
 		rows, err := s.repo.ListModels(tenantID, id)
@@ -685,7 +695,7 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, apiKeyOv
 		models = toCatalogModels(rows)
 	}
 
-	return s.doProbe(baseURL, apiKey, p.Protocol(), p.AuthStyle(), models), nil
+	return s.doProbe(baseURL, apiKey, protocol, authStyle, models), nil
 }
 
 func (s *ProviderService) ProbeConfig(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {

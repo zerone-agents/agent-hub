@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import ProviderForm from "./ProviderForm";
 import type { Provider } from "@/api/providers";
 
-const { updateProvider } = vi.hoisted(() => ({ updateProvider: vi.fn() }));
+const { updateProvider, probeProvider } = vi.hoisted(() => ({
+  updateProvider: vi.fn(),
+  probeProvider: vi.fn(),
+}));
 
 vi.mock("@/queries/useProviders", () => ({
   useCreateProvider: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateProvider: () => ({ mutateAsync: updateProvider, isPending: false }),
-  useProbeProvider: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useProbeProvider: () => ({ mutateAsync: probeProvider, isPending: false }),
   useProbeConfig: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useProviderAttrRules: () => ({ data: {} }),
 }));
@@ -43,9 +46,27 @@ function renderForm() {
   );
 }
 
+// antd Select opens on pointer/mouse-down. Clicking the combobox control for
+// a labelled form item, then clicking the visible option text, drives a
+// selection reliably across antd in jsdom (KnowledgeForm.test 先例).
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  itemLabel: string,
+  optionText: string,
+) {
+  const formItem = screen.getByText(itemLabel).closest<HTMLElement>(".ant-form-item");
+  const control = formItem
+    ? within(formItem).getByRole("combobox")
+    : screen.getByRole("combobox");
+  await user.click(control);
+  const opt = await screen.findByText(optionText);
+  await user.click(opt);
+}
+
 describe("ProviderForm", () => {
   beforeEach(() => {
     updateProvider.mockReset();
+    probeProvider.mockReset();
   });
 
   // Helper: match the "更新" button regardless of whether antd inserts
@@ -81,5 +102,26 @@ describe("ProviderForm", () => {
       "lockedApiKey",
       "sk-replacement-secret-5678",
     );
+  });
+
+  it("probes with the form's unsaved protocol and auth style in edit mode", async () => {
+    probeProvider.mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    });
+    renderForm();
+
+    const user = userEvent.setup();
+    await pickOption(user, "Protocol", "Anthropic");
+    await pickOption(user, "Auth Style", "Auth Token (Bearer header)");
+    await user.click(
+      await screen.findByRole("button", { name: /测\s*试\s*连\s*接/ }),
+    );
+
+    await waitFor(() => { expect(probeProvider).toHaveBeenCalledTimes(1); });
+    expect(probeProvider.mock.calls[0][0]).toMatchObject({
+      id: 1,
+      protocol: "anthropic",
+      authStyle: "auth_token",
+    });
   });
 });

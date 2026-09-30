@@ -254,15 +254,17 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 	}
 
 	type probeOverrideRequest struct {
-		APIKey  string                  `json:"apiKey"`
-		BaseURL string                  `json:"baseUrl"`
-		Models  []provider.CatalogModel `json:"models"`
+		APIKey    string                  `json:"apiKey"`
+		BaseURL   string                  `json:"baseUrl"`
+		Protocol  string                  `json:"protocol"`
+		AuthStyle string                  `json:"authStyle"`
+		Models    []provider.CatalogModel `json:"models"`
 	}
 	var overrideReq probeOverrideRequest
 	// Body is optional; ignore bind errors when no body is sent.
 	_ = c.ShouldBindJSON(&overrideReq)
 
-	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
+	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Protocol, overrideReq.AuthStyle, overrideReq.Models)
 	if err != nil {
 		respondProviderError(c, err)
 		return

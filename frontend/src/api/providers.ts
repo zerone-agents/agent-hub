@@ -93,6 +93,16 @@ export interface ProbeConfig {
   models: CatalogModel[]
 }
 
+// ProbeOverride carries the edit form's unsaved values into the by-id probe.
+// Non-empty fields replace the stored provider values for this probe only.
+export interface ProbeOverride {
+  apiKey?: string
+  baseUrl?: string
+  protocol?: string
+  authStyle?: string
+  models?: CatalogModel[]
+}
+
 export interface SyncMultiRAGRequest {
   verifyOnly?: boolean
   modelIds?: string[]
@@ -106,7 +116,7 @@ export const providerApi = {
   update: (id: number, data: Partial<Provider>) =>
     apiClient.put(`/api/v1/admin/providers/${id}`, data),
   delete: (id: number) => apiClient.delete(`/api/v1/admin/providers/${id}`),
-  probe: (id: number, payload?: { apiKey?: string; baseUrl?: string; models?: CatalogModel[] }) =>
+  probe: (id: number, payload?: ProbeOverride) =>
     apiClient.post(`/api/v1/admin/providers/${id}/probe`, payload ?? {}),
   probeConfig: (config: ProbeConfig) =>
     apiClient.post('/api/v1/admin/providers/probe', config),

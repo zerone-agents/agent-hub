@@ -283,11 +283,18 @@ export default function GenericProviderForm({ open, editingProvider, onClose }: 
     setProbing(true)
     try {
       if (editingProvider) {
-        const values = form.getFieldsValue(['lockedApiKey', 'baseUrl']) as { lockedApiKey?: string; baseUrl?: string }
+        const values = form.getFieldsValue(['lockedApiKey', 'baseUrl', 'protocol', 'authStyle']) as {
+          lockedApiKey?: string
+          baseUrl?: string
+          protocol?: string
+          authStyle?: string
+        }
         const res = await probeProvider.mutateAsync({
           id: editingProvider.id,
           apiKey: values.lockedApiKey,
           baseUrl: values.baseUrl,
+          protocol: values.protocol,
+          authStyle: values.authStyle,
           models: defaultModels,
         })
         const result = (res as { data: { data?: { success?: boolean; latencyMs?: number; error?: string } } }).data.data
