@@ -7,18 +7,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
-	"control-panel/internal/config"
 	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
 	repository "control-panel/internal/infrastructure/persistence"
 
+	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -192,18 +191,15 @@ func TestAuditLogoutSemantics(t *testing.T) {
 // 登出审计语义 = 客户端会话已清除的 success；不得再向不存在的
 // /api/login/oauth/revoke 发请求（此前每次登出必记 Failure 的根因）。
 func TestCasdoorLogoutRecordsSuccessWithoutRevocationAttempt(t *testing.T) {
-	var revokeHits atomic.Int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/api/login/oauth/revoke") {
-			revokeHits.Add(1)
-		}
+		hits.Add(1) // 任意路径都计数：断言的是登出路径整体零 HTTP 触达
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(srv.Close)
-	// 全局 casdoor client 指向假服务（auth_test.go 同款范式）；Fix 后不应有任何请求触达
-	require.NoError(t, auth.InitCasdoor(&config.CasdoorConfig{
-		Endpoint: srv.URL, ClientID: "cid", ClientSecret: "sec",
-	}))
+	// 全局 casdoor client 指向假服务（SwapClientForTest 可恢复，不泄漏全局态）
+	restore := auth.SwapClientForTest(casdoorsdk.NewClient(srv.URL, "cid", "sec", "", "", ""))
+	t.Cleanup(restore)
 
 	db := openAuditEmbedDB(t)
 	require.NoError(t, db.AutoMigrate(&audit.Log{}))
@@ -227,7 +223,7 @@ func TestCasdoorLogoutRecordsSuccessWithoutRevocationAttempt(t *testing.T) {
 	rows := rowsOf(t, db, audit.ActionLogout)
 	require.Len(t, rows, 1)
 	require.Equal(t, audit.StatusSuccess, rows[0].Status)
-	require.EqualValues(t, 0, revokeHits.Load(), "不得再调用不存在的 casdoor revoke 端点")
+	require.EqualValues(t, 0, hits.Load(), "登出路径不得向 casdoor 发起任何 HTTP 请求（含死 revoke 端点）")
 }
 
 // TestAuditLogoutRevokeErrorLogged：builtin 撤销失败仍记 Failure（语义不变），
