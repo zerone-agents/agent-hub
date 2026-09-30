@@ -7,6 +7,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/tenant"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +15,11 @@ import (
 
 type ToolHandler struct {
 	service *services.ToolService
+	audit   *services.AuditRecorder
 }
 
-func NewToolHandler(service *services.ToolService) *ToolHandler {
-	return &ToolHandler{service: service}
+func NewToolHandler(service *services.ToolService, audit *services.AuditRecorder) *ToolHandler {
+	return &ToolHandler{service: service, audit: audit}
 }
 
 // respondToolError 映射 Tool 领域错误（issue #88「可行动的错误层级」）：
@@ -111,6 +113,7 @@ func (h *ToolHandler) Create(c *gin.Context) {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionToolCreate, audit.TargetTool, t.Name, t.Name)
 	respondCreated(c, t)
 }
 
@@ -126,6 +129,7 @@ func (h *ToolHandler) Update(c *gin.Context) {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionToolUpdate, audit.TargetTool, t.Name, t.Name)
 	respondSuccess(c, t)
 }
 
@@ -156,10 +160,12 @@ func (h *ToolHandler) Download(c *gin.Context) {
 }
 
 func (h *ToolHandler) Delete(c *gin.Context) {
-	if err := h.service.Delete(tenant.GetTenantID(c), c.Param("name")); err != nil {
+	name := c.Param("name")
+	if err := h.service.Delete(tenant.GetTenantID(c), name); err != nil {
 		respondToolError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionToolDelete, audit.TargetTool, name, name)
 	respondMessage(c, http.StatusOK, "Tool 已删除")
 }
 

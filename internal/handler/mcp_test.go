@@ -25,7 +25,7 @@ func setupMcpHandlerRouter(t *testing.T) *gin.Engine {
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })
 
-	h := NewMcpHandler(services.NewMcpService("test-key"))
+	h := NewMcpHandler(services.NewMcpService("test-key"), newHandlerTestAuditRecorder(t))
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("tenant_id", "tenant-a") })

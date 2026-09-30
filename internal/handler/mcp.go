@@ -7,6 +7,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/audit"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/tenant"
 
@@ -15,10 +16,11 @@ import (
 
 type McpHandler struct {
 	service *services.McpService
+	audit   *services.AuditRecorder
 }
 
-func NewMcpHandler(svc *services.McpService) *McpHandler {
-	return &McpHandler{service: svc}
+func NewMcpHandler(svc *services.McpService, audit *services.AuditRecorder) *McpHandler {
+	return &McpHandler{service: svc, audit: audit}
 }
 
 // respondMcpError 映射 MCP 领域错误（issue #95 P2 同款边界分流）：
@@ -76,6 +78,7 @@ func (h *McpHandler) Create(c *gin.Context) {
 		respondMcpError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionMcpCreate, audit.TargetMcp, item.Name, item.Name)
 	respondCreated(c, item)
 }
 
@@ -91,6 +94,7 @@ func (h *McpHandler) Update(c *gin.Context) {
 		respondMcpError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionMcpUpdate, audit.TargetMcp, item.Name, item.Name)
 	respondSuccess(c, item)
 }
 
@@ -105,6 +109,7 @@ func (h *McpHandler) Delete(c *gin.Context) {
 		respondMcpError(c, err)
 		return
 	}
+	h.audit.Simple(c, audit.ActionMcpDelete, audit.TargetMcp, name, name)
 	respondMessage(c, http.StatusOK, "MCP 已删除")
 }
 

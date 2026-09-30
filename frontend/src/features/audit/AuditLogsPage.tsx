@@ -15,12 +15,16 @@ const CATEGORY_OPTIONS: { value: AuditCategory; label: string }[] = [
   { value: 'provider', label: 'provider' },
   { value: 'agent', label: 'agent' },
   { value: 'token', label: 'token' },
-  { value: 'aigc', label: 'aigc' }
+  { value: 'aigc', label: 'aigc' },
+  { value: 'skill', label: 'skill' },
+  { value: 'tool', label: 'tool' },
+  { value: 'mcp', label: 'mcp' }
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
   auth: 'geekblue', user: 'orange', invite: 'cyan', provider: 'purple',
-  agent: 'green', token: 'gold', aigc: 'magenta'
+  agent: 'green', token: 'gold', aigc: 'magenta',
+  skill: 'blue', tool: 'volcano', mcp: 'lime'
 }
 
 const STATUS_COLORS: Record<string, string> = { success: 'green', failure: 'red', partial: 'orange' }

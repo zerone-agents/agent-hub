@@ -270,10 +270,10 @@ func main() {
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
 	toolService := services.NewToolService(uploader)
-	toolHandler := handler.NewToolHandler(toolService)
+	toolHandler := handler.NewToolHandler(toolService, auditRecorder)
 
 	skillService := services.NewSkillService(uploader, cfg.OSS.CDNHost)
-	skillHandler := handler.NewSkillHandler(skillService)
+	skillHandler := handler.NewSkillHandler(skillService, auditRecorder)
 
 	sceneService := services.NewSceneService()
 	sceneHandler := handler.NewSceneHandler(sceneService)
@@ -334,7 +334,7 @@ func main() {
 	if err := toolService.BackfillSubagentToolBindings(); err != nil {
 		log.Fatalf("Failed to backfill subagent tool bindings: %v", err)
 	}
-	mcpHandler := handler.NewMcpHandler(mcpService)
+	mcpHandler := handler.NewMcpHandler(mcpService, auditRecorder)
 
 	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
 
