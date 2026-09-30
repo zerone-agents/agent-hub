@@ -55,7 +55,10 @@ const zh = {
     modelSelectionNotFound: 'providerId {{providerId}} 下不存在 selection_id 为 {{selectionId}} 的模型',
     modelNotFound: 'providerId {{providerId}} 下不存在模型 {{model}}',
     modelTypeMismatch: '模型 {{model}} 不是 LLM/VLM 类型（实际: {{actual}}），无法绑定到 Agent',
-    // #205 长尾补齐
+    // #205 长尾补齐。注：iconFieldTooLong / disallowedToolsInvalidItem /
+    // disallowedToolsDuplicate 为单码收敛（多消息形态共用一码），zh 键是改写
+    // 文案而非后端原文逐字镜像——zh 模式运行时直出后端中文原文，zh 键仅作
+    // 键位对称与文档用途；后续新增收敛码沿用此规则，单形态码仍保持逐字。
     configRequired: 'config 不能为空',
     iconFieldTooLong: '{{field}} 长度不能超过 {{limit}} 个字符',
     fieldOverridesRequiresProvider: 'fieldOverrides 需要 providerId 同时存在',

@@ -70,7 +70,11 @@ const (
 	CodeModelSelectionNotFound StableCode = "model_selection_not_found"
 	CodeModelNotFound          StableCode = "model_not_found"
 	CodeModelTypeMismatch      StableCode = "model_type_mismatch"
-	// 长尾补齐（issue #205）：config / icon / fieldOverrides / disallowedTools / Probe
+	// 长尾补齐（issue #205）：config / icon / fieldOverrides / disallowedTools / Probe。
+	// 其中 icon_field_too_long、disallowed_tools_invalid_item、disallowed_tools_duplicate
+	// 为单码收敛（多消息形态共用一码），其 zh/en 键是改写文案而非后端原文逐字镜像
+	// （zh 键属运行时死代码，zh 模式直出后端原文；详见 zh.ts 对应注释），后续新增
+	// 收敛码沿用此规则，勿照抄单形态码的逐字契约。
 	CodeConfigRequired                 StableCode = "config_required"
 	CodeIconFieldTooLong               StableCode = "icon_field_too_long"
 	CodeFieldOverridesRequiresProvider StableCode = "field_overrides_requires_provider"
