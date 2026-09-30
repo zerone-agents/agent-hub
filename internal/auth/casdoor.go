@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -453,36 +451,4 @@ func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 		return nil, ferr
 	}
 	return tokenResponseFrom(tok)
-}
-
-// RevokeToken revokes an access or refresh token.
-func RevokeToken(token string) error {
-	if token == "" {
-		return fmt.Errorf("token is empty")
-	}
-
-	revokeURL := fmt.Sprintf("%s/api/login/oauth/revoke", client.Endpoint)
-
-	data := map[string]string{
-		"client_id":     client.ClientId,
-		"client_secret": client.ClientSecret,
-		"token":         token,
-	}
-
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal revoke request: %w", err)
-	}
-
-	resp, err := http.Post(revokeURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to revoke token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to revoke token: status %d", resp.StatusCode)
-	}
-
-	return nil
 }

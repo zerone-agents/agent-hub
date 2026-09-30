@@ -220,19 +220,14 @@ func RefreshToken(c *gin.Context) {
 	})
 }
 
-// Logout revokes the bearer token and returns a success response.
-// 审计语义 = 凭证撤销结果（spec §3.1）：撤销返回错误 → failure（凭证可能
-// 仍有效，如实记录）；HTTP 响应行为不变（恒 200）。
+// Logout 审计语义（audit spec v20 修订）：casdoor 服务端不提供 token 撤销
+// 接口——v3.60.1 / v4.7.0 / master 路由表核对均无 /api/login/oauth/revoke
+// （上游 casdoor#1574 明确不实现非标准撤销），旧实现对不存在端点发请求、
+// 每次登出必记 Failure。登出为客户端语义：客户端清除本地凭证，审计记
+// 「登出请求已受理」success；撤销结果语义仅 builtin 模式保留（见
+// auth_builtin.go Logout）。
 func Logout(c *gin.Context, ar *services.AuditRecorder) {
-	authHeader := c.GetHeader("Authorization")
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	st := audit.StatusSuccess
-	if token != authHeader && token != "" {
-		if err := auth.RevokeToken(token); err != nil {
-			st = audit.StatusFailure
-		}
-	}
-	ar.SimpleWithStatus(c, audit.ActionLogout, audit.TargetSystem, "", "", st)
+	ar.Simple(c, audit.ActionLogout, audit.TargetSystem, "", "")
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

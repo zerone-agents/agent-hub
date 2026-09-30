@@ -3,14 +3,18 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/config"
 	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
 	repository "control-panel/internal/infrastructure/persistence"
@@ -181,6 +185,70 @@ func TestAuditLogoutSemantics(t *testing.T) {
 	rows = rowsOf(t, db, audit.ActionLogout)
 	require.Len(t, rows, 1)
 	require.Equal(t, audit.StatusSuccess, rows[0].Status)
+}
+
+// TestCasdoorLogoutRecordsSuccessWithoutRevocationAttempt：casdoor 服务端不提供
+// token 撤销接口（v3.60.1/v4.7.0/master 路由核对 + 上游 casdoor#1574），
+// 登出审计语义 = 客户端会话已清除的 success；不得再向不存在的
+// /api/login/oauth/revoke 发请求（此前每次登出必记 Failure 的根因）。
+func TestCasdoorLogoutRecordsSuccessWithoutRevocationAttempt(t *testing.T) {
+	var revokeHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/login/oauth/revoke") {
+			revokeHits.Add(1)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	// 全局 casdoor client 指向假服务（auth_test.go 同款范式）；Fix 后不应有任何请求触达
+	require.NoError(t, auth.InitCasdoor(&config.CasdoorConfig{
+		Endpoint: srv.URL, ClientID: "cid", ClientSecret: "sec",
+	}))
+
+	db := openAuditEmbedDB(t)
+	require.NoError(t, db.AutoMigrate(&audit.Log{}))
+	ar := services.NewAuditRecorder(repository.NewAuditRepository(db))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("tenant_id", "default")
+		c.Set("user_id", "1")
+		c.Set("user_name", "zhiheng")
+	})
+	r.POST("/auth/logout", func(c *gin.Context) { Logout(c, ar) })
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer some-access-token")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rows := rowsOf(t, db, audit.ActionLogout)
+	require.Len(t, rows, 1)
+	require.Equal(t, audit.StatusSuccess, rows[0].Status)
+	require.EqualValues(t, 0, revokeHits.Load(), "不得再调用不存在的 casdoor revoke 端点")
+}
+
+// TestAuditLogoutRevokeErrorLogged：builtin 撤销失败仍记 Failure（语义不变），
+// 但错误必须落服务端日志（此前静默吞掉，排障只能靠猜）。
+func TestAuditLogoutRevokeErrorLogged(t *testing.T) {
+	h, _ := newAuthAuditEnv(t)
+	h.p = stubTokenProvider{revokeErr: errBoomToken}
+
+	var logBuf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	c := ginCtxForAudit()
+	c.Set("tenant_id", "default")
+	c.Request = httptest.NewRequest("POST", "/auth/logout",
+		bytes.NewReader(mustJSON(t, map[string]string{"refreshToken": "tok"})))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Logout(c)
+	require.Equal(t, http.StatusOK, c.Writer.Status())
+	require.Contains(t, logBuf.String(), "boom token", "撤销失败必须落服务端日志")
 }
 
 func TestAuditChangePasswordRow(t *testing.T) {

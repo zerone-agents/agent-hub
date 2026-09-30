@@ -121,11 +121,12 @@ func (p *CasdoorProvider) RefreshToken(refreshToken string) (*TokenPair, error) 
 	}, nil
 }
 
-// RevokeToken revokes a Casdoor access or refresh token. The package-level
-// RevokeToken is called by method dispatch (receiver-bound), so it does not
-// shadow itself here.
+// RevokeToken 是接口占位：Casdoor 服务端不提供 token 撤销接口
+// （v3.60.1 / v4.7.0 / master 路由表核对，上游 casdoor#1574 明确不实现非标准
+// 撤销）。登出在 casdoor 模式下是客户端语义（handler.Logout 不再依赖撤销），
+// 故此处为显式 no-op；未来若上游提供 RFC7009 撤销，在此接入。
 func (p *CasdoorProvider) RevokeToken(token string) error {
-	return RevokeToken(token)
+	return nil
 }
 
 // SyncMembership 登录回调专用：经 Admin API 拉取权威 IsAdmin/IsForbidden，
