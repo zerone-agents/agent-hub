@@ -153,8 +153,26 @@ func TestCasdoorCallbackLoginAuditPersistsWhenSessionOrgEmpty(t *testing.T) {
 	require.Len(t, rows, 1, "默认组织登录必须落库（修复前空租户被 stdout-only 跳过）")
 	require.Equal(t, "login-audit-org", rows[0].TenantID)
 	require.Equal(t, "u-1", rows[0].UserID)
+	require.Equal(t, "zhiheng", rows[0].UserName, "spec §5.6：登录成功行 UserName=用户名")
 	require.Equal(t, audit.StatusSuccess, rows[0].Status)
 	require.Contains(t, rows[0].Detail, `"username":"zhiheng"`)
+}
+
+// TestCasdoorCallbackLoginAuditPrefersTokenOwnerOverSessionOrg：session.Org 非空
+// 且 token 可解析时，权威 org（token owner）优先——多组织/默认组织混用时
+// 审计行租户与会话租户（后续请求的 tenant）保持一致。
+func TestCasdoorCallbackLoginAuditPrefersTokenOwnerOverSessionOrg(t *testing.T) {
+	key := genCasdoorTestKey(t)
+	token := mintCasdoorJWT(t, key, map[string]any{
+		"owner": "acme-org", "name": "zhiheng", "id": "u-2",
+	})
+
+	r, db, state := newCasdoorCallbackAuditEnv(t, key, token, "beta-org")
+	serveCasdoorCallback(t, r, state)
+
+	rows := rowsOf(t, db, audit.ActionLogin)
+	require.Len(t, rows, 1)
+	require.Equal(t, "acme-org", rows[0].TenantID, "token 权威 org 优先于 session.Org")
 }
 
 // TestCasdoorCallbackLoginAuditFallsBackToSessionOrg：token 无法解析

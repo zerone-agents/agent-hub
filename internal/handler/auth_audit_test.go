@@ -105,6 +105,7 @@ func TestAuditLoginSuccess(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, audit.StatusSuccess, rows[0].Status)
 	require.Equal(t, "default", rows[0].TenantID) // builtin 恒 default（spec §5.6）
+	require.Equal(t, "admin", rows[0].UserName)   // spec §5.6：login 行 UserName=用户名
 	// 尝试的用户名落 LoginDetail（未认证端点无 actor user_name——T3 数据模型）
 	require.Contains(t, rows[0].Detail, `"username":"admin"`)
 }

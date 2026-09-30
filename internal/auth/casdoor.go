@@ -107,11 +107,17 @@ func GetClient() *casdoorsdk.Client {
 	return client
 }
 
-// SwapCasdoorForTest 替换全局 casdoor client 与配置并返回恢复函数（测试专用，
-// 同 StoreSession 的导出测试缝先例）：handler 测试需要注入假 endpoint / 证书
-// （token 兑换、JWT 验签），用后必须恢复，不得把全局态泄漏给同包后续测试。
+// SwapCasdoorForTest 替换全局 casdoor 状态（client、配置、按组织 client 缓存
+// clientsByOrg）并返回恢复函数（测试专用，同 StoreSession 的导出测试缝先例）：
+// handler 测试需要注入假 endpoint / 证书（token 兑换、JWT 验签），且成功路径
+// 经 ClientForOrg 会把假 client 写进组织缓存——缓存必须一并清空，restore 时
+// 还原旧表，不得把任何全局态泄漏给同包后续测试。
 func SwapCasdoorForTest(cfg *config.CasdoorConfig) func() {
 	oldClient, oldCfg := client, casdoorConfig
+	clientsByOrgMu.Lock()
+	oldByOrg := clientsByOrg
+	clientsByOrg = make(map[string]*casdoorsdk.Client)
+	clientsByOrgMu.Unlock()
 	casdoorConfig = cfg
 	client = casdoorsdk.NewClient(
 		cfg.Endpoint, cfg.ClientID, cfg.ClientSecret, cfg.Certificate, cfg.Organization,
@@ -120,6 +126,9 @@ func SwapCasdoorForTest(cfg *config.CasdoorConfig) func() {
 	return func() {
 		client = oldClient
 		casdoorConfig = oldCfg
+		clientsByOrgMu.Lock()
+		clientsByOrg = oldByOrg
+		clientsByOrgMu.Unlock()
 	}
 }
 

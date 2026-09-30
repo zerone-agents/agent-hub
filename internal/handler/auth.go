@@ -93,15 +93,15 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 			return
 		}
 
-		loginName, loginUserID, loginOrg := "", "", session.Org
+		auditName, auditUserID, auditOrg := "", "", session.Org
 		if user, err := auth.GetUserInfo(tokenResp.AccessToken); err == nil {
-			loginName = user.Name
-			loginUserID = user.Id
+			auditName = user.Name
+			auditUserID = user.Id
 			// 审计租户取 token 解析出的权威组织（user.Owner）：默认组织登录
 			// （发起 URL 无 ?org=、session.Org 为空）同样正确归属并落库，与
 			// 后续已认证请求（租户同样来自 token owner）保持同一租户视图。
 			if user.Owner != "" {
-				loginOrg = user.Owner
+				auditOrg = user.Owner
 			}
 			// 同步成员记录（Admin API 拉权威 IsAdmin 合成 + 落库）；
 			// 失败仅记日志，不阻断登录。
@@ -112,7 +112,7 @@ func Callback(provider *auth.CasdoorProvider, ar *services.AuditRecorder) gin.Ha
 		// GetUserInfo 失败但 token 已下发并 redirect（现有放行行为）→ success
 		// （会话已签发，照实记录，spec §5.6）；此时租户回退 session.Org，
 		// 仍为空则 stdout-only（不变）。
-		ar.Login(c, loginUserID, loginName, loginOrg, audit.StatusSuccess, "")
+		ar.Login(c, auditUserID, auditName, auditOrg, audit.StatusSuccess, "")
 
 		redirectURL := buildCallbackRedirect(session.Redirect, tokenResp.AccessToken, tokenResp.RefreshToken)
 
