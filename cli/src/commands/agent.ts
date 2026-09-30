@@ -1,4 +1,5 @@
 import { Command, Option } from "clipanion";
+import { SetPatchError, buildSetUpdate, parseSetArgs } from "../agent-set";
 import { AgentYamlError, parseAgentYaml } from "../agent-yaml";
 import { getActiveProfile } from "../config";
 import { outputJson } from "../output/json";
@@ -171,31 +172,69 @@ export class AgentUpdateCommand extends Command {
 
   name = Option.String();
   file = Option.String("--file", { description: "Path to agent.yaml for the update" });
+  set = Option.Array("--set", {
+    description: "Patch a single field, e.g. --set maxTurns=100 --set guest=true (repeatable)",
+  });
   output = Option.String("--output", "yaml");
 
   async execute(): Promise<number> {
-    if (!this.file) {
-      process.stderr.write("Error: missing --file parameter\n");
+    if (this.file && this.set && this.set.length > 0) {
+      process.stderr.write("Error: --file and --set are mutually exclusive\n");
       return 1;
     }
-    try {
-      const parsed = parseAgentYaml(this.file, this.name);
-      const agent = await updateAgent(this.name, {
-        config: parsed.config,
-        ...(parsed.desktopEnabled !== undefined ? { desktopEnabled: parsed.desktopEnabled } : {}),
-        ...(parsed.mobileEnabled !== undefined ? { mobileEnabled: parsed.mobileEnabled } : {}),
-        ...(parsed.isDefault !== undefined ? { isDefault: parsed.isDefault } : {}),
-        ...(parsed.guestEnabled !== undefined ? { guestEnabled: parsed.guestEnabled } : {}),
-      });
-      renderAgent(agent, this.output);
-      return 0;
-    } catch (error) {
-      if (error instanceof AgentYamlError) {
-        process.stderr.write(`Error: ${error.message}\n`);
-        return 2;
+    if (this.file) {
+      try {
+        const parsed = parseAgentYaml(this.file, this.name);
+        const agent = await updateAgent(this.name, {
+          config: parsed.config,
+          ...(parsed.desktopEnabled !== undefined ? { desktopEnabled: parsed.desktopEnabled } : {}),
+          ...(parsed.mobileEnabled !== undefined ? { mobileEnabled: parsed.mobileEnabled } : {}),
+          ...(parsed.isDefault !== undefined ? { isDefault: parsed.isDefault } : {}),
+          ...(parsed.guestEnabled !== undefined ? { guestEnabled: parsed.guestEnabled } : {}),
+        });
+        renderAgent(agent, this.output);
+        return 0;
+      } catch (error) {
+        if (error instanceof AgentYamlError) {
+          process.stderr.write(`Error: ${error.message}\n`);
+          return 2;
+        }
+        throw error;
       }
-      throw error;
     }
+    if (this.set && this.set.length > 0) {
+      // 增量补丁（issue #202 方案 A）：先在零网络调用下解析全部 --set
+      // （格式错误立即拒绝），再 read-modify-write——GET 读回当前
+      // config，依序合并后整体 PUT。纯标志更新不携带 config 键
+      // （后端 req.Config == nil 即不变更），规避全量清空风险。
+      try {
+        parseSetArgs(this.set);
+      } catch (error) {
+        if (error instanceof SetPatchError) {
+          process.stderr.write(`Error: ${error.message}\n`);
+          return 2;
+        }
+        throw error;
+      }
+      try {
+        const current = await getAgent(this.name);
+        const update = buildSetUpdate(
+          (current.config ?? {}) as Record<string, unknown>,
+          this.set,
+        );
+        const agent = await updateAgent(this.name, update);
+        renderAgent(agent, this.output);
+        return 0;
+      } catch (error) {
+        if (error instanceof SetPatchError) {
+          process.stderr.write(`Error: ${error.message}\n`);
+          return 2;
+        }
+        throw error;
+      }
+    }
+    process.stderr.write("Error: missing --file or --set parameter\n");
+    return 1;
   }
 }
 

@@ -297,6 +297,7 @@ zhub agent undeploy <name> --purge  # permanently delete
 - **`--name` is required on every `skill create`**: Single-skill and bundle directories alike. There is no frontmatter fallback for any upload metadata — `--title` defaults to the name on create, and omitted `--description`/`--description-en` are not sent (the Hub keeps existing values on update) — so pass them explicitly.
 - **Agent YAML has two supported shapes**: `id` is required when creating an agent and optional when updating one. Prefer native `config` with `title`, `description`, `modelId`, and other configuration nested beneath it. The compatible flat shape accepts `title`, `description`, `model`, `systemPrompt`, `maxTurns`, and `permissionMode`; `model` maps to `config.modelId`, and `name` remains a legacy Chinese-title alias. Do not define the same normalized field in flat and nested form because the CLI rejects conflicts. See `references/agent.yaml`.
 - **Agent update ID must match when provided**: In `zhub agent update <name> --file agent.yaml`, an optional YAML `id` must exactly match positional `<name>`. Agent update accepts `--file`, not `--json`.
+- **Prefer `--set` for single-field changes**: `zhub agent update <name> --set key=value` (repeatable) patches fields incrementally via read-modify-write — the rest of the config is preserved. Examples: `--set maxTurns=100`, `--set "config.group=桌面端"`, `--set title.zh=新标题`, `--set guest=true`. Values are YAML-parsed (numbers, booleans, strings, `[a, b]`, `{zh: x}`). Platform flags accept `desktop`/`mobile`/`isDefault`/`default`/`guest` and their `*Enabled` aliases, and must be boolean. Any other key is a config path (dot-separated, optional `config.` prefix; top-level `model` maps to `modelId`). `--set` and `--file` are mutually exclusive. Use `--file` only for full-config replacement — it overwrites the whole config, so fields omitted from the YAML are cleared.
 - **Agent platform flags**: On create, `--desktop`/`--no-desktop` and `--mobile`/`--no-mobile` override YAML `desktop`/`mobile`; both default to false when omitted. `--default`/`--no-default` overrides YAML `isDefault`, and `--guest`/`--no-guest` overrides YAML `guest` (Open to Guests), with native last-argument-wins behavior. Update takes state from YAML and leaves omitted state fields unchanged.
 - **Using `update` to change associations**: `update` overwrites the whole config. Use `set-subagents`, `set-tools`, or `set-skills` instead.
 - **Tool/MCP names are URL-encoded internally**: Use the raw name in CLI commands, even with spaces or special characters.
@@ -330,6 +331,7 @@ zhub agent list [--desktop] [--mobile] [--output json|table|yaml]
 zhub agent get <name> [--output yaml]
 zhub agent create --file <path> [--desktop|--no-desktop] [--mobile|--no-mobile] [--default|--no-default] [--output yaml]
 zhub agent update <name> --file <path> [--output yaml]
+zhub agent update <name> --set key=value [--set key=value ...]  # incremental patch, preserves other fields
 zhub agent delete <name>
 zhub agent set-subagents <name> <sub1> [sub2 ...]
 zhub agent set-tools <name> <tool1> [tool2 ...]
