@@ -56,7 +56,17 @@ const en = {
     providerIdNotFound: 'Provider {{providerId}} does not exist',
     modelSelectionNotFound: 'No model with selection_id {{selectionId}} exists under provider {{providerId}}',
     modelNotFound: 'Model {{model}} does not exist under provider {{providerId}}',
-    modelTypeMismatch: 'Model {{model}} is not an LLM/VLM model (actual: {{actual}}) and cannot be bound to an agent'
+    modelTypeMismatch: 'Model {{model}} is not an LLM/VLM model (actual: {{actual}}) and cannot be bound to an agent',
+    // #205 长尾补齐
+    configRequired: 'Config cannot be empty',
+    iconFieldTooLong: '{{field}} length cannot exceed {{limit}} characters',
+    fieldOverridesRequiresProvider: 'fieldOverrides requires providerId to be present',
+    fieldOverridesInvalidKey: 'fieldOverrides contains an invalid key: {{key}}',
+    disallowedToolsTooMany: 'disallowedTools allows at most {{limit}} entries',
+    disallowedToolsInvalidItem: 'disallowedTools[{{index}}] must be a non-empty string',
+    disallowedToolsEntryTooLong: 'disallowedTools[{{index}}] cannot exceed {{limit}} characters',
+    disallowedToolsDuplicate: 'disallowedTools contains a duplicate entry: {{entry}}',
+    providerNotBound: 'Agent has no provider bound'
   },
   time: {
     justNow: 'just now',

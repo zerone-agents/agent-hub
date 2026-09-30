@@ -35,6 +35,16 @@ func TestErrcodes_RegistryPinsDomainAgentCodes(t *testing.T) {
 		{ErrCodeModelSelectionNotFound, agent.CodeModelSelectionNotFound},
 		{ErrCodeModelNotFound, agent.CodeModelNotFound},
 		{ErrCodeModelTypeMismatch, agent.CodeModelTypeMismatch},
+		// #205 长尾补齐：config/icon/fieldOverrides/disallowedTools/ProbeAgent
+		{ErrCodeConfigRequired, agent.CodeConfigRequired},
+		{ErrCodeIconFieldTooLong, agent.CodeIconFieldTooLong},
+		{ErrCodeFieldOverridesRequiresProvider, agent.CodeFieldOverridesRequiresProvider},
+		{ErrCodeFieldOverridesInvalidKey, agent.CodeFieldOverridesInvalidKey},
+		{ErrCodeDisallowedToolsTooMany, agent.CodeDisallowedToolsTooMany},
+		{ErrCodeDisallowedToolsInvalidItem, agent.CodeDisallowedToolsInvalidItem},
+		{ErrCodeDisallowedToolsEntryTooLong, agent.CodeDisallowedToolsEntryTooLong},
+		{ErrCodeDisallowedToolsDuplicate, agent.CodeDisallowedToolsDuplicate},
+		{ErrCodeProviderNotBound, agent.CodeProviderNotBound},
 	}
 	for _, p := range pairs {
 		if string(p.domain) != p.registry {

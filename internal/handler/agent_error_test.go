@@ -510,3 +510,23 @@ func TestAgentHandler_ProbeAgent_ProviderNotFound404(t *testing.T) {
 	require.NotContains(t, respBody, "provider not found", "英文 sentinel 不得直达用户")
 	require.NotContains(t, respBody, "服务器内部错误")
 }
+
+// TestAgentHandler_ProbeAgent_ProviderNotBound400 锁定 #205 长尾码：探测
+// 未绑定 Provider 的 Agent（请求也未带 providerId 覆盖）返回 400
+// provider_not_bound，而非粗码 invalid_agent_config。
+func TestAgentHandler_ProbeAgent_ProviderNotBound400(t *testing.T) {
+	db := setupAgentErrorTestDB(t)
+	seedAgentRow(t, db, "probe-me") // 不绑定 Provider
+
+	h := NewAgentHandler(services.NewAgentService("", ""), nil, newHandlerTestAuditRecorder(t))
+	r := newAgentErrorRouter(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/agents/probe-me/probe", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	env := decodeErrEnvelope(t, w)
+	require.Equal(t, "provider_not_bound", env.Code)
+}

@@ -114,13 +114,15 @@ describe('parseApiError 稳定码翻译（#201 B 档：en 模式按码插值翻�
 
   it('en 键存在性契约：agent 域全部稳定码都有 apiErrors 键（防注册表/键漂移）', async () => {
     await i18next.changeLanguage('en')
-    // 与 domain/agent/errors.go 码常量清单保持同步（17 项）
+    // 与 domain/agent/errors.go 码常量清单保持同步（26 项，#205 长尾补齐）
     const codes = [
       'agent_name_required', 'agent_name_too_long', 'agent_name_invalid', 'agent_name_exists',
       'agent_not_found', 'agent_reference_not_found', 'subagent_not_found', 'subagent_self_reference',
       'system_prompt_required', 'config_key_renamed', 'invalid_permission_mode', 'max_turns_negative',
       'max_turns_too_large', 'provider_id_not_found', 'model_selection_not_found', 'model_not_found',
-      'model_type_mismatch'
+      'model_type_mismatch', 'config_required', 'icon_field_too_long', 'field_overrides_requires_provider',
+      'field_overrides_invalid_key', 'disallowed_tools_too_many', 'disallowed_tools_invalid_item',
+      'disallowed_tools_entry_too_long', 'disallowed_tools_duplicate', 'provider_not_bound'
     ]
     for (const code of codes) {
       const key = `apiErrors.${code.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase())}`
