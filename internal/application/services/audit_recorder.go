@@ -143,7 +143,10 @@ func (r *AuditRecorder) SimpleWithStatus(c *gin.Context, action audit.Action, tt
 }
 
 func (r *AuditRecorder) Login(c *gin.Context, userID, username, org string, st audit.Status, reason string) {
-	r.Record(c, audit.LoginEvent(audit.Actor{UserID: userID, TenantID: org}, username, org, st, reason))
+	// UserName 记用户名（spec §5.6 阶段表：登录成功行 UserName=用户名；
+	// builtin 失败行记尝试的用户名）；相对未经 JWT 中间件的点位，显式身份
+	// 参数覆盖 context 缺省值。
+	r.Record(c, audit.LoginEvent(audit.Actor{UserID: userID, UserName: username, TenantID: org}, username, org, st, reason))
 }
 
 func (r *AuditRecorder) RoleChanged(c *gin.Context, id, name, from, to string, st audit.Status) {
