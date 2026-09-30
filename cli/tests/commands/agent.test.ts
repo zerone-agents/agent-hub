@@ -496,6 +496,11 @@ describe("agent update --set command", () => {
     )!;
     expect(putCall[1].body.config).toEqual({ ...currentAgent.config, maxTurns: 100 });
     expect(putCall[1].body).not.toHaveProperty("guestEnabled");
+    // 验收①「tools/skills 原样保留」：update body 契约上只有 config + 平台
+    // 标志，绑定关系存于 config 之外，钉死 body 不携带这些键。
+    for (const rel of ["tools", "skills", "subagents", "mcps"]) {
+      expect(putCall[1].body).not.toHaveProperty(rel);
+    }
   });
 
   test("多个 --set 组合生效（config 路径 + 平台标志）", async () => {

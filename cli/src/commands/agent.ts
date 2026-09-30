@@ -203,24 +203,18 @@ export class AgentUpdateCommand extends Command {
       }
     }
     if (this.set && this.set.length > 0) {
-      // 增量补丁（issue #202 方案 A）：先在零网络调用下解析全部 --set
-      // （格式错误立即拒绝），再 read-modify-write——GET 读回当前
-      // config，依序合并后整体 PUT。纯标志更新不携带 config 键
-      // （后端 req.Config == nil 即不变更），规避全量清空风险。
+      // 增量补丁（issue #202 方案 A）：先解析全部 --set（格式错误在零
+      // 网络调用下拒绝），再 read-modify-write——GET 读回当前 config，
+      // 依序合并后整体 PUT。纯标志更新不携带 config 键（后端
+      // req.Config == nil 即不变更），规避空对象全量清空风险；GET 读回的
+      // 掩码 secret（fieldOverrides.api_key）由后端解包时按掩码形态还原，
+      // 不会因 RMW 回写被销毁。
       try {
-        parseSetArgs(this.set);
-      } catch (error) {
-        if (error instanceof SetPatchError) {
-          process.stderr.write(`Error: ${error.message}\n`);
-          return 2;
-        }
-        throw error;
-      }
-      try {
+        const pairs = parseSetArgs(this.set);
         const current = await getAgent(this.name);
         const update = buildSetUpdate(
           (current.config ?? {}) as Record<string, unknown>,
-          this.set,
+          pairs,
         );
         const agent = await updateAgent(this.name, update);
         renderAgent(agent, this.output);

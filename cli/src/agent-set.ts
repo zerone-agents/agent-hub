@@ -48,7 +48,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function parseSetArg(arg: string): { key: string; value: unknown } {
+export interface SetPair {
+  key: string;
+  value: unknown;
+}
+
+export function parseSetArg(arg: string): SetPair {
   const eq = arg.indexOf("=");
   if (eq < 0) {
     throw new SetPatchError(`invalid --set "${arg}": expected key=value`);
@@ -73,8 +78,9 @@ export function parseSetArg(arg: string): { key: string; value: unknown } {
 }
 
 // 命令层在任何网络调用前先跑这一步：格式错误（缺 =、空 key、YAML
-// 解析失败、标志非布尔）应在零请求下拒绝。
-export function parseSetArgs(args: string[]): { key: string; value: unknown }[] {
+// 解析失败、标志非布尔）应在零请求下拒绝。解析结果直接传给
+// buildSetUpdate，避免双重解析。
+export function parseSetArgs(args: string[]): SetPair[] {
   return args.map(parseSetArg);
 }
 
@@ -110,17 +116,17 @@ function setConfigPath(
   node[segments[segments.length - 1]] = value;
 }
 
-// 把一组 --set key=value 依序合并到 currentConfig 的深拷贝上。
+// 把一组已解析的 --set 键值依序合并到 currentConfig 的深拷贝上。
 // 只有 config 路径被设置时才返回 config 键（全量合并后的 config 供 PUT
 // 全量替换语义使用）；纯标志更新不携带 config——后端 req.Config == nil
 // 即不变更，避免空对象误触发全量清空。
 export function buildSetUpdate(
   currentConfig: Record<string, unknown> | undefined,
-  sets: string[],
+  pairs: SetPair[],
 ): SetUpdate {
   const update: SetUpdate = {};
   let config: Record<string, unknown> | undefined;
-  for (const { key, value } of parseSetArgs(sets)) {
+  for (const { key, value } of pairs) {
     const flag = FLAG_ALIASES.get(key);
     if (flag !== undefined) {
       update[flag] = value as boolean;
