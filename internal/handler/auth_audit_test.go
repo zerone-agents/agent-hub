@@ -13,11 +13,11 @@ import (
 	"control-panel/internal/application/services"
 	"control-panel/internal/auth"
 	"control-panel/internal/auth/builtin"
+	"control-panel/internal/config"
 	"control-panel/internal/domain/audit"
 	authdom "control-panel/internal/domain/auth"
 	repository "control-panel/internal/infrastructure/persistence"
 
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -197,8 +197,8 @@ func TestCasdoorLogoutRecordsSuccessWithoutRevocationAttempt(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(srv.Close)
-	// 全局 casdoor client 指向假服务（SwapClientForTest 可恢复，不泄漏全局态）
-	restore := auth.SwapClientForTest(casdoorsdk.NewClient(srv.URL, "cid", "sec", "", "", ""))
+	// 全局 casdoor 状态指向假服务（SwapCasdoorForTest 可恢复，不泄漏全局态）
+	restore := auth.SwapCasdoorForTest(&config.CasdoorConfig{Endpoint: srv.URL, ClientID: "cid", ClientSecret: "sec"})
 	t.Cleanup(restore)
 
 	db := openAuditEmbedDB(t)

@@ -107,13 +107,20 @@ func GetClient() *casdoorsdk.Client {
 	return client
 }
 
-// SwapClientForTest 替换全局 client 并返回恢复函数（测试专用，同 StoreSession
-// 的导出测试缝先例）：handler 测试需注入假 endpoint 断言登出路径零 HTTP 触达，
-// 用后必须恢复，不得把全局态泄漏给同包后续测试。
-func SwapClientForTest(c *casdoorsdk.Client) func() {
-	old := client
-	client = c
-	return func() { client = old }
+// SwapCasdoorForTest 替换全局 casdoor client 与配置并返回恢复函数（测试专用，
+// 同 StoreSession 的导出测试缝先例）：handler 测试需要注入假 endpoint / 证书
+// （token 兑换、JWT 验签），用后必须恢复，不得把全局态泄漏给同包后续测试。
+func SwapCasdoorForTest(cfg *config.CasdoorConfig) func() {
+	oldClient, oldCfg := client, casdoorConfig
+	casdoorConfig = cfg
+	client = casdoorsdk.NewClient(
+		cfg.Endpoint, cfg.ClientID, cfg.ClientSecret, cfg.Certificate, cfg.Organization,
+		applicationNameUnused,
+	)
+	return func() {
+		client = oldClient
+		casdoorConfig = oldCfg
+	}
 }
 
 // ClientForOrg returns a cached SDK client whose organization scope is org.
