@@ -116,7 +116,9 @@ func (h *McpHandler) Delete(c *gin.Context) {
 // ==================== 管理：Agent ↔ MCP 绑定 ====================
 
 type updateAgentMcpsReq struct {
-	McpNames []string `json:"mcpNames"`
+	// binding:"required" 对齐 skill/tool 两端点：缺字段（{}）→ 400，
+	// 显式空数组 [] 仍可清空（JSON 反序列化为非 nil 空切片，required 只拒 nil）
+	McpNames []string `json:"mcpNames" binding:"required"`
 }
 
 func (h *McpHandler) GetAgentMcps(c *gin.Context) {

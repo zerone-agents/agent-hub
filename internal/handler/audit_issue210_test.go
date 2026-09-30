@@ -4,10 +4,10 @@ package handler
 //   1. tool UploadFile（制品替换，实质性内容变更）
 //   2. agent 绑定变更（UpdateAgentSkills / UpdateAgentTools / UpdateAgentMcps）
 //   3. agent create / update
-// 绑定变更归 agent 分类（agent.update_bindings），Detail 记录 kind + 新名单；
+// 绑定变更归 agent 分类（agent.update_bindings），Detail 记录 kind + 生效名单；
 // agent.update 的 Detail 记录请求中出现的顶层字段名（不含值）。
-// fixture 复用 audit_skill_tool_mcp_test.go 的 setupAuditToolEnv /
-// auditTestActor / assertAuditRow。
+// 复用 audit_skill_tool_mcp_test.go 的 auditTestActor / assertAuditRow /
+// openAuditEmbedDB；各域环境在本文件自建（服务层连锁依赖不同）。
 
 import (
 	"bytes"
@@ -174,6 +174,31 @@ func TestAuditAgentBindingsFailureNoRecord(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 
 	require.EqualValues(t, 0, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+}
+
+// TestAuditAgentMcpsFieldRequired：mcp 端点补 binding:"required" 后与
+// skill/tool 对齐——缺字段 {} → 400 且零审计；显式空数组 [] 仍可清空，
+// 审计 names 记为 []（非 null）。PR #211 复审建议项的钉住测试。
+func TestAuditAgentMcpsFieldRequired(t *testing.T) {
+	r, db := setupAuditBindingsEnv(t)
+
+	// {}（缺字段）→ 400，零审计行
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/bind-me/mcps", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.EqualValues(t, 0, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+
+	// []（显式空数组）→ 200 清空，审计 names 为 []
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/agents/bind-me/mcps", strings.NewReader(`{"mcpNames":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.EqualValues(t, 1, countAuditByAction(t, db, audit.ActionAgentUpdateBindings))
+	row := fetchAuditByAction(t, db, audit.ActionAgentUpdateBindings)
+	require.JSONEq(t, `{"kind":"mcp","names":[]}`, row.Detail)
 }
 
 // ── agent.create / agent.update ─────────────────────────────────────────────
