@@ -134,4 +134,24 @@ describe("ProviderForm", () => {
       authStyle: "auth_token",
     });
   });
+
+  it("probes with a changed auth style only (protocol untouched) in edit mode", async () => {
+    probeProvider.mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    });
+    renderForm();
+
+    const user = userEvent.setup();
+    await pickOption(user, "Auth Style", "Auth Token (Bearer header)");
+    await user.click(
+      await screen.findByRole("button", { name: /测\s*试\s*连\s*接/ }),
+    );
+
+    await waitFor(() => { expect(probeProvider).toHaveBeenCalledTimes(1); });
+    expect(probeProvider.mock.calls[0][0]).toMatchObject({
+      id: 1,
+      protocol: "openai", // protocol untouched: current form value is sent as-is
+      authStyle: "auth_token",
+    });
+  });
 });
