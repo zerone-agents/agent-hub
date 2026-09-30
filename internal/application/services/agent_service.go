@@ -626,6 +626,10 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 			map[string]string{"oldKey": "maxSessionTurns", "newKey": "maxSessionQueries"},
 			"配置项 maxSessionTurns 已更名为 maxSessionQueries，请更新调用方后重试")
 	}
+	// 解包前的既有绑定快照：fieldOverrides 的掩码值还原需要用它解密旧值
+	// （providerId 在同一次更新里也可能被改写，必须先固定下来）。
+	priorProviderID := cfg.ProviderID
+	priorFieldOverrides := cfg.FieldOverrides
 	if v, ok := config["systemPrompt"].(string); ok {
 		cfg.SystemPrompt = v
 	}
@@ -694,6 +698,35 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		for k, val := range v {
 			if s, ok := val.(string); ok {
 				overrides[k] = s
+			}
+		}
+
+		// 掩码值还原（PR #208 评审 major）：GetAgent 对 api_key 等 secret
+		// 字段只返回 maskSecret 掩码串（abcd****wxyz）。客户端把读回的配置
+		// 原样 PUT（CLI --set 的 read-modify-write 每次都会触发）时，掩码串
+		// 若不拦截会被当作新值加密存储，真实密钥被静默销毁。与 provider
+		// 更新（provider_service.go LockedAPIKey 比较）和本文件 probe 路径
+		// （resolvedKey == maskSecret(overrideKey)）同一约定：入参等于已存
+		// 值的掩码形态即视为「未修改」，还原为已存值。
+		if priorFieldOverrides != "" {
+			var existing map[string]string
+			if priorProviderID != nil {
+				if dec, err := decryptFieldOverrides(priorFieldOverrides, *priorProviderID, encryptionKey); err == nil {
+					existing = dec
+				}
+			} else {
+				// 无 providerId 的旧数据按明文 JSON 存储（下方 else 分支同样
+				// 明文写回），读侧 else 分支仍对 api_key 打掩码，必须回退到
+				// 明文解析取旧值，否则该路径下掩码串会被明文写回。
+				_ = json.Unmarshal([]byte(priorFieldOverrides), &existing)
+			}
+			// 还原范围与读侧打掩码的 key 严格对齐（modelToConfigMap 只对
+			// api_key 打掩码），避免非 secret 字段的字面值恰好等于掩码形态
+			// 时被误回退。
+			if ex, ok := existing["api_key"]; ok && ex != "" {
+				if val, set := overrides["api_key"]; set && val == maskSecret(ex) {
+					overrides["api_key"] = ex
+				}
 			}
 		}
 

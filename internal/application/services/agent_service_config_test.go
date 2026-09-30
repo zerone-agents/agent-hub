@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -75,6 +76,102 @@ func TestMaxSessionQueriesConfigKeys(t *testing.T) {
 		if v != nil {
 			t.Fatalf(`m["maxSessionQueries"] = %#v, want nil`, v)
 		}
+	})
+}
+
+// TestFieldOverridesMaskedSecretRoundTrip locks the PR #208 review fix:
+// GetAgent returns secret override values masked (maskSecret), and clients
+// that echo the read-back config into an update (CLI --set read-modify-write)
+// must not destroy the stored secret. An incoming value equal to the mask of
+// the stored value means "unchanged" and resolves back to the stored value;
+// any other value is applied as the new secret. Same convention as provider
+// LockedAPIKey updates and the agent probe path.
+func TestFieldOverridesMaskedSecretRoundTrip(t *testing.T) {
+	const realKey = "sk-real-secret-key-1234"
+	masked := maskSecret(realKey)
+	require.NotEqual(t, realKey, masked)
+	require.Contains(t, masked, "****")
+
+	newCfg := func() *agent.AgentConfig {
+		pid := uint64(1)
+		// encryptionKey 为空时 fieldOverrides 明文 JSON 存储，不需要 DB
+		return &agent.AgentConfig{
+			ProviderID:     &pid,
+			FieldOverrides: `{"api_key":"` + realKey + `","base_url":"https://old.example.com"}`,
+		}
+	}
+
+	t.Run("掩码值回写还原为已存密钥，其余字段照常更新", func(t *testing.T) {
+		cfg := newCfg()
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{
+				"api_key":  masked,
+				"base_url": "https://new.example.com",
+			},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		stored, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, "")
+		require.NoError(t, err)
+		assert.Equal(t, realKey, stored["api_key"], "masked echo must resolve back to the stored secret")
+		assert.Equal(t, "https://new.example.com", stored["base_url"])
+	})
+
+	t.Run("显式新值正常覆盖", func(t *testing.T) {
+		cfg := newCfg()
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{"api_key": "sk-brand-new-key-9999"},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		stored, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, "")
+		require.NoError(t, err)
+		assert.Equal(t, "sk-brand-new-key-9999", stored["api_key"])
+	})
+
+	t.Run("无 providerId 的明文存储路径同样还原", func(t *testing.T) {
+		// 无 providerId 的旧数据 fieldOverrides 明文存储，但读侧 else 分支
+		// （modelToConfigMap）仍对 api_key 打掩码；还原须回退到明文解析。
+		cfg := &agent.AgentConfig{
+			FieldOverrides: `{"api_key":"` + realKey + `","base_url":"https://old.example.com"}`,
+		}
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{"api_key": masked},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		var stored map[string]string
+		require.NoError(t, json.Unmarshal([]byte(cfg.FieldOverrides), &stored))
+		assert.Equal(t, realKey, stored["api_key"], "plaintext path: masked echo must resolve back to the stored secret")
+	})
+
+	t.Run("非 api_key 字段不还原（与读侧打掩码范围对齐）", func(t *testing.T) {
+		// 读侧只对 api_key 打掩码；非 secret 字段的字面值即使恰好等于掩码
+		// 形态也必须按新值存储，不得误回退。
+		cfg := newCfg()
+		maskedBaseURL := maskSecret("https://old.example.com")
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{
+				"api_key":  masked,
+				"base_url": maskedBaseURL,
+			},
+		}, cfg, "")
+		require.NoError(t, err)
+
+		stored, err := decryptFieldOverrides(cfg.FieldOverrides, *cfg.ProviderID, "")
+		require.NoError(t, err)
+		assert.Equal(t, realKey, stored["api_key"])
+		assert.Equal(t, maskedBaseURL, stored["base_url"], "non-secret keys are stored as-is, never restored")
+	})
+
+	t.Run("无既有 overrides 时不做还原", func(t *testing.T) {
+		pid := uint64(1)
+		cfg := &agent.AgentConfig{ProviderID: &pid}
+		err := unpackConfigToModel(map[string]interface{}{
+			"fieldOverrides": map[string]interface{}{"api_key": masked},
+		}, cfg, "")
+		require.NoError(t, err)
+		assert.Contains(t, cfg.FieldOverrides, masked, "nothing to resolve against; value stored as-is")
 	})
 }
 

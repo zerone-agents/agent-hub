@@ -435,6 +435,243 @@ describe("agent state metadata", () => {
   });
 });
 
+// ── update --set（issue #202 方案 A：read-modify-write 增量补丁）───────
+
+describe("agent update --set command", () => {
+  const currentAgent = {
+    id: 1,
+    name: "code-reviewer",
+    config: {
+      title: { zh: "代码评审" },
+      systemPrompt: "你是评审员",
+      maxTurns: 15,
+      modelId: "qwen3.8-flash",
+    },
+    guestEnabled: false,
+  };
+
+  function setupSetMocks() {
+    // GET 读回当前 config，PUT 返回更新结果——按 method 分流
+    const fetchMock = mock((_url: string, opts?: any) =>
+      Promise.resolve({
+        success: true,
+        data: opts?.method === "PUT" ? { ...currentAgent, ...opts.body } : currentAgent,
+      }),
+    );
+    mock.module("ofetch", () => ({
+      ofetch: fetchMock,
+      FetchError: class FetchError extends Error {},
+    }));
+    mock.module("../../src/config", () => ({
+      ...realConfig,
+      getActiveProfile: mock(() =>
+        Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
+      ),
+    }));
+    return fetchMock;
+  }
+
+  test("--set maxTurns=100 仅变更该字段，其余 config 原样保留", async () => {
+    const fetchMock = setupSetMocks();
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["maxTurns=100"];
+    (cmd as any).output = "yaml";
+
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const putCall = (fetchMock.mock.calls as any[][]).find(
+      (c) => c[1]?.method === "PUT",
+    )!;
+    expect(putCall[1].body.config).toEqual({ ...currentAgent.config, maxTurns: 100 });
+    expect(putCall[1].body).not.toHaveProperty("guestEnabled");
+    // 验收①「tools/skills 原样保留」：update body 契约上只有 config + 平台
+    // 标志，绑定关系存于 config 之外，钉死 body 不携带这些键。
+    for (const rel of ["tools", "skills", "subagents", "mcps"]) {
+      expect(putCall[1].body).not.toHaveProperty(rel);
+    }
+  });
+
+  test("多个 --set 组合生效（config 路径 + 平台标志）", async () => {
+    const fetchMock = setupSetMocks();
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["config.group=桌面端", "guestEnabled=true"];
+    (cmd as any).output = "yaml";
+
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const putCall = (fetchMock.mock.calls as any[][]).find(
+      (c) => c[1]?.method === "PUT",
+    )!;
+    expect(putCall[1].body.config.group).toBe("桌面端");
+    expect(putCall[1].body.config.systemPrompt).toBe("你是评审员");
+    expect(putCall[1].body.guestEnabled).toBe(true);
+  });
+
+  test("纯标志 --set 不发送 config 键", async () => {
+    const fetchMock = setupSetMocks();
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["guest=true"];
+    (cmd as any).output = "yaml";
+
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      console.log = origLog;
+    }
+
+    const putCall = (fetchMock.mock.calls as any[][]).find(
+      (c) => c[1]?.method === "PUT",
+    )!;
+    expect(putCall[1].body).toEqual({ guestEnabled: true });
+  });
+
+  test("未知 config key 被后端丢弃时给出警告（更新本身成功）", async () => {
+    // 服务端只识别固定 schema 的 key：mock PUT 原样返回当前 agent，
+    // 模拟 unknownField 被静默丢弃。
+    const fetchMock = mock((_url: string, opts?: any) =>
+      Promise.resolve({ success: true, data: currentAgent }),
+    );
+    mock.module("ofetch", () => ({
+      ofetch: fetchMock,
+      FetchError: class FetchError extends Error {},
+    }));
+    mock.module("../../src/config", () => ({
+      ...realConfig,
+      getActiveProfile: mock(() =>
+        Promise.resolve({ serverUrl: "https://test.local", token: "cli_test" })
+      ),
+    }));
+
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["unknownField=bar", "maxTurns=15"];
+    (cmd as any).output = "yaml";
+
+    const errs: string[] = [];
+    const origErr = process.stderr.write;
+    process.stderr.write = ((s: string) => { errs.push(s); return true; }) as any;
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(0);
+    } finally {
+      process.stderr.write = origErr;
+      console.log = origLog;
+    }
+
+    expect(errs.join("")).toContain("unknownField");
+    expect(errs.join("")).not.toContain("maxTurns");
+  });
+
+  test("非法 --set 在任何 API 调用前报错", async () => {
+    const fetchMock = setupSetMocks();
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = ["no-equals-sign"];
+    (cmd as any).output = "yaml";
+
+    const errs: string[] = [];
+    const origErr = process.stderr.write;
+    process.stderr.write = ((s: string) => { errs.push(s); return true; }) as any;
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      expect(await cmd.execute()).toBe(2);
+    } finally {
+      process.stderr.write = origErr;
+      console.log = origLog;
+    }
+
+    expect(errs.join("")).toContain("key=value");
+    // 解析错误发生在 GET 之前：零网络调用
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("--file 与 --set 互斥", async () => {
+    const fetchMock = setupSetMocks();
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = "/tmp/whatever.yaml";
+    (cmd as any).set = ["maxTurns=100"];
+    (cmd as any).output = "yaml";
+
+    const errs: string[] = [];
+    const origErr = process.stderr.write;
+    process.stderr.write = ((s: string) => { errs.push(s); return true; }) as any;
+    try {
+      expect(await cmd.execute()).toBe(1);
+    } finally {
+      process.stderr.write = origErr;
+    }
+
+    expect(errs.join("")).toContain("mutually exclusive");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("--file 与 --set 都缺失时报错", async () => {
+    const { AgentUpdateCommand } = await import(
+      `../../src/commands/agent.ts?set=${Date.now()}-${Math.random()}`
+    );
+    const cmd = new AgentUpdateCommand();
+    (cmd as any).name = "code-reviewer";
+    (cmd as any).file = undefined;
+    (cmd as any).set = undefined;
+    (cmd as any).output = "yaml";
+
+    const errs: string[] = [];
+    const origErr = process.stderr.write;
+    process.stderr.write = ((s: string) => { errs.push(s); return true; }) as any;
+    try {
+      expect(await cmd.execute()).toBe(1);
+    } finally {
+      process.stderr.write = origErr;
+    }
+
+    expect(errs.join("")).toContain("--file or --set");
+  });
+});
+
 describe("agent create/update invalid YAML side effects", () => {
   const harness = join(import.meta.dir, "../fixtures/agent-yaml-command-harness.ts");
 
