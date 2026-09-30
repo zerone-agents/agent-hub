@@ -54,6 +54,10 @@ services:
       # --- Server ---
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: ${HUB_PORT:-8081}
+      # Comma-separated proxy CIDRs in front of the hub. Set it (e.g. the docker
+      # network of your reverse proxy, "172.27.0.0/16") so audit logs and IP
+      # rate limiting see real client IPs; empty = trust none, X-Forwarded-For ignored.
+      SERVER_TRUSTED_PROXIES: ${SERVER_TRUSTED_PROXIES:-}
       # --- Optional integrations (leave empty to disable) ---
       # Provider API-key encryption key (set for managing model providers):
       PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}

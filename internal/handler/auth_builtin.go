@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -162,6 +163,9 @@ func (h *BuiltinAuthHandler) Logout(c *gin.Context) {
 	st := audit.StatusSuccess
 	if revErr != nil {
 		st = audit.StatusFailure // 凭证可能仍有效，如实记录（spec §3.1：状态以撤销结果为准）
+		// 失败原因此前被静默吞掉（审计 detail 无此字段），排障无从下手——
+		// 至少落服务端日志（PR 审查：可观测性补齐）。
+		log.Printf("[auth] builtin logout revoke failed: %v", revErr)
 	}
 	h.audit.SimpleWithStatus(c, audit.ActionLogout, audit.TargetSystem, "", "", st)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "logged out successfully"})

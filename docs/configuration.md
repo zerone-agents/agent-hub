@@ -9,6 +9,7 @@ Environment variable reference. All configuration is loaded via Viper (environme
 | `SERVER_HOST` | No | `0.0.0.0` | Listen address |
 | `SERVER_PORT` | No | `8081` | Listen port |
 | `SERVER_CORS_ORIGINS` | No | Allow all | Comma-separated CORS allowlist; **strongly recommended to set explicitly** |
+| `SERVER_TRUSTED_PROXIES` | No | Trust none | Comma-separated CIDRs of reverse proxies in front of the hub. Empty = trust no proxy: `X-Forwarded-For` is ignored and audit logs / IP rate limiting see the proxy hop address (e.g. a Docker gateway like `172.27.0.1`). Set it to the proxy network (e.g. `172.27.0.0/16`) so real client IPs are recorded. Invalid CIDR fails startup fast. |
 
 ## Database
 

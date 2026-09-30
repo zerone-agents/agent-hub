@@ -26,7 +26,7 @@ Two interchangeable backends selected by `AUTH_MODE` (default `builtin`):
 | POST | `/auth/change-password` | (builtin) Change own password |
 | GET | `/auth/userinfo` | Current user info. `tenant_id` is the authoritative field (casdoor mode = Casdoor org name; builtin mode = `default`); `org_id` is a backward-compatible same-source value |
 | POST | `/auth/refresh` | Refresh access_token (rotation: old refresh token revoked) |
-| POST | `/auth/logout` | Revoke token |
+| POST | `/auth/logout` | Log out. builtin mode revokes the refresh token; casdoor mode is client-side only (Casdoor exposes no RFC 7009 self-service revocation endpoint for end-user tokens — the client clears its tokens) |
 
 ## Agent (Public)
 

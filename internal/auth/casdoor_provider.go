@@ -121,13 +121,6 @@ func (p *CasdoorProvider) RefreshToken(refreshToken string) (*TokenPair, error) 
 	}, nil
 }
 
-// RevokeToken revokes a Casdoor access or refresh token. The package-level
-// RevokeToken is called by method dispatch (receiver-bound), so it does not
-// shadow itself here.
-func (p *CasdoorProvider) RevokeToken(token string) error {
-	return RevokeToken(token)
-}
-
 // SyncMembership 登录回调专用：经 Admin API 拉取权威 IsAdmin/IsForbidden，
 // 与本地成员记录合成角色后落库，返回带合成角色的 AuthUser。
 // IsForbidden 用户返回 error；合成/落库失败同样返回 error（调用方记日志，

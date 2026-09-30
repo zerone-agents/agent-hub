@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +105,15 @@ func InitCasdoor(cfg *config.CasdoorConfig) error {
 // GetClient returns the initialized Casdoor client instance.
 func GetClient() *casdoorsdk.Client {
 	return client
+}
+
+// SwapClientForTest 替换全局 client 并返回恢复函数（测试专用，同 StoreSession
+// 的导出测试缝先例）：handler 测试需注入假 endpoint 断言登出路径零 HTTP 触达，
+// 用后必须恢复，不得把全局态泄漏给同包后续测试。
+func SwapClientForTest(c *casdoorsdk.Client) func() {
+	old := client
+	client = c
+	return func() { client = old }
 }
 
 // ClientForOrg returns a cached SDK client whose organization scope is org.
@@ -453,36 +460,4 @@ func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 		return nil, ferr
 	}
 	return tokenResponseFrom(tok)
-}
-
-// RevokeToken revokes an access or refresh token.
-func RevokeToken(token string) error {
-	if token == "" {
-		return fmt.Errorf("token is empty")
-	}
-
-	revokeURL := fmt.Sprintf("%s/api/login/oauth/revoke", client.Endpoint)
-
-	data := map[string]string{
-		"client_id":     client.ClientId,
-		"client_secret": client.ClientSecret,
-		"token":         token,
-	}
-
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal revoke request: %w", err)
-	}
-
-	resp, err := http.Post(revokeURL, "application/json", bytes.NewReader(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to revoke token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to revoke token: status %d", resp.StatusCode)
-	}
-
-	return nil
 }
