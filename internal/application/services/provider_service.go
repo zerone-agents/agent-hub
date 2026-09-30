@@ -722,7 +722,18 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 
 	switch protocol {
 	case string(provider.ProtocolOpenAI):
-		req, err = http.NewRequest("GET", base+"/models", nil)
+		// 已配置模型时真实 ping 一次 /chat/completions：GET /models 只验证连通+鉴权，
+		// 端点不支持 openai chat schema 时会假成功（真实调用才 400，用户实测反例）。
+		// 未配置模型时退化为 GET /models 连通性检查（此时无法验证 chat schema）。
+		if len(models) > 0 && models[0].ModelID != "" {
+			body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, models[0].ModelID)
+			req, err = http.NewRequest("POST", base+"/chat/completions", strings.NewReader(body))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+		} else {
+			req, err = http.NewRequest("GET", base+"/models", nil)
+		}
 	case string(provider.ProtocolMinerU):
 		req, err = http.NewRequest("GET", base+"/health", nil)
 	case string(provider.ProtocolPaddleOCR):

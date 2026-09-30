@@ -142,7 +142,7 @@ func TestProviderHandler_Probe_HonorsProtocolAndAuthStyleOverrides(t *testing.T)
 
 	call := expectProbeCall(t, calls)
 	require.Equal(t, http.MethodGet, call.Method,
-		"openai override must probe GET /models (stored anthropic would POST /v1/messages)")
+		"openai override with no models configured falls back to GET /models (stored anthropic would POST /v1/messages)")
 	require.Equal(t, "/models", call.Path)
 	require.Equal(t, "Bearer sk-stored-secret", call.Authz,
 		"auth_token override must send Bearer with the stored key")
@@ -250,4 +250,116 @@ func TestProviderHandler_ProbeConfig_RejectsUnknownEnums(t *testing.T) {
 	rec = postProbePath(t, router, "/api/v1/admin/providers/probe", valid)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	expectProbeCall(t, calls)
+}
+
+// setupOpenAIProbeRouter seeds one stored provider (openai + auth_token,
+// pointing at a schema-strict fake upstream) with one default model, and
+// registers the by-id probe endpoint. The upstream always answers
+// GET /models but answers POST /chat/completions with chatStatus — on failure
+// with the exact gateway error body from the user's report.
+func setupOpenAIProbeRouter(t *testing.T, chatStatus int) (*gin.Engine, chan probeUpstreamCall) {
+	t.Helper()
+
+	calls := make(chan probeUpstreamCall, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls <- probeUpstreamCall{Method: r.Method, Path: r.URL.Path, Authz: r.Header.Get("Authorization")}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/chat/completions":
+			w.WriteHeader(chatStatus)
+			if chatStatus >= 400 {
+				_, _ = w.Write([]byte(`{"error":{"code":"unsupported_request","message":"request is outside the supported chat schema","param":null,"type":"unsupported_request"}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"id":"chatcmpl-x","choices":[]}`))
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderAttribute{}, &provider.ProviderModel{}))
+
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+
+	encrypted, err := provider.Encrypt("sk-stored-secret", providerModelsTestKey)
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&provider.ProviderSummary{
+		ID:           1,
+		Key:          "openai-provider",
+		Name:         "OpenAI Provider",
+		Protocol:     string(provider.ProtocolOpenAI),
+		AuthStyle:    string(provider.AuthStyleAuthToken),
+		BaseURL:      upstream.URL,
+		LockedAPIKey: encrypted,
+	}).Error)
+	require.NoError(t, db.Create(&provider.ProviderModel{
+		ProviderID:  1,
+		SelectionID: "sel-1",
+		ModelID:     "gpt-4o",
+		ModelType:   "llm",
+	}).Error)
+
+	gin.SetMode(gin.TestMode)
+	h := NewProviderHandler(services.NewProviderService(providerModelsTestKey), nil, newHandlerTestAuditRecorder(t))
+	router := gin.New()
+	router.POST("/api/v1/admin/providers/:id/probe", h.Probe)
+	return router, calls
+}
+
+// TestProviderHandler_Probe_OpenAIProbesRealChatSchema 钉住用户实测反例：
+// openai 探测只打 GET /models（连通+鉴权）时，端点不支持 openai chat schema
+// （真实调用 /chat/completions 才 400）会假成功。已配置模型时必须真发一次
+// chat completions 最小 ping，上游 400 时 success=false 并透出上游错误。
+func TestProviderHandler_Probe_OpenAIProbesRealChatSchema(t *testing.T) {
+	router, calls := setupOpenAIProbeRouter(t, http.StatusBadRequest)
+
+	rec := postProbe(t, router, nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Success bool   `json:"success"`
+			Error   string `json:"error"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.False(t, resp.Data.Success,
+		"上游 chat completions 400 必须判失败，不得假成功: %s", rec.Body.String())
+	require.Contains(t, resp.Data.Error, "400")
+	require.Contains(t, resp.Data.Error, "supported chat schema")
+
+	call := expectProbeCall(t, calls)
+	require.Equal(t, http.MethodPost, call.Method,
+		"openai 探测在已配置模型时必须真实打 /chat/completions（而不是 GET /models）")
+	require.Equal(t, "/chat/completions", call.Path)
+	require.Equal(t, "Bearer sk-stored-secret", call.Authz, "库存 auth_token 照常生效")
+}
+
+// TestProviderHandler_Probe_OpenAIChatSchemaHealthy 正向对照：端点支持 openai
+// chat schema 时探测成功，且同样走 /chat/completions。
+func TestProviderHandler_Probe_OpenAIChatSchemaHealthy(t *testing.T) {
+	router, calls := setupOpenAIProbeRouter(t, http.StatusOK)
+
+	rec := postProbe(t, router, nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var resp struct {
+		Data struct {
+			Success bool `json:"success"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Data.Success, "body=%s", rec.Body.String())
+
+	call := expectProbeCall(t, calls)
+	require.Equal(t, http.MethodPost, call.Method)
+	require.Equal(t, "/chat/completions", call.Path)
 }
