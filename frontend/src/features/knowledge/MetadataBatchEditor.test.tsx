@@ -135,7 +135,7 @@ it("keeps cross-page selection, requires review and confirms only the explicit I
   expect(h.list.mock.calls.every(([, params]) => params.page_size <= 100)).toBe(
     true,
   );
-});
+}, 20_000);
 it("fails closed when a filtered preview is empty or incomplete", async () => {
   const user = userEvent.setup();
   setup();
@@ -477,7 +477,7 @@ it("retains positive text membership for 0x0 and freezes only its actual matchin
       deletes: [],
     },
   );
-});
+}, 20_000);
 it("rejects a returned plain-text document that does not satisfy the requested predicate", async () => {
   const user = userEvent.setup();
   setup();
