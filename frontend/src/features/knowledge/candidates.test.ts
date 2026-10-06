@@ -4,6 +4,8 @@ import {
   buildLayoutCandidates,
   decodeCandidateValue,
   BUILTIN_LAYOUTS,
+  isAllowedLayoutSelection,
+  retainLayoutCandidates,
 } from './candidates'
 import type { Provider } from '@/api/providers'
 import type { MultiRAGModel } from '@/api/multirag'
@@ -42,9 +44,10 @@ describe('buildEmbeddingCandidates', () => {
 })
 
 describe('buildLayoutCandidates', () => {
-  it('shows 3 groups: builtin + multirag + local', () => {
+  it('shows only built-in and enabled MultiRAG OCR, never provider presets', () => {
     const multirag: MultiRAGModel[] = [
       { name: 'mineru-x', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'mineru-x@MinerU' },
+      { name: 'paddle-x', factory: 'PaddleOCR', type: 'ocr', status: '0', fullId: 'paddle-x@PaddleOCR' },
     ]
     const localProviders: Provider[] = [
       {
@@ -55,38 +58,74 @@ describe('buildLayoutCandidates', () => {
         fields: [],
       },
     ]
-    const result = buildLayoutCandidates(multirag, localProviders)
-    expect(result).toHaveLength(3)
+    const result = buildLayoutCandidates(multirag)
+    expect(result).toHaveLength(2)
     const builtinGroup = result.find(g => g.label === 'knowledge.candidates.builtin')!
     expect(builtinGroup.options.map(o => o.value)).toEqual(['builtin:DeepDOC', 'builtin:Plain Text'])
-    const mrGroup = result.find(g => g.label === 'knowledge.candidates.multirag')!
+    const mrGroup = result.find(g => g.label === 'knowledge.candidates.ocr')!
     expect(mrGroup.options).toHaveLength(1)
-    expect(mrGroup.options[0].value).toBe('multirag:MinerU')
-    const localGroup = result.find(g => g.label === 'knowledge.candidates.local')!
-    expect(localGroup.options).toHaveLength(1)
-    expect(localGroup.options[0].value).toBe('local:7:paddleocr')
+    expect(mrGroup.options[0].value).toBe('multirag:mineru-x@MinerU')
+    expect(result.find(g => g.label === 'knowledge.candidates.local')).toBeUndefined()
+    expect(result.flatMap(g => g.options).some(o => o.value.includes('PaddleOCR'))).toBe(false)
+    expect(localProviders[0].baseUrl).toBe('')
   })
 
-  it('dedupes local MinerU when already in MultiRAG', () => {
+  it('keeps distinct enabled models from one OCR factory and rejects stale local selections', () => {
     const multirag: MultiRAGModel[] = [
       { name: 'mineru-default', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'mineru-default@MinerU' },
+      { name: 'mineru-other', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'mineru-other@MinerU' },
     ]
-    const localProviders: Provider[] = [
-      {
-        id: 7, key: 'mineru', name: 'MinerU', protocol: 'mineru', authStyle: 'api_key',
-        baseUrl: '', description: '', descriptionEn: '', iconKey: '', builtin: true,
-        lockedApiKey: '', attributes: {}, createdAt: '', updatedAt: '',
-        defaultModels: [{ modelId: 'mineru', displayName: 'MinerU', modelType: 'ocr' }],
-        fields: [],
-      },
-    ]
-    const result = buildLayoutCandidates(multirag, localProviders)
-    const localGroup = result.find(g => g.label === 'knowledge.candidates.local')
-    // MinerU factory is already in MultiRAG, so local entry is dropped.
-    // If local group exists, it must be empty.
-    if (localGroup) {
-      expect(localGroup.options).toHaveLength(0)
-    }
+    const result = buildLayoutCandidates(multirag)
+    expect(result.find(g => g.label === 'knowledge.candidates.ocr')?.options.map(option => option.rawValue)).toEqual(['mineru-default@MinerU', 'mineru-other@MinerU'])
+    expect(isAllowedLayoutSelection('local:7:mineru', result)).toBe(false)
+    expect(isAllowedLayoutSelection('multirag:MinerU', result)).toBe(false)
+    expect(isAllowedLayoutSelection('multirag:mineru-other@MinerU', result)).toBe(true)
+    expect(isAllowedLayoutSelection('DeepDOC', result)).toBe(true)
+    expect(isAllowedLayoutSelection('OldParser', result, 'OldParser')).toBe(true)
+    expect(isAllowedLayoutSelection('multirag:OldParser', result, 'OldParser')).toBe(true)
+  })
+
+  it('offers configured enabled vision models with their exact names, independent of embedding', () => {
+    const result = buildLayoutCandidates([
+      { name: 'vision@preview', factory: 'OpenAI', type: 'image2text', status: '1', fullId: 'vision@preview@OpenAI' },
+      { name: 'disabled', factory: 'OpenAI', type: 'image2text', status: '0', fullId: 'disabled@OpenAI' },
+      { name: 'embedding', factory: 'OpenAI', type: 'embedding', status: '1', fullId: 'embedding@OpenAI' },
+    ])
+    expect(result.find(group => group.label === 'knowledge.candidates.vision')?.options).toEqual([
+      expect.objectContaining({ rawValue: 'vision@preview@OpenAI', value: 'multirag:vision@preview@OpenAI', kind: 'image2text' }),
+    ])
+    expect(result.flatMap(group => group.options).some(option => option.rawValue === 'embedding@OpenAI')).toBe(false)
+  })
+
+  it('does not offer unsupported exact OCR references or ambiguous cross-factory names', () => {
+    const result = buildLayoutCandidates([
+      { name: 'shared', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'shared@MinerU' },
+      { name: 'shared', factory: 'PaddleOCR', type: 'ocr', status: '0', fullId: 'shared@PaddleOCR' },
+      { name: 'loader', factory: 'OpenDataLoader', type: 'ocr', status: '1', fullId: 'loader@OpenDataLoader' },
+    ])
+    expect(result).toHaveLength(1)
+    expect(isAllowedLayoutSelection('shared@MinerU', result)).toBe(false)
+    expect(isAllowedLayoutSelection('OpenDataLoader', result, 'OpenDataLoader')).toBe(true)
+  })
+
+  it('keeps the encoded selected value visible and disabled after a candidate disappears', () => {
+    const available = buildLayoutCandidates([])
+    const result = retainLayoutCandidates(available, 'removed@OpenAI', 'multirag:removed@OpenAI')
+    expect(result[0].options).toEqual([expect.objectContaining({ value: 'multirag:removed@OpenAI', rawValue: 'removed@OpenAI', disabled: true, unavailable: true })])
+    expect(isAllowedLayoutSelection('multirag:removed@OpenAI', result)).toBe(false)
+    expect(isAllowedLayoutSelection('multirag:removed@OpenAI', result, 'removed@OpenAI')).toBe(true)
+    expect(retainLayoutCandidates(available, 'removed@OpenAI', 'removed@OpenAI')[0].options).toEqual([
+      expect.objectContaining({ value: 'removed@OpenAI', disabled: true }),
+    ])
+  })
+
+  it.each(['builtin:retired@OpenAI', 'multirag:retired@OpenAI', 'local:7:retired@OpenAI'])('does not decode the source-like prefix of a persisted name: %s', (saved) => {
+    const groups = buildLayoutCandidates([])
+    expect(isAllowedLayoutSelection(saved, groups, saved)).toBe(true)
+    expect(retainLayoutCandidates(groups, saved, saved)[0].options[0]).toMatchObject({ label: saved, rawValue: saved, value: saved })
+    expect(retainLayoutCandidates(groups, saved, `multirag:${saved}`)[0].options).toEqual([
+      expect.objectContaining({ label: saved, rawValue: saved, value: `multirag:${saved}`, disabled: true }),
+    ])
   })
 })
 

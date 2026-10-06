@@ -52,6 +52,20 @@ func TestClient_AddLLM_SuccessMessageShape(t *testing.T) {
 	require.Equal(t, "ok", resp.Message)
 }
 
+func TestClient_AddLLM_VerifyEnvelopeHonorsProbeFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"retcode":0,"data":{"success":false,"message":"OCR endpoint unavailable"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "k")
+	resp, err := c.AddLLM(context.Background(), AddLLMRequest{LLMFactory: "MinerU", LLMName: "mineru", MdlType: "ocr", Verify: true})
+	require.NoError(t, err)
+	require.False(t, resp.Success)
+	require.Equal(t, "OCR endpoint unavailable", resp.Message)
+}
+
 func TestClient_AddLLM_MergesExtras(t *testing.T) {
 	var capturedBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +111,7 @@ func TestClient_ListMyLLMs_EnvelopeSuccess(t *testing.T) {
 	require.JSONEq(t, `{"OpenAI":{"llm":[{"type":"chat","name":"gpt-4o","status":"1"}]}}`, string(raw))
 }
 
-func TestClient_ListMyLLMs_NullDataSubstitutesEmptyObject(t *testing.T) {
+func TestClient_ListMyLLMs_NullDataIsNotAnEmptyInventory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"retcode":0,"data":null}`))
@@ -105,9 +119,8 @@ func TestClient_ListMyLLMs_NullDataSubstitutesEmptyObject(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "k")
-	raw, err := c.ListMyLLMs(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, `{}`, string(raw), "null data must be substituted with {} so downstream map unmarshal yields empty")
+	_, err := c.ListMyLLMs(context.Background())
+	require.ErrorContains(t, err, "no model inventory")
 }
 
 func TestClient_ListMyLLMs_NonZeroRetcode(t *testing.T) {
@@ -120,7 +133,49 @@ func TestClient_ListMyLLMs_NonZeroRetcode(t *testing.T) {
 	c := NewClient(srv.URL, "k")
 	_, err := c.ListMyLLMs(context.Background())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "unauthorized")
+	require.Contains(t, err.Error(), "100")
+	require.NotContains(t, err.Error(), "unauthorized")
+}
+
+func TestClient_ListMyLLMs_RequiresExplicitSuccessAndInventory(t *testing.T) {
+	for _, response := range []string{
+		`{"data":{}}`,
+		`{"success":false,"data":{}}`,
+		`{"code":0}`,
+		`{"code":0,"retcode":401,"data":{}}`,
+		`{"retcode":0,"code":401,"data":{}}`,
+		`not-json`,
+	} {
+		t.Run(response, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(response))
+			}))
+			defer srv.Close()
+			_, err := NewClient(srv.URL, "k").ListMyLLMs(context.Background())
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestClient_ListMyLLMs_CodeSuccessAllowsAnExplicitEmptyInventory(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":0,"data":{}}`))
+	}))
+	defer srv.Close()
+	raw, err := NewClient(srv.URL, "k").ListMyLLMs(context.Background())
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(raw))
+}
+
+func TestClient_ListMyLLMs_DoesNotExposeHTTPErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"detail":"credential secret and remote endpoint"}`))
+	}))
+	defer srv.Close()
+	_, err := NewClient(srv.URL, "k").ListMyLLMs(context.Background())
+	require.ErrorContains(t, err, "401")
+	require.NotContains(t, err.Error(), "credential secret")
 }
 
 func TestClient_ListMyLLMs_HTTP500(t *testing.T) {

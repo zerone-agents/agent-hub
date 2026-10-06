@@ -426,6 +426,10 @@ var builtinKnowledgeTools = []McpTool{
 		Description: "检索 Agent 已绑定的知识库，为文档问答提供相关文本片段",
 	},
 	{
+		Name:        "knowledge_rerank_models",
+		Description: "列出知识库检索可用的重排模型",
+	},
+	{
 		Name:        "knowledge_datasets",
 		Description: "列出 Agent 绑定的知识库及实时元数据（文档数、分块数）",
 	},

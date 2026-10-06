@@ -33,6 +33,7 @@ export interface KnowledgeFolder {
 }
 
 export interface KnowledgeDocument {
+  run?: string;
   id: string;
   name: string;
   type: DocumentType;

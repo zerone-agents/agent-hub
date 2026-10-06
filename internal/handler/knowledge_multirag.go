@@ -24,16 +24,15 @@ type MultiRAGModel struct {
 // ListMultiRAGModels flattens MultiRAG's my_llms response, filters by `type`,
 // and returns the list as `{success: true, data: []MultiRAGModel}`.
 //
-// Query param `type` is required. Common values: "embedding", "ocr". Other
-// MultiRAG types (e.g. "chat", "audio", "image") pass through but are not
-// used by the current knowledge form.
+// Query param `type` is required. Knowledge forms use "embedding", "ocr"
+// and "image2text". Other MultiRAG types pass through.
 //
 // Returns:
 //   - 400 when `type` query param is missing.
 //   - 503 when MultiRAG is unconfigured (source is nil) OR the upstream call
 //     fails OR the response cannot be parsed.
 func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
-	typeFilter := c.Query("type")
+	typeFilter := strings.TrimSpace(c.Query("type"))
 	if typeFilter == "" {
 		respondError(c, http.StatusBadRequest, ErrCodeTypeQueryRequired, "type query param required (embedding|ocr|...)")
 		return
@@ -51,30 +50,36 @@ func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"success": false,
-			"error":   err.Error(),
+			"error":   "加载 MultiRAG 模型失败，请重试",
 		})
 		return
 	}
 
 	// MultiRAG shape: { "<Factory>": { "llm": [ {type, name, status, ...} ] } }
-	var perFactory map[string]struct {
-		LLM []struct {
-			Type   string `json:"type"`
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"llm"`
-	}
-	if err := json.Unmarshal(raw, &perFactory); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"success": false,
-			"error":   "解析 MultiRAG 响应失败: " + err.Error(),
-		})
+	var perFactory map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &perFactory); err != nil || perFactory == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
 		return
 	}
 
 	out := make([]MultiRAGModel, 0, 32)
-	for factory, group := range perFactory {
+	for factory, rawGroup := range perFactory {
+		var group struct {
+			LLM []struct {
+				Type   string `json:"type"`
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"llm"`
+		}
+		if strings.TrimSpace(factory) == "" || json.Unmarshal(rawGroup, &group) != nil || group.LLM == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
+			return
+		}
 		for _, m := range group.LLM {
+			if strings.TrimSpace(m.Type) == "" || strings.TrimSpace(m.Name) == "" {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
+				return
+			}
 			if !strings.EqualFold(m.Type, typeFilter) {
 				continue
 			}

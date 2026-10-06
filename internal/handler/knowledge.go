@@ -5,6 +5,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/agent"
@@ -35,6 +36,7 @@ func NewKnowledgeHandler(service *services.KnowledgeService, multiragMyLLMs prov
 func RegisterKnowledgeRoutes(writeGroup, readGroup *gin.RouterGroup, h *KnowledgeHandler) {
 	knowledgeGroup := writeGroup.Group("/knowledge")
 	knowledgeReadGroup := readGroup.Group("/knowledge")
+	registerKnowledgePageRoutes(knowledgeGroup, knowledgeReadGroup, h)
 	{
 		knowledgeReadGroup.GET("/health", h.Health)
 		knowledgeReadGroup.GET("/datasets", h.ListDatasets)
@@ -47,9 +49,11 @@ func RegisterKnowledgeRoutes(writeGroup, readGroup *gin.RouterGroup, h *Knowledg
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents", h.DeleteDocuments)
 		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/download", h.DownloadDocument)
 		knowledgeGroup.PUT("/datasets/:datasetId/documents/:documentId", h.UpdateDocument)
+		knowledgeGroup.PATCH("/datasets/:datasetId/documents/:documentId", h.UpdateDocument)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/parse", h.ParseDocuments)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents/parse", h.StopParsingDocuments)
-		knowledgeReadGroup.GET("/datasets/:datasetId/images/:imageId", h.GetImage)
+		knowledgeGroup.POST("/documents/ingest", h.IngestDocuments)
+		knowledgeReadGroup.GET("/datasets/:datasetId/images/*imageId", h.GetImage)
 		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/chunks", h.ListChunks)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/:documentId/chunks", h.CreateChunk)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents/:documentId/chunks", h.DeleteChunks)
@@ -145,19 +149,37 @@ func (h *KnowledgeHandler) DeleteDatasets(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) ListDocuments(c *gin.Context) {
+	for _, key := range []string{"page", "page_size"} {
+		if values, present := c.Request.URL.Query()[key]; present {
+			value, err := strconv.Atoi(c.Query(key))
+			if len(values) != 1 || err != nil || value < 1 || (key == "page_size" && value > 100) {
+				respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, "文档分页必须为正整数，page_size 最大为 100")
+				return
+			}
+		}
+	}
+	returnEmpty := queryBoolPtr(c, "return_empty_metadata")
+	if _, present := c.GetQuery("return_empty_metadata"); present && returnEmpty == nil {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, "return_empty_metadata 必须是布尔值")
+		return
+	}
 	result, err := h.service.ListDocuments(c.Request.Context(), c.Param("datasetId"), knowledge.DocumentListRequest{
-		Page:              queryInt(c, "page"),
-		PageSize:          queryInt(c, "page_size"),
-		OrderBy:           c.Query("orderby"),
-		Desc:              queryBoolPtr(c, "desc"),
-		Keywords:          c.Query("keywords"),
-		ID:                c.Query("id"),
-		Name:              c.Query("name"),
-		Suffix:            c.QueryArray("suffix"),
-		Run:               c.QueryArray("run"),
-		CreateTimeFrom:    queryInt64(c, "create_time_from"),
-		CreateTimeTo:      queryInt64(c, "create_time_to"),
-		MetadataCondition: c.Query("metadata_condition"),
+		Page:                queryInt(c, "page"),
+		PageSize:            queryInt(c, "page_size"),
+		OrderBy:             c.Query("orderby"),
+		Desc:                queryBoolPtr(c, "desc"),
+		Keywords:            c.Query("keywords"),
+		ID:                  c.Query("id"),
+		IDs:                 c.QueryArray("ids"),
+		Name:                c.Query("name"),
+		Suffix:              c.QueryArray("suffix"),
+		Types:               c.QueryArray("types"),
+		Run:                 c.QueryArray("run"),
+		CreateTimeFrom:      queryInt64(c, "create_time_from"),
+		CreateTimeTo:        queryInt64(c, "create_time_to"),
+		MetadataCondition:   c.Query("metadata_condition"),
+		Metadata:            c.Query("metadata"),
+		ReturnEmptyMetadata: returnEmpty,
 	})
 	if err != nil {
 		respondKnowledgeError(c, err)
@@ -195,7 +217,12 @@ func (h *KnowledgeHandler) DownloadDocument(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) GetImage(c *gin.Context) {
-	stream, err := h.service.GetImage(c.Request.Context(), c.Param("datasetId"), c.Param("imageId"))
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	// Gin's decoded catch-all includes one routing slash. Remove only that
+	// slash; percent literals and the rest of the object key are already decoded.
+	imageID := strings.TrimPrefix(c.Param("imageId"), "/")
+	stream, err := h.service.GetImage(c.Request.Context(), c.Param("datasetId"), imageID)
 	if err != nil {
 		respondKnowledgeError(c, err)
 		return
@@ -265,7 +292,7 @@ func (h *KnowledgeHandler) StopParsingDocuments(c *gin.Context) {
 		respondKnowledgeError(c, err)
 		return
 	}
-	respondMessage(c, http.StatusOK, "文档解析已停止")
+	respondMessage(c, http.StatusOK, "已提交停止解析请求")
 }
 
 func (h *KnowledgeHandler) ListChunks(c *gin.Context) {
@@ -375,6 +402,20 @@ func (h *KnowledgeHandler) Retrieval(c *gin.Context) {
 // respondKnowledgeError 映射知识域错误：删除保护（issue #122）→ 409 +
 // data.datasets 名单；其余沿用 knowledge.StatusCode 桶。
 func respondKnowledgeError(c *gin.Context, err error) {
+	var updateErr *knowledge.DocumentUpdateError
+	if errors.As(err, &updateErr) {
+		c.JSON(updateErr.HTTPStatus, gin.H{"success": false, "code": updateErr.Code, "error": updateErr.Message, "data": gin.H{"outcome": updateErr.Outcome, "request_id": updateErr.RequestID}})
+		return
+	}
+	if errors.Is(err, knowledge.ErrRetrievalGraphScopeConflict) {
+		respondError(c, http.StatusBadRequest, "knowledge_graph_scope_conflict", err.Error())
+		return
+	}
+	var configErr *knowledge.DatasetConfigurationError
+	if errors.As(err, &configErr) {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "code": "knowledge_configuration_pending", "error": configErr.Error(), "data": gin.H{"dataset": configErr.Dataset}})
+		return
+	}
 	var inUse *agent.DatasetInUseError
 	if errors.As(err, &inUse) {
 		datasets := make([]gin.H, 0, len(inUse.Datasets))

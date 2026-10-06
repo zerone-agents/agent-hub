@@ -74,6 +74,15 @@ describe('parseApiError', () => {
     expect(parseApiError(new Error('boom'))).toBe('boom')
   })
 
+  it('uses the product service name for upstream error messages', () => {
+    const err = new axios.AxiosError('bad', 'ERR_BAD_RESPONSE', undefined, undefined, {
+      status: 502,
+      data: { error: 'MultiRAG error 102: parser unavailable' },
+    } as any)
+    expect(parseApiError(err)).toBe('知识库服务 error 102: parser unavailable')
+    expect(parseApiError(new Error('RAGFlow is unavailable'))).toBe('知识库服务 is unavailable')
+  })
+
   it('returns fallback for unknown shapes', () => {
     expect(parseApiError('weird')).toBe('操作失败，请重试')
   })

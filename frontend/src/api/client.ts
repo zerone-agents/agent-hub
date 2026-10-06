@@ -1,11 +1,50 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import type { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig, AxiosRequestTransformer } from 'axios'
 import { loginRedirectUrl } from '@/lib/redirect'
 // 非组件上下文（axios 拦截器/纯函数）：语言切换后下一次生成生效
 import i18next from '@/i18n'
 
 const TOKEN_KEY = 'access_token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
+let credentialGeneration = 0
+
+interface CredentialSnapshot {
+  accessToken: string | null
+  refreshToken: string | null
+  generation: number
+}
+// Keep secrets out of config metadata/query data. Axios errors retain the
+// dispatched config, allowing late 401s to be matched to their actual request.
+const dispatchedCredentials = new WeakMap<InternalAxiosRequestConfig, CredentialSnapshot>()
+
+function credentialSnapshot(): CredentialSnapshot {
+  return { accessToken: getAccessToken(), refreshToken: getRefreshToken(), generation: credentialGeneration }
+}
+
+function credentialsMatch(snapshot: CredentialSnapshot): boolean {
+  return snapshot.generation === credentialGeneration && snapshot.accessToken === getAccessToken() && snapshot.refreshToken === getRefreshToken()
+}
+
+function requestCanceled(config: InternalAxiosRequestConfig): boolean {
+  return config.signal?.aborted === true || config.cancelToken?.reason !== undefined
+}
+
+function canceledReplay(config: InternalAxiosRequestConfig) {
+  const error = new axios.CanceledError('Credentials changed before request replay')
+  error.config = config
+  return error
+}
+
+function requestStillOwnsCredentials(config: InternalAxiosRequestConfig, snapshot: CredentialSnapshot): boolean {
+  return !requestCanceled(config) && credentialsMatch(snapshot)
+    && config.headers.get('Authorization') === (snapshot.accessToken ? `Bearer ${snapshot.accessToken}` : undefined)
+}
+
+function expireRequestCredentials(config: InternalAxiosRequestConfig, snapshot: CredentialSnapshot) {
+  if (!requestStillOwnsCredentials(config, snapshot)) return
+  clearTokens()
+  window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
+}
 
 export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -16,13 +55,17 @@ export function getRefreshToken(): string | null {
 }
 
 export function setTokens(accessToken: string, refreshToken?: string) {
+  credentialGeneration++
   localStorage.setItem(TOKEN_KEY, accessToken)
   if (refreshToken) {
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
   }
 }
 
 export function clearTokens() {
+  credentialGeneration++
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
@@ -37,10 +80,17 @@ const apiClient: AxiosInstance = axios.create({
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getAccessToken()
+    const snapshot = credentialSnapshot()
+    const token = snapshot.accessToken
+    if (config.headers.get('X-Refresh-Attempt') && config.headers.get('Authorization') !== (token ? `Bearer ${token}` : undefined)) {
+      throw canceledReplay(config)
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    } else {
+      config.headers.delete('Authorization')
     }
+    dispatchedCredentials.set(config, snapshot)
     return config
   }
 )
@@ -50,7 +100,7 @@ apiClient.interceptors.response.use(
     return response
   },
   async (error: AxiosError) => {
-    const originalRequest = error.config as (InternalAxiosRequestConfig & { headers: Record<string, string> }) | undefined
+    const originalRequest = error.config
 
     // 凭证校验类端点的 401 语义是"密码错误"，不是"会话过期"——
     // 不能走 refresh / 强制跳登录页，否则错误提示会被整页刷新吞掉。
@@ -58,38 +108,52 @@ apiClient.interceptors.response.use(
     const isCredentialCheck = CREDENTIAL_CHECK_PATHS.some((p) => originalRequest?.url?.includes(p))
 
     if (error.response?.status === 401 && originalRequest && !isCredentialCheck) {
-      if (originalRequest.headers['X-Refresh-Attempt']) {
-        clearTokens()
-        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
+      const snapshot = dispatchedCredentials.get(originalRequest)
+      if (!snapshot || !requestStillOwnsCredentials(originalRequest, snapshot)) return Promise.reject(error)
+      if (originalRequest.headers.get('X-Refresh-Attempt')) {
+        expireRequestCredentials(originalRequest, snapshot)
         return Promise.reject(error)
       }
 
-      const refreshToken = getRefreshToken()
+      const refreshToken = snapshot.refreshToken
       if (!refreshToken) {
-        clearTokens()
-        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
+        expireRequestCredentials(originalRequest, snapshot)
         return Promise.reject(error)
       }
 
+      let response: AxiosResponse<unknown>
       try {
-        const response = await axios.post('/auth/refresh', {
+        response = await axios.post('/auth/refresh', {
           refresh_token: refreshToken
-        })
-
-        const body = response.data as { success: boolean; data?: { accessToken: string; refreshToken: string } }
-        if (body.success) {
-          const { accessToken, refreshToken: newRefreshToken } = body.data ?? { accessToken: '', refreshToken: '' }
-          setTokens(accessToken, newRefreshToken)
-
-          originalRequest.headers['X-Refresh-Attempt'] = 'true'
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`
-          return await apiClient(originalRequest)
-        }
+        }, { signal: originalRequest.signal, cancelToken: originalRequest.cancelToken })
       } catch {
-        clearTokens()
-        window.location.href = loginRedirectUrl(window.location.pathname, window.location.search, window.location.hash)
+        expireRequestCredentials(originalRequest, snapshot)
         return Promise.reject(error)
       }
+      if (!requestStillOwnsCredentials(originalRequest, snapshot)) return Promise.reject(error)
+      const body = response.data as { success?: boolean; data?: { accessToken?: unknown; refreshToken?: unknown } } | null
+      const accessToken = body?.data?.accessToken
+      const newRefreshToken = body?.data?.refreshToken
+      if (body?.success !== true || typeof accessToken !== 'string' || !accessToken || typeof newRefreshToken !== 'string' || !newRefreshToken) {
+        expireRequestCredentials(originalRequest, snapshot)
+        return Promise.reject(error)
+      }
+      setTokens(accessToken, newRefreshToken)
+      const replaySnapshot = credentialSnapshot()
+      const replayRequest = { ...originalRequest, headers: new axios.AxiosHeaders(originalRequest.headers) }
+      replayRequest.headers.set('X-Refresh-Attempt', 'true')
+      replayRequest.headers.set('Authorization', `Bearer ${accessToken}`)
+      // Axios request interceptors run asynchronously. A login can occur after
+      // setTokens but before dispatch; keep the retry bound to this refresh.
+      const replayGuard: AxiosRequestTransformer = function (data: unknown) {
+        if (requestCanceled(this) || !credentialsMatch(replaySnapshot)) throw canceledReplay(this)
+        return data
+      }
+      const transforms = originalRequest.transformRequest
+      replayRequest.transformRequest = [replayGuard, ...(Array.isArray(transforms) ? transforms : transforms ? [transforms] : [])]
+      // Retry errors have their own dispatch snapshot. Do not catch them as a
+      // failure of the old refresh and accidentally clear a newer login.
+      return apiClient(replayRequest)
     }
 
     return Promise.reject(error)
@@ -135,6 +199,11 @@ function errCodeToKey(code: string): string {
   return code.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase())
 }
 
+function publicApiMessage(message: string): string {
+  const service = i18next.t('apiErrors.knowledgeServiceName')
+  return message.replace(/\b(?:MultiRAG|RAGFlow)\b/gi, service)
+}
+
 export function parseApiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status
@@ -153,8 +222,8 @@ export function parseApiError(err: unknown): string {
 
     // Prefer the backend's `error` field; fall back to `message` for
     // third-party / proxy responses.
-    if (data?.error) return data.error
-    if (data?.message) return data.message
+    if (data?.error) return publicApiMessage(data.error)
+    if (data?.message) return publicApiMessage(data.message)
 
     if (status === 401) return i18next.t('apiErrors.unauthorized')
     if (status === 403) return i18next.t('apiErrors.forbidden')
@@ -166,6 +235,6 @@ export function parseApiError(err: unknown): string {
     if (err.code === 'ECONNABORTED') return i18next.t('apiErrors.timeout')
     if (!err.response) return i18next.t('apiErrors.networkError')
   }
-  if (err instanceof Error) return err.message
+  if (err instanceof Error) return publicApiMessage(err.message)
   return i18next.t('apiErrors.operationFailed')
 }

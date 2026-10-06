@@ -14,6 +14,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
+	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/middleware"
 
@@ -70,28 +71,44 @@ type knowledgeSearchArgs struct {
 	// Question 是已废弃的旧参数名，仅作兼容回退：缓存了旧 tools/list
 	// schema 的已部署 runtime 容器升级 hub 后仍会发 question，直到
 	// 重新部署/重启才会拿到只广播 query 的新 schema。
-	Question               string   `json:"question"`
-	DatasetIDs             []string `json:"dataset_ids"`
-	TopK                   *int     `json:"top_k"`
-	SimilarityThreshold    *float64 `json:"similarity_threshold"`
-	VectorSimilarityWeight *float64 `json:"vector_similarity_weight"`
-	Highlight              *bool    `json:"highlight"`
+	Question                string         `json:"question"`
+	DatasetIDs              *[]string      `json:"dataset_ids"`
+	DocIDs                  *[]string      `json:"doc_ids"`
+	MetadataFilter          map[string]any `json:"meta_data_filter"`
+	SearchMode              string         `json:"search_mode"`
+	HybridDenseWeight       *float64       `json:"hybrid_dense_weight"`
+	RerankID                string         `json:"rerank_id"`
+	ReferenceMetadataFields *[]string      `json:"reference_metadata_fields"`
+	Page                    *int           `json:"page"`
+	PageSize                *int           `json:"page_size"`
+	TopK                    *int           `json:"top_k"`
+	SimilarityThreshold     *float64       `json:"similarity_threshold"`
+	VectorSimilarityWeight  *float64       `json:"vector_similarity_weight"`
+	Highlight               *bool          `json:"highlight"`
 }
 
 const (
-	mcpDefaultPageSize = 20
-	mcpMaxPageSize     = 50
+	mcpDefaultPageSize   = 20
+	mcpMaxPageSize       = 50
+	mcpSearchMaxDatasets = 8
+	mcpSearchMaxPageSize = 20
+	mcpSearchMaxPage     = 25
+	mcpSearchMaxTopK     = 512
 )
 
 type listDocumentsArgs struct {
 	DatasetID string `json:"dataset_id"`
 	Page      *int   `json:"page"`
 	PageSize  *int   `json:"page_size"`
+	Keywords  string `json:"keywords"`
+	Run       string `json:"run"`
 }
 
 type listChunksArgs struct {
 	DatasetID  string `json:"dataset_id"`
 	DocumentID string `json:"document_id"`
+	ChunkID    string `json:"chunk_id"`
+	Keywords   string `json:"keywords"`
 	Page       *int   `json:"page"`
 	PageSize   *int   `json:"page_size"`
 }
@@ -115,6 +132,7 @@ func normalizePaging(page, pageSize *int) (int, int) {
 type KnowledgeMcpHandler struct {
 	knowledgeService KnowledgeMcpService
 	agentService     AgentMcpService
+	modelsSource     provider.MultiRAGMyLLMsSource
 
 	// probeMu 保护 probeCooldown（canonical dataset 集签名 → 上次探测
 	// 时刻）与 probeSem 的惰性初始化。
@@ -126,10 +144,15 @@ type KnowledgeMcpHandler struct {
 }
 
 // NewKnowledgeMcpHandler creates a new KnowledgeMcpHandler.
-func NewKnowledgeMcpHandler(knowledgeService KnowledgeMcpService, agentService AgentMcpService) *KnowledgeMcpHandler {
+func NewKnowledgeMcpHandler(knowledgeService KnowledgeMcpService, agentService AgentMcpService, modelsSource ...provider.MultiRAGMyLLMsSource) *KnowledgeMcpHandler {
+	var source provider.MultiRAGMyLLMsSource
+	if len(modelsSource) > 0 {
+		source = modelsSource[0]
+	}
 	return &KnowledgeMcpHandler{
 		knowledgeService: knowledgeService,
 		agentService:     agentService,
+		modelsSource:     source,
 		probeCooldown:    make(map[string]time.Time),
 		probeSem:         make(chan struct{}, mcpDatasetProbeMaxConcurrent),
 	}
@@ -211,37 +234,71 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 							"dataset_ids": map[string]interface{}{
 								"type":        "array",
 								"items":       map[string]interface{}{"type": "string"},
-								"description": "Optional. Restrict retrieval to specific knowledge bases. Valid dataset IDs can be found in the <datasets> block of the system prompt. If omitted, all knowledge bases bound to this agent are used automatically.",
+								"maxItems":    mcpSearchMaxDatasets,
+								"description": "Optional. Search the agent's bound knowledge bases, each independently. Omit to search all bound bases when there are at most 8; otherwise select up to 8 IDs from knowledge_datasets.",
+							},
+							"doc_ids": map[string]interface{}{
+								"type": "array", "items": map[string]interface{}{"type": "string"},
+								"description": "Optional document IDs. An explicit empty array returns no results; it never broadens to the whole knowledge base.",
+							},
+							"meta_data_filter": map[string]interface{}{
+								"type": "object", "description": "Optional manual metadata filter. Use method=manual, logic=and|or, manual=[{key,op,value}]. Supported ops: in, contains, start with, end with, empty. The in operator accepts text or an array of text, finite numbers and booleans on MultiRAG 4ce5dc0 or later. Negative exclusions remain unavailable.",
+							},
+							"search_mode": map[string]interface{}{
+								"type": "string", "enum": []string{"dense", "sparse", "hybrid", "fusion"}, "default": "dense",
+								"description": "Retrieval strategy. Hybrid combines keyword and vector candidates; fusion uses MultiRAG's verified default weights.",
+							},
+							"hybrid_dense_weight": map[string]interface{}{
+								"type": "number", "minimum": 0, "maximum": 1,
+								"description": "Only for search_mode=hybrid. Dense weight; sparse weight is 1 minus this value. Default is 0.7.",
+							},
+							"rerank_id": map[string]interface{}{
+								"type": "string", "description": "Optional enabled rerank model ID returned by knowledge_rerank_models. Omit when no enabled model is available.",
+							},
+							"reference_metadata_fields": map[string]interface{}{
+								"type": "array", "items": map[string]interface{}{"type": "string"}, "maxItems": 10,
+								"description": "Optional document metadata fields to include with each source. Only fields on documents in the requested knowledge bases can be returned.",
+							},
+							"page": map[string]interface{}{
+								"type": "integer", "default": 1, "minimum": 1, "maximum": mcpSearchMaxPage,
+							},
+							"page_size": map[string]interface{}{
+								"type": "integer", "default": 8, "minimum": 1, "maximum": mcpSearchMaxPageSize,
 							},
 							"top_k": map[string]interface{}{
 								"type":        "integer",
-								"description": "Maximum number of relevant text snippets to return. Default is 8. Adjust only when you need to control the result count.",
-								"default":     8,
+								"description": "Candidate pool per knowledge base, not returned snippet count. Must cover page × page_size. Default is 64.",
+								"default":     64,
 								"minimum":     1,
-								"maximum":     100,
+								"maximum":     mcpSearchMaxTopK,
 							},
 							"similarity_threshold": map[string]interface{}{
 								"type":        "number",
-								"description": "Minimum similarity threshold; results below this value are filtered. Default is 0.2. A higher threshold yields stricter results.",
+								"description": "Minimum similarity threshold; default 0.2. MultiRAG can bypass the final threshold for an explicit document or metadata scope.",
 								"default":     0.2,
 								"minimum":     0,
 								"maximum":     1,
 							},
 							"vector_similarity_weight": map[string]interface{}{
 								"type":        "number",
-								"description": "Weight of vector similarity in the hybrid ranking (0-1). Default is 0.3; the remaining weight is allocated to keyword matching.",
+								"description": "Only used with an external rerank model. Default 0.3. For hybrid retrieval weights use hybrid_dense_weight.",
 								"default":     0.3,
 								"minimum":     0,
 								"maximum":     1,
 							},
 							"highlight": map[string]interface{}{
 								"type":        "boolean",
-								"description": "Whether to highlight keywords in the results. Default is false.",
+								"description": "Include the returned match highlight beside each source when available. Default is false.",
 								"default":     false,
 							},
 						},
 						"required": []string{"query"},
 					},
+				},
+				{
+					"name":        "knowledge_rerank_models",
+					"description": "List enabled MultiRAG rerank model IDs that knowledge_search accepts.",
+					"inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 				},
 				{
 					"name":        "knowledge_datasets",
@@ -273,6 +330,8 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"default":     20,
 								"minimum":     1,
 							},
+							"keywords": map[string]interface{}{"type": "string", "description": "Optional document name keywords."},
+							"run":      map[string]interface{}{"type": "string", "enum": []string{"UNSTART", "RUNNING", "CANCEL", "DONE", "FAIL"}, "description": "Optional parsing status filter."},
 						},
 						"required": []string{"dataset_id"},
 					},
@@ -291,6 +350,8 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"type":        "string",
 								"description": "Target document ID, from knowledge_documents.",
 							},
+							"chunk_id": map[string]interface{}{"type": "string", "description": "Optional exact chunk ID from knowledge_search. Only an available chunk in an enabled document is returned."},
+							"keywords": map[string]interface{}{"type": "string", "description": "Optional text search within this document; cannot be combined with chunk_id."},
 							"page": map[string]interface{}{
 								"type":        "integer",
 								"description": "Page number, starting from 1.",
@@ -321,6 +382,8 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 	switch p.Name {
 	case "knowledge_search":
 		return h.handleKnowledgeSearch(ctx, c, id, p.Arguments)
+	case "knowledge_rerank_models":
+		return h.handleKnowledgeRerankModels(ctx, c, id)
 	case "knowledge_datasets":
 		return h.handleKnowledgeDatasets(ctx, c, id)
 	case "knowledge_documents":
@@ -333,84 +396,7 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 }
 
 func (h *KnowledgeMcpHandler) handleKnowledgeSearch(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
-	var args knowledgeSearchArgs
-	if err := json.Unmarshal(params, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
-	}
-	args.Query = strings.TrimSpace(args.Query)
-	if args.Query == "" {
-		args.Query = strings.TrimSpace(args.Question)
-	}
-	if args.Query == "" {
-		return jsonRPCResponse{}, fmt.Errorf("query 不能为空")
-	}
-
-	// Apply defaults that match the inputSchema advertised in tools/list.
-	if args.TopK == nil {
-		args.TopK = new(int)
-		*args.TopK = 8
-	}
-	if args.SimilarityThreshold == nil {
-		args.SimilarityThreshold = new(float64)
-		*args.SimilarityThreshold = 0.2
-	}
-	if args.VectorSimilarityWeight == nil {
-		args.VectorSimilarityWeight = new(float64)
-		*args.VectorSimilarityWeight = 0.3
-	}
-	if args.Highlight == nil {
-		args.Highlight = new(bool)
-		*args.Highlight = false
-	}
-
-	allowedDatasetIDs, deny, err := h.resolveAgentContext(c, id)
-	if err != nil {
-		return jsonRPCResponse{}, err
-	}
-	if deny != nil {
-		return *deny, nil
-	}
-	if len(allowedDatasetIDs) == 0 {
-		return mcpCodedErrorResult(id, mcpErrNoDatasetBound, "当前 Agent 未绑定任何知识库数据集"), nil
-	}
-
-	datasetIDs := args.DatasetIDs
-	if len(datasetIDs) == 0 {
-		datasetIDs = allowedDatasetIDs
-	}
-	if !isStringSubset(datasetIDs, allowedDatasetIDs) {
-		return mcpCodedErrorResult(id, mcpErrDatasetNotAuthorized, knowledgeCapabilityDeniedMessage), nil
-	}
-
-	req := knowledge.RetrievalRequest{
-		// 下游 multirag /api/v1/retrieval 的契约 key 仍是 question，仅 MCP 入参改名 query。
-		"question":                 args.Query,
-		"dataset_ids":              datasetIDs,
-		"top_k":                    *args.TopK,
-		"similarity_threshold":     *args.SimilarityThreshold,
-		"vector_similarity_weight": *args.VectorSimilarityWeight,
-		"highlight":                *args.Highlight,
-	}
-
-	result, err := h.knowledgeService.Retrieval(ctx, req)
-	if err != nil {
-		// 上游细节（multirag 响应体/内网拓扑）只进服务端日志，客户端拿中性文案。
-		log.Printf("knowledge-mcp: retrieval failed (datasets=%v): %v", datasetIDs, err)
-		h.probeDatasetsForDiagnosis(ctx, datasetIDs)
-		return mcpCodedErrorResult(id, mcpErrRetrievalFailed, "知识库检索失败，请稍后重试"), nil
-	}
-
-	text := formatRetrievalResult(result)
-	return jsonRPCResponse{
-		JSONRPC: "2.0",
-		ID:      id,
-		Result: map[string]interface{}{
-			"content": []map[string]interface{}{
-				{"type": "text", "text": text},
-			},
-			"isError": false,
-		},
-	}, nil
+	return h.searchKnowledge(ctx, c, id, params)
 }
 
 func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gin.Context, id interface{}) (jsonRPCResponse, error) {
@@ -430,11 +416,13 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDatasets(ctx context.Context, c *gi
 				log.Printf("knowledge-mcp: get dataset %s metadata failed: %v", dsID, err)
 			}
 			datasets = append(datasets, map[string]any{"id": dsID})
+			datasets[len(datasets)-1]["metadata_available"] = false
 			continue
 		}
 		// NormalizeDataset 出口的计数键为 canonical doc_num/chunk_num，需映射回对外键名。
 		m := map[string]any(*ds)
 		item := pickFields(m, "id", "name", "description")
+		item["metadata_available"] = true
 		if v, ok := m["doc_num"]; ok {
 			item["document_count"] = v
 		}
@@ -459,15 +447,33 @@ func (h *KnowledgeMcpHandler) handleKnowledgeDocuments(ctx context.Context, c *g
 		return *deny, nil
 	}
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
-	result, err := h.knowledgeService.ListDocuments(ctx, datasetID, knowledge.DocumentListRequest{Page: page, PageSize: pageSize})
+	args.Keywords = strings.TrimSpace(args.Keywords)
+	if len([]rune(args.Keywords)) > 200 {
+		return mcpCodedErrorResult(id, mcpErrInvalidSearchArguments, "keywords 不能超过 200 个字符"), nil
+	}
+	args.Run = strings.ToUpper(strings.TrimSpace(args.Run))
+	if args.Run != "" && !map[string]bool{"UNSTART": true, "RUNNING": true, "CANCEL": true, "DONE": true, "FAIL": true}[args.Run] {
+		return mcpCodedErrorResult(id, mcpErrInvalidSearchArguments, "run 必须是有效的解析状态"), nil
+	}
+	listReq := knowledge.DocumentListRequest{Page: page, PageSize: pageSize, Keywords: args.Keywords}
+	if args.Run != "" {
+		listReq.Run = []string{args.Run}
+	}
+	result, err := h.knowledgeService.ListDocuments(ctx, datasetID, listReq)
 	if err != nil {
 		log.Printf("knowledge-mcp: list documents failed (dataset=%s page=%d page_size=%d): %v", datasetID, page, pageSize, err)
+		return mcpErrorResult(id, "知识库文档列表获取失败，请稍后重试"), nil
+	}
+	if result == nil {
 		return mcpErrorResult(id, "知识库文档列表获取失败，请稍后重试"), nil
 	}
 	docs := make([]map[string]any, 0, len(result.Documents))
 	for _, d := range result.Documents {
 		// NormalizeDocument 出口的计数键为 canonical chunk_num，映射回对外 chunk_count。
 		item := pickFields(map[string]any(d), "id", "name", "progress", "run", "create_time")
+		if status, ok := map[string]any(d)["status"]; ok {
+			item["enabled"] = fmt.Sprint(status) == "1"
+		}
 		if v, ok := map[string]any(d)["chunk_num"]; ok {
 			item["chunk_count"] = v
 		}
@@ -495,31 +501,70 @@ func (h *KnowledgeMcpHandler) handleKnowledgeChunks(ctx context.Context, c *gin.
 		return jsonRPCResponse{}, fmt.Errorf("document_id 不能为空")
 	}
 	page, pageSize := normalizePaging(args.Page, args.PageSize)
-	result, err := h.knowledgeService.ListChunks(ctx, datasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize})
+	args.ChunkID = strings.TrimSpace(args.ChunkID)
+	args.Keywords = strings.TrimSpace(args.Keywords)
+	if args.ChunkID != "" && args.Keywords != "" {
+		return mcpCodedErrorResult(id, mcpErrInvalidSearchArguments, "chunk_id 与 keywords 不能同时指定"), nil
+	}
+	if len([]rune(args.Keywords)) > 200 {
+		return mcpCodedErrorResult(id, mcpErrInvalidSearchArguments, "keywords 不能超过 200 个字符"), nil
+	}
+	available := true
+	result, err := h.knowledgeService.ListChunks(ctx, datasetID, args.DocumentID, knowledge.ChunkListRequest{Page: page, PageSize: pageSize, ID: args.ChunkID, Keywords: args.Keywords, Available: &available})
 	if err != nil {
 		log.Printf("knowledge-mcp: list chunks failed (dataset=%s document=%s page=%d page_size=%d): %v", datasetID, args.DocumentID, page, pageSize, err)
 		return mcpErrorResult(id, "知识库分块读取失败，请稍后重试"), nil
 	}
+	if result == nil || result.Document == nil {
+		return mcpCodedErrorResult(id, mcpErrContentUnavailable, "无法确认文档状态，分块内容已隐藏"), nil
+	}
+	doc := map[string]any(result.Document)
+	if docID, ok := doc["id"].(string); !ok || docID != args.DocumentID {
+		return mcpCodedErrorResult(id, mcpErrContentUnavailable, "文档身份不匹配，分块内容已隐藏"), nil
+	}
+	if docDatasetID, ok := doc["dataset_id"].(string); !ok || docDatasetID != datasetID {
+		return mcpCodedErrorResult(id, mcpErrContentUnavailable, "知识库身份不匹配，分块内容已隐藏"), nil
+	}
+	status, known := doc["status"]
+	if !known || fmt.Sprint(status) != "1" {
+		return mcpCodedErrorResult(id, mcpErrContentUnavailable, "文档未启用或状态无法确认，分块内容已隐藏"), nil
+	}
 	chunks := make([]map[string]any, 0, len(result.Chunks))
 	for _, ch := range result.Chunks {
 		m := map[string]any(ch)
-		item := map[string]any{}
-		if v, ok := m["id"]; ok {
-			item["chunk_id"] = v
+		chunkID, _ := m["id"].(string)
+		chunkDocID, _ := m["document_id"].(string)
+		chunkDatasetRaw, hasChunkDataset := m["dataset_id"]
+		chunkDatasetID, datasetIDIsString := chunkDatasetRaw.(string)
+		chunkDatasetConflicts := hasChunkDataset && chunkDatasetRaw != nil && (!datasetIDIsString || chunkDatasetID != datasetID)
+		chunkAvailable, ok := m["available"].(bool)
+		// Older indexed chunks may lack kb_id, so MultiRAG returns a null dataset_id.
+		// The parent document was already verified against the requested dataset,
+		// and the chunk must still belong to that document. Reject any explicit
+		// conflicting dataset_id rather than hiding valid legacy chunks.
+		if chunkID == "" || chunkDocID != args.DocumentID || chunkDatasetConflicts || !ok || !chunkAvailable || (args.ChunkID != "" && chunkID != args.ChunkID) {
+			return mcpCodedErrorResult(id, mcpErrContentUnavailable, "分块身份或启用状态无法确认，内容已隐藏"), nil
 		}
+		item := map[string]any{}
+		item["chunk_id"] = chunkID
 		if v, ok := m["content"]; ok {
 			item["content"] = v
+		}
+		if positions, ok := m["positions"]; ok {
+			item["positions"] = positions
+		}
+		if imageID, ok := m["image_id"].(string); ok && imageID != "" {
+			item["image_id"] = imageID
 		}
 		chunks = append(chunks, item)
 	}
 	docName := ""
-	if result.Document != nil {
-		if v, ok := map[string]any(result.Document)["name"].(string); ok {
-			docName = v
-		}
+	if v, ok := doc["name"].(string); ok {
+		docName = v
 	}
 	return mcpJSONResult(id, map[string]any{
 		"total": result.Total, "page": page, "page_size": pageSize,
+		"dataset_id": datasetID, "document_id": args.DocumentID,
 		"document_name": docName, "chunks": chunks,
 	})
 }
@@ -642,9 +687,13 @@ func mcpJSONResult(id interface{}, payload interface{}) (jsonRPCResponse, error)
 // 文案保持中性。码是稳定契约，只增不改。capability 拒绝与 dataset 越权
 // 共用 dataset_not_authorized，不区分失败步骤——不给探测 oracle。
 const (
-	mcpErrDatasetNotAuthorized = "dataset_not_authorized"
-	mcpErrNoDatasetBound       = "no_dataset_bound"
-	mcpErrRetrievalFailed      = "retrieval_failed"
+	mcpErrDatasetNotAuthorized   = "dataset_not_authorized"
+	mcpErrNoDatasetBound         = "no_dataset_bound"
+	mcpErrRetrievalFailed        = "retrieval_failed"
+	mcpErrInvalidSearchArguments = "invalid_search_arguments"
+	mcpErrRetrievalScopeMismatch = "retrieval_scope_mismatch"
+	mcpErrRerankUnavailable      = "rerank_unavailable"
+	mcpErrContentUnavailable     = "content_unavailable"
 )
 
 // mcpCodedErrorResult 构造带稳定错误码前缀的 isError 工具结果，
@@ -792,7 +841,7 @@ func formatRetrievalResult(result *knowledge.RetrievalResult) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("根据知识库检索结果，共找到 %d 条相关分块：\n\n", len(chunks)))
+	sb.WriteString(fmt.Sprintf("本页返回 %d 条相关分块：\n\n", len(chunks)))
 	for _, item := range chunks {
 		chunk, ok := item.(map[string]interface{})
 		if !ok {
@@ -803,14 +852,68 @@ func formatRetrievalResult(result *knowledge.RetrievalResult) string {
 			docName = "未知文档"
 		}
 		docID, _ := chunk["document_id"].(string)
+		if docID == "" {
+			docID, _ = chunk["doc_id"].(string)
+		}
+		kbID, _ := chunk["kb_id"].(string)
+		if kbID == "" {
+			kbID, _ = chunk["dataset_id"].(string)
+		}
+		chunkID, _ := chunk["id"].(string)
+		if chunkID == "" {
+			chunkID, _ = chunk["chunk_id"].(string)
+		}
 		similarity, _ := chunk["similarity"].(float64)
 		content, _ := chunk["content"].(string)
 		source := fmt.Sprintf("[来源：%s", docName)
+		if kbID != "" {
+			source += fmt.Sprintf(" | 知识库ID：%s", kbID)
+		}
 		if docID != "" {
 			source += fmt.Sprintf(" | 文档ID：%s", docID)
 		}
+		if chunkID != "" {
+			source += fmt.Sprintf(" | 分块ID：%s", chunkID)
+		}
 		source += fmt.Sprintf(" | 相似度：%.3f]", similarity)
-		sb.WriteString(fmt.Sprintf("%s\n%s\n\n", source, content))
+		sb.WriteString(source)
+		sb.WriteString("\n")
+		sb.WriteString(mcpSnippet(content))
+		sb.WriteString("\n")
+		if positions, ok := chunk["positions"].([]any); ok && len(positions) > 0 {
+			if raw, err := json.Marshal(positions); err == nil {
+				sb.WriteString("位置：")
+				sb.Write(raw)
+				sb.WriteString("\n")
+			}
+		}
+		if imageID, ok := chunk["image_id"].(string); ok && imageID != "" {
+			sb.WriteString("图片ID：")
+			sb.WriteString(imageID)
+			sb.WriteString("\n")
+		}
+		if metadata, ok := chunk["document_metadata"].(map[string]any); ok && len(metadata) > 0 {
+			if raw, err := json.Marshal(metadata); err == nil {
+				sb.WriteString("文档元数据：")
+				sb.Write(raw)
+				sb.WriteString("\n")
+			}
+		}
+		if highlight, ok := chunk["highlight"].(string); ok && highlight != "" {
+			sb.WriteString("匹配片段：")
+			sb.WriteString(mcpSnippet(highlight))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func mcpSnippet(value string) string {
+	const limit = 2000
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…（已截断；可用 knowledge_chunks 按分块 ID 核对原文）"
 }

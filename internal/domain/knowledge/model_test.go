@@ -87,3 +87,12 @@ func TestNormalizeRetrievalChunk_ExistingDocumentNameWins(t *testing.T) {
 		t.Fatalf("unconsumed alias must pass through: %#v", got)
 	}
 }
+
+func TestNormalizeDocumentRunStates(t *testing.T) {
+	for raw, want := range map[string]string{"UNSTART": "0", "RUNNING": "1", "CANCEL": "2", "DONE": "3", "FAIL": "4", "1": "1", "FUTURE": "FUTURE"} {
+		got := NormalizeDocument(map[string]any{"run": raw})
+		if got["run"] != want {
+			t.Errorf("%s: got %v want %s", raw, got["run"], want)
+		}
+	}
+}

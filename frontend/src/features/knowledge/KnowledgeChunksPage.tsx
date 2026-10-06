@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from 'react-i18next'
-// 组件外纯函数：直调 i18next
-import i18next from '@/i18n'
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+import { useTranslation } from "react-i18next";
+// 组件外纯函数：直调 i18next
+import i18next from "@/i18n";
+import {
+  Alert,
   Badge,
   Button,
   Checkbox,
@@ -37,13 +44,14 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { parseApiError } from "@/api/client";
 import { copyOrManual } from "@/utils/clipboard";
 import {
   knowledgeApi,
   type ChunkFormInput,
   type KnowledgeChunk,
+  type KnowledgeDocument,
 } from "@/api/knowledge";
 import {
   useChunks,
@@ -54,16 +62,76 @@ import {
 } from "@/queries/useKnowledge";
 import { useCanWrite } from "@/hooks/useCanWrite";
 import PrimaryButton from "@/components/PrimaryButton";
+import KnowledgeOriginalPreview, {
+  chunkPositions,
+} from "./KnowledgeOriginalPreview";
+import { useChunkReviewText } from "./chunkReviewText";
 import { tokens as t } from "@/styles/tokens";
 
 const useStyles = createStyles(({ css }) => ({
+  workspace: css`
+    container-type: inline-size;
+  `,
   shell: css`
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 16px;
-
-    @media (max-width: 1100px) {
-      grid-template-columns: 1fr;
+    grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+    gap: 20px;
+    @container (max-width: 1000px) {
+      grid-template-columns: minmax(0, 1fr);
+      &[data-view="chunks"] > aside {
+        display: none;
+      }
+      &[data-view="original"] > main {
+        display: none;
+      }
+    }
+  `,
+  viewSwitch: css`
+    display: none;
+    margin-bottom: 12px;
+    @container (max-width: 1000px) {
+      display: block;
+    }
+  `,
+  selectedCard: css`
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  `,
+  stackedAlert: css`
+    && {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .ant-alert-content {
+      min-width: 0;
+    }
+    .ant-alert-actions {
+      margin-inline-start: 0;
+      margin-top: 8px;
+    }
+  `,
+  editorWorkspace: css`
+    container-type: inline-size;
+  `,
+  editorSwitch: css`
+    display: none;
+    margin-bottom: 12px;
+    @container (max-width: 800px) {
+      display: block;
+    }
+  `,
+  editorShell: css`
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    @container (max-width: 800px) {
+      grid-template-columns: minmax(0, 1fr);
+      &[data-view="edit"] > section {
+        display: none;
+      }
+      &[data-view="original"] > form {
+        display: none;
+      }
     }
   `,
   main: css`
@@ -137,6 +205,9 @@ const useStyles = createStyles(({ css }) => ({
   card: css`
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
+    &[data-readonly="true"] {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
     gap: 12px;
     padding: 14px;
     border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
@@ -226,6 +297,7 @@ const useStyles = createStyles(({ css }) => ({
     @media (max-width: 760px) {
       grid-column: 1 / -1;
       flex-direction: row;
+      flex-wrap: wrap;
       justify-content: flex-end;
     }
   `,
@@ -278,6 +350,21 @@ interface ImageFileReadResult {
   base64: string;
 }
 
+function handleSegmentedArrow(
+  event: KeyboardEvent<HTMLDivElement>,
+  toggle: () => void,
+) {
+  // rc-segmented focuses its root but binds arrow handling only to inputs.
+  // Handle root focus; input events retain the library's own behavior.
+  if (
+    event.target !== event.currentTarget ||
+    !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+  )
+    return;
+  event.preventDefault();
+  toggle();
+}
+
 function hasHtmlTags(value: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(value);
 }
@@ -321,7 +408,9 @@ function SafeContent({
   clipped: boolean;
 }) {
   const { styles, cx } = useStyles();
-  const html = sanitizeAllowedInlineHtml(content || i18next.t('knowledge.chunks.emptyContent'));
+  const html = sanitizeAllowedInlineHtml(
+    content || i18next.t("knowledge.chunks.emptyContent"),
+  );
   return (
     <div
       className={cx(styles.content, clipped ? styles.clipped : undefined)}
@@ -331,11 +420,12 @@ function SafeContent({
 }
 
 function formatPositions(chunk: KnowledgeChunk): string {
-  const positions = chunk.positions;
-  if (positions.length === 0) return "-";
-  const first = positions[0];
-  if (Array.isArray(first)) return i18next.t('knowledge.chunks.position', { list: first.slice(0, 3).join(", ") });
-  return i18next.t('knowledge.chunks.position', { list: positions.slice(0, 3).map(String).join(", ") });
+  const pages = [
+    ...new Set(chunkPositions(chunk).map((position) => position.page)),
+  ];
+  return pages.length
+    ? `${i18next.t("knowledge.chunks.review.page")} ${pages.join(", ")}`
+    : "-";
 }
 
 function tagFeasText(chunk: KnowledgeChunk | null): string {
@@ -355,23 +445,31 @@ function fileToBase64(file: File): Promise<ImageFileReadResult> {
         markerIndex >= 0 ? dataUrl.slice(markerIndex + marker.length) : dataUrl;
       resolve({ dataUrl, base64 });
     };
-    reader.onerror = () => { reject(reader.error instanceof Error ? reader.error : new Error(String(reader.error))); };
+    reader.onerror = () => {
+      reject(
+        reader.error instanceof Error
+          ? reader.error
+          : new Error(String(reader.error)),
+      );
+    };
     reader.readAsDataURL(file);
   });
 }
 
-function ChunkImage({
+export function ChunkImage({
   datasetId,
   imageId,
   width = 92,
   height = 70,
   className,
+  refreshKey = 0,
 }: {
   datasetId: string;
   imageId: string;
   width?: number;
   height?: number;
   className?: string;
+  refreshKey?: number;
 }) {
   const { styles, cx } = useStyles();
   const [retryKey, setRetryKey] = useState(0);
@@ -388,9 +486,9 @@ function ChunkImage({
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset fetch-lifecycle status before kicking off a new image fetch; coupled to the request below
     setStatus("loading");
-     
+
     setErrorMessage("");
-     
+
     setImageSrc("");
 
     knowledgeApi.images
@@ -398,7 +496,7 @@ function ChunkImage({
       .then((blob) => {
         if (!active) return;
         if (blob.type && !blob.type.startsWith("image/")) {
-          throw new Error(i18next.t('knowledge.chunks.imgProxyError'));
+          throw new Error(i18next.t("knowledge.chunks.imgProxyError"));
         }
         objectURL = URL.createObjectURL(blob);
         setImageSrc(objectURL);
@@ -414,7 +512,7 @@ function ChunkImage({
       controller.abort();
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [datasetId, imageId, retryKey]);
+  }, [datasetId, imageId, retryKey, refreshKey]);
 
   const retry = () => {
     setStatus("loading");
@@ -424,9 +522,9 @@ function ChunkImage({
   const copyImageId = async () => {
     const result = await copyOrManual(imageId);
     if (result === "copied") {
-      message.success(i18next.t('knowledge.chunks.copiedImageId'));
+      message.success(i18next.t("knowledge.chunks.copiedImageId"));
     } else if (result === "failed") {
-      message.error(i18next.t('knowledge.chunks.copyFail'));
+      message.error(i18next.t("knowledge.chunks.copyFail"));
     }
   };
 
@@ -435,7 +533,7 @@ function ChunkImage({
       {status === "failed" ? (
         <div className={styles.imageFallback}>
           <ImageSquareIcon size={18} />
-          <span>{i18next.t('knowledge.chunks.imgLoadFail')}</span>
+          <span>{i18next.t("knowledge.chunks.imgLoadFail")}</span>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             ID {imageId.slice(0, 8)}
           </Typography.Text>
@@ -446,10 +544,10 @@ function ChunkImage({
           ) : null}
           <div className={styles.imageFallbackActions}>
             <Button size="small" type="link" onClick={retry}>
-              {i18next.t('knowledge.chunks.retry')}
+              {i18next.t("knowledge.chunks.retry")}
             </Button>
             <Button size="small" type="link" onClick={() => void copyImageId()}>
-              {i18next.t('knowledge.chunks.copyId')}
+              {i18next.t("knowledge.chunks.copyId")}
             </Button>
           </div>
         </div>
@@ -473,8 +571,12 @@ function ChunkImage({
                 objectFit: "cover",
                 opacity: status === "loaded" ? 1 : 0,
               }}
-              onLoad={() => { setStatus("loaded"); }}
-              onError={() => { setStatus("failed"); }}
+              onLoad={() => {
+                setStatus("loaded");
+              }}
+              onError={() => {
+                setStatus("failed");
+              }}
             />
           ) : null}
         </>
@@ -489,6 +591,8 @@ interface ChunkEditorProps {
   datasetId: string;
   documentId: string;
   onClose: () => void;
+  document?: KnowledgeDocument | null;
+  onSaved: (chunk: KnowledgeChunk) => void;
 }
 
 function ChunkEditor({
@@ -497,25 +601,59 @@ function ChunkEditor({
   datasetId,
   documentId,
   onClose,
+  document,
+  onSaved,
 }: ChunkEditorProps) {
-  const { t } = useTranslation()
+  const { t } = useTranslation();
+  const reviewText = useChunkReviewText();
   const { styles } = useStyles();
   const [form] = Form.useForm<ChunkFormValues>();
   const [imageBase64, setImageBase64] = useState("");
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [imageReading, setImageReading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const savingRef = useRef(false);
+  const draftKey = useRef<string | null>(null);
+  const [pendingReadback, setPendingReadback] = useState<{
+    chunkId: string;
+    input: ChunkFormInput;
+  } | null>(null);
+  const [saveError, setSaveError] = useState("");
+  const readbackController = useRef<AbortController | null>(null);
+  const imageReadVersion = useRef(0);
+  const sessionVersion = useRef(0);
+  const [editorView, setEditorView] = useState("edit");
   const [previewMode, setPreviewMode] = useState<"edit" | "preview">("edit");
-  const createChunk = useCreateChunk(datasetId, documentId);
-  const updateChunk = useUpdateChunk(datasetId, documentId);
-  const submitting = createChunk.isPending || updateChunk.isPending;
+  const createChunk = useCreateChunk(datasetId, documentId, { notify: false });
+  const updateChunk = useUpdateChunk(datasetId, documentId, { notify: false });
+  const submitting =
+    createChunk.isPending || updateChunk.isPending || confirming;
 
   useEffect(() => {
+    sessionVersion.current += 1;
+    readbackController.current?.abort();
+    imageReadVersion.current += 1;
     if (!open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset form-local state on modal open; values are coupled to the antd form.setFieldsValue call below
+    const nextDraftKey = editing?.id ?? "__new";
+    if (draftKey.current === nextDraftKey) {
+      setImageReading(false);
+      return () => {
+        sessionVersion.current += 1;
+        readbackController.current?.abort();
+        imageReadVersion.current += 1;
+      };
+    }
+    draftKey.current = nextDraftKey;
+
     setImageBase64("");
-     
+    setImageReading(false);
+    setSaveError("");
+    setPendingReadback(null);
+
     setImagePreviewUrl("");
-     
+
     setPreviewMode("edit");
+    setEditorView("edit");
     form.setFieldsValue({
       content: editing?.content ?? "",
       important_keywords: editing?.important_keywords ?? [],
@@ -523,13 +661,112 @@ function ChunkEditor({
       tag_kwd: editing?.tag_kwd ?? [],
       tag_feas_text: tagFeasText(editing),
     });
+    return () => {
+      sessionVersion.current += 1;
+      readbackController.current?.abort();
+      imageReadVersion.current += 1;
+    };
   }, [open, editing, form]);
 
+  const confirmSaved = async (
+    saved: KnowledgeChunk,
+    input: ChunkFormInput,
+    chunkId?: string,
+  ) => {
+    const sameList = (actual: string[], expected?: string[]) =>
+      JSON.stringify(actual) === JSON.stringify(expected ?? []);
+    const canonical = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (value && typeof value === "object")
+        return Object.fromEntries(
+          Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, item]) => [key, canonical(item)]),
+        );
+      return value;
+    };
+    if (
+      !saved.id ||
+      saved.document_id !== documentId ||
+      (chunkId && saved.id !== chunkId) ||
+      (input.content !== undefined && saved.content !== input.content) ||
+      (input.important_keywords !== undefined &&
+        !sameList(saved.important_keywords, input.important_keywords)) ||
+      (input.questions !== undefined &&
+        !sameList(
+          saved.questions,
+          input.questions.map((q) => q.trim()).filter(Boolean),
+        )) ||
+      (input.tag_kwd !== undefined &&
+        !sameList(saved.tag_kwd, input.tag_kwd)) ||
+      (input.image_base64 && !saved.image_id) ||
+      (input.tag_feas &&
+        JSON.stringify(canonical(saved.tag_feas)) !==
+          JSON.stringify(canonical(input.tag_feas)))
+    )
+      return false;
+    if (input.image_base64 && saved.image_id) {
+      const controller = new AbortController();
+      readbackController.current = controller;
+      const blob = await knowledgeApi.images.fetch(
+        datasetId,
+        saved.image_id,
+        controller.signal,
+      );
+      const image = await fileToBase64(
+        new File([blob], "readback-image", { type: blob.type }),
+      );
+      if (image.base64 !== input.image_base64) return false;
+    }
+    return true;
+  };
+  const recheck = async () => {
+    if (!pendingReadback || savingRef.current) return;
+    savingRef.current = true;
+    setConfirming(true);
+    const requestSession = sessionVersion.current;
+    try {
+      const result = await knowledgeApi.chunks.list(datasetId, documentId, {
+        id: pendingReadback.chunkId,
+        page_size: 1,
+      });
+      const saved = result.chunks.find(
+        (chunk) => chunk.id === pendingReadback.chunkId,
+      );
+      const confirmed = saved
+        ? await confirmSaved(
+            saved,
+            pendingReadback.input,
+            pendingReadback.chunkId,
+          )
+        : false;
+      if (requestSession !== sessionVersion.current) return;
+      if (!confirmed || !saved) {
+        setSaveError(reviewText("readbackFailed"));
+        return;
+      }
+      draftKey.current = null;
+      onSaved(saved);
+      message.success(reviewText("saved"));
+      onClose();
+    } catch (error) {
+      if (requestSession === sessionVersion.current)
+        setSaveError(
+          `${reviewText("readbackFailed")} · ${parseApiError(error)}`,
+        );
+    } finally {
+      savingRef.current = false;
+      if (requestSession === sessionVersion.current) setConfirming(false);
+    }
+  };
   const submit = async () => {
+    if (savingRef.current || imageReading || pendingReadback) return;
+    savingRef.current = true;
     let values: ChunkFormValues;
     try {
       values = await form.validateFields();
     } catch {
+      savingRef.current = false;
       return;
     }
 
@@ -539,157 +776,404 @@ function ChunkEditor({
       try {
         const parsed = JSON.parse(tagFeasTextValue) as unknown;
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          message.error(i18next.t('knowledge.chunks.tagNotObject'));
+          message.error(i18next.t("knowledge.chunks.tagNotObject"));
+          savingRef.current = false;
           return;
         }
         tagFeas = parsed as Record<string, unknown>;
       } catch {
-        message.error(i18next.t('knowledge.chunks.tagInvalid'));
+        message.error(i18next.t("knowledge.chunks.tagInvalid"));
+        savingRef.current = false;
         return;
       }
     }
 
-    const input: ChunkFormInput = {
+    if (!tagFeas && editing && Object.keys(editing.tag_feas).length > 0)
+      tagFeas = {};
+    const fullInput: ChunkFormInput = {
       content: values.content,
       important_keywords: values.important_keywords,
       questions: values.questions,
       tag_kwd: values.tag_kwd,
       tag_feas: tagFeas,
     };
-    if (!editing && imageBase64) input.image_base64 = imageBase64;
-
-    if (editing) {
-      await updateChunk.mutateAsync({ chunkId: editing.id, input });
-    } else {
-      await createChunk.mutateAsync(input);
+    const sameList = (left: string[], right: string[]) =>
+      JSON.stringify(left) === JSON.stringify(right);
+    const input: ChunkFormInput = editing
+      ? {
+          ...(values.content !== editing.content && {
+            content: values.content,
+          }),
+          ...(!sameList(
+            values.important_keywords,
+            editing.important_keywords,
+          ) && { important_keywords: values.important_keywords }),
+          ...(!sameList(values.questions, editing.questions) && {
+            questions: values.questions,
+          }),
+          ...(!sameList(values.tag_kwd, editing.tag_kwd) && {
+            tag_kwd: values.tag_kwd,
+          }),
+          ...(JSON.stringify(tagFeas ?? {}) !==
+            JSON.stringify(editing.tag_feas) && {
+            tag_feas: tagFeas ?? {},
+          }),
+        }
+      : fullInput;
+    if (imageBase64) {
+      input.image_base64 = imageBase64;
+      if (editing) input.image_update_mode = "replace";
     }
-    onClose();
+    const requestSession = sessionVersion.current;
+    setSaveError("");
+    setConfirming(true);
+    try {
+      const saved = editing
+        ? await updateChunk.mutateAsync({ chunkId: editing.id, input })
+        : await createChunk.mutateAsync(input);
+      if (requestSession !== sessionVersion.current) return;
+      // Go reads persisted content after a null PATCH acknowledgement.
+      const confirmed = await confirmSaved(saved, input, editing?.id);
+      if (requestSession !== sessionVersion.current) return;
+      if (!confirmed) {
+        if (editing?.id || saved.id)
+          setPendingReadback({ chunkId: editing?.id ?? saved.id, input });
+        setSaveError(reviewText("readbackFailed"));
+        return;
+      }
+      draftKey.current = null;
+      onSaved(saved);
+      message.success(reviewText("saved"));
+      onClose();
+    } catch (error) {
+      if (requestSession === sessionVersion.current) {
+        if (editing) setPendingReadback({ chunkId: editing.id, input });
+        setSaveError(`${reviewText("saveFailed")} · ${parseApiError(error)}`);
+      }
+    } finally {
+      savingRef.current = false;
+      if (requestSession === sessionVersion.current) setConfirming(false);
+    }
   };
 
   const contentValue = Form.useWatch("content", form);
 
   return (
     <Drawer
-      title={editing ? i18next.t('knowledge.chunks.editTitle') : i18next.t('knowledge.chunks.createTitle')}
+      title={
+        editing
+          ? i18next.t("knowledge.chunks.editTitle")
+          : i18next.t("knowledge.chunks.createTitle")
+      }
       open={open}
-      onClose={onClose}
-      size={720}
+      onClose={submitting ? undefined : onClose}
+      mask={{ closable: !submitting }}
+      keyboard={!submitting}
+      size={1120}
       destroyOnHidden
       extra={
         <Space>
-          <Button onClick={onClose}>{t('common.cancel')}</Button>
+          <Button disabled={submitting} onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
           <PrimaryButton
             loading={submitting}
-            aria-label={editing ? i18next.t('knowledge.chunks.saveAria') : i18next.t('knowledge.chunks.createAria')}
+            disabled={imageReading || !!pendingReadback}
+            aria-label={
+              editing
+                ? i18next.t("knowledge.chunks.saveAria")
+                : i18next.t("knowledge.chunks.createAria")
+            }
             onClick={submit}
           >
-            {editing ? i18next.t('knowledge.chunks.save') : i18next.t('knowledge.chunks.create')}
+            {editing
+              ? i18next.t("knowledge.chunks.save")
+              : i18next.t("knowledge.chunks.create")}
           </PrimaryButton>
         </Space>
       }
     >
-      <Form form={form} layout="vertical" requiredMark={false}>
-        <Space orientation="vertical" size={14} style={{ width: "100%" }}>
+      <div className={styles.editorWorkspace}>
+        <div className={styles.editorSwitch}>
           <Segmented
-            value={previewMode}
-            onChange={(value) => { setPreviewMode(value as "edit" | "preview"); }}
+            aria-label={reviewText("compare")}
+            value={editorView}
+            onKeyDown={(event) => {
+              handleSegmentedArrow(event, () => {
+                setEditorView((current) =>
+                  current === "edit" ? "original" : "edit",
+                );
+              });
+            }}
+            onChange={setEditorView}
             options={[
-              { label: i18next.t('knowledge.chunks.modeEdit'), value: "edit" },
-              { label: i18next.t('knowledge.chunks.modePreview'), value: "preview" },
+              { label: reviewText("original"), value: "original" },
+              { label: t("knowledge.chunks.modeEdit"), value: "edit" },
             ]}
           />
-
-          {previewMode === "edit" ? (
-            <Form.Item
-              label={i18next.t('knowledge.chunks.content')}
-              name="content"
-              rules={[{ required: true, message: i18next.t('knowledge.chunks.contentRequired') }]}
-            >
-              <Input.TextArea rows={10} placeholder={i18next.t('knowledge.chunks.contentPh')} />
-            </Form.Item>
-          ) : (
-            <div className={styles.preview}>
-              <SafeContent content={contentValue} clipped={false} />
-            </div>
-          )}
-
-          <Form.Item label={i18next.t('knowledge.chunks.keywords')} name="important_keywords">
-            <Select
-              mode="tags"
-              placeholder={i18next.t('knowledge.chunks.keywordsPh')}
-              tokenSeparators={[","]}
-            />
-          </Form.Item>
-
-          <Form.Item label={i18next.t('knowledge.chunks.questions')} name="questions">
-            <Select
-              mode="tags"
-              placeholder={i18next.t('knowledge.chunks.questionsPh')}
-              tokenSeparators={[","]}
-            />
-          </Form.Item>
-
-          <Form.Item label={i18next.t('knowledge.chunks.tag')} name="tag_kwd">
-            <Select
-              mode="tags"
-              placeholder={i18next.t('knowledge.chunks.tagPh')}
-              tokenSeparators={[","]}
-            />
-          </Form.Item>
-
-          <Form.Item label={i18next.t('knowledge.chunks.tagJson')} name="tag_feas_text">
-            <Input.TextArea rows={4} placeholder={i18next.t('knowledge.chunks.tagJsonPh')} />
-          </Form.Item>
-
-          {editing?.image_id ? (
-            <Space orientation="vertical">
-              <Typography.Text strong>{i18next.t('knowledge.chunks.image')}</Typography.Text>
-              <ChunkImage
-                datasetId={datasetId}
-                imageId={editing.image_id}
-                width={180}
-                height={120}
+        </div>
+        <div className={styles.editorShell} data-view={editorView}>
+          <KnowledgeOriginalPreview
+            datasetId={datasetId}
+            documentId={documentId}
+            document={document}
+            selectedChunk={editing}
+          />
+          <Form
+            form={form}
+            layout="vertical"
+            requiredMark={false}
+            disabled={submitting}
+          >
+            {saveError ? (
+              <Alert
+                role="alert"
+                className={styles.stackedAlert}
+                type="error"
+                title={saveError}
+                style={{ marginBottom: 12 }}
+                action={
+                  pendingReadback ? (
+                    <Space wrap>
+                      <Button
+                        disabled={submitting}
+                        onClick={() => void recheck()}
+                      >
+                        {reviewText("recheck")}
+                      </Button>
+                      <Button
+                        disabled={submitting}
+                        onClick={() => {
+                          setPendingReadback(null);
+                          setSaveError("");
+                        }}
+                      >
+                        {reviewText("continueEditing")}
+                      </Button>
+                    </Space>
+                  ) : undefined
+                }
               />
-              <Typography.Text type="secondary">
-                i18next.t('knowledge.chunks.imgReadOnly')
-              </Typography.Text>
-            </Space>
-          ) : null}
-
-          {!editing ? (
-            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-              <Typography.Text strong>{i18next.t('knowledge.chunks.imgChunk')}</Typography.Text>
-              <Upload
-                accept="image/*"
-                maxCount={1}
-                showUploadList={false}
-                beforeUpload={async (file) => {
-                  const image = await fileToBase64(file);
-                  setImageBase64(image.base64);
-                  setImagePreviewUrl(image.dataUrl);
-                  return Upload.LIST_IGNORE;
+            ) : null}
+            <Typography.Paragraph type="secondary">
+              {reviewText("stalePosition")}
+            </Typography.Paragraph>
+            <Space orientation="vertical" size={14} style={{ width: "100%" }}>
+              <Segmented
+                value={previewMode}
+                onKeyDown={(event) => {
+                  handleSegmentedArrow(event, () => {
+                    setPreviewMode((current) =>
+                      current === "edit" ? "preview" : "edit",
+                    );
+                  });
                 }}
+                onChange={(value) => {
+                  setPreviewMode(value as "edit" | "preview");
+                }}
+                options={[
+                  {
+                    label: i18next.t("knowledge.chunks.modeEdit"),
+                    value: "edit",
+                  },
+                  {
+                    label: i18next.t("knowledge.chunks.modePreview"),
+                    value: "preview",
+                  },
+                ]}
+              />
+
+              {previewMode === "edit" ? (
+                <Form.Item
+                  label={i18next.t("knowledge.chunks.content")}
+                  name="content"
+                  rules={[
+                    {
+                      required: true,
+                      message: i18next.t("knowledge.chunks.contentRequired"),
+                    },
+                  ]}
+                >
+                  <Input.TextArea
+                    rows={10}
+                    placeholder={i18next.t("knowledge.chunks.contentPh")}
+                  />
+                </Form.Item>
+              ) : (
+                <div className={styles.preview}>
+                  <SafeContent content={contentValue} clipped={false} />
+                </div>
+              )}
+
+              <Form.Item
+                label={i18next.t("knowledge.chunks.keywords")}
+                name="important_keywords"
               >
-                <Button icon={<ImageSquareIcon size={16} />}>{i18next.t('knowledge.chunks.selectImage')}</Button>
-              </Upload>
-              {imagePreviewUrl ? (
-                <Image width={180} src={imagePreviewUrl} alt="preview image" />
+                <Select
+                  mode="tags"
+                  placeholder={i18next.t("knowledge.chunks.keywordsPh")}
+                  tokenSeparators={[","]}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={i18next.t("knowledge.chunks.questions")}
+                name="questions"
+              >
+                <Select
+                  mode="tags"
+                  placeholder={i18next.t("knowledge.chunks.questionsPh")}
+                  tokenSeparators={[","]}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={i18next.t("knowledge.chunks.tag")}
+                name="tag_kwd"
+              >
+                <Select
+                  mode="tags"
+                  placeholder={i18next.t("knowledge.chunks.tagPh")}
+                  tokenSeparators={[","]}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={i18next.t("knowledge.chunks.tagJson")}
+                name="tag_feas_text"
+              >
+                <Input.TextArea
+                  rows={4}
+                  placeholder={i18next.t("knowledge.chunks.tagJsonPh")}
+                />
+              </Form.Item>
+
+              {editing?.image_id ? (
+                <Space orientation="vertical">
+                  <Typography.Text strong>
+                    {i18next.t("knowledge.chunks.image")}
+                  </Typography.Text>
+                  <ChunkImage
+                    datasetId={datasetId}
+                    imageId={editing.image_id}
+                    width={180}
+                    height={120}
+                  />
+                </Space>
+              ) : null}
+
+              {open ? (
+                <Space
+                  orientation="vertical"
+                  size={8}
+                  style={{ width: "100%" }}
+                >
+                  <Typography.Text strong>
+                    {reviewText("updateImage")}
+                  </Typography.Text>
+                  <Upload
+                    accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+                    disabled={submitting || imageReading}
+                    maxCount={1}
+                    showUploadList={false}
+                    beforeUpload={async (file) => {
+                      if (
+                        ![
+                          "image/png",
+                          "image/jpeg",
+                          "image/gif",
+                          "image/webp",
+                          "image/bmp",
+                        ].includes(file.type) ||
+                        file.size === 0 ||
+                        file.size > 10 * 1024 * 1024
+                      ) {
+                        message.error(reviewText("invalidImage"));
+                        return Upload.LIST_IGNORE;
+                      }
+                      const version = ++imageReadVersion.current;
+                      setImageReading(true);
+                      try {
+                        const image = await fileToBase64(file);
+                        if (version === imageReadVersion.current) {
+                          setImageBase64(image.base64);
+                          setImagePreviewUrl(image.dataUrl);
+                        }
+                      } catch (error) {
+                        if (version === imageReadVersion.current)
+                          message.error(parseApiError(error));
+                      } finally {
+                        if (version === imageReadVersion.current)
+                          setImageReading(false);
+                      }
+                      return Upload.LIST_IGNORE;
+                    }}
+                  >
+                    <Button icon={<ImageSquareIcon size={16} />}>
+                      {reviewText("selectImage")}
+                    </Button>
+                  </Upload>
+                  {imageReading ? (
+                    <Typography.Text role="status">
+                      {reviewText("readingImage")}
+                    </Typography.Text>
+                  ) : null}
+                  <Typography.Text type="secondary">
+                    {reviewText("imageNote")}
+                  </Typography.Text>
+                  {imagePreviewUrl ? (
+                    <>
+                      <Image
+                        width={180}
+                        src={imagePreviewUrl}
+                        alt="preview image"
+                      />
+                      <Button
+                        disabled={submitting}
+                        onClick={() => {
+                          imageReadVersion.current += 1;
+                          setImageBase64("");
+                          setImagePreviewUrl("");
+                        }}
+                      >
+                        {reviewText("discardImage")}
+                      </Button>
+                    </>
+                  ) : null}
+                </Space>
               ) : null}
             </Space>
-          ) : null}
-        </Space>
-      </Form>
+          </Form>
+        </div>
+      </div>
     </Drawer>
   );
 }
 
 export default function KnowledgeChunksPage() {
-  const { t } = useTranslation()
-  const { styles } = useStyles();
+  const { id = "", documentId = "" } = useParams();
+  return <KnowledgeChunksWorkbench key={`${id}:${documentId}`} />;
+}
+function KnowledgeChunksWorkbench() {
+  const { t } = useTranslation();
+  const reviewText = useChunkReviewText();
+  const { styles, cx } = useStyles();
   const navigate = useNavigate();
   const { id = "", documentId = "" } = useParams();
 
   const [page, setPage] = useState(1);
+  const [view, setView] = useState("chunks");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetId =
+    [searchParams.get("chunkId"), searchParams.get("chunk_id")].find(
+      (value) => value,
+    ) ?? "";
+  const [locationRequest, setLocationRequest] = useState(0);
+  const [locatingTarget, setLocatingTarget] = useState(targetId);
+  const [locatingChunk, setLocatingChunk] = useState<KnowledgeChunk | null>(
+    null,
+  );
+  const [imageVersion, setImageVersion] = useState(0);
   const [keywords, setKeywords] = useState("");
   const [availableFilter, setAvailableFilter] = useState<
     "all" | "enabled" | "disabled"
@@ -710,13 +1194,37 @@ export default function KnowledgeChunksPage() {
     keywords,
     available,
   });
+  const targetQuery = useChunks(
+    id,
+    documentId,
+    targetId
+      ? { id: targetId, page_size: 1 }
+      : { page, page_size: PAGE_SIZE, keywords, available },
+  );
   const deleteChunks = useDeleteChunks(id, documentId);
   const switchChunks = useSwitchChunks(id, documentId);
   const canWrite = useCanWrite();
 
   const chunks = useMemo(() => query.data?.chunks ?? [], [query.data?.chunks]);
   const total = query.data?.total ?? 0;
-  const document = query.data?.document;
+  const document =
+    query.data?.document ?? (targetId ? targetQuery.data?.document : null);
+  const targetChunk = targetId
+    ? targetQuery.data?.chunks.find(
+        (chunk) => chunk.id === targetId && chunk.document_id === documentId,
+      )
+    : undefined;
+  const locatedChunk =
+    locatingChunk && locatingTarget === targetId
+      ? (chunks.find((chunk) => chunk.id === locatingChunk.id) ?? locatingChunk)
+      : (targetChunk ?? null);
+  const locatingId = locatedChunk?.id;
+  const locate = (chunk: KnowledgeChunk) => {
+    setLocatingChunk(chunk);
+    setLocatingTarget(targetId);
+    setLocationRequest((current) => current + 1);
+    setView("original");
+  };
   const currentIds = useMemo(() => chunks.map((chunk) => chunk.id), [chunks]);
   const allCurrentSelected =
     currentIds.length > 0 &&
@@ -748,48 +1256,105 @@ export default function KnowledgeChunksPage() {
 
   const openEdit = (chunk: KnowledgeChunk) => {
     setEditing(chunk);
+    setLocatingChunk(chunk);
+    setLocatingTarget(targetId);
     setEditorOpen(true);
   };
 
-  const bulkSwitch = (availableValue: boolean) => {
-    switchChunks.mutate({ chunkIds: selectedIds, available: availableValue });
-    message.success(availableValue ? t('knowledge.chunks.bulkEnabled') : t('knowledge.chunks.bulkDisabled'));
-    setSelectedIds([]);
+  const bulkSwitch = async (availableValue: boolean) => {
+    const requestedIds = selectedIds;
+    try {
+      await switchChunks.mutateAsync({
+        chunkIds: requestedIds,
+        available: availableValue,
+      });
+      message.success(
+        availableValue
+          ? t("knowledge.chunks.bulkEnabled")
+          : t("knowledge.chunks.bulkDisabled"),
+      );
+      setSelectedIds((current) =>
+        current.filter((chunkId) => !requestedIds.includes(chunkId)),
+      );
+    } catch (error) {
+      message.error(parseApiError(error));
+    }
   };
-
-  const bulkDelete = () => {
-    deleteChunks.mutate(selectedIds);
-    setSelectedIds([]);
+  const bulkDelete = async () => {
+    const requestedIds = selectedIds;
+    try {
+      await deleteChunks.mutateAsync(requestedIds);
+      setSelectedIds((current) =>
+        current.filter((chunkId) => !requestedIds.includes(chunkId)),
+      );
+    } catch (error) {
+      message.error(parseApiError(error));
+    }
   };
 
   const copyChunkId = async (chunkId: string) => {
     const result = await copyOrManual(chunkId);
     if (result === "copied") {
-      message.success(t('knowledge.chunks.copiedChunkId'));
+      message.success(t("knowledge.chunks.copiedChunkId"));
     } else if (result === "failed") {
-      message.error(t('knowledge.chunks.copyFail'));
+      message.error(t("knowledge.chunks.copyFail"));
     }
   };
 
   return (
-    <div>
+    <div className={styles.workspace}>
       <button
         type="button"
         className={styles.back}
-        onClick={async () => { await navigate(`/knowledge/${id}/documents`); }}
+        onClick={async () => {
+          await navigate(`/knowledge/${id}/documents`);
+        }}
       >
         <ArrowLeftIcon size={14} />
-        {t('knowledge.chunks.backToDocs')}
+        {t("knowledge.chunks.backToDocs")}
       </button>
 
-      <div className={styles.shell}>
-        <div className={styles.main}>
+      <Typography.Title
+        level={4}
+        style={{ marginTop: 0, overflowWrap: "anywhere" }}
+      >
+        {document?.name ?? reviewText("compare")}
+      </Typography.Title>
+      <div className={styles.viewSwitch}>
+        <Segmented
+          aria-label={reviewText("compare")}
+          value={view}
+          onKeyDown={(event) => {
+            handleSegmentedArrow(event, () => {
+              setView((current) =>
+                current === "chunks" ? "original" : "chunks",
+              );
+            });
+          }}
+          onChange={setView}
+          options={[
+            { label: reviewText("original"), value: "original" },
+            { label: reviewText("chunks"), value: "chunks" },
+          ]}
+        />
+      </div>
+      <div className={styles.shell} data-view={view}>
+        <aside className={styles.sidePanel}>
+          <KnowledgeOriginalPreview
+            datasetId={id}
+            documentId={documentId}
+            document={document}
+            selectedChunk={locatedChunk}
+            locationRequest={locationRequest}
+          />
+        </aside>
+        <main className={styles.main} aria-label={reviewText("chunks")}>
           <div className={styles.toolbar}>
             <div className={styles.filters}>
               <Input.Search
-                placeholder={t('knowledge.chunks.searchPh')}
+                placeholder={t("knowledge.chunks.searchPh")}
                 allowClear
-                style={{ width: 260 }}
+                style={{ width: 260, maxWidth: "100%" }}
                 onSearch={(value) => {
                   setKeywords(value.trim());
                   setPage(1);
@@ -797,21 +1362,34 @@ export default function KnowledgeChunksPage() {
               />
               <Segmented
                 value={displayMode}
-                onChange={(value) =>
-                  { setDisplayMode(value as "ellipsis" | "full"); }
-                }
+                onKeyDown={(event) => {
+                  handleSegmentedArrow(event, () => {
+                    setDisplayMode((current) =>
+                      current === "ellipsis" ? "full" : "ellipsis",
+                    );
+                  });
+                }}
+                onChange={(value) => {
+                  setDisplayMode(value as "ellipsis" | "full");
+                }}
                 options={[
-                  { label: t('knowledge.chunks.ellipsis'), value: "ellipsis" },
-                  { label: t('knowledge.chunks.full'), value: "full" },
+                  { label: t("knowledge.chunks.ellipsis"), value: "ellipsis" },
+                  { label: t("knowledge.chunks.full"), value: "full" },
                 ]}
               />
               <Select
                 value={availableFilter}
                 style={{ width: 130 }}
                 options={[
-                  { label: t('knowledge.chunks.statusAll'), value: "all" },
-                  { label: t('knowledge.chunks.statusEnabled'), value: "enabled" },
-                  { label: t('knowledge.chunks.statusDisabled'), value: "disabled" },
+                  { label: t("knowledge.chunks.statusAll"), value: "all" },
+                  {
+                    label: t("knowledge.chunks.statusEnabled"),
+                    value: "enabled",
+                  },
+                  {
+                    label: t("knowledge.chunks.statusDisabled"),
+                    value: "disabled",
+                  },
                 ]}
                 onChange={(value) => {
                   setAvailableFilter(value);
@@ -822,9 +1400,11 @@ export default function KnowledgeChunksPage() {
                 <Checkbox
                   checked={allCurrentSelected}
                   indeterminate={selectedIds.length > 0 && !allCurrentSelected}
-                  onChange={(event) => { toggleAll(event.target.checked); }}
+                  onChange={(event) => {
+                    toggleAll(event.target.checked);
+                  }}
                 >
-                  {t('knowledge.chunks.selectPage')}
+                  {t("knowledge.chunks.selectPage")}
                 </Checkbox>
               )}
             </div>
@@ -834,14 +1414,14 @@ export default function KnowledgeChunksPage() {
                 loading={query.isFetching}
                 onClick={() => query.refetch()}
               >
-                {t('knowledge.chunks.refresh')}
+                {t("knowledge.chunks.refresh")}
               </Button>
               {canWrite && (
                 <PrimaryButton
                   icon={<PlusIcon size={16} weight="bold" />}
                   onClick={openCreate}
                 >
-                  {t('knowledge.chunks.createChunk')}
+                  {t("knowledge.chunks.createChunk")}
                 </PrimaryButton>
               )}
             </div>
@@ -850,60 +1430,171 @@ export default function KnowledgeChunksPage() {
           {canWrite && selectedIds.length > 0 ? (
             <div className={styles.bulkBar}>
               <Typography.Text strong>
-                {t('knowledge.chunks.selectedN', { n: selectedIds.length })}
+                {t("knowledge.chunks.selectedN", { n: selectedIds.length })}
               </Typography.Text>
               <Space wrap>
                 <Button
                   size="small"
-                  aria-label={t('knowledge.chunks.bulkEnableAria')}
-                  onClick={() => { bulkSwitch(true); }}
+                  aria-label={t("knowledge.chunks.bulkEnableAria")}
+                  disabled={switchChunks.isPending || deleteChunks.isPending}
+                  onClick={() => {
+                    void bulkSwitch(true);
+                  }}
                 >
-                  {t('knowledge.chunks.enable')}
+                  {t("knowledge.chunks.enable")}
                 </Button>
                 <Button
                   size="small"
-                  aria-label={t('knowledge.chunks.bulkDisableAria')}
-                  onClick={() => { bulkSwitch(false); }}
+                  aria-label={t("knowledge.chunks.bulkDisableAria")}
+                  disabled={switchChunks.isPending || deleteChunks.isPending}
+                  onClick={() => {
+                    void bulkSwitch(false);
+                  }}
                 >
-                  {t('knowledge.chunks.disable')}
+                  {t("knowledge.chunks.disable")}
                 </Button>
                 <Popconfirm
-                  title={t('knowledge.chunks.deleteSelectedTitle')}
-                  description={t('knowledge.chunks.deleteSelectedDesc', { n: selectedIds.length })}
-                  okText={t('common.delete')}
+                  title={t("knowledge.chunks.deleteSelectedTitle")}
+                  description={t("knowledge.chunks.deleteSelectedDesc", {
+                    n: selectedIds.length,
+                  })}
+                  okText={t("common.delete")}
                   okButtonProps={{ danger: true }}
-                  cancelText={t('common.cancel')}
+                  cancelText={t("common.cancel")}
                   onConfirm={bulkDelete}
                 >
-                  <Button size="small" danger icon={<TrashIcon size={14} />}>
-                    {t('common.delete')}
+                  <Button
+                    size="small"
+                    danger
+                    disabled={switchChunks.isPending || deleteChunks.isPending}
+                    icon={<TrashIcon size={14} />}
+                  >
+                    {t("common.delete")}
                   </Button>
                 </Popconfirm>
                 <Button
                   size="small"
                   type="text"
-                  onClick={() => { setSelectedIds([]); }}
+                  onClick={() => {
+                    setSelectedIds([]);
+                  }}
                 >
-                  {t('knowledge.chunks.clearSelection')}
+                  {t("knowledge.chunks.clearSelection")}
                 </Button>
               </Space>
             </div>
           ) : null}
 
+          {targetId ? (
+            <Alert
+              className={styles.stackedAlert}
+              type={targetQuery.isError ? "error" : "info"}
+              title={
+                targetQuery.isError
+                  ? parseApiError(targetQuery.error)
+                  : targetChunk
+                    ? `${reviewText("selected")} · ID ${targetId.slice(0, 8)}`
+                    : targetQuery.isLoading
+                      ? reviewText("loadChunks")
+                      : reviewText("readbackFailed")
+              }
+              description={
+                targetChunk ? (
+                  <>
+                    {targetChunk.image_id ? (
+                      <ChunkImage
+                        datasetId={id}
+                        imageId={targetChunk.image_id}
+                        width={180}
+                        height={120}
+                        refreshKey={imageVersion}
+                      />
+                    ) : null}
+                    <SafeContent
+                      content={targetChunk.content}
+                      clipped={false}
+                    />
+                    <Space wrap style={{ marginTop: 8 }}>
+                      <Button
+                        onClick={() => {
+                          locate(targetChunk);
+                        }}
+                      >
+                        {reviewText("locate")}
+                      </Button>
+                      {canWrite ? (
+                        <Button
+                          onClick={() => {
+                            openEdit(targetChunk);
+                          }}
+                        >
+                          {t("common.edit")}
+                        </Button>
+                      ) : null}
+                    </Space>
+                  </>
+                ) : undefined
+              }
+              action={
+                <Button
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete("chunkId");
+                    next.delete("chunk_id");
+                    setSearchParams(next);
+                    setLocatingChunk(null);
+                  }}
+                >
+                  {t("common.close")}
+                </Button>
+              }
+              style={{ marginBottom: 12 }}
+            />
+          ) : null}
+          {query.isLoading ? (
+            <Space role="status">
+              <Spin size="small" />
+              {reviewText("loadChunks")}
+            </Space>
+          ) : null}
+          {query.isError ? (
+            <Alert
+              type="error"
+              title={reviewText("loadFailed")}
+              description={parseApiError(query.error)}
+              action={
+                <Button onClick={() => void query.refetch()}>
+                  {reviewText("retry")}
+                </Button>
+              }
+            />
+          ) : null}
           <div className={styles.list}>
-            {chunks.length === 0 && !query.isLoading ? (
+            {chunks.length === 0 && !query.isLoading && !query.isError ? (
               <Empty
-                description={keywords ? t('knowledge.chunks.emptyNoMatch') : t('knowledge.chunks.emptyNone')}
+                description={
+                  keywords
+                    ? t("knowledge.chunks.emptyNoMatch")
+                    : t("knowledge.chunks.emptyNone")
+                }
               />
             ) : null}
             {chunks.map((chunk) => (
-              <div className={styles.card} key={chunk.id}>
+              <div
+                className={cx(
+                  styles.card,
+                  chunk.id === locatingId && styles.selectedCard,
+                )}
+                key={chunk.id}
+                data-readonly={!canWrite}
+              >
                 {canWrite && (
                   <Checkbox
+                    aria-label={`ID ${chunk.id}`}
                     checked={selectedIds.includes(chunk.id)}
-                    onChange={(event) =>
-                      { toggleOne(chunk.id, event.target.checked); }
-                    }
+                    onChange={(event) => {
+                      toggleOne(chunk.id, event.target.checked);
+                    }}
                   />
                 )}
                 <div className={styles.cardBody}>
@@ -912,9 +1603,16 @@ export default function KnowledgeChunksPage() {
                       {chunk.doc_type ?? (chunk.image_id ? "image" : "text")}
                     </Tag>
                     <Tag>{formatPositions(chunk)}</Tag>
+                    {chunk.id === locatingId ? (
+                      <Tag color="processing">{reviewText("selected")}</Tag>
+                    ) : null}
                     <Badge
                       status={chunk.available ? "success" : "default"}
-                      text={chunk.available ? t('knowledge.chunks.enable') : t('knowledge.chunks.disable')}
+                      text={
+                        chunk.available
+                          ? t("knowledge.chunks.enable")
+                          : t("knowledge.chunks.disable")
+                      }
                     />
                     <Typography.Text type="secondary">
                       ID {chunk.id.slice(0, 8)}
@@ -926,6 +1624,7 @@ export default function KnowledgeChunksPage() {
                       datasetId={id}
                       imageId={chunk.image_id}
                       className={styles.thumbnail}
+                      refreshKey={imageVersion}
                     />
                   ) : null}
 
@@ -951,32 +1650,59 @@ export default function KnowledgeChunksPage() {
                   </div>
                 </div>
                 <div className={styles.cardActions}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      locate(chunk);
+                    }}
+                    title={
+                      chunkPositions(chunk).length
+                        ? undefined
+                        : reviewText("noPosition")
+                    }
+                  >
+                    {reviewText("locate")}
+                  </Button>
                   {canWrite && (
                     <>
                       <Switch
                         size="small"
                         checked={chunk.available}
-                        onChange={(checked) =>
-                          { switchChunks.mutate({
-                            chunkIds: [chunk.id],
-                            available: checked,
-                          }); }
-                        }
+                        loading={switchChunks.isPending}
+                        aria-label={`${t("knowledge.chunks.enable")} ${chunk.id}`}
+                        onChange={(checked) => {
+                          void switchChunks
+                            .mutateAsync({
+                              chunkIds: [chunk.id],
+                              available: checked,
+                            })
+                            .catch((error: unknown) => {
+                              message.error(parseApiError(error));
+                            });
+                        }}
                       />
                       <Button
                         type="text"
                         size="small"
                         icon={<PencilSimpleIcon size={16} />}
-                        onClick={() => { openEdit(chunk); }}
+                        onClick={() => {
+                          openEdit(chunk);
+                        }}
                       >
-                        {t('common.edit')}
+                        {t("common.edit")}
                       </Button>
                       <Popconfirm
-                        title={t('knowledge.chunks.deleteTitle')}
-                        okText={t('common.delete')}
+                        title={t("knowledge.chunks.deleteTitle")}
+                        okText={t("common.delete")}
                         okButtonProps={{ danger: true }}
-                        cancelText={t('common.cancel')}
-                        onConfirm={() => { deleteChunks.mutate([chunk.id]); }}
+                        cancelText={t("common.cancel")}
+                        onConfirm={async () => {
+                          try {
+                            await deleteChunks.mutateAsync([chunk.id]);
+                          } catch (error) {
+                            message.error(parseApiError(error));
+                          }
+                        }}
                       >
                         <Button
                           type="text"
@@ -984,7 +1710,7 @@ export default function KnowledgeChunksPage() {
                           danger
                           icon={<TrashIcon size={16} />}
                         >
-                          {t('common.delete')}
+                          {t("common.delete")}
                         </Button>
                       </Popconfirm>
                     </>
@@ -993,6 +1719,7 @@ export default function KnowledgeChunksPage() {
                     type="text"
                     size="small"
                     icon={<ClipboardTextIcon size={16} />}
+                    aria-label={`${t("knowledge.chunks.copyId")} ${chunk.id}`}
                     onClick={() => void copyChunkId(chunk.id)}
                   />
                 </div>
@@ -1005,47 +1732,61 @@ export default function KnowledgeChunksPage() {
               current={page}
               pageSize={PAGE_SIZE}
               total={total}
-              showTotal={(count) => t('common.totalItems', { total: count })}
-              onChange={(next) => { setPage(next); }}
+              showTotal={(count) => t("common.totalItems", { total: count })}
+              onChange={(next) => {
+                setPage(next);
+              }}
             />
           </div>
-        </div>
-
-        <aside className={styles.sidePanel}>
-          <div className={styles.panelTitle}>
-            <FileTextIcon size={18} weight="duotone" />
-            {t('knowledge.chunks.docInfo')}
-          </div>
-          <Descriptions column={1} size="small">
-            <Descriptions.Item label={t('knowledge.chunks.name')}>
-              {document?.name ?? "-"}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('knowledge.chunks.chunkCount')}>{total}</Descriptions.Item>
-            <Descriptions.Item label={t('knowledge.chunks.parser')}>
-              {document?.parser_id ?? "-"}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('knowledge.chunks.source')}>
-              {document?.source_type ?? "-"}
-            </Descriptions.Item>
-            <Descriptions.Item label="Metadata">
-              {document?.meta_fields.length
-                ? t('knowledge.chunks.metaCount', { n: document.meta_fields.length })
-                : "-"}
-            </Descriptions.Item>
-          </Descriptions>
-          <Divider />
-          <Typography.Text type="secondary">
-            {t('knowledge.chunks.imgNote')}
-          </Typography.Text>
-        </aside>
+        </main>
       </div>
+      <aside style={{ marginTop: 16, overflowWrap: "anywhere" }}>
+        <div className={styles.panelTitle}>
+          <FileTextIcon size={18} weight="duotone" />
+          {t("knowledge.chunks.docInfo")}
+        </div>
+        <Descriptions column={1} size="small">
+          <Descriptions.Item label={t("knowledge.chunks.name")}>
+            {document?.name ?? "-"}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("knowledge.chunks.chunkCount")}>
+            {total}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("knowledge.chunks.parser")}>
+            {document?.parser_id ?? "-"}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("knowledge.chunks.source")}>
+            {document?.source_type ?? "-"}
+          </Descriptions.Item>
+          <Descriptions.Item label="Metadata">
+            {document?.meta_fields.length
+              ? t("knowledge.chunks.metaCount", {
+                  n: document.meta_fields.length,
+                })
+              : "-"}
+          </Descriptions.Item>
+        </Descriptions>
+        <Divider />
+        <Typography.Text type="secondary">
+          {reviewText("stalePosition")}
+        </Typography.Text>
+      </aside>
 
       <ChunkEditor
         open={editorOpen}
         editing={editing}
         datasetId={id}
         documentId={documentId}
-        onClose={() => { setEditorOpen(false); }}
+        document={document}
+        onSaved={(saved) => {
+          setLocatingChunk(saved);
+          setLocatingTarget(targetId);
+          setImageVersion((current) => current + 1);
+          void query.refetch();
+        }}
+        onClose={() => {
+          setEditorOpen(false);
+        }}
       />
     </div>
   );

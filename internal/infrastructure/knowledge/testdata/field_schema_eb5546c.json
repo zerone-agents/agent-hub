@@ -1,0 +1,322 @@
+[
+  {
+    "name": "extensions",
+    "field": {
+      "key": "custom",
+      "type": "string",
+      "custom": {
+        "keep": [
+          false,
+          0,
+          {
+            "nested": "value"
+          }
+        ]
+      },
+      "format": "email",
+      "minLength": 0,
+      "maxLength": 99
+    },
+    "schema": {
+      "custom": {
+        "keep": [
+          false,
+          0,
+          {
+            "nested": "value"
+          }
+        ]
+      },
+      "format": "email",
+      "minLength": 0,
+      "maxLength": 99,
+      "description": "",
+      "type": "string"
+    }
+  },
+  {
+    "name": "numeric_constraints",
+    "field": {
+      "key": "score",
+      "type": "number",
+      "enum": [
+        "1",
+        "2.5"
+      ],
+      "examples": [
+        "0"
+      ],
+      "minimum": 0,
+      "maximum": 10,
+      "custom": false
+    },
+    "schema": {
+      "minimum": 0,
+      "maximum": 10,
+      "custom": false,
+      "description": "",
+      "type": "number",
+      "enum": [
+        1,
+        2.5
+      ],
+      "examples": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "list_object",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "custom": {
+          "keep": true
+        }
+      },
+      "examples": [
+        "one"
+      ]
+    },
+    "schema": {
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "custom": {
+          "keep": true
+        }
+      },
+      "description": "",
+      "type": "array",
+      "examples": [
+        [
+          "one"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "list_default_type",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": {
+        "format": "email"
+      },
+      "enum": [
+        "one"
+      ]
+    },
+    "schema": {
+      "items": {
+        "format": "email",
+        "type": "string",
+        "enum": [
+          "one"
+        ]
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_True_None",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": true,
+      "custom": {
+        "keep": true
+      }
+    },
+    "schema": {
+      "items": true,
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_True_[]",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": true,
+      "custom": {
+        "keep": true
+      },
+      "enum": []
+    },
+    "schema": {
+      "items": true,
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_True_['one']",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": true,
+      "custom": {
+        "keep": true
+      },
+      "enum": [
+        "one"
+      ]
+    },
+    "schema": {
+      "items": {
+        "type": "string",
+        "enum": [
+          "one"
+        ]
+      },
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_False_None",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": false,
+      "custom": {
+        "keep": true
+      }
+    },
+    "schema": {
+      "items": false,
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_False_[]",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": false,
+      "custom": {
+        "keep": true
+      },
+      "enum": []
+    },
+    "schema": {
+      "items": false,
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "list_False_['one']",
+    "field": {
+      "key": "list",
+      "type": "list",
+      "items": false,
+      "custom": {
+        "keep": true
+      },
+      "enum": [
+        "one"
+      ]
+    },
+    "schema": {
+      "items": false,
+      "custom": {
+        "keep": true
+      },
+      "description": "",
+      "type": "array"
+    }
+  },
+  {
+    "name": "restricted_examples",
+    "field": {
+      "name": "category",
+      "descriptions": "legacy",
+      "type": "string",
+      "examples": [
+        "one"
+      ],
+      "restrict_values": true,
+      "custom": 0
+    },
+    "schema": {
+      "custom": 0,
+      "description": "legacy",
+      "type": "string",
+      "enum": [
+        "one"
+      ]
+    }
+  },
+  {
+    "name": "null_enum",
+    "field": {
+      "key": "nullable",
+      "type": "string",
+      "enum": null,
+      "examples": [
+        "one"
+      ],
+      "restrict_values": true
+    },
+    "schema": {
+      "description": "",
+      "type": "string"
+    }
+  },
+  {
+    "name": "empty_enum",
+    "field": {
+      "key": "empty",
+      "type": "string",
+      "enum": [],
+      "examples": []
+    },
+    "schema": {
+      "description": "",
+      "type": "string",
+      "examples": []
+    }
+  },
+  {
+    "name": "time",
+    "field": {
+      "key": "time",
+      "type": "time",
+      "format": "date-time",
+      "examples": [
+        "2026-10-05"
+      ]
+    },
+    "schema": {
+      "format": "date-time",
+      "description": "",
+      "type": "string",
+      "examples": [
+        "2026-10-05"
+      ]
+    }
+  }
+]

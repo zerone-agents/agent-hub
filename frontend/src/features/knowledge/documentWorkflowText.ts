@@ -1,0 +1,55 @@
+import { useTranslation } from "react-i18next";
+
+type DocumentWorkflowKey =
+  | "upload_unknown"
+  | "verifyUpload"
+  | "uploadAgain"
+  | "verified"
+  | "addResources"
+  | "moreActions"
+  | "switchToBuiltin"
+  | "uploadSummary"
+  | "emptyFilterValue"
+  | "templateConflict"
+  | "modeRecovery"
+  | "reservedFilterKey"
+  | "nonFiniteFilterValue"
+  | "exactFilterValueHint"
+  | "metadataEnabled"
+  | "metadataEnabledHint"
+  | "metadataEnabledInvalid"
+  | "load"
+  | "loading"
+  | "retry"
+  | "parserPhase"
+  | "templatePhase"
+  | "pipeline"
+  | "source"
+  | "advanced"
+  | "uploaded"
+  | "queued"
+  | "uploading"
+  | "submitting"
+  | "accepted"
+  | "upload_failed"
+  | "parse_failed"
+  | "folder"
+  | "remove"
+  | "hint"
+  | "missing"
+  | "outcomes"
+  | "pending"
+  | "allAccepted"
+  | "clearFilters"
+  | "filters"
+  | "metadataKey"
+  | "metadataValue"
+  | "valueType"
+  | "apply"
+  | "typedHint";
+
+export function useDocumentWorkflowText() {
+  const { t } = useTranslation();
+  return (key: DocumentWorkflowKey, options?: Record<string, unknown>) =>
+    t(`knowledge.documentWorkflow.${key}`, options);
+}

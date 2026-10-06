@@ -161,6 +161,64 @@ func TestKnowledgeMultiRAGModels_UnconfiguredReturns503(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
+func TestKnowledgeMultiRAGModels_PreservesExactVisualAndOCRReferences(t *testing.T) {
+	h := &KnowledgeHandler{multiragMyLLMs: &stubMultiRAGMyLLMs{data: []byte(`{
+		"OpenAI": {"llm": [
+			{"type":"image2text","name":"vision@preview","status":"1"},
+			{"type":"image2text","name":"disabled-vision","status":"0"},
+			{"type":"embedding","name":"separate-embedding","status":"1"}
+		]},
+		"MinerU": {"llm": [
+			{"type":"ocr","name":"pipeline-one","status":"1"},
+			{"type":"ocr","name":"pipeline-two","status":"1"}
+		]}
+	}`)}}
+	r := newMultiRAGModelsRouter(h)
+	for _, tc := range []struct {
+		typeName string
+		want     []MultiRAGModel
+	}{
+		{"image2text", []MultiRAGModel{
+			{Name: "disabled-vision", Factory: "OpenAI", Type: "image2text", Status: "0", FullID: "disabled-vision@OpenAI"},
+			{Name: "vision@preview", Factory: "OpenAI", Type: "image2text", Status: "1", FullID: "vision@preview@OpenAI"},
+		}},
+		{"ocr", []MultiRAGModel{
+			{Name: "pipeline-one", Factory: "MinerU", Type: "ocr", Status: "1", FullID: "pipeline-one@MinerU"},
+			{Name: "pipeline-two", Factory: "MinerU", Type: "ocr", Status: "1", FullID: "pipeline-two@MinerU"},
+		}},
+	} {
+		t.Run(tc.typeName, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/multirag/models?type="+tc.typeName, nil))
+			require.Equal(t, http.StatusOK, w.Code)
+			var response struct {
+				Success bool            `json:"success"`
+				Data    []MultiRAGModel `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.True(t, response.Success)
+			require.Equal(t, tc.want, response.Data)
+		})
+	}
+}
+
+func TestKnowledgeMultiRAGModels_InvalidInventoryCannotBecomeEmptySuccess(t *testing.T) {
+	for _, data := range []string{
+		`null`, `[]`, `{"OpenAI":null}`, `{"OpenAI":{}}`, `{"OpenAI":{"llm":null}}`,
+		`{"OpenAI":{"llm":[{"type":"image2text","status":"1"}]}}`,
+		`{"OpenAI":{"llm":[{"type":"image2text","name":"vision","status":1}]}}`,
+	} {
+		t.Run(data, func(t *testing.T) {
+			h := &KnowledgeHandler{multiragMyLLMs: &stubMultiRAGMyLLMs{data: []byte(data)}}
+			w := httptest.NewRecorder()
+			newMultiRAGModelsRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/multirag/models?type=image2text", nil))
+			require.Equal(t, http.StatusServiceUnavailable, w.Code)
+			require.NotContains(t, w.Body.String(), `"success":true`)
+			require.NotContains(t, w.Body.String(), "cannot unmarshal")
+		})
+	}
+}
+
 func TestKnowledgeMultiRAGModels_SourceErrorReturns503(t *testing.T) {
 	h := &KnowledgeHandler{
 		multiragMyLLMs: &stubMultiRAGMyLLMs{err: errors.New("upstream timeout")},
@@ -172,6 +230,7 @@ func TestKnowledgeMultiRAGModels_SourceErrorReturns503(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.NotContains(t, w.Body.String(), "upstream timeout")
 }
 
 func TestKnowledgeMultiRAGModels_EmptyResultReturnsEmptyArray(t *testing.T) {

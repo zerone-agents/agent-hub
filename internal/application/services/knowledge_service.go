@@ -151,6 +151,9 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, datasetID string, 
 	if err != nil {
 		return nil, err
 	}
+	if err := knowledge.ValidateDocumentFilters(req); err != nil {
+		return nil, err
+	}
 	return engine.ListDocuments(ctx, datasetID, req)
 }
 
@@ -190,17 +193,26 @@ func (s *KnowledgeService) GetImage(ctx context.Context, datasetID string, image
 	if err != nil {
 		return nil, err
 	}
-	if _, err := requireID("datasetId", datasetID); err != nil {
+	datasetID, err = requireID("datasetId", datasetID)
+	if err != nil {
 		return nil, err
 	}
 	imageID, err = requireID("imageId", imageID)
 	if err != nil {
 		return nil, err
 	}
+	imageDatasetID, key, ok := strings.Cut(imageID, "-")
+	if !ok || imageDatasetID != datasetID || strings.TrimSpace(key) == "" {
+		return nil, knowledge.NewBadRequestError("imageId 与 datasetId 不匹配或格式无效")
+	}
+	// Namespace binding here complements exact SQL/index ownership checks upstream.
 	return engine.GetImage(ctx, imageID)
 }
 
 func (s *KnowledgeService) UpdateDocument(ctx context.Context, datasetID string, documentID string, req knowledge.DocumentUpdateRequest) (*knowledge.Document, error) {
+	if _, err := knowledge.PrepareDocumentPatch(req); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -355,7 +367,13 @@ func (s *KnowledgeService) Retrieval(ctx context.Context, req knowledge.Retrieva
 	if err != nil {
 		return nil, err
 	}
-	normalized := normalizeRetrievalRequest(req)
+	normalized, err := knowledge.RetrievalToSearch(req)
+	if err != nil {
+		return nil, err
+	}
+	if knowledge.EmptyRetrievalScope(normalized) {
+		return knowledge.EmptyRetrievalResult(), nil
+	}
 	return engine.Retrieval(ctx, normalized)
 }
 
@@ -391,14 +409,17 @@ func (s *KnowledgeService) translateModelRefs(ctx context.Context, tenantID stri
 // translateLocalModelRef checks if the given ref matches a local
 // provider_models.model_id. If so, returns the MultiRAG-format reference:
 //   - mode "embedding" → "<modelId>@<factory>" (the full MultiRAG id)
-//   - mode "layout"    → "<factory>" (MultiRAG's layout_recognize uses
-//     the factory name only, e.g. "MinerU", not "mineru@MinerU")
+//   - mode "layout"    → "<factory>" for legacy local selections.
+//
+// Explicit layout references (name@factory) must pass through unchanged:
+// vision references and multiple OCR models depend on the exact model name.
+// Embedding IDs still require lookup because local model names may contain @.
 //
 // Otherwise returns the original ref unchanged. Empty refs, nil
 // ProviderService, providers without a MultiRAG factory mapping, and
 // unknown model_ids all pass through unchanged.
 func (s *KnowledgeService) translateLocalModelRef(ctx context.Context, tenantID, ref, mode string) string {
-	if ref == "" || s == nil || s.providerSvc == nil {
+	if ref == "" || (mode == "layout" && strings.Contains(ref, "@")) || s == nil || s.providerSvc == nil {
 		return ref
 	}
 	p, err := s.providerSvc.FindProviderByModelID(tenantID, ref)
@@ -435,22 +456,4 @@ func cleanIDs(ids []string) []string {
 		}
 	}
 	return cleaned
-}
-
-func normalizeRetrievalRequest(req knowledge.RetrievalRequest) knowledge.RetrievalRequest {
-	normalized := knowledge.CloneObject(map[string]any(req))
-	if _, ok := normalized["dataset_ids"]; !ok {
-		if kbIDs, exists := normalized["kb_ids"]; exists {
-			normalized["dataset_ids"] = kbIDs
-		}
-	}
-	delete(normalized, "kb_ids")
-
-	if _, ok := normalized["document_ids"]; !ok {
-		if docIDs, exists := normalized["doc_ids"]; exists {
-			normalized["document_ids"] = docIDs
-		}
-	}
-	delete(normalized, "doc_ids")
-	return knowledge.RetrievalRequest(normalized)
 }

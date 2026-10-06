@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
-import { useTranslation } from 'react-i18next'
+import { useTranslation } from "react-i18next";
 // 组件外纯函数：直调 i18next
-import i18next from '@/i18n'
+import i18next from "@/i18n";
 import type { Key } from "react";
 import {
+  Alert,
+  Collapse,
   Tag,
   Progress,
   Space,
   Button,
   Input,
-  Upload,
   Switch,
   Popconfirm,
   Tooltip,
@@ -18,6 +19,7 @@ import {
   Select,
   Typography,
   Descriptions,
+  Dropdown,
   Badge,
   message,
 } from "antd";
@@ -28,6 +30,8 @@ import {
   DownloadSimpleIcon,
   FileTextIcon,
   FunnelSimpleIcon,
+  GraphIcon,
+  DotsThreeIcon,
   ListBulletsIcon,
   PencilSimpleIcon,
   PlayIcon,
@@ -37,18 +41,40 @@ import {
 } from "@phosphor-icons/react";
 import { createStyles } from "antd-style";
 import { useNavigate, useParams } from "react-router";
+import {
+  knowledgeManagement,
+  parseObjectJSON,
+} from "@/api/knowledgeManagement";
+import KnowledgeDocumentGraph from "./KnowledgeDocumentGraph";
+import KnowledgeIngestModal from "./KnowledgeIngestModal";
+import {
+  documentExactMetadataFilter,
+  EmptyDocumentFilterValue,
+  ReservedDocumentFilterKey,
+  NonFiniteDocumentFilterValue,
+} from "./documentSettings";
+import MetadataValuesEditor from "./MetadataValuesEditor";
+import KnowledgeDocumentUpload from "./KnowledgeDocumentUpload";
+import { useDocumentWorkflowText } from "./documentWorkflowText";
+import {
+  KnowledgeDocumentEditor,
+  KnowledgeDocumentCreate,
+} from "./KnowledgeDocumentEditor";
 import { parseApiError } from "@/api/client";
 import { knowledgeApi, type KnowledgeDocument } from "@/api/knowledge";
 import {
   useDocuments,
+  useDocumentFilters,
   useUploadDocuments,
-  useParseDocuments,
+  useIngestDocuments,
   useStopParsingDocuments,
   useUpdateDocument,
   useDeleteDocuments,
 } from "@/queries/useKnowledge";
 import BorderedTable from "@/components/BorderedTable";
-import PrimaryButton from "@/components/PrimaryButton";
+import PrimaryButton, {
+  usePrimaryButtonStyle,
+} from "@/components/PrimaryButton";
 import { useCanWrite } from "@/hooks/useCanWrite";
 import { tokens as t } from "@/styles/tokens";
 import { formatTime } from "@/utils/time";
@@ -161,7 +187,8 @@ const useStyles = createStyles(({ css }) => ({
     padding: 10px 12px;
 
     & + & {
-      border-top: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+      border-top: 1px solid
+        color-mix(in srgb, var(--foreground) 8%, transparent);
     }
   `,
   detailText: css`
@@ -175,11 +202,11 @@ const PAGE_SIZE = 10;
 // 筛选选项 label 存 i18n key，消费处 map t()——模块级 i18next.t() 会在首次
 // import 时烘焙语言，运行期切换不生效（PR #172 review 阻塞项 2）。
 const STATUS_OPTIONS = [
-  { label: 'knowledge.docs.runParsing', value: "1" },
-  { label: 'knowledge.docs.runCancelled', value: "2" },
-  { label: 'knowledge.docs.runDone', value: "3" },
-  { label: 'knowledge.docs.runFailed', value: "4" },
-  { label: 'knowledge.docs.runUnparsed', value: "0" },
+  { label: "knowledge.docs.runParsing", value: "1" },
+  { label: "knowledge.docs.runCancelled", value: "2" },
+  { label: "knowledge.docs.runDone", value: "3" },
+  { label: "knowledge.docs.runFailed", value: "4" },
+  { label: "knowledge.docs.runUnparsed", value: "0" },
 ];
 
 const SUFFIX_OPTIONS = [
@@ -212,32 +239,58 @@ function statusMeta(doc: KnowledgeDocument): {
   color: "processing" | "success" | "error" | "warning" | "default";
   percent: number;
 } {
-  const percent = Math.round((doc.progress) * 100);
-  if (doc.run === "1") return { label: i18next.t('knowledge.docs.runParsing'), color: "processing", percent };
-  if (doc.run === "3" || percent >= 100)
-    return { label: i18next.t('knowledge.docs.runDone'), color: "success", percent: 100 };
-  if (doc.run === "4") return { label: i18next.t('knowledge.docs.runFailed'), color: "error", percent };
-  if (doc.run === "2") return { label: i18next.t('knowledge.docs.runCancelled'), color: "warning", percent };
-  return { label: i18next.t('knowledge.docs.runUnparsed'), color: "default", percent };
+  const percent = Math.round(doc.progress * 100);
+  if (doc.run === "1")
+    return {
+      label: i18next.t("knowledge.docs.runParsing"),
+      color: "processing",
+      percent,
+    };
+  if (doc.run === "4")
+    return {
+      label: i18next.t("knowledge.docs.runFailed"),
+      color: "error",
+      percent,
+    };
+  if (doc.run === "2")
+    return {
+      label: i18next.t("knowledge.docs.runCancelled"),
+      color: "warning",
+      percent,
+    };
+  if (doc.run === "3")
+    return {
+      label: i18next.t("knowledge.docs.runDone"),
+      color: doc.chunk_num ? "success" : "warning",
+      percent: 100,
+    };
+  return {
+    label: i18next.t("knowledge.docs.runUnparsed"),
+    color: "default",
+    percent,
+  };
 }
 
 function metadataSummary(doc: KnowledgeDocument): string {
   const fields = doc.meta_fields;
   if (fields.length === 0) return "-";
   const pickStr = (v: unknown): string =>
-    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" || typeof v === "bigint" ? String(v) : "";
+    typeof v === "string"
+      ? v
+      : typeof v === "number" || typeof v === "boolean" || typeof v === "bigint"
+        ? String(v)
+        : "";
   const names = fields
     .map((item) => pickStr(item.name ?? item.key ?? item.field).trim())
     .filter(Boolean);
-  if (names.length === 0) return i18next.t('knowledge.docs.metaCount', { n: fields.length });
+  if (names.length === 0)
+    return i18next.t("knowledge.docs.metaCount", { n: fields.length });
   return (
     names.slice(0, 2).join("、") +
-    (names.length > 2 ? i18next.t('knowledge.docs.metaMore', { n: names.length }) : "")
+    (names.length > 2
+      ? i18next.t("knowledge.docs.metaMore", { n: names.length })
+      : "")
   );
-}
-
-function queueKey(file: File): string {
-  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 function extractDownloadFileName(
@@ -262,138 +315,28 @@ function extractDownloadFileName(
   return filenameMatch?.[1]?.trim();
 }
 
-interface UploadModalProps {
-  open: boolean;
-  uploading: boolean;
-  onClose: () => void;
-  onUpload: (files: File[], autoParse: boolean) => Promise<void>;
-}
-
-function UploadModal({ open, uploading, onClose, onUpload }: UploadModalProps) {
-  const { t } = useTranslation()
-  const { styles } = useStyles();
-  const [files, setFiles] = useState<File[]>([]);
-  const [autoParse, setAutoParse] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset upload-modal state on close so the next open starts clean
-      setFiles([]);
-       
-      setError("");
-       
-      setAutoParse(true);
-    }
-  }, [open]);
-
-  const addFiles = (incoming: File[]) => {
-    setError("");
-    setFiles((current) => {
-      const merged = new Map(current.map((file) => [queueKey(file), file]));
-      for (const file of incoming) merged.set(queueKey(file), file);
-      return Array.from(merged.values());
-    });
-  };
-
-  const submit = async () => {
-    if (files.length === 0) {
-      setError(i18next.t('knowledge.docs.chooseFirst'));
-      return;
-    }
-    try {
-      await onUpload(files, autoParse);
-      onClose();
-    } catch (err) {
-      setError(parseApiError(err));
-    }
-  };
-
-  return (
-    <Modal
-      title={i18next.t('knowledge.docs.uploadTitle')}
-      open={open}
-      onOk={submit}
-      onCancel={onClose}
-      confirmLoading={uploading}
-      okText={error ? i18next.t('knowledge.docs.retryUpload') : i18next.t('knowledge.docs.startUpload')}
-      cancelText={t('common.cancel')}
-      width={680}
-      destroyOnHidden
-    >
-      <Space
-        orientation="vertical"
-        size={12}
-        style={{ width: "100%", marginTop: 8 }}
-      >
-        <Upload.Dragger
-          multiple
-          showUploadList={false}
-          beforeUpload={(_file, fileList) => {
-            addFiles(fileList);
-            return Upload.LIST_IGNORE;
-          }}
-        >
-          <p className="ant-upload-drag-icon">
-            <UploadSimpleIcon size={26} />
-          </p>
-          <p className="ant-upload-text">{i18next.t('knowledge.docs.dragText')}</p>
-          <p className="ant-upload-hint">
-            i18next.t('knowledge.docs.queueHint')
-          </p>
-        </Upload.Dragger>
-
-        <Switch
-          checked={autoParse}
-          onChange={setAutoParse}
-          checkedChildren={i18next.t('knowledge.docs.parseAfterUpload')}
-          unCheckedChildren={i18next.t('knowledge.docs.uploadOnly')}
-        />
-
-        {error ? (
-          <Typography.Text type="danger">{error}</Typography.Text>
-        ) : null}
-
-        <div className={styles.queueList}>
-          {files.length === 0 ? (
-            <div className={styles.queueEmpty}>{i18next.t('knowledge.docs.queueEmpty')}</div>
-          ) : (
-            files.map((file) => (
-              <div className={styles.queueItem} key={queueKey(file)}>
-                <div>
-                  <Typography.Text strong>{file.name}</Typography.Text>
-                  <div className={styles.detailText}>
-                    {formatBytes(file.size)}
-                  </div>
-                </div>
-                <Button
-                  size="small"
-                  type="text"
-                  danger
-                  icon={<TrashIcon size={15} />}
-                  onClick={() =>
-                    { setFiles((current) =>
-                      current.filter(
-                        (item) => queueKey(item) !== queueKey(file),
-                      ),
-                    ); }
-                  }
-                />
-              </div>
-            ))
-          )}
-        </div>
-      </Space>
-    </Modal>
-  );
-}
-
 export default function KnowledgeDocumentsPage() {
-  const { t } = useTranslation()
+  const { t } = useTranslation();
   const { styles } = useStyles();
+  const text = useDocumentWorkflowText();
+  const primaryStyle = usePrimaryButtonStyle();
   const navigate = useNavigate();
   const { id = "" } = useParams();
 
+  const [graphDoc, setGraphDoc] = useState<KnowledgeDocument | null>(null);
+  const [idsFilter, setIdsFilter] = useState<string[]>([]);
+  const [typesFilter, setTypesFilter] = useState<string[]>([]);
+  const [emptyMetadata, setEmptyMetadata] = useState(false);
+  const [exactMetadataDraft, setExactMetadataDraft] = useState("{}");
+  const [exactMetadata, setExactMetadata] = useState("");
+  const [editingDoc, setEditingDoc] = useState<KnowledgeDocument | null>(null);
+  const [ingestIds, setIngestIds] = useState<string[] | null>(null);
+  const [acceptedAt, setAcceptedAt] = useState(0);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [metadataFilter, setMetadataFilter] = useState("");
+  const [metadataCondition, setMetadataCondition] = useState("");
   const [page, setPage] = useState(1);
   const [keywords, setKeywords] = useState("");
   const [runFilter, setRunFilter] = useState<string[]>([]);
@@ -406,6 +349,7 @@ export default function KnowledgeDocumentsPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const canWrite = useCanWrite();
+  const [modal, modalContext] = Modal.useModal();
 
   const query = useDocuments(id, {
     page,
@@ -413,27 +357,45 @@ export default function KnowledgeDocumentsPage() {
     keywords,
     suffix: suffixFilter,
     run: runFilter,
+    ids: idsFilter,
+    types: typesFilter,
+    metadata: emptyMetadata ? undefined : exactMetadata,
+    return_empty_metadata: emptyMetadata,
+    metadata_condition: emptyMetadata ? undefined : metadataCondition,
     orderby: "create_time",
     desc: true,
   });
+  const filtersQuery = useDocumentFilters(id, {
+    keywords,
+    run: runFilter,
+    types: typesFilter,
+    suffix: suffixFilter,
+  });
+  const candidates = filtersQuery.data?.filter;
   const uploadDocuments = useUploadDocuments(id);
-  const parseDocuments = useParseDocuments(id);
+  const ingestDocuments = useIngestDocuments(id);
   const stopParsing = useStopParsingDocuments(id);
   const updateDocument = useUpdateDocument(id);
   const deleteDocuments = useDeleteDocuments(id);
 
   const documents = query.data?.documents ?? [];
   const total = query.data?.total ?? 0;
+  const displayedStatusDoc =
+    statusDoc &&
+    (documents.find((doc) => doc.id === statusDoc.id) ?? statusDoc);
   const selectedIds = selectedRowKeys.map(String);
   const hasRunning = documents.some((doc) => doc.run === "1");
 
   useEffect(() => {
-    if (!hasRunning) return;
+    if (!hasRunning && !acceptedAt) return;
     const timer = window.setInterval(() => {
       void query.refetch();
+      if (acceptedAt && Date.now() - acceptedAt >= 60000) setAcceptedAt(0);
     }, 3500);
-    return () => { window.clearInterval(timer); };
-  }, [hasRunning, query]);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasRunning, acceptedAt, query]);
 
   const submitRename = async () => {
     if (!renaming) return;
@@ -447,12 +409,20 @@ export default function KnowledgeDocumentsPage() {
     setRenaming(null);
   };
 
-  const handleUpload = async (files: File[], autoParse: boolean) => {
-    const docs = await uploadDocuments.mutateAsync(files);
-    const ids = docs.map((doc) => doc.id).filter(Boolean);
-    if (autoParse && ids.length > 0) {
-      parseDocuments.mutate(ids);
-    }
+  const handleUpload = async (file: File) => {
+    const docs = await uploadDocuments.mutateAsync([file]);
+    const doc = docs.find((item) => item.id);
+    if (!doc) throw new Error(text("missing"));
+    return doc;
+  };
+  const handleUploadParse = async (doc: KnowledgeDocument) => {
+    await ingestDocuments.mutateAsync({
+      doc_ids: [doc.id],
+      run: 1,
+      delete: false,
+      apply_kb: false,
+    });
+    setAcceptedAt(Date.now());
   };
 
   const handleDownload = async (doc: KnowledgeDocument) => {
@@ -469,7 +439,9 @@ export default function KnowledgeDocumentsPage() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.setTimeout(() => { URL.revokeObjectURL(objectUrl); }, 0);
+      window.setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+      }, 0);
     } catch (err) {
       message.error(parseApiError(err));
     } finally {
@@ -478,28 +450,55 @@ export default function KnowledgeDocumentsPage() {
   };
 
   const bulkSwitch = async (enabled: boolean) => {
-    await Promise.all(
-      selectedIds.map((documentId) =>
-        updateDocument.mutateAsync({ documentId, patch: { enabled } }),
-      ),
-    );
-    setSelectedRowKeys([]);
-    message.success(enabled ? t('knowledge.docs.bulkEnabled') : t('knowledge.docs.bulkDisabled'));
+    setBulkBusy(true);
+    setBulkError("");
+    try {
+      const result = await knowledgeManagement.documentStatus(
+        id,
+        selectedIds,
+        enabled,
+      );
+      setSelectedRowKeys(result.failed);
+      await query.refetch();
+      if (result.failed.length)
+        setBulkError(
+          t("knowledge.manage.bulkPartial", {
+            succeeded: result.succeeded.length,
+            failed: result.failed.length,
+          }),
+        );
+      else
+        message.success(
+          enabled
+            ? t("knowledge.docs.bulkEnabled")
+            : t("knowledge.docs.bulkDisabled"),
+        );
+    } catch (err) {
+      setBulkError(parseApiError(err));
+      await query.refetch();
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const bulkParse = () => {
-    parseDocuments.mutate(selectedIds);
-    setSelectedRowKeys([]);
+    setIngestIds(selectedIds);
   };
 
   const bulkStop = () => {
-    stopParsing.mutate(selectedIds);
-    setSelectedRowKeys([]);
+    stopParsing.mutate(selectedIds, {
+      onSuccess: () => {
+        setSelectedRowKeys([]);
+      },
+    });
   };
 
   const bulkDelete = () => {
-    deleteDocuments.mutate(selectedIds);
-    setSelectedRowKeys([]);
+    deleteDocuments.mutate(selectedIds, {
+      onSuccess: () => {
+        setSelectedRowKeys([]);
+      },
+    });
   };
 
   const rowSelection: TableRowSelection<KnowledgeDocument> = {
@@ -510,7 +509,7 @@ export default function KnowledgeDocumentsPage() {
 
   const columns: ColumnsType<KnowledgeDocument> = [
     {
-      title: t('knowledge.docs.docCol'),
+      title: t("knowledge.docs.docCol"),
       dataIndex: "name",
       key: "name",
       width: 280,
@@ -522,28 +521,39 @@ export default function KnowledgeDocumentsPage() {
           </span>
           <span className={styles.nameText}>
             <Tooltip title={value} placement="topLeft">
-              <span className={styles.primaryText}>{value || t('knowledge.docs.unnamed')}</span>
+              <span className={styles.primaryText}>
+                {value || t("knowledge.docs.unnamed")}
+              </span>
             </Tooltip>
             <span className={styles.secondaryText}>
               {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: API may omit suffix */}
-              {(record.suffix ?? record.type ?? "file")
-                .toUpperCase()}{" "}
-              · {formatBytes(record.size)}
+              {(record.suffix ?? record.type ?? "file").toUpperCase()} ·{" "}
+              {formatBytes(record.size)}
             </span>
           </span>
         </div>
       ),
     },
     {
-      title: t('knowledge.docs.parserCol'),
+      title: t("knowledge.docs.parserCol"),
       key: "parser_id",
       width: 120,
       render: (_, record) => (
-        <Tag color="blue">{record.parser_id || "naive"}</Tag>
+        <Button
+          type="link"
+          size="small"
+          disabled={!canWrite}
+          aria-label={`${t("knowledge.manage.parserSettings")}: ${record.name}`}
+          onClick={() => {
+            setEditingDoc(record);
+          }}
+        >
+          {record.pipeline_id ? t("knowledge.docs.processingFlow") : record.parser_id || "naive"}
+        </Button>
       ),
     },
     {
-      title: "Metadata",
+      title: t("knowledge.manage.metadataManagement"),
       key: "metadata",
       width: 160,
       ellipsis: true,
@@ -554,14 +564,14 @@ export default function KnowledgeDocumentsPage() {
       ),
     },
     {
-      title: t('knowledge.docs.chunkCol'),
+      title: t("knowledge.docs.chunkCol"),
       dataIndex: "chunk_num",
       key: "chunk_num",
       width: 80,
       align: "right",
     },
     {
-      title: t('knowledge.docs.statusCol'),
+      title: t("knowledge.docs.statusCol"),
       key: "status",
       width: 170,
       render: (_, record) => {
@@ -570,11 +580,27 @@ export default function KnowledgeDocumentsPage() {
           <button
             type="button"
             className={styles.statusButton}
-            aria-label={t('knowledge.docs.viewStatusAria', { label: meta.label })}
-            onClick={() => { setStatusDoc(record); }}
+            aria-label={t("knowledge.docs.viewStatusAria", {
+              label: meta.label,
+            })}
+            onClick={() => {
+              setStatusDoc(record);
+            }}
           >
             <Space orientation="vertical" size={3} style={{ width: "100%" }}>
               <Badge status={meta.color} text={meta.label} />
+              {record.run === "3" && (
+                <Typography.Text
+                  type={record.chunk_num ? "secondary" : "warning"}
+                >
+                  {t(
+                    record.chunk_num
+                      ? "knowledge.manage.chunksProduced"
+                      : "knowledge.manage.noChunksProduced",
+                    { n: record.chunk_num },
+                  )}
+                </Typography.Text>
+              )}
               {record.run === "1" ? (
                 <Progress percent={meta.percent} size="small" status="active" />
               ) : record.progress_msg ? (
@@ -592,7 +618,7 @@ export default function KnowledgeDocumentsPage() {
       },
     },
     {
-      title: t('knowledge.docs.enabledCol'),
+      title: t("knowledge.docs.enabledCol"),
       key: "enabled",
       width: 76,
       render: (_, record) =>
@@ -600,30 +626,32 @@ export default function KnowledgeDocumentsPage() {
           <Switch
             size="small"
             checked={record.enabled}
-            onChange={(checked) =>
-              { updateDocument.mutate({
+            onChange={(checked) => {
+              updateDocument.mutate({
                 documentId: record.id,
                 patch: { enabled: checked },
-              }); }
-            }
+              });
+            }}
           />
         ) : (
           <Tag color={record.enabled ? "success" : "default"}>
-            {record.enabled ? t('knowledge.docs.enabled') : t('knowledge.docs.disabled')}
+            {record.enabled
+              ? t("knowledge.docs.enabled")
+              : t("knowledge.docs.disabled")}
           </Tag>
         ),
     },
     {
-      title: t('knowledge.docs.createdAt'),
+      title: t("knowledge.docs.createdAt"),
       key: "create_time",
       width: 136,
       render: (_, record) =>
         formatTime(record.create_time ?? record.create_date),
     },
     {
-      title: t('knowledge.docs.actions'),
+      title: t("knowledge.docs.actions"),
       key: "action",
-      width: 270,
+      width: 200,
       fixed: "right",
       render: (_, record) => (
         <Space size={4} wrap>
@@ -632,70 +660,112 @@ export default function KnowledgeDocumentsPage() {
               <Button
                 type="link"
                 size="small"
-                aria-label={t('knowledge.docs.stopParseAria', { name: record.name })}
+                aria-label={t("knowledge.docs.stopParseAria", {
+                  name: record.name,
+                })}
                 icon={<StopIcon size={14} />}
-                onClick={() => { stopParsing.mutate([record.id]); }}
+                onClick={() => {
+                  stopParsing.mutate([record.id]);
+                }}
               >
-                {t('knowledge.docs.stop')}
+                {t("knowledge.docs.stop")}
               </Button>
             ) : (
               <Button
                 type="link"
                 size="small"
-                aria-label={t('knowledge.docs.parseDocAria', { name: record.name })}
+                aria-label={t("knowledge.docs.parseDocAria", {
+                  name: record.name,
+                })}
                 icon={<PlayIcon size={14} />}
-                onClick={() => { parseDocuments.mutate([record.id]); }}
+                onClick={() => {
+                  setIngestIds([record.id]);
+                }}
               >
-                {t('knowledge.docs.parse')}
+                {t("knowledge.docs.parse")}
               </Button>
             ))}
           <Button
             type="link"
             size="small"
             icon={<ListBulletsIcon size={14} />}
-            onClick={async () =>
-              { await navigate(`/knowledge/${id}/documents/${record.id}/chunks`); }
-            }
+            onClick={async () => {
+              await navigate(`/knowledge/${id}/documents/${record.id}/chunks`);
+            }}
           >
-            {t('knowledge.docs.chunkNav')}
+            {t("knowledge.docs.chunkNav")}
           </Button>
-          <Button
-            type="link"
-            size="small"
-            aria-label={t('knowledge.docs.downloadAria', { name: record.name })}
-            icon={<DownloadSimpleIcon size={14} />}
-            loading={downloadingId === record.id}
-            onClick={() => void handleDownload(record)}
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                {
+                  key: "download",
+                  label: t("common.download"),
+                  icon: <DownloadSimpleIcon size={16} />,
+                  disabled: downloadingId === record.id,
+                  onClick: () => void handleDownload(record),
+                },
+                {
+                  key: "graph",
+                  label: t("knowledge.manage.documentGraph"),
+                  icon: <GraphIcon size={16} />,
+                  onClick: () => {
+                    setGraphDoc(record);
+                  },
+                },
+                ...(canWrite
+                  ? [
+                      {
+                        key: "settings",
+                        label: t("knowledge.manage.settings"),
+                        onClick: () => {
+                          setEditingDoc(record);
+                        },
+                      },
+                      {
+                        key: "rename",
+                        label: t("knowledge.docs.rename"),
+                        icon: <PencilSimpleIcon size={16} />,
+                        onClick: () => {
+                          setRenaming(record);
+                          setRenameValue(record.name);
+                        },
+                      },
+                      {
+                        key: "delete",
+                        label: t("common.delete"),
+                        danger: true,
+                        icon: <TrashIcon size={16} />,
+                        onClick: () => {
+                          modal.confirm({
+                            title: t("scenes.deleteConfirmTitle"),
+                            content: t("knowledge.docs.deleteDesc", {
+                              name: record.name,
+                            }),
+                            okText: t("common.delete"),
+                            cancelText: t("common.cancel"),
+                            okButtonProps: {
+                              danger: true,
+                              className: primaryStyle.root,
+                            },
+                            onOk: () =>
+                              deleteDocuments.mutateAsync([record.id]),
+                          });
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            }}
           >
-            {t('common.download')}
-          </Button>
-          {canWrite && (
-            <>
-              <Button
-                type="link"
-                size="small"
-                icon={<PencilSimpleIcon size={14} />}
-                onClick={() => {
-                  setRenaming(record);
-                  setRenameValue(record.name);
-                }}
-              >
-                {t('knowledge.docs.rename')}
-              </Button>
-              <Popconfirm
-                title={t('scenes.deleteConfirmTitle')}
-                description={t('knowledge.docs.deleteDesc', { name: record.name })}
-                okText={t('common.delete')}
-                okButtonProps={{ danger: true }}
-                cancelText={t('common.cancel')}
-                onConfirm={() => { deleteDocuments.mutate([record.id]); }}
-              >
-                <Button type="link" size="small" danger>
-                  {t('common.delete')}
-                </Button>
-              </Popconfirm>
-            </>
-          )}
+            <Button
+              type="text"
+              size="small"
+              aria-label={`${text("moreActions")}: ${record.name}`}
+              icon={<DotsThreeIcon size={18} />}
+            />
+          </Dropdown>
         </Space>
       ),
     },
@@ -703,24 +773,79 @@ export default function KnowledgeDocumentsPage() {
 
   return (
     <div className={styles.shell}>
+      {modalContext}
+      {query.error && (
+        <Alert
+          type="error"
+          showIcon
+          title={parseApiError(query.error)}
+          action={
+            <Button onClick={() => void query.refetch()}>
+              {text("retry")}
+            </Button>
+          }
+        />
+      )}
+      {graphDoc && (
+        <KnowledgeDocumentGraph
+          datasetId={id}
+          documentId={graphDoc.id}
+          name={graphDoc.name}
+          onClose={() => {
+            setGraphDoc(null);
+          }}
+        />
+      )}
+      {bulkError && <Alert type="warning" showIcon title={bulkError} />}
+      {editingDoc && (
+        <KnowledgeDocumentEditor
+          datasetId={id}
+          document={editingDoc}
+          onClose={() => {
+            setEditingDoc(null);
+          }}
+          onSaved={() => void query.refetch()}
+          onReparse={(doc) => {
+            setIngestIds([doc.id]);
+          }}
+        />
+      )}
+      {createOpen && (
+        <KnowledgeDocumentCreate
+          datasetId={id}
+          onClose={() => {
+            setCreateOpen(false);
+          }}
+          onSaved={() => void query.refetch()}
+        />
+      )}
       <div className={styles.toolbar}>
         <div className={styles.filters}>
           <Input.Search
-            placeholder={t('knowledge.docs.searchPh')}
+            placeholder={t("knowledge.docs.searchPh")}
             allowClear
-            style={{ width: 260 }}
+            value={keywords}
+            onChange={(event) => {
+              setKeywords(event.target.value);
+              setPage(1);
+            }}
+            style={{ width: "min(260px, 100%)" }}
             onSearch={(value) => {
               setKeywords(value.trim());
               setPage(1);
             }}
           />
           <Select
+            aria-label={t("knowledge.docs.statusPh")}
             mode="multiple"
             allowClear
             maxTagCount="responsive"
-            placeholder={t('knowledge.docs.statusPh')}
+            placeholder={t("knowledge.docs.statusPh")}
             style={{ minWidth: 160 }}
-            options={STATUS_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
+            options={STATUS_OPTIONS.map((o) => ({
+              ...o,
+              label: `${t(o.label)}${candidates?.run_status[o.value] !== undefined ? ` (${candidates.run_status[o.value]})` : ""}`,
+            }))}
             value={runFilter}
             onChange={(value) => {
               setRunFilter(value);
@@ -728,13 +853,20 @@ export default function KnowledgeDocumentsPage() {
             }}
           />
           <Select
-            mode="multiple"
+            mode="tags"
             allowClear
             maxTagCount="responsive"
-            placeholder={t('knowledge.docs.fileTypePh')}
+            aria-label={t("knowledge.docs.fileTypePh")}
+            placeholder={t("knowledge.docs.fileTypePh")}
             style={{ minWidth: 160 }}
-            options={SUFFIX_OPTIONS.map((value) => ({
-              label: value.toUpperCase(),
+            options={Array.from(
+              new Set([
+                ...SUFFIX_OPTIONS,
+                ...Object.keys(candidates?.suffix ?? {}),
+                ...suffixFilter,
+              ]),
+            ).map((value) => ({
+              label: `${value.toUpperCase()}${candidates?.suffix[value] !== undefined ? ` (${candidates.suffix[value]})` : ""}`,
               value,
             }))}
             value={suffixFilter}
@@ -749,10 +881,17 @@ export default function KnowledgeDocumentsPage() {
               setKeywords("");
               setRunFilter([]);
               setSuffixFilter([]);
+              setIdsFilter([]);
+              setTypesFilter([]);
+              setEmptyMetadata(false);
+              setExactMetadata("");
+              setExactMetadataDraft("{}");
+              setMetadataFilter("");
+              setMetadataCondition("");
               setPage(1);
             }}
           >
-            {t('knowledge.docs.reset')}
+            {t("knowledge.docs.reset")}
           </Button>
         </div>
         <div className={styles.actions}>
@@ -761,73 +900,246 @@ export default function KnowledgeDocumentsPage() {
             loading={query.isFetching}
             onClick={() => query.refetch()}
           >
-            {t('knowledge.docs.refresh')}
+            {t("knowledge.docs.refresh")}
           </Button>
           {canWrite && (
-            <PrimaryButton
-              icon={<UploadSimpleIcon size={16} />}
-              onClick={() => { setUploadOpen(true); }}
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: [
+                  {
+                    key: "upload",
+                    label: t("knowledge.docs.uploadBtn"),
+                    onClick: () => {
+                      setUploadOpen(true);
+                    },
+                  },
+                  {
+                    key: "create",
+                    label: t("knowledge.manage.createDocument"),
+                    onClick: () => {
+                      setCreateOpen(true);
+                    },
+                  },
+                ],
+              }}
             >
-              {t('knowledge.docs.uploadBtn')}
-            </PrimaryButton>
+              <PrimaryButton icon={<UploadSimpleIcon size={16} />}>
+                {text("addResources")}
+              </PrimaryButton>
+            </Dropdown>
           )}
         </div>
       </div>
 
+      <Collapse
+        items={[
+          {
+            key: "filters",
+            label: t("knowledge.manage.preciseDocumentFilters"),
+            children: (
+              <Space
+                orientation="vertical"
+                size="middle"
+                style={{ width: "100%" }}
+              >
+                <div className={styles.filters}>
+                  <Select
+                    aria-label={t("knowledge.manage.documentIDs")}
+                    mode="tags"
+                    allowClear
+                    value={idsFilter}
+                    placeholder={t("knowledge.manage.documentIDs")}
+                    style={{ minWidth: 180, flex: "1 1 220px" }}
+                    onChange={(values) => {
+                      setIdsFilter(values);
+                      setPage(1);
+                    }}
+                  />
+                  <Select
+                    aria-label={t("knowledge.manage.documentTypes")}
+                    mode="multiple"
+                    allowClear
+                    value={typesFilter}
+                    placeholder={t("knowledge.manage.documentTypes")}
+                    style={{ minWidth: 160, flex: "1 1 180px" }}
+                    options={[
+                      "pdf",
+                      "doc",
+                      "visual",
+                      "aural",
+                      "virtual",
+                      "folder",
+                      "other",
+                    ].map((value) => ({
+                      value,
+                      label: t(`knowledge.manage.documentType_${value}`),
+                    }))}
+                    onChange={(values) => {
+                      setTypesFilter(values);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+                <Space wrap>
+                  <Switch
+                    aria-label={t("knowledge.manage.onlyEmptyMetadata")}
+                    checked={emptyMetadata}
+                    onChange={(value) => {
+                      setEmptyMetadata(value);
+                      setPage(1);
+                    }}
+                  />
+                  <Typography.Text>
+                    {t("knowledge.manage.onlyEmptyMetadata")}
+                  </Typography.Text>
+                </Space>
+                {emptyMetadata && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    title={t("knowledge.manage.emptyMetadataFilterHint")}
+                  />
+                )}
+                {filtersQuery.error && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title={parseApiError(filtersQuery.error)}
+                    action={
+                      <Button onClick={() => void filtersQuery.refetch()}>
+                        {text("retry")}
+                      </Button>
+                    }
+                  />
+                )}
+                <Typography.Text strong>
+                  {t("knowledge.manage.exactMetadataFilter")}
+                </Typography.Text>
+                <MetadataValuesEditor
+                  value={exactMetadataDraft}
+                  onChange={setExactMetadataDraft}
+                  disabled={emptyMetadata}
+                  fields={Object.entries(candidates?.metadata ?? {})
+                    .filter(([key]) => key !== "empty_metadata")
+                    .map(([key, values]) => ({
+                      key,
+                      enum: Object.keys(values),
+                      restrict_values: true,
+                    }))}
+                />
+                <Button
+                  disabled={emptyMetadata}
+                  onClick={() => {
+                    try {
+                      setExactMetadata(
+                        documentExactMetadataFilter(exactMetadataDraft),
+                      );
+                      setPage(1);
+                    } catch (err) {
+                      message.error(
+                        err instanceof ReservedDocumentFilterKey
+                          ? text("reservedFilterKey")
+                          : err instanceof EmptyDocumentFilterValue
+                            ? text("emptyFilterValue")
+                            : err instanceof NonFiniteDocumentFilterValue
+                              ? text("nonFiniteFilterValue")
+                              : parseApiError(err),
+                      );
+                    }
+                  }}
+                >
+                  {text("apply")}
+                </Button>
+                <Input.Search
+                  disabled={emptyMetadata}
+                  value={metadataFilter}
+                  onChange={(e) => {
+                    setMetadataFilter(e.target.value);
+                  }}
+                  placeholder={t("knowledge.manage.metadataFilter")}
+                  style={{ width: 240 }}
+                  onSearch={(value) => {
+                    try {
+                      if (value.trim()) parseObjectJSON(value);
+                      setMetadataCondition(value.trim());
+                      setPage(1);
+                    } catch {
+                      message.error(t("knowledge.manage.jsonInvalid"));
+                    }
+                  }}
+                />
+                <Typography.Text type="secondary">
+                  {text("exactFilterValueHint")}
+                  <br />
+                  {t("knowledge.manage.exactMetadataFilterHint")}
+                </Typography.Text>
+              </Space>
+            ),
+          },
+        ]}
+      />
+
       {canWrite && selectedIds.length > 0 ? (
         <div className={styles.bulkBar}>
           <Typography.Text strong>
-            {t('knowledge.docs.selectedN', { n: selectedIds.length })}
+            {t("knowledge.docs.selectedN", { n: selectedIds.length })}
           </Typography.Text>
           <Space wrap>
             <Button
               size="small"
-              aria-label={t('knowledge.docs.bulkEnableAria')}
+              loading={bulkBusy}
+              aria-label={t("knowledge.docs.bulkEnableAria")}
               onClick={() => void bulkSwitch(true)}
             >
-              {t('knowledge.docs.enabled')}
+              {t("knowledge.docs.enabled")}
             </Button>
             <Button
               size="small"
-              aria-label={t('knowledge.docs.bulkDisableAria')}
+              loading={bulkBusy}
+              aria-label={t("knowledge.docs.bulkDisableAria")}
               onClick={() => void bulkSwitch(false)}
             >
-              {t('knowledge.docs.disabled')}
+              {t("knowledge.docs.disabled")}
             </Button>
             <Button
               size="small"
-              aria-label={t('knowledge.docs.bulkParseAria')}
+              aria-label={t("knowledge.docs.bulkParseAria")}
               icon={<PlayIcon size={14} />}
               onClick={bulkParse}
             >
-              {t('knowledge.docs.parse')}
+              {t("knowledge.docs.parse")}
             </Button>
             <Button
               size="small"
-              aria-label={t('knowledge.docs.bulkStopParseAria')}
+              aria-label={t("knowledge.docs.bulkStopParseAria")}
               icon={<StopIcon size={14} />}
               onClick={bulkStop}
             >
-              {t('knowledge.docs.stop')}
+              {t("knowledge.docs.stop")}
             </Button>
             <Popconfirm
-              title={t('knowledge.docs.deleteSelectedTitle')}
-              description={t('knowledge.docs.deleteSelectedDesc', { n: selectedIds.length })}
-              okText={t('common.delete')}
+              title={t("knowledge.docs.deleteSelectedTitle")}
+              description={t("knowledge.docs.deleteSelectedDesc", {
+                n: selectedIds.length,
+              })}
+              okText={t("common.delete")}
               okButtonProps={{ danger: true }}
-              cancelText={t('common.cancel')}
+              cancelText={t("common.cancel")}
               onConfirm={bulkDelete}
             >
               <Button size="small" danger icon={<TrashIcon size={14} />}>
-                {t('common.delete')}
+                {t("common.delete")}
               </Button>
             </Popconfirm>
             <Button
               size="small"
               type="text"
-              onClick={() => { setSelectedRowKeys([]); }}
+              onClick={() => {
+                setSelectedRowKeys([]);
+              }}
             >
-              {t('knowledge.docs.clearSelection')}
+              {t("knowledge.docs.clearSelection")}
             </Button>
           </Space>
         </div>
@@ -845,11 +1157,18 @@ export default function KnowledgeDocumentsPage() {
           emptyText: (
             <Empty
               description={
-                keywords
-                  ? t('knowledge.docs.emptyNoMatch')
+                keywords ||
+                runFilter.length ||
+                suffixFilter.length ||
+                idsFilter.length ||
+                typesFilter.length ||
+                emptyMetadata ||
+                exactMetadata ||
+                metadataCondition
+                  ? t("knowledge.docs.emptyNoMatch")
                   : canWrite
-                    ? t('knowledge.docs.emptyNoUpload')
-                    : t('knowledge.docs.emptyNone')
+                    ? t("knowledge.docs.emptyNoUpload")
+                    : t("knowledge.docs.emptyNone")
               }
             />
           ),
@@ -858,64 +1177,102 @@ export default function KnowledgeDocumentsPage() {
           current: page,
           pageSize: PAGE_SIZE,
           total,
-          showTotal: (count) => t('common.totalItems', { total: count }),
-          onChange: (next) => { setPage(next); },
+          showTotal: (count) => t("common.totalItems", { total: count }),
+          onChange: (next) => {
+            setPage(next);
+          },
         }}
       />
 
-      <UploadModal
-        open={uploadOpen}
-        uploading={uploadDocuments.isPending}
-        onClose={() => { setUploadOpen(false); }}
-        onUpload={handleUpload}
-      />
+      {ingestIds && (
+        <KnowledgeIngestModal
+          docIds={ingestIds}
+          names={Object.fromEntries(documents.map((doc) => [doc.id, doc.name]))}
+          onClose={() => {
+            setIngestIds(null);
+          }}
+          onSubmit={async (input) => {
+            await ingestDocuments.mutateAsync(input);
+            setAcceptedAt(Date.now());
+            setSelectedRowKeys((current) =>
+              current.filter((key) => !input.doc_ids.includes(String(key))),
+            );
+          }}
+        />
+      )}
+
+      {uploadOpen && (
+        <KnowledgeDocumentUpload
+          onClose={() => {
+            setUploadOpen(false);
+          }}
+          onUpload={handleUpload}
+          onParse={handleUploadParse}
+        />
+      )}
 
       <Modal
-        title={t('knowledge.docs.statusCol')}
+        title={t("knowledge.docs.statusCol")}
         open={!!statusDoc}
-        onCancel={() => { setStatusDoc(null); }}
-        footer={<Button onClick={() => { setStatusDoc(null); }}>{t('knowledge.docs.close')}</Button>}
+        onCancel={() => {
+          setStatusDoc(null);
+        }}
+        footer={
+          <Button
+            onClick={() => {
+              setStatusDoc(null);
+            }}
+          >
+            {t("knowledge.docs.close")}
+          </Button>
+        }
         width={640}
         destroyOnHidden
       >
-        {statusDoc ? (
+        {displayedStatusDoc ? (
           <Space
             orientation="vertical"
             size={16}
             style={{ width: "100%", marginTop: 8 }}
           >
+            <Alert
+              type="info"
+              showIcon
+              title={t("knowledge.manage.retrievalReadinessHint")}
+            />
             <Progress
-              percent={statusMeta(statusDoc).percent}
-              status={statusDoc.run === "4" ? "exception" : undefined}
+              percent={statusMeta(displayedStatusDoc).percent}
+              status={displayedStatusDoc.run === "4" ? "exception" : undefined}
             />
             <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label={t('knowledge.docs.statusDocCol')}>
-                {statusDoc.name}
+              <Descriptions.Item label={t("knowledge.docs.statusDocCol")}>
+                {displayedStatusDoc.name}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.statusColState')}>
-                {statusMeta(statusDoc).label}
+              <Descriptions.Item label={t("knowledge.docs.statusColState")}>
+                {statusMeta(displayedStatusDoc).label}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.progressMsg')}>
-                {statusDoc.progress_msg || "-"}
+              <Descriptions.Item label={t("knowledge.docs.progressMsg")}>
+                {displayedStatusDoc.progress_msg || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.statusChunkCount')}>
-                {statusDoc.chunk_num}
+              <Descriptions.Item label={t("knowledge.docs.statusChunkCount")}>
+                {displayedStatusDoc.chunk_num}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.elapsed')}>
-                {statusDoc.process_duration
-                  ? `${statusDoc.process_duration}s`
+              <Descriptions.Item label={t("knowledge.docs.elapsed")}>
+                {displayedStatusDoc.process_duration
+                  ? `${displayedStatusDoc.process_duration}s`
                   : "-"}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.startTime')}>
+              <Descriptions.Item label={t("knowledge.docs.startTime")}>
                 {formatTime(
-                  statusDoc.process_begin_at ??
-                    statusDoc.create_time ??
-                    statusDoc.create_date,
+                  displayedStatusDoc.process_begin_at ??
+                    displayedStatusDoc.create_time ??
+                    displayedStatusDoc.create_date,
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label={t('knowledge.docs.errorSummary')}>
-                {statusDoc.run === "4"
-                  ? statusDoc.progress_msg || t('knowledge.docs.parseFail')
+              <Descriptions.Item label={t("knowledge.docs.errorSummary")}>
+                {displayedStatusDoc.run === "4"
+                  ? displayedStatusDoc.progress_msg ||
+                    t("knowledge.docs.parseFail")
                   : "-"}
               </Descriptions.Item>
             </Descriptions>
@@ -924,20 +1281,25 @@ export default function KnowledgeDocumentsPage() {
       </Modal>
 
       <Modal
-        title={t('knowledge.docs.renameTitle')}
+        title={t("knowledge.docs.renameTitle")}
         open={!!renaming}
         onOk={submitRename}
-        onCancel={() => { setRenaming(null); }}
+        onCancel={() => {
+          setRenaming(null);
+        }}
+        okButtonProps={{ className: primaryStyle.root }}
         confirmLoading={updateDocument.isPending}
-        okText={t('knowledge.docs.saveBtn')}
-        cancelText={t('common.cancel')}
+        okText={t("knowledge.docs.saveBtn")}
+        cancelText={t("common.cancel")}
         destroyOnHidden
       >
         <Input
           value={renameValue}
-          onChange={(event) => { setRenameValue(event.target.value); }}
+          onChange={(event) => {
+            setRenameValue(event.target.value);
+          }}
           onPressEnter={submitRename}
-          placeholder={t('knowledge.docs.renamePh')}
+          placeholder={t("knowledge.docs.renamePh")}
           style={{ marginTop: 8 }}
         />
       </Modal>

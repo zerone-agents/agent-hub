@@ -110,6 +110,13 @@ export const router = createBrowserRouter(
                 }))
             },
             {
+              path: 'ingestions',
+              lazy: () =>
+                import('@/features/knowledge/KnowledgeTasksPage').then((m) => ({
+                  Component: m.default
+                }))
+            },
+            {
               path: 'settings',
               lazy: () =>
                 import('@/features/knowledge/KnowledgeSettingsPage').then((m) => ({

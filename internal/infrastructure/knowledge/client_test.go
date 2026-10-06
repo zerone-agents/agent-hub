@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +162,8 @@ func TestCreateDataset_UsesStrictCreateBodyAndPostCreateDisplayBridge(t *testing
 					"parser_config":   gotUpdateBody["parser_config"],
 				},
 			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/datasets":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []map[string]any{{"id": "kb1", "name": gotCreateBody["name"], "chunk_method": gotUpdateBody["chunk_method"], "embedding_model": gotUpdateBody["embedding_model"], "parser_config": gotUpdateBody["parser_config"]}}})
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -274,6 +278,10 @@ func TestCreateDataset_UsesStrictCreateBodyAndPostCreateDisplayBridge(t *testing
 func TestUpdateDataset_StoresDisplayNameWithoutRenamingCollection(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/datasets" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []map[string]any{{"id": "kb1", "name": "kb_physical_one", "parser_config": gotBody["parser_config"]}}})
+			return
+		}
 		if r.URL.Path != "/api/v1/datasets/kb1" {
 			t.Errorf("path = %q, want /api/v1/datasets/kb1", r.URL.Path)
 		}
@@ -567,12 +575,12 @@ func TestListDocuments_QueryPassthrough(t *testing.T) {
 		Run:               []string{"1", "4"},
 		CreateTimeFrom:    11,
 		CreateTimeTo:      22,
-		MetadataCondition: "author",
+		MetadataCondition: "{}",
 	})
 	if err != nil {
 		t.Fatalf("ListDocuments failed: %v", err)
 	}
-	for _, want := range []string{"page=2", "page_size=20", "orderby=create_time", "desc=true", "keywords=guide", "suffix=pdf", "suffix=docx", "run=1", "run=4", "create_time_from=11", "create_time_to=22", "metadata_condition=author"} {
+	for _, want := range []string{"page=2", "page_size=20", "orderby=create_time", "desc=true", "keywords=guide", "suffix=pdf", "suffix=docx", "run=1", "run=4", "create_time_from=11", "create_time_to=22", "metadata_condition=%7B%7D"} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
@@ -625,6 +633,77 @@ func TestListChunks_RichFieldMapping(t *testing.T) {
 	}
 	if got["image_id"] != "img1" || got["doc_type"] != "image" || got["positions"] == nil || got["tag_kwd"] == nil || got["tag_feas"] == nil {
 		t.Fatalf("rich mapping failed: %#v", got)
+	}
+}
+
+func TestListChunks_ExactIDFallsBackToScopedPages(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		chunkDoc string
+		wantErr  bool
+	}{
+		{"legacy chunk", "doc1", false},
+		{"mismatched document", "other-doc", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exactCalls, listCalls := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/datasets/kb1/documents/doc1/chunks" || r.URL.Query().Get("available") != "true" {
+					t.Errorf("unexpected scoped request: %s", r.URL.String())
+				}
+				if r.URL.Query().Get("id") != "" {
+					exactCalls++
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte(`{"message":"legacy chunk validation failed"}`))
+					return
+				}
+				listCalls++
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+					"total": 2,
+					"doc":   map[string]any{"id": "doc1", "dataset_id": "kb1", "status": "1"},
+					"chunks": []map[string]any{
+						{"id": "other", "document_id": "doc1", "available": true},
+						{"id": "target", "document_id": tc.chunkDoc, "dataset_id": nil, "available": true, "content": "legacy text"},
+					},
+				}})
+			}))
+			defer server.Close()
+
+			available := true
+			client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+			result, err := client.ListChunks(context.Background(), "kb1", "doc1", domain.ChunkListRequest{ID: "target", Available: &available})
+			if (err != nil) != tc.wantErr || exactCalls != 1 || listCalls != 1 {
+				t.Fatalf("fallback result=%v err=%v exact=%d list=%d", result, err, exactCalls, listCalls)
+			}
+			if !tc.wantErr && (result.Total != 1 || len(result.Chunks) != 1 || result.Chunks[0]["id"] != "target") {
+				t.Fatalf("unexpected exact chunk result: %#v", result)
+			}
+		})
+	}
+}
+
+func TestDatasetReadbackAcceptsDisabledParentChildCanonicalForm(t *testing.T) {
+	request := domain.DatasetUpdateToRemote(domain.DatasetMutationRequest{
+		"name": "Guide",
+		"parser_config": map[string]any{
+			"enable_children": false,
+			"chunk_token_num": 512,
+		},
+	})
+	readback := map[string]any{
+		"display_name": "Guide",
+		"parser_config": map[string]any{
+			"control_panel":   map[string]any{"display_name": "Guide"},
+			"parent_child":    map[string]any{},
+			"chunk_token_num": float64(512),
+		},
+	}
+	if !datasetContainsExpected(readback, request) {
+		t.Fatalf("MultiRAG's disabled parent-child canonical form should confirm the save")
+	}
+	readback["parser_config"].(map[string]any)["chunk_token_num"] = float64(256)
+	if datasetContainsExpected(readback, request) {
+		t.Fatalf("unrelated parser setting mismatch must still fail readback")
 	}
 }
 
@@ -720,60 +799,154 @@ func TestDownloadDocument_RejectsJSONEnvelope(t *testing.T) {
 	}
 }
 
-func TestGetImage_UsesProxySourceRoute(t *testing.T) {
-	var gotAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		if r.URL.Path != "/v1/document/image/img1" {
-			t.Errorf("path = %q, want image route", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = io.WriteString(w, "png")
-	}))
-	defer server.Close()
-
-	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
-	stream, err := client.GetImage(context.Background(), "img1")
-	if err != nil {
-		t.Fatalf("GetImage failed: %v", err)
-	}
-	defer stream.Body.Close()
-	body, _ := io.ReadAll(stream.Body)
-	if string(body) != "png" || stream.ContentType != "image/png" {
-		t.Fatalf("unexpected image stream: body=%q type=%q", string(body), stream.ContentType)
-	}
-	if gotAuth != "Bearer test-key" {
-		t.Fatalf("Authorization = %q", gotAuth)
+func TestGetImage_ProtectedRouteAndRawRasterBytes(t *testing.T) {
+	for _, fixture := range []struct{ mime, magic string }{
+		{"image/png", "\x89PNG\r\n\x1a\n"}, {"image/jpeg", "\xff\xd8\xff"},
+		{"image/gif", "GIF89a"}, {"image/webp", "RIFF1234WEBPVP8 "}, {"image/bmp", "BM"},
+	} {
+		t.Run(fixture.mime, func(t *testing.T) {
+			data := []byte(fixture.magic + strings.Repeat("payload", 100))
+			imageID := "kb1-key-with-hyphens /?#%中文.png"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.EscapedPath() != "/api/v1/documents/images/"+url.PathEscape(imageID) || r.URL.RawQuery != "" {
+					t.Errorf("wrong encoded URL: %s", r.URL)
+				}
+				if r.Header.Get("Authorization") != "Bearer test-key" || r.Method != http.MethodGet {
+					t.Error("missing bearer auth or wrong method")
+				}
+				w.Header().Set("Content-Type", fixture.mime)
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				_, _ = w.Write(data)
+			}))
+			defer server.Close()
+			client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+			stream, err := client.GetImage(context.Background(), imageID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Body.Close()
+			body, err := io.ReadAll(stream.Body)
+			if err != nil || !bytes.Equal(body, data) || stream.ContentType != fixture.mime || stream.ContentLength != int64(len(data)) {
+				t.Fatalf("unexpected stream: len=%d type=%q length=%d err=%v", len(body), stream.ContentType, stream.ContentLength, err)
+			}
+		})
 	}
 }
 
-func TestGetImage_RejectsJSONErrorResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/document/image/img1" {
-			t.Errorf("path = %q, want image route", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"retcode": 102,
-			"retmsg":  "image not found",
-		})
-	}))
-	defer server.Close()
+type imageRoundTripFunc func(*http.Request) (*http.Response, error)
 
-	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
-	stream, err := client.GetImage(context.Background(), "img1")
-	if stream != nil {
-		t.Fatalf("stream = %#v, want nil", stream)
+func (f imageRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type imageTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *imageTrackingBody) Close() error { b.closed = true; return nil }
+
+func TestGetImage_RejectsUnsafeResponsesAndClosesBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, mime, body string
+		status           int
+	}{
+		{"new error", "application/json", `{"code":102,"message":"private-bucket-secret","data":null}`, 200},
+		{"legacy error", "application/json", `{"retcode":102,"retmsg":"private-bucket-secret"}`, 200},
+		{"JSON success", "application/json", `{"code":0,"data":"private-bucket-secret"}`, 200},
+		{"problem JSON", "application/problem+json", `{"message":"private-bucket-secret"}`, 200},
+		{"mislabeled JSON", "image/png", `{"code":109,"message":"private-bucket-secret"}`, 200},
+		{"HTML", "text/html", "private-bucket-secret", 200},
+		{"SVG", "image/svg+xml", "<svg>private-bucket-secret</svg>", 200},
+		{"missing MIME", "", "private-bucket-secret", 200},
+		{"empty", "image/png", "", 200},
+		{"wrong raster MIME", "image/jpeg", "\x89PNG\r\n\x1a\n", 200},
+		{"HTTP 401", "application/json", "private-bucket-secret", 401},
+		{"HTTP 404", "image/png", "private-bucket-secret", 404},
+		{"HTTP 500", "text/html", "private-bucket-secret", 500},
+		{"partial", "image/png", "\x89PNG\r\n\x1a\n", 206},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &imageTrackingBody{Reader: strings.NewReader(tc.body)}
+			client := NewRemoteMultiragEngine("http://example.invalid", "test-key", time.Second, time.Hour)
+			client.client.Transport = imageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": []string{tc.mime}}, Body: body}, nil
+			})
+			stream, err := client.GetImage(context.Background(), "kb1-key")
+			if stream != nil || err == nil || domain.StatusCode(err) != 502 || !body.closed {
+				t.Fatalf("stream=%v err=%v closed=%v", stream, err, body.closed)
+			}
+			if strings.Contains(err.Error(), "private-bucket-secret") {
+				t.Fatalf("private error leaked: %v", err)
+			}
+		})
 	}
-	if err == nil || !strings.Contains(err.Error(), "image not found") {
-		t.Fatalf("expected upstream JSON error, got %v", err)
+}
+
+func TestGetImage_SuccessBodyOwnership(t *testing.T) {
+	body := &imageTrackingBody{Reader: strings.NewReader("\x89PNG\r\n\x1a\nraw")}
+	client := NewRemoteMultiragEngine("http://example.invalid", "test-key", time.Second, time.Hour)
+	client.client.Transport = imageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: body}, nil
+	})
+	stream, err := client.GetImage(context.Background(), "kb1-key")
+	if err != nil || body.closed {
+		t.Fatalf("err=%v closed=%v", err, body.closed)
+	}
+	if err := stream.Body.Close(); err != nil || !body.closed {
+		t.Fatalf("close=%v closed=%v", err, body.closed)
+	}
+}
+
+func TestGetImage_ContextCancellation(t *testing.T) {
+	for _, afterHeaders := range []bool{false, true} {
+		t.Run(fmt.Sprint(afterHeaders), func(t *testing.T) {
+			started := make(chan struct{})
+			canceled := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if afterHeaders {
+					w.Header().Set("Content-Type", "image/png")
+					_, _ = io.WriteString(w, "\x89PNG\r\n\x1a\n")
+					w.(http.Flusher).Flush()
+				}
+				close(started)
+				<-r.Context().Done()
+				close(canceled)
+			}))
+			defer server.Close()
+			client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				stream, err := client.GetImage(ctx, "kb1-key")
+				if stream != nil {
+					stream.Body.Close()
+				}
+				done <- err
+			}()
+			<-started
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("err=%v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("client did not cancel")
+			}
+			select {
+			case <-canceled:
+			case <-time.After(time.Second):
+				t.Fatal("upstream did not cancel")
+			}
+		})
 	}
 }
 
 func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/retrieval" {
-			t.Errorf("path = %q, want /api/v1/retrieval", r.URL.Path)
+		if r.URL.Path != "/api/v1/datasets/kb-1/search" {
+			t.Errorf("path = %q, want /api/v1/datasets/kb-1/search", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 0,
@@ -808,5 +981,136 @@ func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
 	second, _ := chunks[1].(map[string]any)
 	if second["document_name"] != "共识.docx" || second["document_id"] != "doc-2" {
 		t.Errorf("chunk2 mapping failed: %#v", second)
+	}
+}
+
+type imageFailingReader struct{}
+
+func (imageFailingReader) Read([]byte) (int, error) { return 0, errors.New("private-bucket-secret") }
+
+func TestGetImage_SanitizesRequestTransportAndReadFailures(t *testing.T) {
+	for _, mode := range []string{"request", "transport", "body", "truncated"} {
+		t.Run(mode, func(t *testing.T) {
+			client := NewRemoteMultiragEngine("http://example.invalid", "test-key", time.Second, time.Hour)
+			body := &imageTrackingBody{Reader: imageFailingReader{}}
+			if mode == "request" {
+				client.baseURL = "http://private-bucket-secret%"
+			}
+			client.client.Transport = imageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				if mode == "transport" {
+					return nil, errors.New("private-bucket-secret")
+				}
+				if mode == "truncated" {
+					body.Reader = strings.NewReader("\x89PNG\r\n\x1a\n")
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, ContentLength: 100, Body: body}, nil
+			})
+			stream, err := client.GetImage(context.Background(), "kb1-key")
+			if stream != nil || err == nil || strings.Contains(err.Error(), "private-bucket-secret") {
+				t.Fatalf("stream=%v err=%v", stream, err)
+			}
+			if (mode == "body" || mode == "truncated") && !body.closed {
+				t.Fatal("failed response body left open")
+			}
+		})
+	}
+}
+
+func TestKnowledgeMutationsMatchPinnedMultiRAGRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path string
+		call               func(*RemoteMultiragEngine) error
+	}{
+		{"document", "PATCH", "/api/v1/datasets/kb1/documents/doc1", func(c *RemoteMultiragEngine) error {
+			_, err := c.UpdateDocument(context.Background(), "kb1", "doc1", domain.DocumentUpdateRequest{"name": "renamed.pdf"})
+			return err
+		}},
+		{"chunk", "PATCH", "/api/v1/datasets/kb1/documents/doc1/chunks/c1", func(c *RemoteMultiragEngine) error {
+			_, err := c.UpdateChunk(context.Background(), "kb1", "doc1", "c1", domain.ChunkMutationRequest{"content": "fixed", "tag_kwd": []string{"tag"}})
+			return err
+		}},
+		{"switch", "PATCH", "/api/v1/datasets/kb1/documents/doc1/chunks", func(c *RemoteMultiragEngine) error {
+			return c.SwitchChunks(context.Background(), "kb1", "doc1", []string{"c1"}, false)
+		}},
+		{"parse", "POST", "/api/v1/datasets/kb1/documents/parse", func(c *RemoteMultiragEngine) error {
+			return c.ParseDocuments(context.Background(), "kb1", []string{"doc1"})
+		}},
+		{"stop", "POST", "/api/v1/datasets/kb1/documents/stop", func(c *RemoteMultiragEngine) error {
+			return c.StopParsingDocuments(context.Background(), "kb1", []string{"doc1"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.name == "document" && r.Method == "GET" {
+					if r.URL.Path != "/api/v1/datasets/kb1/documents" || r.URL.Query().Get("id") != "doc1" || r.URL.Query().Get("page_size") != "1" {
+						t.Errorf("wrong readback %s", r.URL.String())
+					}
+					_, _ = io.WriteString(w, `{"code":0,"data":{"total":1,"docs":[{"id":"doc1","dataset_id":"kb1","name":"renamed.pdf"}]}}`)
+					return
+				}
+				if (r.Method != tc.method && !(tc.name == "chunk" && r.Method == "GET")) || r.URL.Path != tc.path || r.Header.Get("Authorization") != "Bearer test-key" {
+					t.Errorf("wrong request %s %s", r.Method, r.URL.Path)
+				}
+				if tc.name == "chunk" && r.Method == "GET" {
+					_, _ = io.WriteString(w, `{"code":0,"data":{"content_with_weight":"fixed","doc_id":"doc1"}}`)
+				} else if tc.name == "parse" || tc.name == "stop" {
+					_, _ = io.WriteString(w, `{"code":0,"data":{"success_count":1}}`)
+				} else {
+					_, _ = io.WriteString(w, `{"code":0,"data":null}`)
+				}
+			}))
+			defer server.Close()
+			if err := tc.call(NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDocumentParsingRejectsPartialBusinessSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0,"data":{"success_count":0,"errors":["private backend details"]}}`)
+	}))
+	defer server.Close()
+	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+	for _, call := range []func() error{func() error { return client.ParseDocuments(context.Background(), "kb1", []string{"doc1"}) }, func() error { return client.StopParsingDocuments(context.Background(), "kb1", []string{"doc1"}) }} {
+		err := call()
+		if err == nil || strings.Contains(err.Error(), "private backend details") {
+			t.Fatalf("err=%v", err)
+		}
+	}
+}
+
+func TestCreateDatasetConfigurationFailureKeepsDurableID(t *testing.T) {
+	for _, fail := range []string{"update", "readback", "mismatch"} {
+		t.Run(fail, func(t *testing.T) {
+			creates := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case "POST":
+					creates++
+					_, _ = io.WriteString(w, `{"code":0,"data":{"id":"kb1","name":"physical"}}`)
+				case "PUT":
+					if fail == "update" {
+						_, _ = io.WriteString(w, `{"code":109,"message":"private-storage-path"}`)
+					} else {
+						_, _ = io.WriteString(w, `{"code":0,"data":null}`)
+					}
+				case "GET":
+					if fail == "readback" {
+						w.WriteHeader(500)
+					} else {
+						_, _ = io.WriteString(w, `{"code":0,"data":[{"id":"kb1","name":"physical","parser_config":{}}]}`)
+					}
+				}
+			}))
+			defer server.Close()
+			client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
+			_, err := client.CreateDataset(context.Background(), domain.DatasetMutationRequest{"name": "Display name"})
+			var pending *domain.DatasetConfigurationError
+			if !errors.As(err, &pending) || (*pending.Dataset)["id"] != "kb1" || creates != 1 || strings.Contains(err.Error(), "private-storage-path") {
+				t.Fatalf("err=%v creates=%d", err, creates)
+			}
+		})
 	}
 }

@@ -1,12 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import i18next from '@/i18n'
 import { message } from 'antd'
-import { parseApiError } from '@/api/client'
+import apiClient, { getAccessToken, parseApiError, unwrapResponse } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import type { UserInfoResponse } from '@/api/auth'
+import type { ApiResponse } from '@/types/api'
+import { ownedRequestConfig } from '@/api/requestOwnership'
 import {
   knowledgeApi,
   type DatasetFormInput,
+  type KnowledgeWriteOwner,
   type DatasetListParams,
+  type DatasetListResult,
+  type KnowledgeDataset,
   type DocumentListParams,
+  type DocumentFilterParams,
+  type DocumentIngestInput,
   type ChunkListParams,
   type ChunkFormInput,
   type RetrievalInput
@@ -33,11 +43,54 @@ export const knowledgeKeys = {
 // Datasets
 // ---------------------------------------------------------------------------
 
-export function useKnowledgeList(params: DatasetListParams = {}) {
-  return useQuery({
-    queryKey: knowledgeKeys.datasetList(params),
-    queryFn: () => knowledgeApi.datasets.list(params)
-  })
+export interface KnowledgeListOrigin { id: string; token: string | null; role?: string }
+// Private weak metadata binds the displayed object to its verified request.
+// Credentials are never placed in JSON, query keys or persisted query data.
+const datasetListOrigins = new WeakMap<DatasetListResult, KnowledgeListOrigin>();
+const datasetDetailOrigins = new WeakMap<KnowledgeDataset, KnowledgeListOrigin>();
+async function verifyKnowledgeIdentity(signal: AbortSignal) {
+  const id = useAuthStore.getState().user?.id;
+  let token = getAccessToken();
+  const current = () => Boolean(id && !signal.aborted && useAuthStore.getState().user?.id === id);
+  const owner: KnowledgeWriteOwner = {
+    signal,
+    isCurrent: () => current() && getAccessToken() === token,
+    assertCurrent: (refresh) => {
+      if (refresh && current()) token = getAccessToken();
+      if (!current() || getAccessToken() !== token) throw new Error(i18next.t('knowledge.list.deleteOwnerChanged'));
+    },
+  };
+  owner.assertCurrent();
+  const response = await apiClient.get<ApiResponse<UserInfoResponse>>('/auth/userinfo', ownedRequestConfig(owner));
+  owner.assertCurrent();
+  const identity = unwrapResponse<UserInfoResponse>(response);
+  if ((identity.user_id ?? identity.id) !== id) throw new Error(i18next.t('knowledge.list.deleteOwnerChanged'));
+  const roles = identity.roles ?? [];
+  return { owner, getOrigin: (): KnowledgeListOrigin => ({ id: id ?? '', token, role: roles.includes('guest') ? 'guest' : roles[0] }) };
+}
+export async function readOwnedKnowledgeList(params: DatasetListParams, signal: AbortSignal) {
+  const { owner, getOrigin } = await verifyKnowledgeIdentity(signal);
+  const result = await knowledgeApi.datasets.list(params, owner);
+  datasetListOrigins.set(result, getOrigin());
+  return result;
+}
+
+export async function readOwnedKnowledgeDetail(id: string, signal: AbortSignal) {
+  const { owner, getOrigin } = await verifyKnowledgeIdentity(signal);
+  const result = await knowledgeApi.datasets.get(id, owner);
+  datasetDetailOrigins.set(result, getOrigin());
+  return result;
+}
+
+export function useKnowledgeList(params: DatasetListParams = {}, options: { owned?: boolean } = {}) {
+  const accountId = useAuthStore((state) => state.user?.id);
+  const query = useQuery({
+    queryKey: options.owned ? [...knowledgeKeys.datasetList(params), 'owned', accountId] : knowledgeKeys.datasetList(params),
+    queryFn: ({ signal }) => options.owned ? readOwnedKnowledgeList(params, signal) : knowledgeApi.datasets.list(params),
+    enabled: !options.owned || Boolean(accountId),
+    structuralSharing: options.owned ? false : undefined,
+  });
+  return { ...query, origin: query.data ? datasetListOrigins.get(query.data) : undefined };
 }
 
 const KNOWLEDGE_LIST_ALL_PAGE_SIZE = 1000
@@ -77,39 +130,51 @@ export function useKnowledgeListAll() {
   })
 }
 
-export function useKnowledgeDetail(id: string) {
-  return useQuery({
-    queryKey: knowledgeKeys.datasetDetail(id),
-    queryFn: () => knowledgeApi.datasets.get(id),
-    enabled: !!id
-  })
+export function useKnowledgeDetail(id: string, options: { owned?: boolean } = {}) {
+  const accountId = useAuthStore((state) => state.user?.id);
+  const query = useQuery({
+    queryKey: options.owned ? [...knowledgeKeys.datasetDetail(id), 'owned', accountId] : knowledgeKeys.datasetDetail(id),
+    queryFn: ({ signal }) => options.owned ? readOwnedKnowledgeDetail(id, signal) : knowledgeApi.datasets.get(id),
+    enabled: !!id && (!options.owned || Boolean(accountId)),
+    structuralSharing: options.owned ? false : undefined,
+  });
+  return { ...query, origin: query.data ? datasetDetailOrigins.get(query.data) : undefined };
 }
 
-export function useCreateKnowledge() {
+export function useCreateKnowledge(options: { getOwner?: () => KnowledgeWriteOwner | undefined } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: DatasetFormInput) => knowledgeApi.datasets.create(input),
-    onSuccess: () => {
+    onMutate: () => options.getOwner?.(),
+    mutationFn: (input: DatasetFormInput) => knowledgeApi.datasets.create(input, options.getOwner?.()),
+    onSuccess: (_saved, _variables, owner) => {
+      if (owner && !owner.isCurrent()) return;
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       message.success(t('knowledge.toast.created'))
     },
-    onError: (err) => message.error(parseApiError(err))
+    onError: (err, _variables, owner) => {
+      if (owner && !owner.isCurrent()) return;
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      message.error(parseApiError(err))
+    }
   })
 }
 
-export function useUpdateKnowledge() {
+export function useUpdateKnowledge(options: { getOwner?: () => KnowledgeWriteOwner | undefined } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
+    onMutate: () => options.getOwner?.(),
     mutationFn: ({ id, data }: { id: string; data: DatasetFormInput }) =>
-      knowledgeApi.datasets.update(id, data),
-    onSuccess: (_res, variables) => {
+      knowledgeApi.datasets.update(id, data, options.getOwner?.()),
+    onSuccess: (saved, variables, owner) => {
+      if (owner && !owner.isCurrent()) return;
+      qc.setQueryData(knowledgeKeys.datasetDetail(variables.id), saved)
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasetDetail(variables.id) })
       message.success(t('knowledge.toast.updated'))
     },
-    onError: (err) => message.error(parseApiError(err))
+    onError: (err, _variables, owner) => { if (!owner || owner.isCurrent()) message.error(parseApiError(err)) }
   })
 }
 
@@ -126,6 +191,71 @@ export function useDeleteKnowledge() {
   })
 }
 
+// Deleted IDs produce a business error in MR's filtered GET. Only a complete,
+// unfiltered, consistent directory can independently prove absence.
+export async function readKnowledgeDirectory(owner?: KnowledgeWriteOwner) {
+  const pageSize = 100;
+  const maxPages = 200;
+  const ids = new Set<string>();
+  let total: number | undefined;
+  for (let page = 1; page <= maxPages; page++) {
+    const result = await knowledgeApi.datasets.list({ page, page_size: pageSize }, owner);
+    total ??= result.total;
+    if (result.total !== total || total > maxPages * pageSize || result.datasets.length !== Math.min(pageSize, total - (page - 1) * pageSize)) throw new Error(i18next.t('knowledge.list.deleteReadback'));
+    for (const dataset of result.datasets) {
+      if (!dataset.id || ids.has(dataset.id)) throw new Error(i18next.t('knowledge.list.deleteReadback'));
+      ids.add(dataset.id);
+    }
+    if (ids.size === total) return ids;
+  }
+  throw new Error(i18next.t('knowledge.list.deleteReadback'));
+}
+
+// Delete only explicitly selected IDs. Business errors stay failures even when
+// another selected deletion succeeds; unreadable directories confirm nothing.
+export async function deleteKnowledgeSelection(ids: string[], owner?: KnowledgeWriteOwner) {
+  if (!ids.length || ids.some((id) => !id.trim())) throw new Error('Empty dataset selection');
+  const candidates: string[] = [];
+  const deletedIds: string[] = [];
+  const failed: { id: string; error: unknown }[] = [];
+  for (const id of new Set(ids)) {
+    owner?.assertCurrent();
+    try {
+      await knowledgeApi.datasets.remove([id], owner);
+      candidates.push(id);
+    } catch (error) {
+      owner?.assertCurrent();
+      failed.push({ id, error });
+    }
+  }
+  if (candidates.length) {
+    try {
+      const directory = await readKnowledgeDirectory(owner);
+      for (const id of candidates) {
+        if (directory.has(id)) failed.push({ id, error: new Error(i18next.t('knowledge.list.deleteReadback')) });
+        else deletedIds.push(id);
+      }
+    } catch (error) {
+      owner?.assertCurrent();
+      failed.push(...candidates.map((id) => ({ id, error })));
+    }
+  }
+  return { deletedIds, failed };
+}
+
+export function useDeleteKnowledgeSelection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, owner }: { ids: string[]; owner: KnowledgeWriteOwner }) => deleteKnowledgeSelection(ids, owner),
+    onSuccess: async (result, { owner }) => {
+      if (!owner.isCurrent()) return;
+      await qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() });
+      if (owner.isCurrent() && !result.failed.length) message.success(t('knowledge.toast.deleted'));
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -135,6 +265,14 @@ export function useDocuments(datasetId: string, params: DocumentListParams = {})
     queryKey: knowledgeKeys.documentList(datasetId, params),
     queryFn: () => knowledgeApi.documents.list(datasetId, params),
     enabled: !!datasetId
+  })
+}
+
+export function useDocumentFilters(datasetId: string, params: DocumentFilterParams = {}) {
+  return useQuery({
+    queryKey: [...knowledgeKeys.documents(datasetId), 'filters', params],
+    queryFn: () => knowledgeApi.documents.filters(datasetId, params),
+    enabled: !!datasetId,
   })
 }
 
@@ -193,6 +331,20 @@ export function useParseDocuments(datasetId: string) {
   })
 }
 
+export function useIngestDocuments(datasetId: string) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: DocumentIngestInput) => knowledgeApi.documents.ingest(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: [...knowledgeKeys.all, 'chunks', datasetId] })
+      message.success(t('knowledge.manage.ingestAccepted'))
+    },
+  })
+}
+
 export function useStopParsingDocuments(datasetId: string) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -218,7 +370,7 @@ export function useChunks(datasetId: string, documentId: string, params: ChunkLi
   })
 }
 
-export function useCreateChunk(datasetId: string, documentId: string) {
+export function useCreateChunk(datasetId: string, documentId: string, opts: { notify?: boolean } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
@@ -226,13 +378,13 @@ export function useCreateChunk(datasetId: string, documentId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success(t('knowledge.toast.chunkAdded'))
+      if (opts.notify !== false) message.success(t('knowledge.toast.chunkAdded'))
     },
-    onError: (err) => message.error(parseApiError(err))
+    onError: (err) => { if (opts.notify !== false) message.error(parseApiError(err)) }
   })
 }
 
-export function useUpdateChunk(datasetId: string, documentId: string) {
+export function useUpdateChunk(datasetId: string, documentId: string, opts: { notify?: boolean } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
@@ -240,9 +392,9 @@ export function useUpdateChunk(datasetId: string, documentId: string) {
       knowledgeApi.chunks.update(datasetId, documentId, chunkId, input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.chunks(datasetId, documentId) })
-      message.success(t('knowledge.toast.chunkSaved'))
+      if (opts.notify !== false) message.success(t('knowledge.toast.chunkSaved'))
     },
-    onError: (err) => message.error(parseApiError(err))
+    onError: (err) => { if (opts.notify !== false) message.error(parseApiError(err)) }
   })
 }
 

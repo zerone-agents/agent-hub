@@ -1,14 +1,19 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Spin, Popconfirm, message } from 'antd'
+import { Spin, Popconfirm, message, Dropdown } from 'antd'
 import NameSearch from '@/components/NameSearch'
-import { PlusIcon, PencilSimpleIcon, TrashIcon, ClockIcon, PlugIcon, SquaresFourIcon } from '@phosphor-icons/react'
+import { PlusIcon, PencilSimpleIcon, TrashIcon, ClockIcon, PlugIcon, SquaresFourIcon, ArrowsClockwiseIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import { useProviders, useDeleteProvider, useProbeProvider } from '@/queries/useProviders'
 import { useCanWrite } from '@/hooks/useCanWrite'
-import type { Provider } from '@/api/providers'
+import type { CatalogModel, Provider } from '@/api/providers'
 import type { ApiEnvelope } from '@/api/client'
+import { multiragKeys } from '@/queries/useMultirag'
+import { useQueryClient } from '@tanstack/react-query'
+import { getAccessToken } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import type { RequestOwner } from '@/api/requestOwnership'
 import { formatTime } from '@/utils/time'
 import { tokens as tk } from '@/styles/tokens'
 import EntityCard from '@/components/EntityCard'
@@ -16,6 +21,7 @@ import CardGrid from '@/components/CardGrid'
 import ProviderForm from './ProviderForm'
 import AnthropicBrand from '@lobehub/icons/es/Anthropic'
 import OpenAIBrand from '@lobehub/icons/es/OpenAI'
+import { getParserSyncModels, syncParserModel, ParserModelSyncError } from './parserModelSync'
 
 const useStyles = createStyles(({ css }) => ({
   page: css`
@@ -174,6 +180,14 @@ export default function ProviderListPage() {
   const { styles } = useStyles()
   const { data: providers = [], isLoading } = useProviders()
   const canWrite = useCanWrite()
+  const queryClient = useQueryClient()
+  const syncController = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      if (next.user?.id !== previous.user?.id || next.user?.role !== previous.user?.role) syncController.current?.abort()
+    })
+    return () => { unsubscribe(); syncController.current?.abort() }
+  }, [])
 
   const deleteProvider = useDeleteProvider()
   const probeProvider = useProbeProvider()
@@ -181,6 +195,7 @@ export default function ProviderListPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null)
   const [probingId, setProbingId] = useState<number | null>(null)
+  const [syncingId, setSyncingId] = useState<number | null>(null)
 
   // 搜索
   const [keywords, setKeywords] = useState('')
@@ -234,9 +249,37 @@ export default function ProviderListPage() {
     }
   }
 
+  const handleParserSync = async (provider: Provider, model: CatalogModel) => {
+    const accountId = useAuthStore.getState().user?.id
+    const token = getAccessToken()
+    const controller = new AbortController()
+    syncController.current = controller
+    const owner: RequestOwner = {
+      signal: controller.signal,
+      isCurrent: () => !controller.signal.aborted && useAuthStore.getState().user?.id === accountId && getAccessToken() === token,
+      assertCurrent: () => { if (!owner.isCurrent()) throw new Error(t('knowledge.form.ownerChanged')) },
+    }
+    setSyncingId(provider.id)
+    try {
+      await syncParserModel(provider, model, owner)
+      owner.assertCurrent()
+      await queryClient.invalidateQueries({ queryKey: multiragKeys.models(model.modelType === 'vlm' ? 'image2text' : 'ocr') })
+      owner.assertCurrent()
+      message.success(t('providers.parserSyncSuccess'))
+    } catch (error) {
+      if (owner.isCurrent()) {
+        const key = error instanceof ParserModelSyncError ? ({ 'needs-config': 'ocrNeedsConfig', 'invalid-model': 'parserSyncInvalid', 'verify-failed': 'parserSyncFailed', 'sync-failed': 'parserSyncFailed', 'readback-failed': 'ocrSyncUnconfirmed', 'owner-changed': 'parserSyncFailed' } as const)[error.code] : 'parserSyncFailed'
+        message.error(t(`providers.${key}`))
+      }
+    } finally {
+      if (syncController.current === controller) { syncController.current = null; setSyncingId(null) }
+    }
+  }
+
   const renderProviderCard = (provider: Provider) => {
     const visibleModels = provider.defaultModels.slice(0, 4)
     const remaining = provider.defaultModels.length - visibleModels.length
+    const parserModels = getParserSyncModels(provider)
     return (
       <EntityCard
         key={provider.id}
@@ -303,6 +346,9 @@ export default function ProviderListPage() {
         bodyExtra={
           <div className={styles.providerMeta}>
             <div className={styles.baseUrl}>{provider.baseUrl || '—'}</div>
+            {(provider.protocol === 'mineru' || provider.protocol === 'paddleocr') && !provider.baseUrl.trim() && (
+              <div>{t('providers.ocrNeedsConfig')}</div>
+            )}
             <div className={styles.modelStats}>
               {t('providers.modelFieldCount', { models: provider.defaultModels.length, fields: provider.fields.length })}
             </div>
@@ -338,6 +384,22 @@ export default function ProviderListPage() {
               >
                 {probingId === provider.id ? <Spin size="small" /> : <PlugIcon size={14} />}
               </button>
+              {parserModels.length > 0 && (
+                <Dropdown trigger={['click']} menu={{ items: [
+                  { key: 'hint', disabled: true, label: t('providers.parserSyncCost'), style: { whiteSpace: 'normal', maxWidth: 300 } },
+                  ...parserModels.map((model, index) => ({ key: String(index), label: t('providers.parserSyncModel', { name: model.modelId, type: model.modelType === 'vlm' ? t('providers.parserVision') : 'OCR' }), style: { whiteSpace: 'normal' as const, maxWidth: 300, overflowWrap: 'anywhere' as const } })),
+                ], onClick: ({ key }) => { const model = parserModels.find((_, index) => String(index) === key); if (model) void handleParserSync(provider, model) } }}>
+                  <button
+                    type="button"
+                    className={styles.actBtn}
+                    title={t('providers.parserVerifyAndSync')}
+                    aria-label={t('providers.parserVerifyAndSync')}
+                    disabled={((provider.protocol === 'mineru' || provider.protocol === 'paddleocr') && !provider.baseUrl.trim()) || syncingId !== null}
+                  >
+                    {syncingId === provider.id ? <Spin size="small" /> : <ArrowsClockwiseIcon size={14} />}
+                  </button>
+                </Dropdown>
+              )}
               <button
                 type="button"
                 className={styles.actBtn}

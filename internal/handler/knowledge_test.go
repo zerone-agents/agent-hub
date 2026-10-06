@@ -5,17 +5,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/tenant"
+	remoteknowledge "control-panel/internal/infrastructure/knowledge"
 	"control-panel/pkg/database"
 
 	"github.com/gin-gonic/gin"
@@ -346,13 +351,13 @@ func TestKnowledgeHandler_ListDocumentsBindsAdvancedFilters(t *testing.T) {
 	})
 
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/documents?page=2&page_size=20&suffix=pdf&suffix=docx&run=1&run=4&create_time_from=11&create_time_to=22&metadata_condition=author", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/documents?page=2&page_size=20&suffix=pdf&suffix=docx&run=1&run=4&create_time_from=11&create_time_to=22&metadata_condition=%7B%7D", nil)
 	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
-	if gotReq.Page != 2 || gotReq.PageSize != 20 || gotReq.CreateTimeFrom != 11 || gotReq.CreateTimeTo != 22 || gotReq.MetadataCondition != "author" {
+	if gotReq.Page != 2 || gotReq.PageSize != 20 || gotReq.CreateTimeFrom != 11 || gotReq.CreateTimeTo != 22 || gotReq.MetadataCondition != "{}" {
 		t.Fatalf("query binding failed: %#v", gotReq)
 	}
 	if len(gotReq.Suffix) != 2 || gotReq.Suffix[0] != "pdf" || gotReq.Suffix[1] != "docx" {
@@ -399,8 +404,8 @@ func TestKnowledgeHandler_DownloadDocumentStreamsGatewayResponse(t *testing.T) {
 func TestKnowledgeHandler_GetImageStreamsGatewayResponse(t *testing.T) {
 	router := setupKnowledgeRouter(&handlerFakeKnowledgeEngine{
 		imageFunc: func(ctx context.Context, imageID string) (*knowledge.StreamResult, error) {
-			if imageID != "img1" {
-				t.Fatalf("imageID = %q, want img1", imageID)
+			if imageID != "kb1-key-with-hyphens" {
+				t.Fatalf("imageID = %q, want kb1-key-with-hyphens", imageID)
 			}
 			return &knowledge.StreamResult{
 				Body:          io.NopCloser(strings.NewReader("jpeg")),
@@ -411,7 +416,7 @@ func TestKnowledgeHandler_GetImageStreamsGatewayResponse(t *testing.T) {
 	})
 
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/images/img1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/images/kb1-key-with-hyphens", nil)
 	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
@@ -425,12 +430,12 @@ func TestKnowledgeHandler_GetImageStreamsGatewayResponse(t *testing.T) {
 func TestKnowledgeHandler_GetImageMapsUpstreamError(t *testing.T) {
 	router := setupKnowledgeRouter(&handlerFakeKnowledgeEngine{
 		imageFunc: func(ctx context.Context, imageID string) (*knowledge.StreamResult, error) {
-			return nil, knowledge.NewUpstreamError("multirag image response is not an image", errors.New("image not found"))
+			return nil, knowledge.NewUpstreamError("知识库图片响应格式无效", nil)
 		},
 	})
 
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/images/img1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/images/kb1-key-with-hyphens", nil)
 	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusBadGateway {
@@ -439,8 +444,8 @@ func TestKnowledgeHandler_GetImageMapsUpstreamError(t *testing.T) {
 	if resp.Header().Get("Content-Type") == "image/jpeg" {
 		t.Fatalf("unexpected image content type for upstream error")
 	}
-	if !strings.Contains(resp.Body.String(), "not an image") || !strings.Contains(resp.Body.String(), "image not found") {
-		t.Fatalf("response does not include upstream error: %s", resp.Body.String())
+	if !strings.Contains(resp.Body.String(), "知识库图片响应格式无效") {
+		t.Fatalf("response does not include safe upstream error: %s", resp.Body.String())
 	}
 }
 
@@ -511,4 +516,108 @@ func TestKnowledgeHandler_DeleteDatasets_InUseConflict(t *testing.T) {
 	require.Equal(t, []string{"pharmaceutical"}, payload.Data.Datasets[0].Agents)
 	require.True(t, payload.Data.Datasets[0].Foreign)
 	require.Zero(t, engineCalls)
+}
+
+// This exercises real HTTP listeners with the production engine and gateway;
+// the upstream remains a controlled fixture, not a live MultiRAG/storage proof.
+func TestKnowledgeHandler_GetImageRemoteGateway(t *testing.T) {
+	var pngData, jpegData bytes.Buffer
+	require.NoError(t, png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	require.NoError(t, jpeg.Encode(&jpegData, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil))
+	for _, tc := range []struct {
+		name, dataset, mime string
+		status              int
+		data                []byte
+		calls               int64
+		want                int
+	}{
+		{"PNG", "kb1", "image/png", 200, pngData.Bytes(), 1, 200},
+		{"JPEG", "kb1", "image/jpeg", 200, jpegData.Bytes(), 1, 200},
+		{"wrong dataset", "kb2", "image/png", 200, pngData.Bytes(), 0, 400},
+		{"new JSON error", "kb1", "application/json", 200, []byte(`{"code":109,"message":"private-bucket-secret","data":null}`), 1, 502},
+		{"legacy JSON error", "kb1", "application/json", 200, []byte(`{"retcode":102,"retmsg":"private-bucket-secret"}`), 1, 502},
+		{"HTTP error", "kb1", "application/json", 500, []byte(`{"code":500,"message":"private-bucket-secret"}`), 1, 502},
+		{"unknown bytes", "kb1", "image/png", 200, []byte("private-bucket-secret"), 1, 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int64
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path != "/api/v1/documents/images/kb1-key-with-hyphens" || r.Header.Get("Authorization") != "Bearer test-key" {
+					t.Errorf("wrong upstream route/auth")
+				}
+				w.Header().Set("Content-Type", tc.mime)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write(tc.data)
+			}))
+			defer upstream.Close()
+			engine := remoteknowledge.NewRemoteMultiragEngine(upstream.URL, "test-key", time.Second, time.Hour)
+			gateway := httptest.NewServer(setupKnowledgeRouter(engine))
+			defer gateway.Close()
+			resp, err := http.Get(gateway.URL + "/api/v1/admin/knowledge/datasets/" + tc.dataset + "/images/kb1-key-with-hyphens")
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, resp.StatusCode)
+			require.Equal(t, tc.calls, calls.Load())
+			require.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
+			require.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
+			if tc.want == 200 {
+				require.Equal(t, tc.mime, resp.Header.Get("Content-Type"))
+				require.Equal(t, tc.data, body)
+				require.Equal(t, int64(len(tc.data)), resp.ContentLength)
+			} else {
+				require.Contains(t, resp.Header.Get("Content-Type"), "application/json")
+				require.NotContains(t, string(body), "private-bucket-secret")
+				var envelope map[string]any
+				require.NoError(t, json.Unmarshal(body, &envelope))
+				require.Equal(t, false, envelope["success"])
+				require.Equal(t, ErrCodeKnowledgeError, envelope["code"])
+			}
+		})
+	}
+}
+
+func TestKnowledgeHandler_GetImagePropagatesCancel(t *testing.T) {
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(canceled)
+	}))
+	defer upstream.Close()
+	engine := remoteknowledge.NewRemoteMultiragEngine(upstream.URL, "test-key", time.Second, time.Hour)
+	gateway := httptest.NewServer(setupKnowledgeRouter(engine))
+	defer gateway.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gateway.URL+"/api/v1/admin/knowledge/datasets/kb1/images/kb1-key", nil)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream not reached")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("gateway client did not cancel")
+	}
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gateway did not cancel upstream")
+	}
 }

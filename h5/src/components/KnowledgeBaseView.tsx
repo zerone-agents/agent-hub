@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from "react";
 import {
   Search,
   Plus,
@@ -13,67 +13,90 @@ import {
   Code,
   FileCode,
   ChevronRight,
-} from 'lucide-react';
-import { KnowledgeDocument, KnowledgeFolder, DocumentType } from '../types';
-import { KnowledgeBaseModal } from './KnowledgeBaseModal';
+} from "lucide-react";
+import { KnowledgeDocument, KnowledgeFolder, DocumentType } from "../types";
+import {
+  KnowledgeBaseModal,
+  type KnowledgeFolderFormInput,
+} from "./KnowledgeBaseModal";
+import type { MobileChunk } from "../api/knowledge";
+import { KnowledgeRetrieval } from "./KnowledgeRetrieval";
+import "./KnowledgeMobile.css";
 
 interface KnowledgeBaseViewProps {
+  loading?: boolean;
+  error?: string;
+  onRefresh: () => Promise<void>;
   documents: KnowledgeDocument[];
   folders: KnowledgeFolder[];
   /** 写权限（新建/上传/编辑/删除）：后端 /api/v1/admin/** 需 maintainer+，
    *  体验用户（guest）与 member 只读，不显示任何写操作入口 */
   canWrite?: boolean;
   onOpenUpload: (defaultFolderId?: string) => void;
-  onOpenDocDetail: (doc: KnowledgeDocument) => void;
+  onOpenDocDetail: (doc: KnowledgeDocument, chunk?: MobileChunk) => void;
   onOpenDocEdit: (doc: KnowledgeDocument) => void;
-  onDeleteDoc: (id: string) => void;
-  onCreateFolder: (folderData: {
-    name: string;
-    description: string;
-    parseMethod: string;
-    category: 'mine' | 'team';
-  }) => void;
+  onDeleteDoc: (id: string) => Promise<void>;
+  onCreateFolder: (
+    folderData: KnowledgeFolderFormInput,
+  ) => Promise<KnowledgeFolder>;
   onUpdateFolder: (
     folderId: string,
-    data: { name: string; description: string; parseMethod: string; category: 'mine' | 'team' }
-  ) => void;
-  onDeleteFolder: (folderId: string) => void;
+    data: {
+      name: string;
+      description: string;
+      parseMethod: string;
+      category: "mine" | "team";
+    },
+  ) => Promise<void>;
+  onDeleteFolder: (folderId: string) => Promise<void>;
 }
 
 export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
   documents,
+  loading,
+  error,
+  onRefresh,
   folders,
   canWrite = true,
   onOpenUpload,
   onOpenDocDetail,
-  onDeleteDoc,
   onCreateFolder,
   onUpdateFolder,
   onDeleteFolder,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [actionError, setActionError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const perform = async (action: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await action();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "操作失败，请重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [fabOpen, setFabOpen] = useState(false);
+  const [folderTab, setFolderTab] = useState<"documents" | "retrieval">(
+    "documents",
+  );
 
   // Folder create / edit modal
   const [folderModalState, setFolderModalState] = useState<{
     isOpen: boolean;
-    mode: 'create' | 'edit';
+    mode: "create" | "edit";
     folder: KnowledgeFolder | null;
   }>({
     isOpen: false,
-    mode: 'create',
+    mode: "create",
     folder: null,
   });
 
-  // Calculate live doc count for each folder
-  const foldersWithCounts = useMemo(() => {
-    return folders.map((f) => {
-      const docsInFolder = documents.filter((d) => d.folderId === f.id);
-      const docCount = docsInFolder.length > 0 ? docsInFolder.length : f.docCount || 0;
-      return { ...f, docCount };
-    });
-  }, [folders, documents]);
+  const foldersWithCounts = folders;
 
   // Filtered folders by search（首页只展示知识库文件夹）
   const filteredFolders = useMemo(() => {
@@ -97,13 +120,15 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
 
   const renderFileIcon = (type: DocumentType) => {
     switch (type) {
-      case 'xlsx':
-        return <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0" />;
-      case 'html':
+      case "xlsx":
+        return (
+          <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0" />
+        );
+      case "html":
         return <Code className="w-5 h-5 text-blue-600 shrink-0" />;
-      case 'pdf':
+      case "pdf":
         return <FileText className="w-5 h-5 text-rose-600 shrink-0" />;
-      case 'md':
+      case "md":
         return <FileCode className="w-5 h-5 text-amber-600 shrink-0" />;
       default:
         return <FileText className="w-5 h-5 text-neutral-600 shrink-0" />;
@@ -111,10 +136,24 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
   };
 
   const openCreateFolder = () =>
-    setFolderModalState({ isOpen: true, mode: 'create', folder: null });
+    setFolderModalState({ isOpen: true, mode: "create", folder: null });
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#F8F9FA] overflow-hidden relative">
+    <div className="knowledge-mobile flex-1 flex flex-col h-full knowledge-background overflow-hidden relative text-gray-900">
+      <div className="shrink-0 px-4 py-2 text-xs bg-white border-b border-gray-100">
+        <button
+          disabled={busy || loading}
+          onClick={() => void perform(onRefresh)}
+          className="text-emerald-700 disabled:opacity-40"
+        >
+          {loading ? "加载中…" : "刷新知识库"}
+        </button>
+        {(error || actionError) && (
+          <p role="alert" className="mt-2 text-red-700">
+            {actionError || error}
+          </p>
+        )}
+      </div>
       {/* CASE 1: INSIDE A FOLDER (文件夹内详情视图) */}
       {currentFolder ? (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
@@ -140,7 +179,11 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
             {canWrite && (
               <button
                 onClick={() =>
-                  setFolderModalState({ isOpen: true, mode: 'edit', folder: currentFolder })
+                  setFolderModalState({
+                    isOpen: true,
+                    mode: "edit",
+                    folder: currentFolder,
+                  })
                 }
                 className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer transition-colors shrink-0"
                 title="编辑知识库"
@@ -150,63 +193,113 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
             )}
           </div>
 
-          {/* Files inside this folder */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-2.5 pb-24">
-            {currentFolderDocs.length === 0 ? (
-              <div className="h-64 flex flex-col items-center justify-center text-center p-6 border border-dashed border-gray-200 rounded-2xl bg-gray-50/70 mt-2">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
-                  <FileText className="w-6 h-6" />
-                </div>
-                <div className="text-xs font-bold text-gray-800">暂无文件</div>
-                {canWrite && <div className="text-[11px] text-gray-400 mt-1">点右下角 + 上传文件</div>}
-              </div>
-            ) : (
-              currentFolderDocs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="p-3 bg-white rounded-2xl border border-gray-200/90 hover:border-gray-300 shadow-2xs transition-all flex items-center justify-between gap-3 group"
-                >
-                  <div
-                    onClick={() => onOpenDocDetail(doc)}
-                    className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center shrink-0">
-                      {renderFileIcon(doc.type)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">
-                        {doc.name}
-                      </div>
-                      <div className="text-[10px] text-gray-400 flex items-center gap-2 mt-0.5">
-                        <span className="font-medium text-gray-500">{doc.size}</span>
-                        <span>•</span>
-                        <span>{doc.updatedAt}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {canWrite && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => onDeleteDoc(doc.id)}
-                        className="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 cursor-pointer transition-colors"
-                        title="删除文件"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))
+          <div className="px-4 pt-3 flex gap-2 text-sm">
+            <button
+              onClick={() => setFolderTab("documents")}
+              aria-pressed={folderTab === "documents"}
+              className={`flex-1 rounded-xl border border-gray-200 ${folderTab === "documents" ? "bg-neutral-900 text-white" : ""}`}
+            >
+              资料
+            </button>
+            {canWrite && (
+              <button
+                onClick={() => setFolderTab("retrieval")}
+                aria-pressed={folderTab === "retrieval"}
+                className={`flex-1 rounded-xl border border-gray-200 ${folderTab === "retrieval" ? "bg-neutral-900 text-white" : ""}`}
+              >
+                检索验证
+              </button>
             )}
           </div>
+          {!canWrite && (
+            <p className="px-4 pt-2 text-xs text-gray-500">
+              当前角色可核对原文与切片；检索验证需维护者权限。
+            </p>
+          )}
+          {folderTab === "retrieval" && canWrite ? (
+            <div className="flex-1 overflow-y-auto p-4 pb-24">
+              <KnowledgeRetrieval
+                key={currentFolder.id}
+                datasetId={currentFolder.id}
+                documents={currentFolderDocs}
+                onOpenDocument={onOpenDocDetail}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Files inside this folder */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 pb-24">
+                {loading && !currentFolderDocs.length ? (
+                  <p role="status">正在加载资料…</p>
+                ) : error && !currentFolderDocs.length ? (
+                  <p>资料加载失败，请点击上方刷新重试。</p>
+                ) : currentFolderDocs.length === 0 ? (
+                  <div className="h-64 flex flex-col items-center justify-center text-center p-6 border border-dashed border-gray-200 rounded-2xl bg-gray-50/70 mt-2">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div className="text-xs font-bold text-gray-800">
+                      暂无文件
+                    </div>
+                    {canWrite && (
+                      <div className="text-[11px] text-gray-400 mt-1">
+                        点右下角 + 上传文件
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  currentFolderDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="p-3 bg-white rounded-2xl border border-gray-200/90 hover:border-gray-300 shadow-2xs transition-all flex items-center justify-between gap-3 group"
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`查看文档 ${doc.name}`}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onOpenDocDetail(doc);
+                          }
+                        }}
+                        onClick={() => onOpenDocDetail(doc)}
+                        className="flex items-center gap-3 min-w-0 min-h-11 flex-1 cursor-pointer"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center shrink-0">
+                          {renderFileIcon(doc.type)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">
+                            {doc.name}
+                          </div>
+                          <div className="text-[10px] text-gray-400 flex items-center gap-2 mt-0.5">
+                            <span className="font-medium text-gray-500">
+                              {doc.size}
+                            </span>
+                            <span>•</span>
+                            <span>{doc.updatedAt}</span>
+                          </div>
+                          <div className="text-[10px] text-gray-500 mt-1">
+                            {doc.summary}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </div>
       ) : (
         /* CASE 2: ROOT KNOWLEDGE BASE VIEW (知识库首页 - 只列文件夹) */
-        <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#F8F9FA]">
+        <div className="flex-1 flex flex-col h-full overflow-hidden knowledge-background">
           {/* Top Bar: title only */}
           <div className="px-4 py-3 bg-white border-b border-gray-100 shrink-0 shadow-2xs">
-            <h1 className="text-base font-bold text-gray-900 tracking-tight">知识库</h1>
+            <h1 className="text-base font-bold text-gray-900 tracking-tight">
+              知识库
+            </h1>
           </div>
 
           {/* Search Bar */}
@@ -233,16 +326,40 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
               </span>
             </div>
 
-            {filteredFolders.length === 0 ? (
+            {loading && !folders.length ? (
+              <p role="status">正在加载知识库…</p>
+            ) : error && !folders.length ? (
+              <p>知识库加载失败，请点击上方刷新重试。</p>
+            ) : filteredFolders.length === 0 ? (
               <div className="p-6 text-center bg-white rounded-2xl border border-gray-200/80 text-gray-400 text-xs">
-                {canWrite ? '暂无知识库，点右下角 + 新建' : '暂无知识库'}
+                {searchQuery.trim()
+                  ? "没有匹配的知识库，请调整搜索词"
+                  : canWrite
+                    ? "暂无知识库，点右下角 + 新建"
+                    : "暂无知识库"}
               </div>
             ) : (
               <div className="space-y-2">
                 {filteredFolders.map((folder) => (
                   <div
                     key={folder.id}
-                    onClick={() => setSelectedFolderId(folder.id)}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`打开知识库 ${folder.name}`}
+                    onKeyDown={(event) => {
+                      if (
+                        event.target === event.currentTarget &&
+                        (event.key === "Enter" || event.key === " ")
+                      ) {
+                        event.preventDefault();
+                        setFolderTab("documents");
+                        setSelectedFolderId(folder.id);
+                      }
+                    }}
+                    onClick={() => {
+                      setFolderTab("documents");
+                      setSelectedFolderId(folder.id);
+                    }}
                     className="p-3 bg-white hover:bg-emerald-50/30 rounded-2xl border border-gray-200/90 hover:border-emerald-200 shadow-2xs transition-all flex items-center justify-between gap-3 cursor-pointer group active:scale-[0.99]"
                   >
                     {/* Left Folder Icon */}
@@ -267,7 +384,11 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setFolderModalState({ isOpen: true, mode: 'edit', folder });
+                              setFolderModalState({
+                                isOpen: true,
+                                mode: "edit",
+                                folder,
+                              });
                             }}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
                             title="编辑知识库"
@@ -275,10 +396,15 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            disabled={busy}
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm(`确定要删除知识库「${folder.name}」吗？`)) {
-                                onDeleteFolder(folder.id);
+                              if (
+                                confirm(
+                                  `确定要删除知识库「${folder.name}」吗？`,
+                                )
+                              ) {
+                                void perform(() => onDeleteFolder(folder.id));
                               }
                             }}
                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
@@ -322,8 +448,12 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                   <FolderPlus className="w-4.5 h-4.5" />
                 </div>
                 <div className="text-left">
-                  <div className="text-xs font-bold text-gray-900">新建知识库</div>
-                  <div className="text-[10px] text-gray-400 mt-0.5">创建一个新的知识库文件夹</div>
+                  <div className="text-xs font-bold text-gray-900">
+                    新建知识库
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    创建一个新的知识库文件夹
+                  </div>
                 </div>
               </button>
             )}
@@ -342,7 +472,7 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
                 <div className="text-[10px] text-gray-400 mt-0.5">
                   {currentFolder
                     ? `上传到「${currentFolder.name}」`
-                    : '默认根目录，上传时可改选知识库'}
+                    : "默认根目录，上传时可改选知识库"}
                 </div>
               </div>
             </button>
@@ -356,11 +486,11 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
           onClick={() => setFabOpen((v) => !v)}
           className={`absolute bottom-6 right-4 z-50 w-13 h-13 rounded-full shadow-lg flex items-center justify-center cursor-pointer transition-all active:scale-90 ${
             fabOpen
-              ? 'bg-white text-gray-700 border border-gray-200 rotate-45'
-              : 'bg-neutral-900 hover:bg-neutral-800 text-white'
+              ? "bg-white text-gray-700 border border-gray-200 rotate-45"
+              : "bg-neutral-900 hover:bg-neutral-800 text-white"
           }`}
           style={{ width: 52, height: 52 }}
-          title={fabOpen ? '收起' : '新建 / 上传'}
+          title={fabOpen ? "收起" : "新建 / 上传"}
         >
           <Plus className="w-6 h-6 stroke-[2.2]" />
         </button>
@@ -371,13 +501,18 @@ export const KnowledgeBaseView: React.FC<KnowledgeBaseViewProps> = ({
         isOpen={folderModalState.isOpen}
         mode={folderModalState.mode}
         folder={folderModalState.folder}
-        onClose={() => setFolderModalState({ isOpen: false, mode: 'create', folder: null })}
-        onSubmit={(data) => {
-          if (folderModalState.mode === 'create') {
-            onCreateFolder(data);
+        onClose={() =>
+          setFolderModalState({ isOpen: false, mode: "create", folder: null })
+        }
+        onSubmit={async (data) => {
+          if (folderModalState.mode === "create") {
+            const folder = await onCreateFolder(data);
+            setSelectedFolderId(folder.id);
+            setFolderTab("documents");
+            onOpenUpload(folder.id);
           } else if (folderModalState.folder) {
-            onUpdateFolder(folderModalState.folder.id, data);
-          }
+            await onUpdateFolder(folderModalState.folder.id, data);
+          } else throw new Error("请选择知识库");
         }}
       />
     </div>

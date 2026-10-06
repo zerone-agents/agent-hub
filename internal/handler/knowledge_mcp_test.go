@@ -33,7 +33,7 @@ func (f *fakeKnowledgeMcpService) Retrieval(ctx context.Context, req knowledge.R
 	if f.retrievalFunc != nil {
 		return f.retrievalFunc(ctx, req)
 	}
-	return &knowledge.RetrievalResult{}, nil
+	return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 }
 
 func (f *fakeKnowledgeMcpService) GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error) {
@@ -181,8 +181,8 @@ func TestKnowledgeMcpHandler_ToolsList(t *testing.T) {
 		t.Fatalf("result is not an object: %v", resp.Result)
 	}
 	tools, ok := result["tools"].([]interface{})
-	if !ok || len(tools) != 4 {
-		t.Fatalf("expected 4 tools, got %v", result["tools"])
+	if !ok || len(tools) != 5 {
+		t.Fatalf("expected 5 tools, got %v", result["tools"])
 	}
 	tool, ok := tools[0].(map[string]interface{})
 	if !ok {
@@ -364,7 +364,7 @@ func TestKnowledgeMcpHandler_ToolsCall_PerAgentCapabilityAuthorization(t *testin
 		knowledgeSvc := &fakeKnowledgeMcpService{
 			retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
 				gotDatasetIDs, _ = req["dataset_ids"].([]string)
-				return &knowledge.RetrievalResult{}, nil
+				return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 			},
 		}
 		rec := postJSONRPCWithCapability(t, newRouter(knowledgeSvc, bindings), "tools/call",
@@ -388,7 +388,7 @@ func TestKnowledgeMcpHandler_ToolsCall_PerAgentCapabilityAuthorization(t *testin
 		knowledgeSvc := &fakeKnowledgeMcpService{
 			retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
 				gotDatasetIDs, _ = req["dataset_ids"].([]string)
-				return &knowledge.RetrievalResult{}, nil
+				return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 			},
 		}
 		rec := postJSONRPCWithCapability(t, newRouter(knowledgeSvc, bindings), "tools/call",
@@ -554,6 +554,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Success(t *testing.T) {
 			result := knowledge.RetrievalResult{
 				"chunks": []interface{}{
 					map[string]interface{}{
+						"id": "chunk-1", "kb_id": "allowed-dataset", "document_id": "doc-1",
 						"document_name": "doc1",
 						"similarity":    0.95,
 						"content":       "relevant content",
@@ -683,7 +684,7 @@ func TestKnowledgeMcpHandler_ToolsCall_LegacyQuestionArg(t *testing.T) {
 	knowledgeSvc := &fakeKnowledgeMcpService{
 		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
 			gotReq = req
-			return &knowledge.RetrievalResult{}, nil
+			return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 		},
 	}
 	router := setupKnowledgeMcpRouter(
@@ -733,7 +734,7 @@ func TestKnowledgeMcpHandler_ToolsCall_Defaults(t *testing.T) {
 	knowledgeSvc := &fakeKnowledgeMcpService{
 		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
 			gotReq = req
-			return &knowledge.RetrievalResult{}, nil
+			return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 		},
 	}
 	router := setupKnowledgeMcpRouter(
@@ -746,8 +747,8 @@ func TestKnowledgeMcpHandler_ToolsCall_Defaults(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if topK, _ := gotReq["top_k"].(int); topK != 8 {
-		t.Fatalf("top_k = %v, want 8", gotReq["top_k"])
+	if topK, _ := gotReq["top_k"].(int); topK != 64 {
+		t.Fatalf("top_k = %v, want 64", gotReq["top_k"])
 	}
 	if st, _ := gotReq["similarity_threshold"].(float64); st != 0.2 {
 		t.Fatalf("similarity_threshold = %v, want 0.2", gotReq["similarity_threshold"])
@@ -898,8 +899,8 @@ func TestKnowledgeMcpHandler_ToolsCall_Datasets_DegradeOnErrorOrNil(t *testing.T
 		t.Fatalf("datasets len = %d, want 2", len(payload.Datasets))
 	}
 	for _, ds := range payload.Datasets {
-		if len(ds) != 1 || ds["id"] == "" {
-			t.Fatalf("expected id-only degrade entries, got %v", payload.Datasets)
+		if len(ds) != 2 || ds["id"] == "" || ds["metadata_available"] != false {
+			t.Fatalf("expected visibly degraded entries, got %v", payload.Datasets)
 		}
 	}
 	if strings.Contains(resultText(resp.Result), "10.0.0.1") {
@@ -1127,9 +1128,9 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_ReadPage(t *testing.T) {
 			return &knowledge.ChunkListResult{
 				Total: 12,
 				Chunks: []knowledge.Chunk{
-					{"id": "ck-1", "content": "第一章内容", "image_id": "internal"},
+					{"id": "ck-1", "content": "第一章内容", "image_id": "internal", "document_id": "doc-1", "dataset_id": "ds-1", "available": true},
 				},
-				Document: knowledge.Document{"name": "使用手册.pdf"},
+				Document: knowledge.Document{"id": "doc-1", "dataset_id": "ds-1", "status": "1", "name": "使用手册.pdf"},
 			}, nil
 		},
 	}
@@ -1154,8 +1155,8 @@ func TestKnowledgeMcpHandler_ToolsCall_Chunks_ReadPage(t *testing.T) {
 	if !strings.Contains(text, `"document_name":"使用手册.pdf"`) {
 		t.Fatalf("missing document_name: %s", text)
 	}
-	if strings.Contains(text, "image_id") {
-		t.Fatalf("whitelist violated: %s", text)
+	if !strings.Contains(text, `"image_id":"internal"`) {
+		t.Fatalf("image reference missing: %s", text)
 	}
 }
 
@@ -1323,13 +1324,12 @@ func TestFormatRetrievalResult_SourceAttribution(t *testing.T) {
 	}
 }
 
-// issue #119 验收项：不传 dataset_ids 时，请求补全为当前身份的全部绑定
-// 数据集（顺序保持 service 返回序）。
+// 不传 dataset_ids 时仍覆盖所有绑定库，但按库独立请求，不依赖尚未验收的多库结果合同。
 func TestKnowledgeMcpHandler_ToolsCall_SearchDefaultCompletionUsesAllBoundDatasets(t *testing.T) {
-	var gotDatasetIDs any
+	var gotDatasetIDs [][]string
 	svc := &fakeKnowledgeMcpService{
 		retrievalFunc: func(ctx context.Context, req knowledge.RetrievalRequest) (*knowledge.RetrievalResult, error) {
-			gotDatasetIDs = map[string]any(req)["dataset_ids"]
+			gotDatasetIDs = append(gotDatasetIDs, req["dataset_ids"].([]string))
 			return &knowledge.RetrievalResult{"chunks": []any{}}, nil
 		},
 	}
@@ -1340,9 +1340,8 @@ func TestKnowledgeMcpHandler_ToolsCall_SearchDefaultCompletionUsesAllBoundDatase
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	ids, ok := gotDatasetIDs.([]string)
-	if !ok || len(ids) != 2 || ids[0] != "kb-1" || ids[1] != "kb-2" {
-		t.Fatalf("dataset_ids = %#v, want [kb-1 kb-2]", gotDatasetIDs)
+	if len(gotDatasetIDs) != 2 || len(gotDatasetIDs[0]) != 1 || gotDatasetIDs[0][0] != "kb-1" || len(gotDatasetIDs[1]) != 1 || gotDatasetIDs[1][0] != "kb-2" {
+		t.Fatalf("dataset_ids = %#v, want [[kb-1] [kb-2]]", gotDatasetIDs)
 	}
 }
 
