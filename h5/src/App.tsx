@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ActiveTab, Agent, ChatMessage, KnowledgeDocument, KnowledgeFolder, ScenarioPrompt } from './types';
 import {
   INITIAL_AGENTS,
-  INITIAL_DOCUMENTS,
-  INITIAL_FOLDERS,
 } from './data/mockData';
 import { MobileFrame } from './components/MobileFrame';
 import { BottomNav } from './components/BottomNav';
@@ -11,6 +9,7 @@ import { HomeChatView } from './components/HomeChatView';
 import { AgentsView } from './components/AgentsView';
 import { AgentDetailModal } from './components/AgentDetailModal';
 import { KnowledgeBaseView } from './components/KnowledgeBaseView';
+import type { KnowledgeFolderFormInput } from './components/KnowledgeBaseModal';
 import { DocumentModal } from './components/DocumentModal';
 import { UploadDocumentModal } from './components/UploadDocumentModal';
 import { ProfileView } from './components/ProfileView';
@@ -20,7 +19,12 @@ import {
   updateDataset,
   deleteDatasets,
   listDocuments,
-  uploadDocuments,
+  completeUpload,
+  ingestDocuments,
+  stopParsingDocuments,
+  KnowledgeConfigurationPendingError,
+  type UploadResume,
+  type MobileChunk,
   renameDocument,
   deleteDocuments,
 } from './api/knowledge';
@@ -87,27 +91,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Documents state with localStorage fallback
-  const [documents, setDocuments] = useState<KnowledgeDocument[]>(() => {
-    try {
-      const saved = localStorage.getItem('workbuddy_docs');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_DOCUMENTS;
-  });
-
-  // Folders state with localStorage fallback
-  const [folders, setFolders] = useState<KnowledgeFolder[]>(() => {
-    try {
-      const saved = localStorage.getItem('workbuddy_folders');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_FOLDERS;
-  });
+  // 知识库只显示当前身份的后端结果，不从跨账号缓存或示例数据恢复。
+  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [folders, setFolders] = useState<KnowledgeFolder[]>([]);
+  const [knowledgeRevision, setKnowledgeRevision] = useState(0);
 
   // Agents state —— 从 agent-hub 对客公开接口（/api/v1/agents?view=chat）拉取。
   // 真实后端整组要求 JWT：401 时绝不显示本地兜底假数据，而是引导登录；
@@ -226,28 +213,12 @@ export default function App() {
     isOpen: boolean;
     mode: 'view' | 'edit' | 'upload';
     doc: KnowledgeDocument | null;
+    chunk?: MobileChunk;
   }>({
     isOpen: false,
     mode: 'view',
     doc: null,
   });
-
-  // Persist documents, folders & messages
-  useEffect(() => {
-    try {
-      localStorage.setItem('workbuddy_docs', JSON.stringify(documents));
-    } catch {
-      // ignore
-    }
-  }, [documents]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('workbuddy_folders', JSON.stringify(folders));
-    } catch {
-      // ignore
-    }
-  }, [folders]);
 
   useEffect(() => {
     try {
@@ -257,117 +228,89 @@ export default function App() {
     }
   }, [messages]);
 
-  // ── 知识库：从 agent-hub 接口加载（失败则保留本地 mock 数据兜底）──
-  const [kbOnline, setKbOnline] = useState(false);
+  const [parsingAcceptedAt, setParsingAcceptedAt] = useState(0);
+  const [knowledgeError, setKnowledgeError] = useState('');
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const refreshKnowledge = async () => {
+    const token = getStoredAuth()?.token;
+    const remoteFolders = await listDatasets();
+    const groups = await Promise.all(remoteFolders.map(f => listDocuments(f.id, f.name)));
+    if (token !== getStoredAuth()?.token) throw new Error('登录身份已变化，请重新加载知识库');
+    setFolders(remoteFolders); setDocuments(groups.flat()); setKnowledgeError('');
+  };
+  useEffect(() => {
+    const changed = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== 'zerone_auth') return;
+      setAuthRole(getStoredAuth()?.role);
+      setKnowledgeRevision(value => value + 1);
+      setDocuments([]); setFolders([]);
+      setUploadModalState({ isOpen: false });
+      setDocModalState({ isOpen: false, mode: 'view', doc: null });
+    };
+    window.addEventListener(AUTH_CHANGED_EVENT, changed);
+    window.addEventListener('storage', changed);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, changed);
+      window.removeEventListener('storage', changed);
+    };
+  }, []);
   useEffect(() => {
     let cancelled = false;
+    setDocuments([]); setFolders([]); setKnowledgeError(''); setKnowledgeLoading(false);
+    setUploadModalState({ isOpen: false });
+    setDocModalState({ isOpen: false, mode: 'view', doc: null });
+    if (!getStoredAuth() || authRole === 'guest') return;
+    setKnowledgeLoading(true);
+    const token = getStoredAuth()?.token;
     (async () => {
       try {
         const remoteFolders = await listDatasets();
-        const docsGroups = await Promise.all(
-          remoteFolders.map((f) => listDocuments(f.id, f.name).catch(() => [] as KnowledgeDocument[]))
-        );
-        if (cancelled) return;
-        setFolders(remoteFolders);
-        setDocuments(docsGroups.flat());
-        setKbOnline(true);
+        const groups = await Promise.all(remoteFolders.map(f => listDocuments(f.id, f.name)));
+        if (cancelled || token !== getStoredAuth()?.token) return;
+        setFolders(remoteFolders); setDocuments(groups.flat());
       } catch (err) {
-        console.warn('[知识库] agent-hub 接口不可达，使用本地数据兜底：', err);
-      }
+        if (!cancelled) setKnowledgeError(err instanceof Error ? err.message : '知识库加载失败');
+      } finally { if (!cancelled) setKnowledgeLoading(false); }
     })();
-    return () => {
-      cancelled = true;
-    };
-    // authRole 变化（登录/退出/token 注入）后重拉，保证数据跟随身份
-  }, [authRole]);
+    return () => { cancelled = true; };
+  }, [authRole, knowledgeRevision]);
+  useEffect(() => {
+    if (activeTab !== 'knowledge' || (!documents.some(doc => doc.run === '1') && Date.now() - parsingAcceptedAt >= 60000)) return;
+    const timer = window.setTimeout(() => {
+      refreshKnowledge().catch(err => setKnowledgeError(err instanceof Error ? err.message : '状态刷新失败'));
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, documents, parsingAcceptedAt]);
 
-  // 新建文件夹（知识库）：只收集名称+描述，解析配置走接口默认项（naive/bge-large-zh/DeepDOC/512）
-  const handleCreateFolder = async (data: {
-    name: string;
-    description: string;
-    parseMethod: string;
-    category: 'mine' | 'team';
-  }) => {
+  const handleCreateFolder = async (data: KnowledgeFolderFormInput) => {
     try {
-      const folder = await createDataset(data.name, data.description);
-      setFolders((prev) => [folder, ...prev]);
-      return;
+      const folder = await createDataset(data.name, data.description, data.existingId, data.configuration);
+      setFolders(prev => [folder, ...prev.filter(f => f.id !== folder.id)]);
+      return folder;
     } catch (err) {
-      console.warn('[知识库] 新建知识库接口失败，本地兜底：', err);
+      if (err instanceof KnowledgeConfigurationPendingError) {
+        setFolders(prev => [err.folder, ...prev.filter(f => f.id !== err.folder.id)]);
+      }
+      throw err;
     }
-    const newFolder: KnowledgeFolder = {
-      id: 'folder-' + Date.now(),
-      name: data.name,
-      description: data.description,
-      parseMethod: data.parseMethod,
-      category: data.category,
-      docCount: 0,
-      chunkCount: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: '刚刚',
-    };
-    setFolders((prev) => [newFolder, ...prev]);
   };
-
-  const handleUpdateFolder = async (
-    folderId: string,
-    data: { name: string; description: string; parseMethod: string; category: 'mine' | 'team' }
-  ) => {
-    try {
-      await updateDataset(folderId, { name: data.name, description: data.description });
-    } catch (err) {
-      console.warn('[知识库] 更新知识库接口失败，本地兜底：', err);
-    }
-    setFolders((prev) =>
-      prev.map((f) =>
-        f.id === folderId
-          ? {
-              ...f,
-              ...data,
-              updatedAt: '刚刚',
-            }
-          : f
-      )
-    );
-    // Also update any documents in this folder with the new folderName
-    setDocuments((prev) =>
-      prev.map((d) => (d.folderId === folderId ? { ...d, folderName: data.name } : d))
-    );
+  const handleUpdateFolder = async (folderId: string, data: { name: string; description: string; parseMethod: string; category: 'mine' | 'team' }) => {
+    const folder = await updateDataset(folderId, { name: data.name, description: data.description });
+    setFolders(prev => prev.map(f => f.id === folderId ? folder : f));
+    setDocuments(prev => prev.map(doc => doc.folderId === folderId ? { ...doc, folderName: folder.name } : doc));
   };
-
   const handleDeleteFolder = async (folderId: string) => {
-    try {
-      await deleteDatasets([folderId]);
-    } catch (err) {
-      console.warn('[知识库] 删除知识库接口失败，本地兜底：', err);
-    }
-    setFolders((prev) => prev.filter((f) => f.id !== folderId));
-    setDocuments((prev) => prev.filter((doc) => doc.folderId !== folderId));
+    await deleteDatasets([folderId]);
+    setFolders(prev => prev.filter(f => f.id !== folderId));
+    setDocuments(prev => prev.filter(doc => doc.folderId !== folderId));
   };
-
-  // 上传文件：走 agent-hub  multipart 接口（字段名 files），autoParse 默认开启由后端解析
-  const handleUploadFiles = async (files: File[], folderId: string, _autoParse: boolean) => {
-    const folder = folders.find((f) => f.id === folderId);
-    if (!folder) return;
-    try {
-      const created = await uploadDocuments(folderId, folder.name, files);
-      setDocuments((prev) => [...created, ...prev]);
-      setFolders((prev) =>
-        prev.map((f) =>
-          f.id === folderId
-            ? {
-                ...f,
-                docCount: (f.docCount || 0) + created.length,
-                chunkCount: (f.chunkCount || 0) + created.length * 48,
-                updatedAt: '刚刚',
-              }
-            : f
-        )
-      );
-    } catch (err) {
-      console.error('[知识库] 上传失败：', err);
-      alert(`上传失败：${err instanceof Error ? err.message : '未知错误'}`);
-    }
+  const handleUploadFiles = async (files: File[], folderId: string, autoParse: boolean, resume?: UploadResume) => {
+    const folder = folders.find(f => f.id === folderId);
+    if (!folder) throw new Error('请选择已有知识库');
+    await completeUpload(folderId, folder.name, files, autoParse, created => {
+      const ids = new Set(created.map(doc => doc.id));
+      setDocuments(prev => [...created, ...prev.filter(doc => !ids.has(doc.id))]);
+    }, refreshKnowledge, resume);
   };
 
   // 聊天会话 id 缓存：key = agent 的 hub name（即 agent.id），value = 会话 id
@@ -491,55 +434,30 @@ export default function App() {
     }
   };
 
-  // Document CRUD
+  // 文档编辑只提交已有文档的名称；内容修改需通过切片页面。
   const handleSaveDocument = async (docData: Partial<KnowledgeDocument>) => {
-    if (docData.id) {
-      // update（重命名走 agent-hub 文档更新接口）
-      const existing = documents.find((d) => d.id === docData.id);
-      if (existing?.folderId && docData.name && docData.name !== existing.name) {
-        try {
-          await renameDocument(existing.folderId, docData.id, docData.name);
-        } catch (err) {
-          console.warn('[知识库] 重命名文档接口失败，本地兜底：', err);
-        }
-      }
-      setDocuments((prev) =>
-        prev.map((d) => (d.id === docData.id ? ({ ...d, ...docData } as KnowledgeDocument) : d))
-      );
-    } else {
-      // create
-      const newDoc: KnowledgeDocument = {
-        id: 'doc-' + Date.now(),
-        name: docData.name || '未命名资料.docx',
-        type: docData.type || 'docx',
-        category: docData.category || 'mine',
-        size: docData.size || '16.5 KB',
-        updatedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        content: docData.content || '',
-        summary: docData.summary || docData.content?.slice(0, 80),
-        tags: docData.tags || ['新上传'],
-      };
-      setDocuments((prev) => [newDoc, ...prev]);
-    }
+    const existing = documents.find(doc => doc.id === docData.id);
+    if (!existing?.folderId || !docData.name?.trim()) throw new Error('请选择已有文档');
+    await renameDocument(existing.folderId, existing.id, docData.name.trim());
+    setDocuments(prev => prev.map(doc => doc.id === existing.id ? { ...doc, name: docData.name.trim() } : doc));
+  };
+  const handleDeleteDocument = async (id: string) => {
+    const existing = documents.find(doc => doc.id === id);
+    if (!existing?.folderId) throw new Error('文档不存在，请刷新');
+    await deleteDocuments(existing.folderId, [id]);
+    setDocuments(prev => prev.filter(doc => doc.id !== id));
+    // 数量由后端回读；刷新失败保留删除结果并展示错误。
+    try { await refreshKnowledge(); }
+    catch (err) { setKnowledgeError(err instanceof Error ? err.message : '知识库状态刷新失败'); }
   };
 
-  const handleDeleteDocument = async (id: string) => {
-    const existing = documents.find((d) => d.id === id);
-    if (existing?.folderId) {
-      try {
-        await deleteDocuments(existing.folderId, [id]);
-        setFolders((prev) =>
-          prev.map((f) =>
-            f.id === existing.folderId
-              ? { ...f, docCount: Math.max(0, (f.docCount || 1) - 1), updatedAt: '刚刚' }
-              : f
-          )
-        );
-      } catch (err) {
-        console.warn('[知识库] 删除文档接口失败，本地兜底：', err);
-      }
-    }
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
+  const handleDocumentParsing = async (id: string, stop: boolean, options = { delete: false, apply_kb: false }) => {
+    const existing = documents.find(doc => doc.id === id);
+    if (!existing?.folderId) throw new Error('文档不存在，请刷新');
+    if (stop) await stopParsingDocuments(existing.folderId, [id]);
+    else { await ingestDocuments([id], options); setParsingAcceptedAt(Date.now()); }
+    try { await refreshKnowledge(); }
+    catch (err) { setKnowledgeError(err instanceof Error ? err.message : '状态刷新失败'); }
   };
 
   // 未登录判定：本地无登录态（authRole 为空）或接口 401（token 过期，agentsNeedLogin）。
@@ -557,6 +475,7 @@ export default function App() {
             onSsoLogin={goLogin}
             onAuthSuccess={(a) => {
               setAuthRole(a.role);
+              setKnowledgeRevision(value => value + 1);
               // 体验用户（guest）登录后自动跳聊天页
               if (a.role === 'guest') setActiveTab('chat');
             }}
@@ -589,6 +508,10 @@ export default function App() {
 
         {activeTab === 'knowledge' && showKnowledge && (
           <KnowledgeBaseView
+            key={`${authRole}-${knowledgeRevision}`}
+            loading={knowledgeLoading}
+            error={knowledgeError}
+            onRefresh={async () => { setKnowledgeLoading(true); try { await refreshKnowledge(); } finally { setKnowledgeLoading(false); } }}
             documents={documents}
             folders={folders}
             canWrite={canWriteKnowledge}
@@ -598,11 +521,12 @@ export default function App() {
                 targetFolderId: folderId || null,
               })
             }
-            onOpenDocDetail={(doc) =>
+            onOpenDocDetail={(doc, chunk) =>
               setDocModalState({
                 isOpen: true,
                 mode: 'view',
                 doc,
+                chunk,
               })
             }
             onOpenDocEdit={(doc) =>
@@ -623,10 +547,11 @@ export default function App() {
           <ProfileView
             onAuthSuccess={(a) => {
               setAuthRole(a.role);
+              setKnowledgeRevision(value => value + 1);
               // 体验用户（guest）登录/注册后自动跳转聊天体验页
               if (a.role === 'guest') setActiveTab('chat');
             }}
-            onLogout={() => setAuthRole(undefined)}
+            onLogout={() => { setAuthRole(undefined); setKnowledgeRevision(value => value + 1); }}
           />
         )}
         </>
@@ -657,8 +582,9 @@ export default function App() {
         {/* Document Modal (View, Edit) */}
         <DocumentModal
           mode={docModalState.mode}
-          document={docModalState.doc}
+          document={documents.find(doc => doc.id === docModalState.doc?.id) ?? docModalState.doc}
           folders={folders}
+          initialChunk={docModalState.chunk}
           isOpen={docModalState.isOpen}
           onClose={() =>
             setDocModalState({
@@ -667,6 +593,10 @@ export default function App() {
               doc: null,
             })
           }
+          canWrite={canWriteKnowledge}
+          onRefresh={refreshKnowledge}
+          onParse={(id, options) => handleDocumentParsing(id, false, options)}
+          onStop={id => handleDocumentParsing(id, true)}
           onSave={handleSaveDocument}
           onDelete={handleDeleteDocument}
         />

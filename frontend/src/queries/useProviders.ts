@@ -1,3 +1,4 @@
+import type { KnowledgeWriteOwner } from '@/api/knowledge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { providerApi, type Provider, type ProbeConfig, type AttrRules, type CatalogModel } from '@/api/providers'
@@ -76,10 +77,11 @@ export function useProbeConfig() {
   })
 }
 
-export function useSyncProviderMultiRAG() {
+export function useSyncProviderMultiRAG(options: { getOwner?: () => KnowledgeWriteOwner | undefined } = {}) {
   return useMutation({
+    onMutate: () => options.getOwner?.(),
     mutationFn: ({ id, verifyOnly = false, modelIds }: { id: number; verifyOnly?: boolean; modelIds?: string[] }) =>
-      providerApi.syncMultiRAG(id, { verifyOnly, modelIds }).then((res) => unwrapResponse(res)),
-    onError: (err) => message.error(parseApiError(err)),
+      providerApi.syncMultiRAG(id, { verifyOnly, modelIds }, options.getOwner?.()).then((res) => unwrapResponse(res)),
+    onError: (err, _variables, owner) => { if (!owner || owner.isCurrent()) message.error(parseApiError(err)) },
   })
 }

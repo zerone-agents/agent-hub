@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import dayjs from 'dayjs'
+import i18next from './index'
 import {
   LANGUAGE_STORAGE_KEY,
   readStoredLanguage,
@@ -35,3 +36,17 @@ describe('i18n 初始化与语言切换', () => {
     expect(dayjs.locale()).toBe('zh-cn')
   })
 })
+
+
+describe('knowledge workflow resources', () => {
+  it.each(['zh', 'en'])('provides durable save and upload recovery instructions in %s', (lng) => {
+    const t = i18next.getFixedT(lng);
+    for (const key of ['pipeline', 'advanced', 'hint', 'missing', 'allAccepted', 'upload_unknown', 'verifyUpload']) {
+      const path = `knowledge.documentWorkflow.${key}`;
+      expect(i18next.exists(path, { lng })).toBe(true);
+      expect(t(path)).not.toContain('knowledge.documentWorkflow.');
+    }
+    expect(t('knowledge.documentWorkflow.uploadSummary', { uploaded: 2, total: 3, accepted: 1, failed: 1 })).toContain('2 / 3');
+    expect(t('knowledge.documentWorkflow.uploadSummary', { uploaded: 2, total: 3, accepted: 1, failed: 1 })).not.toContain('{{');
+  });
+});

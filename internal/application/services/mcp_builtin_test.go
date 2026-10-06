@@ -30,7 +30,7 @@ func TestApplyBuiltinMetadataSetsFixedToolsAndSuccessfulStatus(t *testing.T) {
 
 	assert.True(t, changed)
 	assert.Equal(t, "success", existing.ProbeStatus)
-	assert.JSONEq(t, `[{"name":"knowledge_search","description":"检索 Agent 已绑定的知识库，为文档问答提供相关文本片段"},{"name":"knowledge_datasets","description":"列出 Agent 绑定的知识库及实时元数据（文档数、分块数）"},{"name":"knowledge_documents","description":"分页列出知识库内文档（目录），仅返回元数据"},{"name":"knowledge_chunks","description":"按页读取文档分块原文，page/page_size 自控节奏"}]`, existing.ToolsJSON)
+	assert.JSONEq(t, `[{"name":"knowledge_search","description":"检索 Agent 已绑定的知识库，为文档问答提供相关文本片段"},{"name":"knowledge_rerank_models","description":"列出知识库检索可用的重排模型"},{"name":"knowledge_datasets","description":"列出 Agent 绑定的知识库及实时元数据（文档数、分块数）"},{"name":"knowledge_documents","description":"分页列出知识库内文档（目录），仅返回元数据"},{"name":"knowledge_chunks","description":"按页读取文档分块原文，page/page_size 自控节奏"}]`, existing.ToolsJSON)
 	assert.Nil(t, existing.LastProbedAt)
 	assert.Equal(t, "https://custom.example.com/api/v1/knowledge/mcp", existing.URL)
 	assert.Equal(t, "encrypted-custom-headers", existing.Headers)

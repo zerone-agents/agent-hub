@@ -336,7 +336,7 @@ func main() {
 	}
 	mcpHandler := handler.NewMcpHandler(mcpService, auditRecorder)
 
-	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService)
+	knowledgeMcpHandler := handler.NewKnowledgeMcpHandler(knowledgeService, agentService, multiragMyLLMs)
 
 	// ==================== 路由管理 ====================
 
@@ -434,7 +434,7 @@ func main() {
 	// 依赖配置端点完成模型/Agent/SKILL 配置同步（guest 仅可读配置，不可写）。
 	// 正式角色用户 guard 直接放行，行为零变化。
 	// /auth/* 与 /health 挂在根级（白名单内），静态资源 /static 不在本链，均不受影响。
-	v1group := r.Group("/api/v1", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.GuestGuard())
+	v1group := r.Group("/api/v1", handler.KnowledgeImageHeaders, middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.GuestGuard())
 	// 管理写操作 + 敏感读：admin | maintainer（member 只读权限见 spec）
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）

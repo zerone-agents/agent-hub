@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "inject-token": "node scripts/inject-token.mjs"
+    "inject-token": "node scripts/inject-token.mjs",
+    "test:knowledge": "node --test scripts/test-knowledge.mjs",
+    "test:server": "node --test scripts/test-server.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

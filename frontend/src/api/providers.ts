@@ -1,3 +1,4 @@
+import { ownedRequestConfig, type RequestOwner } from './requestOwnership'
 import apiClient from './client'
 
 export interface CatalogModel {
@@ -118,6 +119,13 @@ export const providerApi = {
     apiClient.patch(`/api/v1/admin/providers/${providerId}/models/${selectionId}`, patch),
   deleteModel: (providerId: number, selectionId: string) =>
     apiClient.delete(`/api/v1/admin/providers/${providerId}/models/${selectionId}`),
-  syncMultiRAG: (id: number, body: SyncMultiRAGRequest = {}) =>
-    apiClient.post(`/api/v1/admin/providers/${id}/sync-multirag`, body),
+  syncMultiRAG: (id: number, body: SyncMultiRAGRequest = {}, owner?: RequestOwner) => {
+    owner?.assertCurrent()
+    // MultiRAG probes OCR availability before returning; its probe budget can
+    // exceed the shared 10-second API timeout.
+    return apiClient.post(`/api/v1/admin/providers/${id}/sync-multirag`, body, {
+      timeout: 65000,
+      ...ownedRequestConfig(owner),
+    })
+  },
 }

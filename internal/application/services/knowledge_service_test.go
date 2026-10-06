@@ -162,11 +162,11 @@ func TestKnowledgeService_RetrievalUsesDatasetIDs(t *testing.T) {
 	if _, ok := got["kb_ids"]; ok {
 		t.Fatalf("kb_ids leaked into engine request: %#v", got)
 	}
-	if _, ok := got["doc_ids"]; ok {
-		t.Fatalf("doc_ids leaked into engine request: %#v", got)
+	if _, ok := got["document_ids"]; ok {
+		t.Fatalf("document_ids leaked into engine request: %#v", got)
 	}
-	if got["dataset_ids"] == nil || got["document_ids"] == nil {
-		t.Fatalf("expected dataset_ids/document_ids, got %#v", got)
+	if got["dataset_ids"] == nil || got["doc_ids"] == nil {
+		t.Fatalf("expected dataset_ids/doc_ids, got %#v", got)
 	}
 }
 
@@ -231,13 +231,13 @@ func TestKnowledgeService_GetImageRequiresDatasetAndImageID(t *testing.T) {
 			return &knowledge.StreamResult{Body: io.NopCloser(strings.NewReader("img"))}, nil
 		},
 	}, nil)
-	stream, err := svc.GetImage(context.Background(), " kb1 ", " img1 ")
+	stream, err := svc.GetImage(context.Background(), " kb1 ", " kb1-key-with-hyphens ")
 	if err != nil {
 		t.Fatalf("GetImage failed: %v", err)
 	}
 	defer stream.Body.Close()
-	if gotImageID != "img1" {
-		t.Fatalf("imageID = %q, want img1", gotImageID)
+	if gotImageID != "kb1-key-with-hyphens" {
+		t.Fatalf("imageID = %q, want kb1-key-with-hyphens", gotImageID)
 	}
 }
 
@@ -484,4 +484,24 @@ func TestKnowledgeService_DeleteDatasets_ForeignTenantBlockedWithoutNames(t *tes
 	require.True(t, errors.As(err, &inUse), "want DatasetInUseError, got %v", err)
 	require.Equal(t, []agent.DatasetInUseItem{{ID: "kb-foreign", Foreign: true}}, inUse.Datasets)
 	require.NotContains(t, inUse.Error(), "outsider", "cross-tenant agent names must never leak")
+}
+
+func TestKnowledgeService_GetImageRejectsWrongDatasetWithoutRemoteRead(t *testing.T) {
+	calls := 0
+	svc := NewKnowledgeService(&fakeKnowledgeEngine{imageFunc: func(context.Context, string) (*knowledge.StreamResult, error) {
+		calls++
+		return nil, nil
+	}}, nil)
+	for _, tc := range []struct{ datasetID, imageID string }{
+		{"", "kb1-key"}, {"kb1", ""}, {"kb1", "key"}, {"kb1", "-key"}, {"kb1", "kb1-"},
+		{"kb1", "kb1-  "}, {"kb1", "kb2-key-with-hyphens"}, {"kb1", "kb10-key"}, {"kb1-other", "kb1-other-key"},
+	} {
+		stream, err := svc.GetImage(context.Background(), tc.datasetID, tc.imageID)
+		if stream != nil || err == nil || knowledge.StatusCode(err) != 400 {
+			t.Fatalf("case=%+v stream=%v err=%v", tc, stream, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("remote calls=%d", calls)
+	}
 }

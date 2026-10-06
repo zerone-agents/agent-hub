@@ -146,22 +146,90 @@ func (c *RemoteMultiragEngine) CreateDataset(ctx context.Context, req domain.Dat
 	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets", nil, body, &raw); err != nil {
 		return nil, err
 	}
-	displayName := domain.DatasetMutationDisplayName(req)
-	if id := toString(raw["id"]); id != "" {
-		updateBody := domain.DatasetUpdateToRemote(req)
-		if len(updateBody) > 0 {
-			var updated map[string]any
-			if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(id), nil, updateBody, &updated); err == nil {
-				raw = updated
-			} else if displayName != "" {
-				raw["display_name"] = displayName
+	dataset := domain.NormalizeDataset(raw)
+	id := toString(raw["id"])
+	if id == "" {
+		return nil, domain.NewUpstreamError("创建知识库响应缺少标识", nil)
+	}
+	updateBody := domain.DatasetUpdateToRemote(req)
+	if len(updateBody) > 0 {
+		var updated map[string]any
+		if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(id), nil, updateBody, &updated); err != nil {
+			return nil, &domain.DatasetConfigurationError{Dataset: &dataset}
+		}
+	}
+	persisted, err := c.GetDataset(ctx, id)
+	if err != nil || persisted == nil || !datasetContainsExpected(map[string]any(*persisted), updateBody) {
+		return nil, &domain.DatasetConfigurationError{Dataset: &dataset}
+	}
+	return persisted, nil
+}
+
+// Compare only requested writable fields; physical names intentionally differ
+// from user-facing names and provider references were translated by the service.
+func datasetContainsExpected(raw, expected map[string]any) bool {
+	for key, value := range expected {
+		if key == "name" || key == "display_name" || key == "collection_name" {
+			continue
+		}
+		actualKey := key
+		if key == "chunk_method" {
+			actualKey = "parser_id"
+		}
+		if key == "embedding_model" {
+			actualKey = "embd_id"
+		}
+		if key == "parser_config" {
+			value = domain.DatasetUpdateToRemote(domain.DatasetMutationRequest{"parser_config": value})[key]
+			if config, ok := value.(map[string]any); ok {
+				if parentChild, ok := config["parent_child"].(map[string]any); ok && parentChild["use_parent_child"] == false {
+					// MultiRAG flattens a disabled parent-child mode to an empty object.
+					// Compare against that stored form while keeping all other requested
+					// parser fields in the readback check.
+					normalized := domain.CloneObject(config)
+					normalized["parent_child"] = map[string]any{}
+					value = normalized
+				}
 			}
 		}
-	} else if displayName != "" {
-		raw["display_name"] = displayName
+		if !jsonContains(raw[actualKey], value) {
+			return false
+		}
 	}
-	dataset := domain.NormalizeDataset(raw)
-	return &dataset, nil
+	if name := domain.DatasetMutationDisplayName(domain.DatasetMutationRequest(expected)); name != "" && toString(raw["display_name"]) != name {
+		return false
+	}
+	return true
+}
+
+func jsonContains(actual, expected any) bool {
+	if items, ok := expected.([]any); ok {
+		values, ok := actual.([]any)
+		if !ok || len(items) != len(values) {
+			return false
+		}
+		for i, value := range items {
+			if !jsonContains(values[i], value) {
+				return false
+			}
+		}
+		return true
+	}
+	if fields, ok := expected.(map[string]any); ok {
+		object, ok := actual.(map[string]any)
+		if !ok {
+			return false
+		}
+		for key, value := range fields {
+			if !jsonContains(object[key], value) {
+				return false
+			}
+		}
+		return true
+	}
+	a, _ := json.Marshal(actual)
+	b, _ := json.Marshal(expected)
+	return bytes.Equal(a, b)
 }
 
 func (c *RemoteMultiragEngine) GetDataset(ctx context.Context, id string) (*domain.Dataset, error) {
@@ -181,8 +249,11 @@ func (c *RemoteMultiragEngine) UpdateDataset(ctx context.Context, id string, req
 	if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(id), nil, body, &raw); err != nil {
 		return nil, err
 	}
-	dataset := domain.NormalizeDataset(raw)
-	return &dataset, nil
+	persisted, err := c.GetDataset(ctx, id)
+	if err != nil || persisted == nil || !datasetContainsExpected(map[string]any(*persisted), body) {
+		return nil, domain.NewUpstreamError("配置保存后未确认，请刷新并重试", nil)
+	}
+	return persisted, nil
 }
 
 func (c *RemoteMultiragEngine) DeleteDatasets(ctx context.Context, req domain.DeleteRequest) error {
@@ -191,6 +262,9 @@ func (c *RemoteMultiragEngine) DeleteDatasets(ctx context.Context, req domain.De
 }
 
 func (c *RemoteMultiragEngine) ListDocuments(ctx context.Context, datasetID string, req domain.DocumentListRequest) (*domain.DocumentListResult, error) {
+	if err := domain.ValidateDocumentFilters(req); err != nil {
+		return nil, err
+	}
 	query := url.Values{}
 	addInt(query, "page", req.Page)
 	addInt(query, "page_size", req.PageSize)
@@ -202,6 +276,14 @@ func (c *RemoteMultiragEngine) ListDocuments(ctx context.Context, datasetID stri
 	addInt64(query, "create_time_from", req.CreateTimeFrom)
 	addInt64(query, "create_time_to", req.CreateTimeTo)
 	addString(query, "metadata_condition", req.MetadataCondition)
+	addString(query, "metadata", req.Metadata)
+	addBoolPtr(query, "return_empty_metadata", req.ReturnEmptyMetadata)
+	for _, id := range req.IDs {
+		query.Add("ids", id)
+	}
+	for _, fileType := range req.Types {
+		query.Add("types", fileType)
+	}
 	for _, suffix := range req.Suffix {
 		if suffix != "" {
 			query.Add("suffix", suffix)
@@ -240,13 +322,7 @@ func (c *RemoteMultiragEngine) UploadDocuments(ctx context.Context, datasetID st
 }
 
 func (c *RemoteMultiragEngine) UpdateDocument(ctx context.Context, datasetID string, documentID string, req domain.DocumentUpdateRequest) (*domain.Document, error) {
-	body := domain.DocumentUpdateToRemote(req)
-	var raw map[string]any
-	if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(datasetID)+"/documents/"+url.PathEscape(documentID), nil, body, &raw); err != nil {
-		return nil, err
-	}
-	document := domain.NormalizeDocument(raw)
-	return &document, nil
+	return c.updateDocumentConfirmed(ctx, datasetID, documentID, req)
 }
 
 func (c *RemoteMultiragEngine) DeleteDocuments(ctx context.Context, datasetID string, req domain.DeleteRequest) error {
@@ -255,16 +331,81 @@ func (c *RemoteMultiragEngine) DeleteDocuments(ctx context.Context, datasetID st
 }
 
 func (c *RemoteMultiragEngine) ParseDocuments(ctx context.Context, datasetID string, ids []string) error {
-	_, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/"+url.PathEscape(datasetID)+"/chunks", nil, map[string]any{"document_ids": ids}, nil)
-	return err
+	return c.documentParsingAction(ctx, datasetID, ids, "parse")
 }
 
 func (c *RemoteMultiragEngine) StopParsingDocuments(ctx context.Context, datasetID string, ids []string) error {
-	_, err := c.doJSON(ctx, http.MethodDelete, "/api/v1/datasets/"+url.PathEscape(datasetID)+"/chunks", nil, map[string]any{"document_ids": ids}, nil)
-	return err
+	return c.documentParsingAction(ctx, datasetID, ids, "stop")
+}
+
+func (c *RemoteMultiragEngine) documentParsingAction(ctx context.Context, datasetID string, ids []string, action string) error {
+	var result struct {
+		SuccessCount *int     `json:"success_count"`
+		Errors       []string `json:"errors"`
+	}
+	_, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/"+url.PathEscape(datasetID)+"/documents/"+action, nil, map[string]any{"document_ids": ids}, &result)
+	if err != nil {
+		return err
+	}
+	if result.SuccessCount == nil {
+		return domain.NewUpstreamError("文档操作响应缺少结果", nil)
+	}
+	if len(result.Errors) > 0 || *result.SuccessCount < len(ids) {
+		return domain.NewUpstreamError("部分文档操作未完成，请刷新列表后重试", nil)
+	}
+	return nil
 }
 
 func (c *RemoteMultiragEngine) ListChunks(ctx context.Context, datasetID string, documentID string, req domain.ChunkListRequest) (*domain.ChunkListResult, error) {
+	result, err := c.listChunksPage(ctx, datasetID, documentID, req)
+	var upstreamErr *domain.Error
+	if err == nil || req.ID == "" || ctx.Err() != nil || !errors.As(err, &upstreamErr) || !strings.HasPrefix(upstreamErr.Message, "multirag returned HTTP 500") {
+		return result, err
+	}
+
+	// MultiRAG's exact-ID path can fail while serializing older indexed chunks
+	// (for example string-valued tag_kwd/position_int). Its paginated list path
+	// normalizes those fields. Scan that scoped list only after the exact call
+	// fails, and return a chunk only when its document and dataset identities
+	// match the requested path.
+	const pageSize, maxPages = 100, 100
+	for page := 1; page <= maxPages; page++ {
+		scanReq := req
+		scanReq.ID = ""
+		scanReq.Page = page
+		scanReq.PageSize = pageSize
+		listed, listErr := c.listChunksPage(ctx, datasetID, documentID, scanReq)
+		if listErr != nil || listed == nil || listed.Document == nil {
+			return nil, err
+		}
+		doc := map[string]any(listed.Document)
+		if doc["id"] != documentID || doc["dataset_id"] != datasetID {
+			return nil, err
+		}
+		for _, chunk := range listed.Chunks {
+			item := map[string]any(chunk)
+			if item["id"] != req.ID {
+				continue
+			}
+			if item["document_id"] != documentID {
+				return nil, err
+			}
+			if chunkDatasetID := item["dataset_id"]; chunkDatasetID != nil && chunkDatasetID != datasetID {
+				return nil, err
+			}
+			if req.Available != nil && item["available"] != *req.Available {
+				return nil, err
+			}
+			return &domain.ChunkListResult{Total: 1, Chunks: []domain.Chunk{chunk}, Document: listed.Document}, nil
+		}
+		if len(listed.Chunks) == 0 || page*pageSize >= listed.Total {
+			break
+		}
+	}
+	return nil, err
+}
+
+func (c *RemoteMultiragEngine) listChunksPage(ctx context.Context, datasetID string, documentID string, req domain.ChunkListRequest) (*domain.ChunkListResult, error) {
 	query := url.Values{}
 	addInt(query, "page", req.Page)
 	addInt(query, "page_size", req.PageSize)
@@ -309,10 +450,32 @@ func (c *RemoteMultiragEngine) UpdateChunk(ctx context.Context, datasetID string
 	body := domain.ChunkMutationToRemote(req)
 	var raw map[string]any
 	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks/" + url.PathEscape(chunkID)
-	if _, err := c.doJSON(ctx, http.MethodPut, path, nil, body, &raw); err != nil {
+	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &raw); err != nil {
 		return nil, err
 	}
+	// Current MultiRAG PATCH returns data:null. Read the durable chunk instead
+	// of normalizing that acknowledgement into a fictitious empty object.
+	if len(raw) == 0 {
+		var err error
+		raw, err = c.readVisibleChunk(ctx, path)
+		if err != nil {
+			return nil, domain.NewUpstreamError("切片更新已受理，但回读未确认，请刷新后核对", nil)
+		}
+	}
+	if len(raw) == 0 {
+		return nil, domain.NewUpstreamError("切片更新已受理，但回读结果为空，请刷新后核对", nil)
+	}
 	chunk := domain.NormalizeChunk(raw)
+	// The GET endpoint reads by path ID, but older index documents may omit
+	// that field in their stored payload. Never permit a conflicting identity.
+	if id, ok := chunk["id"]; ok && id != chunkID {
+		return nil, domain.NewUpstreamError("切片回读身份不一致，请刷新后核对", nil)
+	}
+	if id, ok := chunk["document_id"]; ok && id != documentID {
+		return nil, domain.NewUpstreamError("切片回读文档不一致，请刷新后核对", nil)
+	}
+	chunk["id"] = chunkID
+	chunk["document_id"] = documentID
 	return &chunk, nil
 }
 
@@ -324,16 +487,28 @@ func (c *RemoteMultiragEngine) DeleteChunks(ctx context.Context, datasetID strin
 
 func (c *RemoteMultiragEngine) SwitchChunks(ctx context.Context, datasetID string, documentID string, ids []string, available bool) error {
 	body := map[string]any{"chunk_ids": ids, "available": available}
-	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks/switch"
-	_, err := c.doJSON(ctx, http.MethodPost, path, nil, body, nil)
+	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks"
+	_, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, nil)
 	return err
 }
 
 func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.RetrievalRequest) (*domain.RetrievalResult, error) {
-	body := domain.CloneObject(map[string]any(req))
-	var raw map[string]any
-	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/retrieval", nil, body, &raw); err != nil {
+	// Metadata intersections/zero matches require MultiRAG aa2c6146 or later.
+	// Keep Hub and upstream deployments aligned with that search contract.
+	body, err := domain.RetrievalToSearch(req)
+	if err != nil {
 		return nil, err
+	}
+	if domain.EmptyRetrievalScope(body) {
+		return domain.EmptyRetrievalResult(), nil
+	}
+	ids := body["dataset_ids"].([]string)
+	var raw map[string]any
+	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/"+url.PathEscape(ids[0])+"/search", nil, body, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, domain.NewUpstreamError("检索响应缺少结果", nil)
 	}
 	normalizeRetrievalChunks(raw)
 	result := domain.RetrievalResult(raw)
@@ -346,26 +521,53 @@ func (c *RemoteMultiragEngine) DownloadDocument(ctx context.Context, datasetID s
 }
 
 func (c *RemoteMultiragEngine) GetImage(ctx context.Context, imageID string) (*domain.StreamResult, error) {
-	path := "/v1/document/image/" + url.PathEscape(imageID)
-	result, err := c.doStream(ctx, path, "image/*, */*")
+	path := "/api/v1/documents/images/" + url.PathEscape(imageID)
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
-		return nil, err
-	}
-	if result.ContentType == "" {
-		result.ContentType = "image/jpeg"
-		return result, nil
-	}
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(result.ContentType, ";")[0]))
-	if !strings.HasPrefix(mediaType, "image/") {
-		body, _ := io.ReadAll(io.LimitReader(result.Body, 4096))
-		result.Body.Close()
-		message := strings.TrimSpace(string(body))
-		if message == "" {
-			message = result.ContentType
+		if domain.StatusCode(err) == http.StatusServiceUnavailable {
+			return nil, err
 		}
-		return nil, domain.NewUpstreamError("multirag image response is not an image", errors.New(message))
+		return nil, domain.NewUpstreamError("读取知识库图片失败", nil)
 	}
-	return result, nil
+	req.Header.Set("Accept", "image/png, image/jpeg, image/gif, image/webp, image/bmp")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		// Only expose the safe context cause, never transport URLs or backend details.
+		return nil, domain.NewUpstreamError("读取知识库图片失败", ctx.Err())
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, domain.NewUpstreamError("知识库图片不可用", nil)
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	switch mediaType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp":
+	default:
+		// This also rejects code/message/data and legacy retcode JSON errors,
+		// including HTTP 200 envelopes, without exposing their private messages.
+		resp.Body.Close()
+		return nil, domain.NewUpstreamError("知识库图片响应格式无效", nil)
+	}
+	prefix := make([]byte, 512)
+	n, err := io.ReadFull(resp.Body, prefix)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		resp.Body.Close()
+		return nil, domain.NewUpstreamError("读取知识库图片失败", ctx.Err())
+	}
+	prefix = prefix[:n]
+	if n == 0 || (n < 512 && resp.ContentLength > int64(n)) || http.DetectContentType(prefix) != mediaType {
+		resp.Body.Close()
+		return nil, domain.NewUpstreamError("知识库图片响应格式无效", nil)
+	}
+	// Replay the sniffed bytes unchanged, keeping ownership of the original body.
+	return &domain.StreamResult{
+		Body: struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(prefix), resp.Body), resp.Body},
+		ContentType:   mediaType,
+		ContentLength: resp.ContentLength,
+	}, nil
 }
 
 func (c *RemoteMultiragEngine) doJSON(ctx context.Context, method, path string, query url.Values, body any, out any) (int, error) {

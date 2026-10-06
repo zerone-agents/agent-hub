@@ -47,18 +47,22 @@ type DeleteRequest struct {
 }
 
 type DocumentListRequest struct {
-	Page              int
-	PageSize          int
-	OrderBy           string
-	Desc              *bool
-	Keywords          string
-	ID                string
-	Name              string
-	Suffix            []string
-	Run               []string
-	CreateTimeFrom    int64
-	CreateTimeTo      int64
-	MetadataCondition string
+	Page                int
+	PageSize            int
+	OrderBy             string
+	Desc                *bool
+	Keywords            string
+	ID                  string
+	IDs                 []string
+	Name                string
+	Suffix              []string
+	Types               []string
+	Run                 []string
+	CreateTimeFrom      int64
+	CreateTimeTo        int64
+	MetadataCondition   string
+	Metadata            string
+	ReturnEmptyMetadata *bool
 }
 
 type DocumentUpdateRequest Object
@@ -117,6 +121,14 @@ type HealthStatus struct {
 	Message    string `json:"message"`
 }
 
+// DatasetConfigurationError acknowledges the durable create while keeping a
+// retry on the same dataset. It must never cause a second create in the UI.
+type DatasetConfigurationError struct{ Dataset *Dataset }
+
+func (e *DatasetConfigurationError) Error() string {
+	return "知识库已创建，但配置未保存或未确认；请重试保存配置"
+}
+
 type ErrorKind string
 
 const (
@@ -167,6 +179,14 @@ func NewUpstreamError(message string, cause error) *Error {
 }
 
 func StatusCode(err error) int {
+	var updateErr *DocumentUpdateError
+	if errors.As(err, &updateErr) {
+		return updateErr.HTTPStatus
+	}
+	var configErr *DatasetConfigurationError
+	if errors.As(err, &configErr) {
+		return http.StatusBadGateway
+	}
 	var knowledgeErr *Error
 	if errors.As(err, &knowledgeErr) && knowledgeErr.HTTPStatus != 0 {
 		return knowledgeErr.HTTPStatus
@@ -259,7 +279,14 @@ func NormalizeDataset(raw map[string]any) Dataset {
 }
 
 func NormalizeDocument(raw map[string]any) Document {
-	return Document(renameInbound(raw, InboundDocumentKeyMap))
+	doc := renameInbound(raw, InboundDocumentKeyMap)
+	if run, ok := doc["run"]; ok {
+		state := strings.ToUpper(strings.TrimSpace(fmt.Sprint(run)))
+		if numeric, found := map[string]string{"UNSTART": "0", "RUNNING": "1", "CANCEL": "2", "DONE": "3", "FAIL": "4"}[state]; found {
+			doc["run"] = numeric
+		}
+	}
+	return Document(doc)
 }
 
 func NormalizeChunk(raw map[string]any) Chunk {

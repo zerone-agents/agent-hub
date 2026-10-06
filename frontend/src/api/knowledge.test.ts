@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import apiClient from "./client";
 import {
   normalizeDataset,
   normalizeDocument,
+  normalizeDocumentRun,
   normalizeChunk,
   normalizeRetrievalResult,
   toDatasetBody,
@@ -267,12 +268,12 @@ describe("knowledge adapter — field anti-corruption layer", () => {
   });
 
   describe("toChunkBody", () => {
-    it("defaults keyword arrays to empty", () => {
-      expect(toChunkBody({ content: "x" })).toEqual({
-        content: "x",
-        important_keywords: [],
-        questions: [],
+    it("omits fields absent from a partial chunk update", () => {
+      expect(toChunkBody({ image_base64: "image", image_update_mode: "replace" })).toEqual({
+        image_base64: "image",
+        image_update_mode: "replace",
       });
+      expect(toChunkBody({ content: "x", tag_kwd: [] })).toEqual({ content: "x", tag_kwd: [] });
     });
 
     it("passes image and tag fields through", () => {
@@ -339,5 +340,114 @@ describe("knowledge adapter — field anti-corruption layer", () => {
       );
       post.mockRestore();
     });
+  });
+});
+
+describe("document status contract", () => {
+  it.each([["UNSTART", "0"], ["RUNNING", "1"], ["CANCEL", "2"], ["DONE", "3"], ["FAIL", "4"], ["1", "1"], ["FUTURE", "FUTURE"]])("normalizes %s to %s", (raw, want) => {
+    expect(normalizeDocumentRun(raw)).toBe(want);
+    expect(normalizeDocument({ id: "doc1", run: raw }).run).toBe(want);
+  });
+});
+
+describe("metadata map contract", () => {
+  it("preserves keys and list values as editable rows", () => {
+    const doc = normalizeDocument({ id: "d", meta_fields: { author: "Alice", years: [2025, 2026] } });
+    expect(doc.meta_fields).toEqual([{ key: "author", value: "Alice" }, { key: "years", value: [2025, 2026] }]);
+  });
+});
+
+
+describe('single document readback', () => {
+  it('uses the document ID filter and rejects an unrelated row', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce({ data: { success: true, data: { total: 1, documents: [{ id: 'other' }] } } })
+    await expect(knowledgeApi.documents.get('kb/1', 'doc/1')).rejects.toThrow('保存后回读未确认')
+    expect(get).toHaveBeenCalledWith('/api/v1/admin/knowledge/datasets/kb%2F1/documents?page=1&page_size=1&id=doc%2F1')
+    get.mockRestore()
+  })
+})
+
+it('only confirms ingest acceptance for the strict true response', async () => {
+  const input = { doc_ids: ['d1'], run: 1 as const, delete: false, apply_kb: false }
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({ data: { success: true, data: {} } }).mockResolvedValueOnce({ data: { success: true, data: true } })
+  await expect(knowledgeApi.documents.ingest(input)).rejects.toThrow('解析请求未被确认')
+  await expect(knowledgeApi.documents.ingest(input)).resolves.toBe(true)
+  expect(post).toHaveBeenCalledWith('/api/v1/admin/knowledge/documents/ingest', input)
+  post.mockRestore()
+})
+
+it('preserves search text and document and reference metadata from the new contract', () => {
+  const result = normalizeRetrievalResult({ total: 1, reference_metadata: { include: true }, chunks: [{ id: 'c1', text: 'native search text', document_metadata: { version: 2 }, reference_metadata: { fields: ['version'] } }] })
+  expect(result.chunks[0]).toMatchObject({ content: 'native search text', document_metadata: { version: 2 }, reference_metadata: { fields: ['version'] } })
+  expect(result.reference_metadata).toEqual({ include: true })
+})
+
+it('sends precise document filters and keeps an explicit false flag', async () => {
+  const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce({ data: { success: true, data: { total: 0, documents: [] } } });
+  await knowledgeApi.documents.list('kb1', { ids: ['d1', 'd2'], types: ['doc', 'visual'], metadata: '{"version":["v2"]}', return_empty_metadata: false });
+  const url = new URL(get.mock.calls[0][0], 'http://fixture');
+  expect(url.searchParams.getAll('ids')).toEqual(['d1', 'd2']);
+  expect(url.searchParams.getAll('types')).toEqual(['doc', 'visual']);
+  expect(url.searchParams.get('metadata')).toBe('{"version":["v2"]}');
+  expect(url.searchParams.get('return_empty_metadata')).toBe('false');
+  get.mockRestore();
+});
+
+
+describe("dataset write readback and scoped candidates", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  it("confirms only requested dataset fields with an independent GET", async () => {
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: { id: "kb/1", name: "Updated", parser_config: { custom: true, auto_keywords: 2 } } } });
+    await expect(knowledgeApi.datasets.update("kb/1", { name: "Updated", parser_config: { auto_keywords: 2 } })).resolves.toMatchObject({ name: "Updated" });
+    expect(get).toHaveBeenCalledWith("/api/v1/admin/knowledge/datasets/kb%2F1");
+  });
+  it.each([{ id: "other", name: "Updated" }, { id: "kb1", name: "Old" }])("rejects a stale or unrelated dataset readback", async (data) => {
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data } });
+    await expect(knowledgeApi.datasets.update("kb1", { name: "Updated" })).rejects.toThrow("配置读回未确认");
+  });
+  it("verifies canonical parent-child flags and resolved model references", async () => {
+    const data = { id: "kb1", embd_id: "local-embed@Anthropic", parser_config: { layout_recognize: "MinerU", parent_child: { use_parent_child: false, children_delimiter: "|" }, raptor: { use_raptor: false } } };
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data } });
+    await expect(knowledgeApi.datasets.update("kb1", { embd_id: "local-embed", parser_config: { layout_recognize: "local-ocr", enable_children: false, children_delimiter: "|", raptor: { enabled: false } } })).resolves.toMatchObject({ id: "kb1" });
+  });
+  it("accepts MultiRAG's empty parent-child object after disabling the mode", async () => {
+    const saved = { id: "kb1", parser_config: { parent_child: {}, chunk_token_num: 512 } };
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: saved } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: saved } });
+    await expect(knowledgeApi.datasets.update("kb1", { parser_config: { enable_children: false, chunk_token_num: 512 } })).resolves.toMatchObject({ id: "kb1" });
+    saved.parser_config.chunk_token_num = 256;
+    await expect(knowledgeApi.datasets.update("kb1", { parser_config: { enable_children: false, chunk_token_num: 512 } })).rejects.toThrow("配置读回未确认");
+  });
+  it("only reads the current configuration when the form has no changes", async () => {
+    const put = vi.spyOn(apiClient, "put");
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: { id: "kb1" } } });
+    await expect(knowledgeApi.datasets.update("kb1", {})).resolves.toMatchObject({ id: "kb1" });
+    expect(put).not.toHaveBeenCalled();
+  });
+  it("does not read back or claim success for a business rejection", async () => {
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: false, error: "Rejected" } });
+    const get = vi.spyOn(apiClient, "get");
+    await expect(knowledgeApi.datasets.update("kb1", { name: "Updated" })).rejects.toThrow("Rejected");
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("fetches dataset-wide filter counts with repeated query values", async () => {
+    const result = { total: 2, filter: { suffix: { pdf: 2 }, run_status: { "3": 2 }, metadata: { year: { "2026": 2 } } } };
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: result } });
+    await expect(knowledgeApi.documents.filters("kb/1", { types: ["doc", "visual"], run: ["3", "4"] })).resolves.toEqual(result);
+    const url = new URL(get.mock.calls[0][0], "https://fixture.invalid");
+    expect(url.pathname).toBe("/api/v1/admin/knowledge/datasets/kb%2F1/documents/filters");
+    expect(url.searchParams.getAll("types")).toEqual(["doc", "visual"]);
+    expect(url.searchParams.getAll("run")).toEqual(["3", "4"]);
+  });
+  it("preserves explicit image update mode and omits it for older consumers", () => {
+    expect(toChunkBody({ content: "text", image_base64: "image", image_update_mode: "replace" })).toMatchObject({ image_update_mode: "replace", image_base64: "image" });
+    expect(toChunkBody({ content: "text" })).not.toHaveProperty("image_update_mode");
+  });
+  it("rejects a dataset deletion business error despite HTTP success", async () => {
+    vi.spyOn(apiClient, "delete").mockResolvedValue({ data: { success: false, error: "Bound dataset" } });
+    await expect(knowledgeApi.datasets.remove(["kb1"])).rejects.toThrow("Bound dataset");
   });
 });

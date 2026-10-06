@@ -1,5 +1,6 @@
 import apiClient from "./client";
 import type { AxiosResponse } from "axios";
+import { ownedRequestConfig, type RequestOwner } from "./requestOwnership";
 import i18next from "@/i18n";
 
 /**
@@ -94,7 +95,24 @@ export interface KnowledgeChunk {
   [key: string]: unknown;
 }
 
+export interface ReferenceMetadataConfig {
+  include?: boolean;
+  fields?: string[] | null;
+}
+
+export interface MetadataFilter {
+  method: 'manual' | 'auto' | 'semi_auto';
+  logic?: 'and' | 'or';
+  manual?: { key: string; op: string; value?: unknown }[];
+  semi_auto?: (string | { key: string; op?: string })[];
+}
+
 export interface RetrievalChunk {
+  document_metadata?: Record<string, unknown>;
+  reference_metadata?: Record<string, unknown>;
+  image_id?: string;
+  dataset_id?: string;
+  positions?: unknown[];
   id: string;
   content: string;
   document_id: string;
@@ -112,6 +130,7 @@ export interface DocAggregation {
 }
 
 export interface RetrievalResult {
+  reference_metadata?: Record<string, unknown>;
   total: number;
   chunks: RetrievalChunk[];
   doc_aggs: DocAggregation[];
@@ -138,6 +157,8 @@ export interface ChunkListResult {
 // Request input types
 // ---------------------------------------------------------------------------
 
+export type KnowledgeWriteOwner = RequestOwner;
+
 export interface DatasetFormInput {
   name?: string;
   display_name?: string;
@@ -150,6 +171,7 @@ export interface DatasetFormInput {
 }
 
 export interface DatasetListParams {
+  id?: string;
   page?: number;
   page_size?: number;
   orderby?: string;
@@ -159,6 +181,11 @@ export interface DatasetListParams {
 }
 
 export interface DocumentListParams {
+  ids?: string[];
+  types?: string[];
+  metadata?: string;
+  return_empty_metadata?: boolean;
+  id?: string;
   page?: number;
   page_size?: number;
   orderby?: string;
@@ -171,7 +198,25 @@ export interface DocumentListParams {
   metadata_condition?: string;
 }
 
+export type DocumentFilterParams = Pick<DocumentListParams, "keywords" | "run" | "types" | "suffix">;
+export interface DocumentFilterResult {
+  total: number;
+  filter: {
+    suffix: Record<string, number>;
+    run_status: Record<string, number>;
+    metadata: Record<string, Record<string, number>>;
+  };
+}
+
+export interface DocumentIngestInput {
+  doc_ids: string[];
+  run: 0 | 1 | 2;
+  delete: boolean;
+  apply_kb: boolean;
+}
+
 export interface ChunkListParams {
+  id?: string;
   page?: number;
   page_size?: number;
   keywords?: string;
@@ -179,7 +224,8 @@ export interface ChunkListParams {
 }
 
 export interface ChunkFormInput {
-  content: string;
+  image_update_mode?: "append" | "replace";
+  content?: string;
   important_keywords?: string[];
   questions?: string[];
   image_base64?: string;
@@ -188,6 +234,18 @@ export interface ChunkFormInput {
 }
 
 export interface RetrievalInput {
+  size?: number;
+  doc_ids?: string[] | null;
+  meta_data_filter?: MetadataFilter;
+  reference_metadata?: ReferenceMetadataConfig;
+  page?: number;
+  page_size?: number;
+  rerank_id?: string;
+  keyword?: boolean;
+  use_kg?: boolean;
+  cross_languages?: string[];
+  metadata_condition?: Record<string, unknown>;
+  search_mode?: { type: 'sparse' | 'dense' | 'hybrid' | 'fusion'; weight_dense?: number; weight_sparse?: number; weights?: string };
   question: string;
   dataset_ids: string[];
   document_ids?: string[];
@@ -292,6 +350,12 @@ export function normalizeDataset(raw: RawObject): KnowledgeDataset {
   };
 }
 
+export function normalizeDocumentRun(value: unknown): string {
+  const state = str(value, "0").trim();
+  const states: Record<string, string> = { UNSTART: "0", RUNNING: "1", CANCEL: "2", DONE: "3", FAIL: "4" };
+  return states[state.toUpperCase()] ?? state;
+}
+
 export function normalizeDocument(raw: RawObject): KnowledgeDocument {
   const enabledRaw = pick(raw, "enabled");
   const statusRaw = str(pick(raw, "status"), "1");
@@ -302,14 +366,16 @@ export function normalizeDocument(raw: RawObject): KnowledgeDocument {
     chunk_num: num(pick(raw, "chunk_num", "chunk_count")),
     token_num: num(pick(raw, "token_num", "token_count")),
     parser_id: str(pick(raw, "parser_id", "chunk_method"), "naive"),
-    run: str(pick(raw, "run"), "0"),
+    run: normalizeDocumentRun(pick(raw, "run")),
     progress: num(pick(raw, "progress")),
     progress_msg: str(pick(raw, "progress_msg")),
     status: statusRaw,
     enabled: typeof enabledRaw === "boolean" ? enabledRaw : statusRaw === "1",
     size: num(pick(raw, "size")),
     type: str(pick(raw, "type")),
-    meta_fields: recordArray(pick(raw, "meta_fields", "metadata_fields")),
+    meta_fields: Array.isArray(pick(raw, "meta_fields", "metadata_fields"))
+      ? recordArray(pick(raw, "meta_fields", "metadata_fields"))
+      : Object.entries(isRecord(raw.meta_fields) ? raw.meta_fields : isRecord(raw.metadata_fields) ? raw.metadata_fields : {}).map(([key, value]) => ({ key, value })),
     parser_config: isRecord(raw.parser_config) ? raw.parser_config : {},
     created_by: optionalStr(
       pick(raw, "created_by", "created_id", "creator_id"),
@@ -340,7 +406,7 @@ export function normalizeChunk(raw: RawObject): KnowledgeChunk {
   return {
     ...raw,
     id: str(pick(raw, "id", "chunk_id")),
-    content: str(pick(raw, "content", "content_with_weight")),
+    content: str(pick(raw, "content", "content_with_weight", "text")),
     document_id: str(pick(raw, "document_id", "doc_id")),
     important_keywords: strArray(
       pick(raw, "important_keywords", "important_kwd"),
@@ -357,16 +423,21 @@ export function normalizeChunk(raw: RawObject): KnowledgeChunk {
 
 export function normalizeRetrievalChunk(raw: RawObject): RetrievalChunk {
   return {
+    document_metadata: isRecord(raw.document_metadata) ? raw.document_metadata : undefined,
+    reference_metadata: isRecord(raw.reference_metadata) ? raw.reference_metadata : undefined,
     id: str(pick(raw, "id", "chunk_id")),
-    content: str(pick(raw, "content", "content_with_weight")),
+    content: str(pick(raw, "content", "content_with_weight", "text")),
     document_id: str(pick(raw, "document_id", "doc_id")),
     document_name: str(
-      pick(raw, "docnm_kwd", "document_name", "document_keyword"),
+      pick(raw, "document_name", "docnm_kwd", "document_keyword"),
     ),
     similarity: num(pick(raw, "similarity", "score")),
     vector_similarity: num(pick(raw, "vector_similarity")),
     term_similarity: num(pick(raw, "term_similarity")),
     highlight: optionalStr(raw.highlight),
+    image_id: optionalStr(pick(raw, "image_id", "img_id")),
+    dataset_id: optionalStr(pick(raw, "dataset_id", "kb_id")),
+    positions: unknownArray(pick(raw, "positions", "position_int")),
   };
 }
 
@@ -386,6 +457,7 @@ export function normalizeRetrievalResult(raw: RawObject): RetrievalResult {
     chunks,
     doc_aggs: docAggs,
     labels: isRecord(raw.labels) ? raw.labels : {},
+    reference_metadata: isRecord(raw.reference_metadata) ? raw.reference_metadata : undefined,
   };
 }
 
@@ -413,11 +485,12 @@ export function toDatasetBody(
 }
 
 export function toChunkBody(input: ChunkFormInput): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    content: input.content,
-    important_keywords: input.important_keywords ?? [],
-    questions: input.questions ?? [],
-  };
+  const body: Record<string, unknown> = {};
+  if (input.content !== undefined) body.content = input.content;
+  if (input.important_keywords !== undefined)
+    body.important_keywords = input.important_keywords;
+  if (input.questions !== undefined) body.questions = input.questions;
+  if (input.image_update_mode !== undefined) body.image_update_mode = input.image_update_mode;
   if (input.image_base64 !== undefined)
     body.image_base64 = stripDataURLPrefix(input.image_base64);
   if (input.tag_kwd !== undefined) body.tag_kwd = input.tag_kwd;
@@ -428,6 +501,57 @@ export function toChunkBody(input: ChunkFormInput): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Envelope unwrap
 // ---------------------------------------------------------------------------
+
+function includesRequestedFields(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) return Array.isArray(actual) && actual.length === expected.length && expected.every((value, index) => includesRequestedFields(actual[index], value));
+  if (isRecord(expected)) return isRecord(actual) && Object.entries(expected).every(([key, value]) => includesRequestedFields(actual[key], value));
+  return actual === expected;
+}
+
+// Keep legacy local IDs compatible with the gateway's protocol mapping.
+// A PUT response may only normalize the reference's shape, not choose a model.
+const LOCAL_MODEL_FACTORIES = ['Anthropic', 'OpenAI-API-Compatible', 'MinerU', 'PaddleOCR'];
+const LEGACY_LAYOUT_FACTORIES = new Set(['MinerU', 'PaddleOCR', 'Docling', 'OpenDataLoader', 'TCADP Parser']);
+const STRICT_LAYOUT_VALUES = new Set(['DeepDOC', 'Plain Text', ...LEGACY_LAYOUT_FACTORIES]);
+const KNOWN_MODEL_FACTORIES = new Set([...LOCAL_MODEL_FACTORIES, ...LEGACY_LAYOUT_FACTORIES, 'OpenAI', 'BAAI'].map((factory) => factory.toLowerCase()));
+
+function isKnownFullModelRef(ref: string): boolean {
+  const separator = ref.lastIndexOf('@');
+  return separator > 0 && KNOWN_MODEL_FACTORIES.has(ref.slice(separator + 1).toLowerCase());
+}
+
+function expectedDatasetMutation(input: DatasetFormInput, written: RawObject): RawObject {
+  const expected = toDatasetBody(input);
+  if (input.embd_id && !isKnownFullModelRef(input.embd_id) && LOCAL_MODEL_FACTORIES.some((factory) => written.embd_id === `${input.embd_id}@${factory}`)) {
+    expected.embd_id = written.embd_id;
+  }
+  if (input.parser_config) {
+    const config = { ...input.parser_config };
+    const parentChild = isRecord(config.parent_child) ? { ...config.parent_child } : {};
+    if (config.enable_children !== undefined) parentChild.use_parent_child = config.enable_children;
+    if (config.children_delimiter !== undefined) parentChild.children_delimiter = config.children_delimiter;
+    if (Object.keys(parentChild).length) {
+      // MultiRAG stores the disabled mode as parent_child: {}, even if the
+      // request used use_parent_child: false (and a stale delimiter).
+      config.parent_child = parentChild.use_parent_child === false ? {} : parentChild;
+      delete config.enable_children;
+      delete config.children_delimiter;
+    }
+    for (const [key, target] of [["raptor", "use_raptor"], ["graphrag", "use_graphrag"]]) {
+      const nested = config[key];
+      if (isRecord(nested) && nested.enabled !== undefined && nested[target] === undefined) {
+        const normalized = { ...nested, [target]: nested.enabled };
+        delete normalized.enabled;
+        config[key] = normalized;
+      }
+    }
+    if (typeof config.layout_recognize === "string" && config.layout_recognize.length > 0 && !config.layout_recognize.includes("@") && !STRICT_LAYOUT_VALUES.has(config.layout_recognize) && isRecord(written.parser_config) && typeof written.parser_config.layout_recognize === "string" && LEGACY_LAYOUT_FACTORIES.has(written.parser_config.layout_recognize)) {
+      config.layout_recognize = written.parser_config.layout_recognize;
+    }
+    expected.parser_config = config;
+  }
+  return expected;
+}
 
 async function unwrap<T>(
   promise: Promise<AxiosResponse<Envelope<T>>>,
@@ -515,8 +639,11 @@ export const knowledgeApi = {
   datasets: {
     list: async (
       params: DatasetListParams = {},
+      owner?: KnowledgeWriteOwner,
     ): Promise<DatasetListResult> => {
+      owner?.assertCurrent();
       const qs = buildQuery({
+        id: params.id,
         page: params.page,
         page_size: params.page_size,
         orderby: params.orderby,
@@ -525,43 +652,74 @@ export const knowledgeApi = {
         parser_id: params.parser_id,
       });
       const data = await unwrap<{ total: number; datasets: RawObject[] }>(
-        apiClient.get(`${BASE}/datasets${qs}`),
+        apiClient.get(`${BASE}/datasets${qs}`, ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)),
       );
+      owner?.assertCurrent();
+      if (!Number.isInteger(data.total) || data.total < 0 || !Array.isArray(data.datasets)) {
+        throw new Error(i18next.t('knowledge.states.listFailed'));
+      }
       return {
         total: num(data.total),
         datasets: (data.datasets).map(normalizeDataset),
       };
     },
 
-    get: async (datasetId: string): Promise<KnowledgeDataset> => {
+    get: async (datasetId: string, owner?: KnowledgeWriteOwner): Promise<KnowledgeDataset> => {
+      owner?.assertCurrent();
       const data = await unwrap<RawObject>(
-        apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`),
+        apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`, ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)),
       );
-      return normalizeDataset(data);
+      owner?.assertCurrent();
+      const dataset = normalizeDataset(data);
+      if (dataset.id !== datasetId) throw new Error(i18next.t("knowledge.states.detailFailed"));
+      return dataset;
     },
 
-    create: async (input: DatasetFormInput): Promise<KnowledgeDataset> => {
+    create: async (input: DatasetFormInput, owner?: KnowledgeWriteOwner): Promise<KnowledgeDataset> => {
+      owner?.assertCurrent();
       const data = await unwrap<RawObject>(
-        apiClient.post(`${BASE}/datasets`, toDatasetBody(input)),
+        apiClient.post(`${BASE}/datasets`, toDatasetBody(input), ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)),
       );
+      owner?.assertCurrent();
       return normalizeDataset(data);
     },
 
     update: async (
       datasetId: string,
       input: DatasetFormInput,
+      owner?: KnowledgeWriteOwner,
     ): Promise<KnowledgeDataset> => {
-      const data = await unwrap<RawObject>(
-        apiClient.put(
-          `${BASE}/datasets/${encodeURIComponent(datasetId)}`,
-          toDatasetBody(input),
-        ),
+      owner?.assertCurrent();
+      if (!Object.keys(toDatasetBody(input)).length) {
+        const current = await unwrap<RawObject>(apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`, ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)));
+        owner?.assertCurrent();
+        const saved = normalizeDataset(current);
+        if (saved.id !== datasetId) throw new Error(i18next.t("knowledge.states.detailFailed"));
+        return saved;
+      }
+      const written = await unwrap<RawObject>(
+        apiClient.put(`${BASE}/datasets/${encodeURIComponent(datasetId)}`, toDatasetBody(input), ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)),
       );
-      return normalizeDataset(data);
+      owner?.assertCurrent();
+      try {
+        const data = await unwrap<RawObject>(apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`, ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)));
+        owner?.assertCurrent();
+        const saved = normalizeDataset(data);
+        if (saved.id !== datasetId || !includesRequestedFields(saved, expectedDatasetMutation(input, isRecord(written) ? written : {}))) {
+          throw new Error("readback mismatch");
+        }
+        return saved;
+      } catch {
+        throw new Error(i18next.t("knowledge.settings.readbackFailed"));
+      }
     },
 
-    remove: (datasetIds: string[]): Promise<unknown> =>
-      apiClient.delete(`${BASE}/datasets`, { data: { ids: datasetIds } }),
+    remove: async (datasetIds: string[], owner?: KnowledgeWriteOwner): Promise<unknown> => {
+      owner?.assertCurrent();
+      const result = await unwrap(apiClient.delete<Envelope<unknown>>(`${BASE}/datasets`, { ...ownedRequestConfig(owner), data: { ids: datasetIds } }));
+      owner?.assertCurrent();
+      return result;
+    },
   },
 
   documents: {
@@ -575,6 +733,11 @@ export const knowledgeApi = {
         orderby: params.orderby,
         desc: params.desc,
         keywords: params.keywords,
+        id: params.id,
+        ids: params.ids,
+        types: params.types,
+        metadata: params.metadata,
+        return_empty_metadata: params.return_empty_metadata,
         suffix: params.suffix,
         run: params.run,
         create_time_from: params.create_time_from,
@@ -590,6 +753,19 @@ export const knowledgeApi = {
         total: num(data.total),
         documents: (data.documents).map(normalizeDocument),
       };
+    },
+
+    get: async (datasetId: string, documentId: string): Promise<KnowledgeDocument> => {
+      const result = await knowledgeApi.documents.list(datasetId, { id: documentId, page: 1, page_size: 1 });
+      const document = result.documents.find((item) => item.id === documentId);
+      if (!document) throw new Error(i18next.t("knowledge.manage.readbackFailed"));
+      return document;
+    },
+
+    filters: async (datasetId: string, params: DocumentFilterParams = {}): Promise<DocumentFilterResult> => {
+      return unwrap<DocumentFilterResult>(apiClient.get(
+        `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/filters${buildQuery(params)}`,
+      ));
     },
 
     upload: async (
@@ -611,6 +787,7 @@ export const knowledgeApi = {
       return (data).map(normalizeDocument);
     },
 
+    /** Metadata in parser_config requires a complete JSON Schema; partial schemas are rejected by the gateway. Prefer the dedicated metadata/config endpoint for template editing. */
     update: async (
       datasetId: string,
       documentId: string,
@@ -646,6 +823,12 @@ export const knowledgeApi = {
           data: { document_ids: documentIds },
         },
       ),
+
+    ingest: async (input: DocumentIngestInput): Promise<true> => {
+      const accepted = await unwrap<unknown>(apiClient.post(`${BASE}/documents/ingest`, input));
+      if (accepted !== true) throw new Error(i18next.t("knowledge.manage.ingestNotAccepted"));
+      return true;
+    },
 
     downloadUrl: (datasetId: string, documentId: string): string =>
       `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/download`,
@@ -691,6 +874,7 @@ export const knowledgeApi = {
       params: ChunkListParams = {},
     ): Promise<ChunkListResult> => {
       const qs = buildQuery({
+        id: params.id,
         page: params.page,
         page_size: params.page_size,
         keywords: params.keywords,

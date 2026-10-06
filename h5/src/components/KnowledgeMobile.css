@@ -1,0 +1,86 @@
+.knowledge-mobile .knowledge-background,
+.knowledge-mobile.knowledge-background {
+  background-color: #f8f9fa;
+}
+.knowledge-mobile button {
+  min-height: 44px;
+  min-width: 44px;
+}
+.knowledge-mobile button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.knowledge-mobile :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+}
+.knowledge-mobile :is(input:not([type="checkbox"]), textarea, select) {
+  font-size: 16px;
+}
+.knowledge-mobile pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (prefers-color-scheme: dark) {
+  .knowledge-mobile .knowledge-background,
+  .knowledge-mobile.knowledge-background {
+    background-color: #15191d;
+  }
+  .knowledge-mobile {
+    color: #e5e7eb;
+    background-color: #15191d;
+    color-scheme: dark;
+  }
+  .knowledge-mobile.bg-black\/40 {
+    background-color: rgb(0 0 0 / 0.5);
+  }
+  .knowledge-mobile .bg-white {
+    background-color: #20262c;
+  }
+  .knowledge-mobile
+    :is(.bg-gray-50, .bg-gray-50\/70, .bg-gray-100, .bg-gray-100\/80) {
+    background-color: #293139;
+  }
+  .knowledge-mobile :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+    color: #f3f4f6;
+  }
+  .knowledge-mobile :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+    color: #b6c1ce;
+  }
+  .knowledge-mobile :is(.text-emerald-700, .text-emerald-600) {
+    color: #6ee7b7;
+  }
+  .knowledge-mobile .text-red-700 {
+    color: #fca5a5;
+  }
+  .knowledge-mobile .text-amber-700 {
+    color: #fcd34d;
+  }
+  .knowledge-mobile
+    :is(
+      .border-gray-100,
+      .border-gray-200,
+      .border-gray-200\/90,
+      .border-gray-200\/80
+    ) {
+    border-color: #3d4854;
+  }
+  .knowledge-mobile :is(.bg-emerald-50, .bg-red-50) {
+    background-color: #253932;
+  }
+  .knowledge-mobile .bg-neutral-900 {
+    background-color: #047857;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-mobile *,
+  .knowledge-mobile *::before,
+  .knowledge-mobile *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .knowledge-mobile button {
+    transform: none !important;
+  }
+}

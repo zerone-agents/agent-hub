@@ -106,6 +106,21 @@ func (c *Client) do(ctx context.Context, path string, payload any) (*MultiRAGRes
 			} else {
 				out.Message = env.Message
 			}
+			// verify=true returns a successful envelope even when the actual
+			// provider probe failed: data={"success":false,"message":"..."}.
+			// Do not report that as a verified model to the caller.
+			if out.Success && len(env.Data) > 0 {
+				var probe struct {
+					Success *bool  `json:"success"`
+					Message string `json:"message"`
+				}
+				if json.Unmarshal(env.Data, &probe) == nil && probe.Success != nil && !*probe.Success {
+					out.Success = false
+					if probe.Message != "" {
+						out.Message = probe.Message
+					}
+				}
+			}
 			return out, nil
 		}
 		// Success/message shape.
@@ -179,39 +194,38 @@ func (c *Client) ListMyLLMs(ctx context.Context) (json.RawMessage, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("MultiRAG my_llms response could not be read")
+	}
+	if len(body) > 1<<20 {
+		return nil, fmt.Errorf("MultiRAG my_llms response exceeds limit")
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("MultiRAG my_llms returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("MultiRAG my_llms returned HTTP %d", resp.StatusCode)
 	}
 
 	// Unwrap the standard MultiRAG envelope.
 	var env struct {
 		RetCode *int            `json:"retcode"`
 		Code    *int            `json:"code"`
-		RetMsg  string          `json:"retmsg"`
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("解析 my_llms envelope 失败: %w", err)
+		return nil, fmt.Errorf("MultiRAG my_llms response is invalid")
 	}
-	code := 0
-	if env.RetCode != nil {
-		code = *env.RetCode
-	} else if env.Code != nil {
-		code = *env.Code
+	if env.RetCode == nil && env.Code == nil {
+		return nil, fmt.Errorf("MultiRAG my_llms response has no success code")
 	}
-	if code != 0 {
-		msg := env.RetMsg
-		if msg == "" {
-			msg = "MultiRAG my_llms error"
-		}
-		return nil, fmt.Errorf("MultiRAG my_llms error: %s", msg)
+	if env.RetCode != nil && *env.RetCode != 0 {
+		return nil, fmt.Errorf("MultiRAG my_llms error code %d", *env.RetCode)
+	}
+	if env.Code != nil && *env.Code != 0 {
+		return nil, fmt.Errorf("MultiRAG my_llms error code %d", *env.Code)
 	}
 	if len(env.Data) == 0 || string(env.Data) == "null" {
-		// Default to an empty object so downstream json.Unmarshal into a
-		// map produces an empty result instead of nil.
-		return json.RawMessage(`{}`), nil
+		return nil, fmt.Errorf("MultiRAG my_llms response has no model inventory")
 	}
 	return env.Data, nil
 }
