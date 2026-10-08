@@ -41,6 +41,20 @@ const (
 	AuthStyleNoAuth    AuthStyle = "no_auth"
 )
 
+// SupportedProtocols returns the protocol allow-list validated at the probe
+// endpoints. It is the single source of truth: handler validation and its
+// error messages are derived from it, so a new protocol is added in exactly
+// one place.
+func SupportedProtocols() []Protocol {
+	return []Protocol{ProtocolAnthropic, ProtocolOpenAI, ProtocolMinerU, ProtocolPaddleOCR}
+}
+
+// SupportedAuthStyles returns the auth-style allow-list validated at the probe
+// endpoints (same single-source rationale as SupportedProtocols).
+func SupportedAuthStyles() []AuthStyle {
+	return []AuthStyle{AuthStyleAPIKey, AuthStyleAuthToken, AuthStyleNoAuth}
+}
+
 type ProviderType string
 
 const (

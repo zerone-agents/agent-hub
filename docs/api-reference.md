@@ -147,6 +147,19 @@ Deployed agents carry three independent identities since deployer v3.1 (see conf
 curl -X POST http://localhost:8081/api/v1/admin/providers/1/probe \
   -H "Authorization: Bearer $TOKEN"
 
+# Test a saved Provider with unsaved overrides: the optional body fields
+# (apiKey/baseUrl/protocol/authStyle/models) replace the stored values for
+# this probe only — the edit form's "test" button uses this. Unknown
+# protocol/authStyle values are rejected with 400.
+curl -X POST http://localhost:8081/api/v1/admin/providers/1/probe \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseUrl": "https://api.openai.com",
+    "protocol": "openai",
+    "authStyle": "auth_token"
+  }'
+
 # Test an unsaved configuration
 curl -X POST http://localhost:8081/api/v1/admin/providers/probe \
   -H "Authorization: Bearer $TOKEN" \

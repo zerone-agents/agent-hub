@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/audit"
@@ -253,22 +255,51 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 		return
 	}
 
-	type probeOverrideRequest struct {
-		APIKey  string                  `json:"apiKey"`
-		BaseURL string                  `json:"baseUrl"`
-		Models  []provider.CatalogModel `json:"models"`
-	}
-	var overrideReq probeOverrideRequest
+	var override services.ProbeOverride
 	// Body is optional; ignore bind errors when no body is sent.
-	_ = c.ShouldBindJSON(&overrideReq)
+	_ = c.ShouldBindJSON(&override)
+	if override.Protocol != "" && !isSupportedProtocol(override.Protocol) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: %s）", override.Protocol, supportedProtocolsText))
+		return
+	}
+	if override.AuthStyle != "" && !isSupportedAuthStyle(override.AuthStyle) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: %s）", override.AuthStyle, supportedAuthStylesText))
+		return
+	}
 
-	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, overrideReq.APIKey, overrideReq.BaseURL, overrideReq.Models)
+	result, err := h.service.ProbeWithOverride(tenant.GetTenantID(c), id, override)
 	if err != nil {
 		respondProviderError(c, err)
 		return
 	}
 	respondSuccess(c, result)
 }
+
+// isSupportedProtocol / isSupportedAuthStyle 为探测端点钉住枚举白名单：未知值
+// 在 handler 层直接 400，不再落入 doProbe 的默认分支静默回退 anthropic/Bearer
+// —— 那会产生「按所选 protocol 探测成功」的假象。白名单与错误文案的单源都在
+// domain（SupportedProtocols/SupportedAuthStyles），新增枚举只需改 domain 一处。
+func isSupportedProtocol(v string) bool {
+	return slices.Contains(provider.SupportedProtocols(), provider.Protocol(v))
+}
+
+func isSupportedAuthStyle(v string) bool {
+	return slices.Contains(provider.SupportedAuthStyles(), provider.AuthStyle(v))
+}
+
+// joinEnum renders an enum allow-list for validation error messages.
+func joinEnum[T ~string](vals []T) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = string(v)
+	}
+	return strings.Join(parts, ", ")
+}
+
+var (
+	supportedProtocolsText  = joinEnum(provider.SupportedProtocols())
+	supportedAuthStylesText = joinEnum(provider.SupportedAuthStyles())
+)
 
 type probeConfigRequest struct {
 	BaseURL   string                  `json:"baseUrl" binding:"required"`
@@ -292,6 +323,14 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 	authStyle := req.AuthStyle
 	if authStyle == "" {
 		authStyle = string(provider.AuthStyleAPIKey)
+	}
+	if !isSupportedProtocol(protocol) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: %s）", protocol, supportedProtocolsText))
+		return
+	}
+	if !isSupportedAuthStyle(authStyle) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: %s）", authStyle, supportedAuthStylesText))
+		return
 	}
 
 	result := h.service.ProbeConfig(req.BaseURL, req.APIKey, protocol, authStyle, req.Models)
