@@ -125,7 +125,7 @@ async function pickOption(
   if (itemLabel === "解析布局" || itemLabel === "实体与关系提取方式") {
     await openAdvanced(user);
   }
-  const formItem = screen.getByText(itemLabel).closest(".ant-form-item");
+  const formItem = screen.getByText(itemLabel).closest<HTMLElement>(".ant-form-item");
   const control = formItem
     ? within(formItem).getByRole("combobox")
     : screen.getByRole("combobox");
@@ -194,7 +194,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
     await openAdvanced(userEvent.setup());
     const embdItem = screen
       .getByText("向量模型")
-      .closest(".ant-form-item")!;
+      .closest<HTMLElement>(".ant-form-item")!;
     expect(within(embdItem).getByRole("combobox")).toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText("如 bge-m3、text-embedding-3-small"),
@@ -516,7 +516,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
 
     const embdItem = screen
       .getByText("向量模型")
-      .closest(".ant-form-item")!;
+      .closest<HTMLElement>(".ant-form-item")!;
     // Select still renders as a combobox (not the legacy free-form Input).
     expect(within(embdItem).getByRole("combobox")).toBeInTheDocument();
     expect(
@@ -546,7 +546,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
 
     const embdItem = screen
       .getByText("向量模型")
-      .closest(".ant-form-item")!;
+      .closest<HTMLElement>(".ant-form-item")!;
     // Wait for the remap effect to swap the saved raw for the encoded value;
     // the Select then displays the matching option's label.
     await waitFor(() =>
@@ -581,7 +581,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
     renderForm();
     await openAdvanced(user);
     expect(screen.getByRole('link', { name: '配置解析器 / 视觉模型' })).toHaveAttribute('href', '/providers');
-    const layoutItem = screen.getByText('解析布局').closest('.ant-form-item')!;
+    const layoutItem = screen.getByText('解析布局').closest<HTMLElement>('.ant-form-item')!;
     await user.click(within(layoutItem).getByRole('combobox'));
     expect(screen.queryByText('MinerU OCR (MinerU Local)')).not.toBeInTheDocument();
     expect(screen.getAllByText('DeepDOC').length).toBeGreaterThan(0);
