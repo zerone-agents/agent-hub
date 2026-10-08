@@ -3,8 +3,10 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +26,7 @@ type probeUpstreamCall struct {
 	Path   string
 	APIKey string // x-api-key header
 	Authz  string // Authorization header
+	Body   string // request body, when the upstream handler reads it
 }
 
 // setupProviderProbeRouter seeds one stored provider (anthropic + api_key,
@@ -362,4 +365,144 @@ func TestProviderHandler_Probe_OpenAIChatSchemaHealthy(t *testing.T) {
 	call := expectProbeCall(t, calls)
 	require.Equal(t, http.MethodPost, call.Method)
 	require.Equal(t, "/chat/completions", call.Path)
+}
+
+// setupChatModelProbeRouter seeds a stored provider with the given protocol and
+// models (in sort order), behind an upstream that only accepts chat pings for
+// chatModelID — any other chat-shaped request gets a 400. GET /models always
+// succeeds (connectivity fallback path).
+func setupChatModelProbeRouter(t *testing.T, protocol provider.Protocol, chatModelID string, models []provider.ProviderModel) (*gin.Engine, chan probeUpstreamCall) {
+	t.Helper()
+
+	calls := make(chan probeUpstreamCall, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if r.Body != nil {
+			body, _ = io.ReadAll(r.Body)
+		}
+		calls <- probeUpstreamCall{Method: r.Method, Path: r.URL.Path, Body: string(body)}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodPost && (r.URL.Path == "/chat/completions" || r.URL.Path == "/v1/messages"):
+			if strings.Contains(string(body), `"`+chatModelID+`"`) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":"ok","choices":[]}`))
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"model not usable for chat"}}`))
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&provider.ProviderSummary{}, &provider.ProviderAttribute{}, &provider.ProviderModel{}))
+
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = previousDB })
+
+	encrypted, err := provider.Encrypt("sk-stored-secret", providerModelsTestKey)
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&provider.ProviderSummary{
+		ID:           1,
+		Key:          "chat-model-provider",
+		Name:         "Chat Model Provider",
+		Protocol:     string(protocol),
+		AuthStyle:    string(provider.AuthStyleAuthToken),
+		BaseURL:      upstream.URL,
+		LockedAPIKey: encrypted,
+	}).Error)
+	for _, m := range models {
+		m.ProviderID = 1
+		require.NoError(t, db.Create(&m).Error)
+	}
+
+	gin.SetMode(gin.TestMode)
+	h := NewProviderHandler(services.NewProviderService(providerModelsTestKey), nil, newHandlerTestAuditRecorder(t))
+	router := gin.New()
+	router.POST("/api/v1/admin/providers/:id/probe", h.Probe)
+	return router, calls
+}
+
+// TestProviderHandler_Probe_ChatPingSkipsNonChatModels 钉住复审发现：chat ping
+// 必须取首个 chat-capable（llm/vlm）模型 —— models[0] 按用户排序，若为
+// embedding 模型，探测会对 chat 端点 ping 一个 embedding 模型而假失败。
+func TestProviderHandler_Probe_ChatPingSkipsNonChatModels(t *testing.T) {
+	t.Run("openai", func(t *testing.T) {
+		router, calls := setupChatModelProbeRouter(t, provider.ProtocolOpenAI, "gpt-4o", []provider.ProviderModel{
+			{SelectionID: "sel-e", ModelID: "text-embedding-3-large", ModelType: string(provider.TypeEmbedding), SortOrder: 0},
+			{SelectionID: "sel-l", ModelID: "gpt-4o", ModelType: string(provider.TypeLLM), SortOrder: 1},
+		})
+
+		rec := postProbe(t, router, nil)
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+		var resp struct {
+			Data struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.True(t, resp.Data.Success,
+			"embedding 排前也必须用 chat-capable 模型 ping 成功: %s", rec.Body.String())
+
+		call := expectProbeCall(t, calls)
+		require.Equal(t, http.MethodPost, call.Method)
+		require.Equal(t, "/chat/completions", call.Path)
+		require.Contains(t, call.Body, `"gpt-4o"`, "chat ping 必须取 llm 模型而非排前的 embedding")
+	})
+
+	t.Run("anthropic", func(t *testing.T) {
+		router, calls := setupChatModelProbeRouter(t, provider.ProtocolAnthropic, "claude-sonnet-4-5", []provider.ProviderModel{
+			{SelectionID: "sel-e", ModelID: "bge-m3", ModelType: string(provider.TypeEmbedding), SortOrder: 0},
+			{SelectionID: "sel-l", ModelID: "claude-sonnet-4-5", ModelType: string(provider.TypeLLM), SortOrder: 1},
+		})
+
+		rec := postProbe(t, router, nil)
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+		var resp struct {
+			Data struct {
+				Success bool `json:"success"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.True(t, resp.Data.Success, "body=%s", rec.Body.String())
+
+		call := expectProbeCall(t, calls)
+		require.Equal(t, http.MethodPost, call.Method)
+		require.Equal(t, "/v1/messages", call.Path)
+		require.Contains(t, call.Body, `"claude-sonnet-4-5"`, "chat ping 必须取 llm 模型而非排前的 embedding")
+	})
+}
+
+// TestProviderHandler_Probe_OpenAIOnlyNonChatModelsFallsBackToModelsList 钉住：
+// 没有任何 chat-capable 模型时，openai 探测退化为 GET /models 连通性检查，
+// 不会拿 embedding 模型去 ping chat 端点造成假失败。
+func TestProviderHandler_Probe_OpenAIOnlyNonChatModelsFallsBackToModelsList(t *testing.T) {
+	router, calls := setupChatModelProbeRouter(t, provider.ProtocolOpenAI, "never-matches", []provider.ProviderModel{
+		{SelectionID: "sel-e", ModelID: "text-embedding-3-large", ModelType: string(provider.TypeEmbedding), SortOrder: 0},
+	})
+
+	rec := postProbe(t, router, nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var resp struct {
+		Data struct {
+			Success bool `json:"success"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Data.Success, "body=%s", rec.Body.String())
+
+	call := expectProbeCall(t, calls)
+	require.Equal(t, http.MethodGet, call.Method, "无 chat-capable 模型时只能退化 GET /models")
+	require.Equal(t, "/models", call.Path)
 }

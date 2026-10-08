@@ -713,6 +713,25 @@ func (s *ProviderService) ProbeConfig(baseURL, apiKey, protocol, authStyle strin
 	return s.doProbe(baseURL, apiKey, protocol, authStyle, models)
 }
 
+// firstChatModelID returns the id of the first chat-capable model (llm/vlm or
+// unspecified type). models[0] is user-sorted and may be an embedding model,
+// which a chat-schema ping would hit and produce a false failure.
+func firstChatModelID(models []provider.CatalogModel) (string, bool) {
+	for _, m := range models {
+		if m.ModelID == "" {
+			continue
+		}
+		switch m.ModelType {
+		case "", string(provider.TypeLLM), string(provider.TypeVLM):
+			return m.ModelID, true
+		}
+	}
+	return "", false
+}
+
+// doProbe performs the actual HTTP probe against the upstream provider.
+// It backs both the admin "test connection" buttons and the CLI
+// `provider probe/test` commands.
 func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {
 	start := time.Now()
 	base := strings.TrimSuffix(baseURL, "/")
@@ -722,11 +741,12 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 
 	switch protocol {
 	case string(provider.ProtocolOpenAI):
-		// 已配置模型时真实 ping 一次 /chat/completions：GET /models 只验证连通+鉴权，
-		// 端点不支持 openai chat schema 时会假成功（真实调用才 400，用户实测反例）。
-		// 未配置模型时退化为 GET /models 连通性检查（此时无法验证 chat schema）。
-		if len(models) > 0 && models[0].ModelID != "" {
-			body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, models[0].ModelID)
+		// 已配置 chat-capable 模型时真实 ping 一次 /chat/completions：GET /models
+		// 只验证连通+鉴权，端点不支持 openai chat schema 时会假成功（真实调用才
+		// 400，用户实测反例）。无 chat-capable 模型时退化为 GET /models 连通性
+		// 检查（此时无法验证 chat schema）。
+		if modelID, ok := firstChatModelID(models); ok {
+			body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, modelID)
 			req, err = http.NewRequest("POST", base+"/chat/completions", strings.NewReader(body))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
@@ -742,8 +762,8 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 		// Anthropic-compatible。handler 已做枚举校验，未知 protocol 在入站即被拒，
 		// 仅 anthropic 系列会走到 default。
 		modelID := "claude-sonnet-4-20250514"
-		if len(models) > 0 && models[0].ModelID != "" {
-			modelID = models[0].ModelID
+		if id, ok := firstChatModelID(models); ok {
+			modelID = id
 		}
 		body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, modelID)
 		req, err = http.NewRequest("POST", base+"/v1/messages", strings.NewReader(body))

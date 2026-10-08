@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/audit"
@@ -257,11 +259,11 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 	// Body is optional; ignore bind errors when no body is sent.
 	_ = c.ShouldBindJSON(&override)
 	if override.Protocol != "" && !isSupportedProtocol(override.Protocol) {
-		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: anthropic, openai, mineru, paddleocr）", override.Protocol))
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: %s）", override.Protocol, supportedProtocolsText))
 		return
 	}
 	if override.AuthStyle != "" && !isSupportedAuthStyle(override.AuthStyle) {
-		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: api_key, auth_token, no_auth）", override.AuthStyle))
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: %s）", override.AuthStyle, supportedAuthStylesText))
 		return
 	}
 
@@ -275,22 +277,29 @@ func (h *ProviderHandler) Probe(c *gin.Context) {
 
 // isSupportedProtocol / isSupportedAuthStyle 为探测端点钉住枚举白名单：未知值
 // 在 handler 层直接 400，不再落入 doProbe 的默认分支静默回退 anthropic/Bearer
-// —— 那会产生「按所选 protocol 探测成功」的假象。
+// —— 那会产生「按所选 protocol 探测成功」的假象。白名单与错误文案的单源都在
+// domain（SupportedProtocols/SupportedAuthStyles），新增枚举只需改 domain 一处。
 func isSupportedProtocol(v string) bool {
-	switch provider.Protocol(v) {
-	case provider.ProtocolAnthropic, provider.ProtocolOpenAI, provider.ProtocolMinerU, provider.ProtocolPaddleOCR:
-		return true
-	}
-	return false
+	return slices.Contains(provider.SupportedProtocols(), provider.Protocol(v))
 }
 
 func isSupportedAuthStyle(v string) bool {
-	switch provider.AuthStyle(v) {
-	case provider.AuthStyleAPIKey, provider.AuthStyleAuthToken, provider.AuthStyleNoAuth:
-		return true
-	}
-	return false
+	return slices.Contains(provider.SupportedAuthStyles(), provider.AuthStyle(v))
 }
+
+// joinEnum renders an enum allow-list for validation error messages.
+func joinEnum[T ~string](vals []T) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = string(v)
+	}
+	return strings.Join(parts, ", ")
+}
+
+var (
+	supportedProtocolsText  = joinEnum(provider.SupportedProtocols())
+	supportedAuthStylesText = joinEnum(provider.SupportedAuthStyles())
+)
 
 type probeConfigRequest struct {
 	BaseURL   string                  `json:"baseUrl" binding:"required"`
@@ -316,11 +325,11 @@ func (h *ProviderHandler) ProbeConfig(c *gin.Context) {
 		authStyle = string(provider.AuthStyleAPIKey)
 	}
 	if !isSupportedProtocol(protocol) {
-		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: anthropic, openai, mineru, paddleocr）", protocol))
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 protocol: %s（支持: %s）", protocol, supportedProtocolsText))
 		return
 	}
 	if !isSupportedAuthStyle(authStyle) {
-		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: api_key, auth_token, no_auth）", authStyle))
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, fmt.Sprintf("无效的 authStyle: %s（支持: %s）", authStyle, supportedAuthStylesText))
 		return
 	}
 
