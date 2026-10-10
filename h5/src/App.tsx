@@ -73,8 +73,9 @@ export default function App() {
     fetchAuthMode().then(setAuthMode);
   }, []);
 
-  // Casdoor OAuth 回调落地：URL 上带 ?token=&refreshToken=（部署在 console /static/h5/ 时
-  // 由 /auth/login?redirect=/h5/ 完成跳转）。验证 token 后写入登录态并广播。
+  // Casdoor OAuth 回调落地：token 走 URL fragment（#token=&refreshToken=，issue #185 起；
+  // 旧 query 格式滚动兼容），部署在 console /static/h5/ 时由 /auth/login?redirect=/h5/
+  // 完成跳转。验证 token 后写入登录态并广播。
   useEffect(() => {
     const tokens = extractOAuthTokensFromUrl();
     if (!tokens) return;

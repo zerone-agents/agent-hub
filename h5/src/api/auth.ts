@@ -125,22 +125,36 @@ export async function fetchAuthMode(): Promise<AuthMode> {
 
 /**
  * 从 URL 落地参数接收 OAuth token。
- * casdoor 回调：/static{redirect}?token=xxx&refreshToken=yyy（redirect 由 /auth/login?redirect= 带入，
- * H5 部署在 console /static/h5/ 时用 /h5/）。读取后立即清掉 URL 上的 token 参数。
+ * casdoor 回调（issue #185 起）：token 走 URL fragment（#token=xxx&refreshToken=yyy，
+ * 不进网关日志、不受请求行长限制）；旧格式 query（?token=）滚动兼容。
+ * 读取后立即清掉 URL 上这两种载体里的 token 参数。
  */
 export function extractOAuthTokensFromUrl(): { token: string; refreshToken?: string } | null {
   if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get('token');
+  const { pathname, search, hash } = window.location;
+  const query = new URLSearchParams(search);
+  const frag = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+
+  const token = frag.get('token') ?? query.get('token');
   if (!token) return null;
-  const refreshToken = params.get('refreshToken') ?? undefined;
-  params.delete('token');
-  params.delete('refreshToken');
-  const qs = params.toString();
+  const refreshToken = frag.get('refreshToken') ?? query.get('refreshToken') ?? undefined;
+
+  query.delete('token');
+  query.delete('refreshToken');
+  // fragment 按 & 分段过滤（而非 URLSearchParams.toString()）：后者会把
+  // 裸 hash（如 "#f"）重建成 "#f="，破坏业务 hash 原样性（对齐控制台
+  // consume-auth-params 的实现）。
+  const authSegment = /^(token|refreshToken)=/;
+  const cleanedHash = hash
+    .replace(/^#/, '')
+    .split('&')
+    .filter((segment) => segment !== '' && !authSegment.test(segment))
+    .join('&');
+  const qs = query.toString();
   window.history.replaceState(
     null,
     '',
-    window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+    pathname + (qs ? `?${qs}` : '') + (cleanedHash ? `#${cleanedHash}` : '')
   );
   return { token, refreshToken };
 }
