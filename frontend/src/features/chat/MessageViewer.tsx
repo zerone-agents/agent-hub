@@ -49,6 +49,11 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
+// antd Pagination 默认 totalBoundaryShowSizeChanger=50：total 超过它才渲染「每页条数」
+// 下拉。该下拉嵌在分页控件内部，所以控件可见性必须按 `total > pageSize` 与它取并集——
+// 只写前者的话，用户把条数切到 ≥ total 后控件会连下拉一起被卸载，页码和条数都再也改不回来。
+const SIZE_CHANGER_THRESHOLD = 50
+
 interface MessageViewerProps {
   session: ChatSession
 }
@@ -61,6 +66,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
 
   const messages = data?.items ?? []
   const total = data?.total ?? 0
+  const showSizeChanger = total > SIZE_CHANGER_THRESHOLD
 
   const buildAttachmentUrl = useMemo(
     () => (session.agent_id ? (p: string) => adminFileContentUrl(session.agent_id, p) : undefined),
@@ -106,7 +112,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
       </div>
 
       {/* Pagination */}
-      {total > pageSize && (
+      {total > pageSize || showSizeChanger ? (
         <div className={styles.pagination}>
           <Pagination
             current={page}
@@ -114,10 +120,11 @@ export default function MessageViewer({ session }: MessageViewerProps) {
             pageSize={pageSize}
             size="small"
             simple
+            showSizeChanger={showSizeChanger}
             onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

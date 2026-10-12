@@ -124,4 +124,42 @@ describe('chat pagination', () => {
     })
     await screen.findByText('消息 p1 size100')
   })
+
+  it('会话列表：条数切到 ≥ total 后分页控件不消失（否则无法切回）', async () => {
+    const qc = newQueryClient()
+    render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
+    await screen.findByText('会话 p1 size30')
+
+    await switchPageSizeTo(100)
+    await screen.findByText('会话 p1 size100')
+
+    // total=90 < pageSize=100 → 页数只剩 1 页，但「每页条数」下拉必须还在，
+    // 否则用户把自己锁死在 100。
+    expect(document.querySelector('.ant-pagination')).not.toBeNull()
+    expect(document.querySelector('.ant-pagination-options-size-changer')).not.toBeNull()
+
+    await switchPageSizeTo(20)
+    await waitFor(() => {
+      expect(chatApi.listSessions).toHaveBeenLastCalledWith({ page: 1, pageSize: 20 })
+    })
+  })
+
+  it('会话列表：末页切到更大条数时页码被钳制回 1', async () => {
+    const qc = newQueryClient()
+    render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
+    await screen.findByText('会话 p1 size30')
+
+    // total=90 / pageSize=30 → 3 页，先翻到末页
+    const next = () => document.querySelector('.ant-pagination-next button') as HTMLElement
+    fireEvent.click(next())
+    await screen.findByText('会话 p2 size30')
+    fireEvent.click(next())
+    await screen.findByText('会话 p3 size30')
+
+    // 切到 100：页数变 1，antd 会把 current 钳制为 1（本次断言即锁定该契约）
+    await switchPageSizeTo(100)
+    await waitFor(() => {
+      expect(chatApi.listSessions).toHaveBeenLastCalledWith({ page: 1, pageSize: 100 })
+    })
+  })
 })
