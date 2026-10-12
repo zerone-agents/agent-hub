@@ -79,7 +79,7 @@ interface SessionListPanelProps {
 export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }: SessionListPanelProps) {
   const { t } = useTranslation()
   const { styles } = useStyles()
-  const { data, isLoading, page, pageSize, setPage } = useChatSessions()
+  const { data, isLoading, page, pageSize, setPage, setPageSize } = useChatSessions()
   const deleteSession = useDeleteChatSession()
   const [search, setSearch] = useState('')
 
@@ -195,7 +195,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
             pageSize={pageSize}
             size="small"
             simple
-            onChange={(p) => { setPage(p); }}
+            onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>
       )}

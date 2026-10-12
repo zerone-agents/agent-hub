@@ -56,7 +56,7 @@ interface MessageViewerProps {
 export default function MessageViewer({ session }: MessageViewerProps) {
   const { t } = useTranslation()
   const { styles } = useStyles()
-  const { data, isLoading, page, pageSize, setPage } = useChatMessages(session.id)
+  const { data, isLoading, page, pageSize, setPage, setPageSize } = useChatMessages(session.id)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const messages = data?.items ?? []
@@ -114,7 +114,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
             pageSize={pageSize}
             size="small"
             simple
-            onChange={(p) => { setPage(p); }}
+            onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>
       )}
