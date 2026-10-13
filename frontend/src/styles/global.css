@@ -78,26 +78,26 @@ button {
     transform 160ms ease !important;
 }
 
-/* 分页器是点选控件，不是正文。antd simple 分页把当前页码渲染成真 <input>、后面跟
-   可选中的「/ N」文本，两处都没设 cursor → 走 UA 默认亮 I 型文本光标、还能拖选出
-   选区，看着像坏了的按钮。这里改手型光标，并对非输入区的「/ N」禁选
-   （input 上不写 user-select，避免影响键入页码后选中修改）。 */
+/* 分页器是点选控件，不是正文。antd simple 页码器的当前页是真 <input> + 「/ N」文本，
+   两处都没设 cursor → 走 UA 默认的 I 型文本标。改手型；「/ N」禁选，页码框保留可选中。 */
 .ant-pagination .ant-pagination-simple-pager {
   cursor: pointer;
   user-select: none;
 }
 
+/* user-select 可继承：上面父级的 none 会传到 input，这里显式放开，保住「键入页码后
+   拖选修改」的能力（光标仍由 cursor 决定，不受影响）。 */
 .ant-pagination .ant-pagination-simple-pager input {
   cursor: pointer;
+  user-select: text;
 }
 
-/* 「每页条数」下拉：antd v6 给带 showSearch 的 Select 根节点设 cursor: text
-   （见 select-input.js 的 `-show-search` 规则），而分页器里的条数选择器正带
-   `ant-select-show-search`——已在本页真实 DOM dump 中确认——于是悬停变 I 型文本标。
-   它是点开选项的控件、不是给人打字的输入框。antd 样式由 cssinjs 运行时注入，
-   选择器特异性与插入顺序都不可靠（本文件覆写 transition 同样用了 !important），
-   故这里显式 !important。 */
-.ant-pagination .ant-pagination-options-size-changer {
+/* 「每页条数」下拉是点开选项的控件，不是打字框。antd 给带 showSearch 的 Select 根节点
+   设了 cursor: text；更关键的是内层 <input> 的光标来自 UA 默认且不继承祖先
+   （Chrome 实测：裸 input 放进 cursor:pointer 容器仍解析为 text），只覆根节点管不到它。
+   故两层都写。!important 抵 antd cssinjs 的运行时注入（特异性与插入顺序不可靠）。 */
+.ant-pagination .ant-pagination-options-size-changer,
+.ant-pagination .ant-pagination-options-size-changer input {
   cursor: pointer !important;
   user-select: none;
 }
