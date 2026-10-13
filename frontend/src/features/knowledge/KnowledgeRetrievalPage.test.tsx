@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+// These interaction-heavy suites chain many userEvent steps; on a loaded CI
+// runner individual tests can exceed the 5s default (observed as flaky 5000ms
+// timeouts on main). Give the whole file headroom — scoped to this file only.
+vi.setConfig({ testTimeout: 20_000 });
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router";
