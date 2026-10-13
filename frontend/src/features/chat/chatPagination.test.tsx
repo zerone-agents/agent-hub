@@ -15,6 +15,7 @@ vi.mock('./ChatMarkdown', () => ({
   default: ({ content }: { content: string }) => <div>{content}</div>,
 }))
 
+import { switchPageSizeTo } from '@/test/size-changer'
 import { chatApi } from '@/api/chat'
 import SessionListPanel from './SessionListPanel'
 import MessageViewer from './MessageViewer'
@@ -46,20 +47,6 @@ function newQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-/** 通过 antd 的每页条数下拉切换 pageSize（total > 50 时 antd 才渲染该下拉）。 */
-async function switchPageSizeTo(size: number) {
-  const combo = document.querySelector(
-    '.ant-pagination-options-size-changer .ant-select-content'
-  ) as HTMLElement | null
-  expect(combo).not.toBeNull()
-  fireEvent.mouseDown(combo!)
-  const option = (await screen.findAllByRole('option')).find(
-    // title 形如 "100 / page" / "100 条/页"——按数字前缀匹配，不依赖 antd 文案语言
-    (o) => (o.getAttribute('title') ?? '').trim().startsWith(String(size))
-  )
-  expect(option).toBeDefined()
-  fireEvent.click(option!)
-}
 
 describe('chat pagination', () => {
   beforeEach(() => {

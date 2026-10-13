@@ -71,6 +71,8 @@ export default function KnowledgeListPage() {
   const navigate = useNavigate()
 
   const [page, setPage] = useState(1)
+  // 条数可选：与 antd 下拉一致（默认沿用页面原常量 10），并由下面的 onChange 接住第二参
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
   const [keywords, setKeywords] = useState('')
   const [sort, setSort] = useState('updated')
   const [formOpen, setFormOpen] = useState(false)
@@ -102,7 +104,7 @@ export default function KnowledgeListPage() {
 
   const { data, origin: listOrigin, isLoading, isError, refetch } = useKnowledgeList({
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     keywords,
     orderby: 'update_time',
     desc: sort === 'updated'
@@ -331,12 +333,12 @@ export default function KnowledgeListPage() {
           }}
           pagination={{
             current: page,
-            pageSize: PAGE_SIZE,
+            pageSize,
             total,
             showTotal: (n) => t('common.totalItems', { total: n }),
             showSizeChanger: sizeChangerProps(total),
             disabled: busy,
-            onChange: (next) => { clearSelection(); setPage(next); }
+            onChange: (next, size) => { clearSelection(); setPage(next); setPageSize(size); }
           }}
         />
       )}

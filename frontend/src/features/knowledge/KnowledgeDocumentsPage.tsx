@@ -338,7 +338,9 @@ export default function KnowledgeDocumentsPage() {
   const [bulkError, setBulkError] = useState("");
   const [metadataFilter, setMetadataFilter] = useState("");
   const [metadataCondition, setMetadataCondition] = useState("");
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(1)
+  // 条数可选：见 pagination.onChange（接住第二参），默认沿用原常量 10
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [keywords, setKeywords] = useState("");
   const [runFilter, setRunFilter] = useState<string[]>([]);
   const [suffixFilter, setSuffixFilter] = useState<string[]>([]);
@@ -354,7 +356,7 @@ export default function KnowledgeDocumentsPage() {
 
   const query = useDocuments(id, {
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     keywords,
     suffix: suffixFilter,
     run: runFilter,
@@ -1176,12 +1178,13 @@ export default function KnowledgeDocumentsPage() {
         }}
         pagination={{
           current: page,
-          pageSize: PAGE_SIZE,
+          pageSize,
           total,
           showTotal: (count) => t("common.totalItems", { total: count }),
           showSizeChanger: sizeChangerProps(total),
-          onChange: (next) => {
+          onChange: (next, size) => {
             setPage(next);
+            setPageSize(size);
           },
         }}
       />

@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
 import { antdTheme } from "@/lib/antd-theme";
 import KnowledgeChunksPage from "./KnowledgeChunksPage";
+import { switchPageSizeTo } from "@/test/size-changer";
 import { setAuthRole } from "@/test/auth-store-mock";
 
 // vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
@@ -16,6 +17,7 @@ const h = vi.hoisted(() => ({
   chunks: [] as Record<string, unknown>[],
   total: 0,
   refetchMock: vi.fn(),
+  chunkParamsMock: vi.fn(),
   createMock: vi.fn(),
   updateMock: vi.fn(),
   deleteMock: vi.fn(),
@@ -27,7 +29,9 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
-  useChunks: (_id: string, _documentId: string, params: { id?: string }) => ({
+  useChunks: (_id: string, _documentId: string, params: { id?: string; page_size?: number }) => {
+    h.chunkParamsMock(params);
+    return ({
     data: {
       chunks: params.id ? (h.target ? [h.target] : []) : h.chunks,
       total: h.total,
@@ -39,10 +43,11 @@ vi.mock("@/queries/useKnowledge", () => ({
         meta_fields: [{ key: "author" }],
       },
     },
-    isLoading: false,
-    isFetching: false,
-    refetch: h.refetchMock,
-  }),
+      isLoading: false,
+      isFetching: false,
+      refetch: h.refetchMock,
+    });
+  },
   useCreateChunk: () => ({ mutateAsync: h.createMock, isPending: false }),
   useUpdateChunk: () => ({ mutateAsync: h.updateMock, isPending: false }),
   useDeleteChunks: () => ({ mutate: h.deleteMock, mutateAsync: h.deleteMock }),
@@ -560,5 +565,19 @@ describe("KnowledgeChunksPage", () => {
       screen.queryByRole("checkbox", { name: "选择本页" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/已选择/)).not.toBeInTheDocument();
+  });
+it("切换每页条数会带上新的 page_size 重新查询（接线：onChange 须接住第二参）", async () => {
+    h.chunks = sampleChunks;
+    h.total = 90;
+    renderPage();
+    await screen.findAllByText("guide.pdf");
+
+    await switchPageSizeTo(50);
+
+    await waitFor(() => {
+      expect(h.chunkParamsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page_size: 50 }),
+      );
+    });
   });
 });
