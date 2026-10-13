@@ -91,7 +91,10 @@ export default function ChatViewPage() {
             <ArrowLeftIcon size={16} />
             {t('chat.backToList')}
           </button>
-          <MessageViewer session={selectedSession} />
+          {/* key 让分页状态（page/pageSize）随会话复位：否则在 A 会话翻到第 3 页再切到
+              只有 1 页的 B，会带着越界页码请求 → 列表空白，且总条数 ≤ pageSize 时
+              分页控件整块不渲染，用户卡在空页无法返回（对齐 AgentChatPage 的 key={name}）。 */}
+          <MessageViewer key={selectedSession.id} session={selectedSession} />
         </div>
       ) : (
         <div className={styles.emptyPane}>

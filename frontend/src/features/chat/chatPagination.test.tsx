@@ -18,6 +18,7 @@ vi.mock('./ChatMarkdown', () => ({
 import { chatApi } from '@/api/chat'
 import SessionListPanel from './SessionListPanel'
 import MessageViewer from './MessageViewer'
+import ChatViewPage from './ChatViewPage'
 
 const session = (id: string, title: string) => ({
   user_id: 'u1', id, title, created_at: '2026-01-01T00:00:00Z',
@@ -161,5 +162,44 @@ describe('chat pagination', () => {
     await waitFor(() => {
       expect(chatApi.listSessions).toHaveBeenLastCalledWith({ page: 1, pageSize: 100 })
     })
+  })
+
+  it('切换会话后消息分页回到第 1 页，不残留上一会话的页码', async () => {
+    const qc = newQueryClient()
+    vi.mocked(chatApi.listSessions).mockResolvedValue(
+      envelope({
+        items: [session('s1', '会话A'), session('s2', '会话B')],
+        total: 2, page: 1, page_size: 30, total_pages: 1,
+      })
+    )
+    vi.mocked(chatApi.listMessages).mockImplementation((sessionId, params) => {
+      const page = params?.page ?? 1
+      const total = sessionId === 's1' ? 60 : 5
+      return Promise.resolve(
+        envelope({
+          items: [message(`${sessionId}-p${page}`, `${sessionId} 第${page}页`)],
+          total, page, page_size: 20, total_pages: Math.ceil(total / 20),
+        })
+      )
+    })
+    render(<ChatViewPage />, { wrapper: wrapper(qc) })
+
+    fireEvent.click(await screen.findByText('会话A'))
+    await screen.findByText('s1 第1页')
+
+    // 会话A 有 3 页，翻到末页
+    const next = () => document.querySelector('.ant-pagination-next button') as HTMLElement
+    fireEvent.click(next())
+    await screen.findByText('s1 第2页')
+    fireEvent.click(next())
+    await screen.findByText('s1 第3页')
+
+    // 切到会话B（只有 5 条=1 页）：若页码残留为 3，请求会越界、列表空白且
+    // 分页控件因 total(5) 既 ≤ pageSize 又 ≤ 50 而整块不渲染 → 用户卡死。
+    fireEvent.click(screen.getByText('会话B'))
+    await waitFor(() => {
+      expect(chatApi.listMessages).toHaveBeenLastCalledWith('s2', { page: 1, pageSize: 20 })
+    })
+    await screen.findByText('s2 第1页')
   })
 })
