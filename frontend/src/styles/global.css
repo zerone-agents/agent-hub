@@ -78,6 +78,30 @@ button {
     transform 160ms ease !important;
 }
 
+/* 分页器是点选控件，不是正文。antd simple 页码器的当前页是真 <input> + 「/ N」文本，
+   两处都没设 cursor → 走 UA 默认的 I 型文本标。改手型；「/ N」禁选，页码框保留可选中。 */
+.ant-pagination .ant-pagination-simple-pager {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* user-select 可继承：上面父级的 none 会传到 input，这里显式放开，保住「键入页码后
+   拖选修改」的能力（光标仍由 cursor 决定，不受影响）。 */
+.ant-pagination .ant-pagination-simple-pager input {
+  cursor: pointer;
+  user-select: text;
+}
+
+/* 「每页条数」下拉是点开选项的控件，不是打字框。antd 给带 showSearch 的 Select 根节点
+   设了 cursor: text；更关键的是内层 <input> 的光标来自 UA 默认且不继承祖先
+   （Chrome 实测：裸 input 放进 cursor:pointer 容器仍解析为 text），只覆根节点管不到它。
+   故两层都写。!important 抵 antd cssinjs 的运行时注入（特异性与插入顺序不可靠）。 */
+.ant-pagination .ant-pagination-options-size-changer,
+.ant-pagination .ant-pagination-options-size-changer input {
+  cursor: pointer !important;
+  user-select: none;
+}
+
 .ant-btn:active:not(:disabled) {
   transform: translateY(1px);
 }
