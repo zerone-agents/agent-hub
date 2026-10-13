@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 
 export function useChatSessions() {
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(30)
+  const [pageSize, setPageSize] = useState(30)
 
   const query = useQuery<PaginatedData<ChatSession>>({
     queryKey: ['chat-sessions', page, pageSize],
@@ -16,12 +16,12 @@ export function useChatSessions() {
       unwrapResponse<PaginatedData<ChatSession>>(await chatApi.listSessions({ page, pageSize }))
   })
 
-  return { ...query, page, pageSize, setPage }
+  return { ...query, page, pageSize, setPage, setPageSize }
 }
 
 export function useChatMessages(sessionId: string | null) {
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(20)
 
   const query = useQuery<PaginatedData<ChatMessage>>({
     queryKey: ['chat-messages', sessionId, page, pageSize],
@@ -34,7 +34,7 @@ export function useChatMessages(sessionId: string | null) {
     enabled: !!sessionId
   })
 
-  return { ...query, page, pageSize, setPage }
+  return { ...query, page, pageSize, setPage, setPageSize }
 }
 
 export function useDeleteChatSession() {

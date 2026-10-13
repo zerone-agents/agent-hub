@@ -22,7 +22,8 @@ vi.mock('@/queries/useChat', () => ({
     isLoading: false,
     page: 1,
     pageSize: 30,
-    setPage: vi.fn()
+    setPage: vi.fn(),
+    setPageSize: vi.fn()
   }),
   useChatMessages: () => ({
     data: {
@@ -35,7 +36,8 @@ vi.mock('@/queries/useChat', () => ({
     isLoading: false,
     page: 1,
     pageSize: 100,
-    setPage: vi.fn()
+    setPage: vi.fn(),
+    setPageSize: vi.fn()
   }),
   useDeleteChatSession: () => ({ mutate: vi.fn() })
 }))
