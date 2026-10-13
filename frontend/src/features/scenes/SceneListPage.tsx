@@ -4,6 +4,7 @@ import NameSearch from '@/components/NameSearch'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusIcon, PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
+import { SIZE_CHANGER_NO_SEARCH } from '@/lib/pagination'
 import PrimaryButton from '@/components/PrimaryButton'
 import StatusBadge from '@/components/StatusBadge'
 import type { Scene } from '@/api/scenes'
@@ -205,7 +206,7 @@ export default function SceneListPage() {
           scroll={{ x: 960 }}
           pagination={{
             pageSize: 10,
-            showSizeChanger: true,
+            showSizeChanger: SIZE_CHANGER_NO_SEARCH,
             showTotal: (total) => t('common.totalItems', { total })
           }}
         />

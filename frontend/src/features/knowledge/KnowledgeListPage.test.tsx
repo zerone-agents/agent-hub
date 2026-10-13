@@ -6,6 +6,7 @@ import { ConfigProvider } from 'antd'
 import { antdTheme } from '@/lib/antd-theme'
 import KnowledgeListPage from './KnowledgeListPage'
 import { setAuthRole } from '@/test/auth-store-mock'
+import { switchPageSizeTo } from '@/test/size-changer'
 
 // vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
 vi.mock('@/stores/auth', async () => {
@@ -286,5 +287,19 @@ describe('KnowledgeListPage', () => {
     expect(screen.queryAllByTitle('编辑')).toHaveLength(0)
     expect(screen.queryAllByTitle('删除')).toHaveLength(0)
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+  it('切换每页条数会带上新的 page_size 重新查询（接线：onChange 须接住第二参）', async () => {
+    h.datasets = sampleDatasets
+    h.total = 90
+    renderPage()
+    await screen.findByText('产品知识库')
+
+    await switchPageSizeTo(50)
+
+    await waitFor(() => {
+      expect(h.listMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page_size: 50 })
+      )
+    })
   })
 })

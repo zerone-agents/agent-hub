@@ -15,6 +15,7 @@ vi.mock('./ChatMarkdown', () => ({
   default: ({ content }: { content: string }) => <div>{content}</div>,
 }))
 
+import { switchPageSizeTo } from '@/test/size-changer'
 import { chatApi } from '@/api/chat'
 import SessionListPanel from './SessionListPanel'
 import MessageViewer from './MessageViewer'
@@ -46,26 +47,11 @@ function newQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-/** 通过 antd 的每页条数下拉切换 pageSize（total > 50 时 antd 才渲染该下拉）。 */
-async function switchPageSizeTo(size: number) {
-  const combo = document.querySelector(
-    '.ant-pagination-options-size-changer .ant-select-content'
-  ) as HTMLElement | null
-  expect(combo).not.toBeNull()
-  fireEvent.mouseDown(combo!)
-  const option = (await screen.findAllByRole('option')).find(
-    // title 形如 "100 / page" / "100 条/页"——按数字前缀匹配，不依赖 antd 文案语言
-    (o) => (o.getAttribute('title') ?? '').trim().startsWith(String(size))
-  )
-  expect(option).toBeDefined()
-  fireEvent.click(option!)
-}
 
 describe('chat pagination', () => {
   beforeEach(() => {
     vi.mocked(chatApi.listSessions).mockImplementation((params) => {
-      const page = params?.page ?? 1
-      const size = params?.pageSize ?? 30
+      const { page, pageSize: size } = params
       return Promise.resolve(
         envelope({
           items: [session(`s-${page}-${size}`, `会话 p${page} size${size}`)],
@@ -74,8 +60,7 @@ describe('chat pagination', () => {
       )
     })
     vi.mocked(chatApi.listMessages).mockImplementation((_id, params) => {
-      const page = params?.page ?? 1
-      const size = params?.pageSize ?? 20
+      const { page, pageSize: size } = params
       return Promise.resolve(
         envelope({
           items: [message(`m-${page}-${size}`, `消息 p${page} size${size}`)],
@@ -88,7 +73,7 @@ describe('chat pagination', () => {
   it('会话列表：切换每页条数会带上新的 pageSize 重新请求', async () => {
     const qc = newQueryClient()
     render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
-    await screen.findByText('会话 p1 size30')
+    await screen.findByText('会话 p1 size20')
 
     await switchPageSizeTo(100)
 
@@ -101,16 +86,16 @@ describe('chat pagination', () => {
   it('会话列表：翻页仍按当前 pageSize 请求', async () => {
     const qc = newQueryClient()
     render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
-    await screen.findByText('会话 p1 size30')
+    await screen.findByText('会话 p1 size20')
 
     const next = document.querySelector('.ant-pagination-next button')
     expect(next).not.toBeNull()
     fireEvent.click(next!)
 
     await waitFor(() => {
-      expect(chatApi.listSessions).toHaveBeenCalledWith({ page: 2, pageSize: 30 })
+      expect(chatApi.listSessions).toHaveBeenCalledWith({ page: 2, pageSize: 20 })
     })
-    await screen.findByText('会话 p2 size30')
+    await screen.findByText('会话 p2 size20')
   })
 
   it('消息列表：切换每页条数会带上新的 pageSize 重新请求', async () => {
@@ -129,7 +114,7 @@ describe('chat pagination', () => {
   it('会话列表：条数切到 ≥ total 后分页控件不消失（否则无法切回）', async () => {
     const qc = newQueryClient()
     render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
-    await screen.findByText('会话 p1 size30')
+    await screen.findByText('会话 p1 size20')
 
     await switchPageSizeTo(100)
     await screen.findByText('会话 p1 size100')
@@ -148,14 +133,14 @@ describe('chat pagination', () => {
   it('会话列表：末页切到更大条数时页码被钳制回 1', async () => {
     const qc = newQueryClient()
     render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
-    await screen.findByText('会话 p1 size30')
+    await screen.findByText('会话 p1 size20')
 
-    // total=90 / pageSize=30 → 3 页，先翻到末页
+    // total=90 / pageSize=20 → 5 页，先翻到末页
     const next = () => document.querySelector('.ant-pagination-next button') as HTMLElement
-    fireEvent.click(next())
-    await screen.findByText('会话 p2 size30')
-    fireEvent.click(next())
-    await screen.findByText('会话 p3 size30')
+    for (let p = 2; p <= 5; p++) {
+      fireEvent.click(next())
+      await screen.findByText(`会话 p${p} size20`)
+    }
 
     // 切到 100：页数变 1，antd 会把 current 钳制为 1（本次断言即锁定该契约）
     await switchPageSizeTo(100)
@@ -164,16 +149,40 @@ describe('chat pagination', () => {
     })
   })
 
+  it('会话列表：条数下拉只列标准选项，且不启用搜索', async () => {
+    const qc = newQueryClient()
+    render(<SessionListPanel selectedId={null} onSelect={vi.fn()} />, { wrapper: wrapper(qc) })
+    await screen.findByText('会话 p1 size20')
+
+    // 默认 pageSize 必须在选项集合内：rc-pagination 会把当前值 concat 进选项，
+    // 默认值在集合外就会多出一个"野"选项（历史默认 30 即如此）。
+    // 按数值断言，不锁 antd 文案语言（title 形如 "10 / page" / "10 条/页"）。
+    const combo = document.querySelector(
+      '.ant-pagination-options-size-changer .ant-select-content'
+    ) as HTMLElement
+    fireEvent.mouseDown(combo)
+    const opts = await screen.findAllByRole('option')
+    expect(
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- getAttribute/textContent 运行时可为 null，TS 声明不完备的防御
+      opts.map((o) => parseInt((o.getAttribute('title') ?? o.textContent ?? '').trim(), 10))
+    ).toEqual([10, 20, 50, 100])
+
+    // 只有几项，不该是搜索框：antd 默认给条数下拉开 showSearch，本页显式关掉。
+    // 断言范围限定在条数下拉内，避免误伤同页其它 Select。
+    expect(document.querySelector('.ant-pagination-options-size-changer.ant-select-show-search')).toBeNull()
+    expect(document.querySelector('.ant-pagination-options-size-changer input')?.hasAttribute('readonly')).toBe(true)
+  })
+
   it('切换会话后消息分页回到第 1 页，不残留上一会话的页码', async () => {
     const qc = newQueryClient()
     vi.mocked(chatApi.listSessions).mockResolvedValue(
       envelope({
         items: [session('s1', '会话A'), session('s2', '会话B')],
-        total: 2, page: 1, page_size: 30, total_pages: 1,
+        total: 2, page: 1, page_size: 20, total_pages: 1,
       })
     )
     vi.mocked(chatApi.listMessages).mockImplementation((sessionId, params) => {
-      const page = params?.page ?? 1
+      const { page } = params
       const total = sessionId === 's1' ? 60 : 5
       return Promise.resolve(
         envelope({

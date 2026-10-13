@@ -5,6 +5,7 @@ import { MagnifyingGlassIcon, TrashIcon, ChatCircleDotsIcon } from '@phosphor-ic
 import { createStyles } from 'antd-style'
 import type { ChatSession } from '@/api/chat'
 import { useChatSessions, useDeleteChatSession } from '@/queries/useChat'
+import { SIZE_CHANGER_MIN_TOTAL, sizeChangerProps } from '@/lib/pagination'
 import { useProviders } from '@/queries/useProviders'
 import { formatTime } from '@/utils/time'
 import { tokens as tk } from '@/styles/tokens'
@@ -70,11 +71,8 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-// antd Pagination 默认 totalBoundaryShowSizeChanger=50：total 超过它才渲染「每页条数」
-// 下拉。该下拉嵌在分页控件内部，所以控件可见性必须按 `total > pageSize` 与它取并集——
-// 只写前者的话，用户把条数切到 ≥ total 后控件会连下拉一起被卸载，页码和条数都再也改不回来。
-const SIZE_CHANGER_THRESHOLD = 50
-
+// 分页控件可见性必须与「每页条数」下拉取并集：条数切到 ≥ total 后 `total > pageSize`
+// 会翻 false，控件连同下拉一起卸载就再也切不回来。下拉配置见 @/lib/pagination。
 interface SessionListPanelProps {
   selectedId: string | null
   onSelect: (session: ChatSession) => void
@@ -90,7 +88,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
 
   const sessions = useMemo(() => data?.items ?? [], [data?.items])
   const total = data?.total ?? 0
-  const showSizeChanger = total > SIZE_CHANGER_THRESHOLD
+  const showSizeChanger = total > SIZE_CHANGER_MIN_TOTAL
 
   // 解析 (provider_id, model_selection_id) → catalog displayName。
   // 历史快照场景下 provider 可能已删 / selectionId 已不在 catalog，此时 fallback 到 session.model。
@@ -201,7 +199,7 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
             pageSize={pageSize}
             size="small"
             simple
-            showSizeChanger={showSizeChanger}
+            showSizeChanger={sizeChangerProps(total)}
             onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>

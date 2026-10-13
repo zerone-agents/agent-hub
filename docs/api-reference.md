@@ -85,6 +85,7 @@ Covers CRUD + Probe for Agent / Tool / Skill / Scene / Provider / Knowledge / Ch
 | GET/PUT/DELETE | `/api/v1/admin/aigc/config` (+ `POST /config/rotate-key`) | adminWrite | Per-tenant AIGC content-labeling config (GB 45438-2025) |
 | GET/POST/DELETE | `/api/v1/admin/users`, `/admin/invites` | admin only | User management / invite links |
 | GET | `/api/v1/admin/audit-logs` | admin only | Audit log query — filters + snapshot pagination, see [Audit Logs](#audit-logs-admin-only) |
+| GET×3 | `/api/v1/admin/knowledge/datasets`, `…/datasets/:id/documents`, `…/documents/:id/chunks` | adminRead | Knowledge catalogue / documents / chunks. Pagination params have **two distinct semantics** (both bounded server-side so they cannot be amplified): `documents` **rejects** out-of-range `page_size` with 400 (`page_size 最大为 100`); `datasets` / `chunks` **clamp** `page` / `page_size` to `1e6` / `100` without erroring. The name/keyword local-filter branch additionally caps its single upstream fetch at 20000 rows |
 
 ### Audit Logs (admin only)
 

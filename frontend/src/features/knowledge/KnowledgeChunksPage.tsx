@@ -66,6 +66,7 @@ import KnowledgeOriginalPreview, {
   chunkPositions,
 } from "./KnowledgeOriginalPreview";
 import { useChunkReviewText } from "./chunkReviewText";
+import { sizeChangerProps } from "@/lib/pagination";
 import { tokens as t } from "@/styles/tokens";
 
 const useStyles = createStyles(({ css }) => ({
@@ -1162,6 +1163,8 @@ function KnowledgeChunksWorkbench() {
   const { id = "", documentId = "" } = useParams();
 
   const [page, setPage] = useState(1);
+  // 条数可选：见 pager 的 onChange（接住第二参），默认沿用原常量 10
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [view, setView] = useState("chunks");
   const [searchParams, setSearchParams] = useSearchParams();
   const targetId =
@@ -1190,7 +1193,7 @@ function KnowledgeChunksWorkbench() {
 
   const query = useChunks(id, documentId, {
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     keywords,
     available,
   });
@@ -1199,7 +1202,7 @@ function KnowledgeChunksWorkbench() {
     documentId,
     targetId
       ? { id: targetId, page_size: 1 }
-      : { page, page_size: PAGE_SIZE, keywords, available },
+      : { page, page_size: pageSize, keywords, available },
   );
   const deleteChunks = useDeleteChunks(id, documentId);
   const switchChunks = useSwitchChunks(id, documentId);
@@ -1730,11 +1733,13 @@ function KnowledgeChunksWorkbench() {
           <div className={styles.pager}>
             <Pagination
               current={page}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               total={total}
               showTotal={(count) => t("common.totalItems", { total: count })}
-              onChange={(next) => {
+              showSizeChanger={sizeChangerProps(total)}
+              onChange={(next, size) => {
                 setPage(next);
+                setPageSize(size);
               }}
             />
           </div>

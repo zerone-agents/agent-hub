@@ -82,8 +82,8 @@ func (h *KnowledgeHandler) ListDatasets(c *gin.Context) {
 	result, err := h.service.ListDatasets(c.Request.Context(), knowledge.DatasetListRequest{
 		ID:                   c.Query("id"),
 		Name:                 c.Query("name"),
-		Page:                 queryInt(c, "page"),
-		PageSize:             queryInt(c, "page_size"),
+		Page:                 queryIntBounded(c, "page", maxPage),
+		PageSize:             queryIntBounded(c, "page_size", maxPageSize),
 		OrderBy:              c.Query("orderby"),
 		Desc:                 queryBoolPtr(c, "desc"),
 		Keywords:             c.Query("keywords"),
@@ -164,7 +164,7 @@ func (h *KnowledgeHandler) ListDocuments(c *gin.Context) {
 		return
 	}
 	result, err := h.service.ListDocuments(c.Request.Context(), c.Param("datasetId"), knowledge.DocumentListRequest{
-		Page:                queryInt(c, "page"),
+		Page:                queryIntBounded(c, "page", maxPage),
 		PageSize:            queryInt(c, "page_size"),
 		OrderBy:             c.Query("orderby"),
 		Desc:                queryBoolPtr(c, "desc"),
@@ -297,8 +297,8 @@ func (h *KnowledgeHandler) StopParsingDocuments(c *gin.Context) {
 
 func (h *KnowledgeHandler) ListChunks(c *gin.Context) {
 	result, err := h.service.ListChunks(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"), knowledge.ChunkListRequest{
-		Page:      queryInt(c, "page"),
-		PageSize:  queryInt(c, "page_size"),
+		Page:      queryIntBounded(c, "page", maxPage),
+		PageSize:  queryIntBounded(c, "page_size", maxPageSize),
 		Keywords:  c.Query("keywords"),
 		ID:        c.Query("id"),
 		Available: queryBoolPtr(c, "available"),
@@ -452,6 +452,20 @@ func queryInt(c *gin.Context, key string) int {
 	}
 	parsed, _ := strconv.Atoi(value)
 	return parsed
+}
+
+// queryIntBounded 解析分页入参并钳到边界，复用聊天分页（parsePagination，issue #219）
+// 同款上界：超界钳到上界、不报错，未传/非法仍返回 0（上游按缺省填充）。
+//
+// knowledge 的分页值会经 client 直透 multirag，不设限即可被外部放大：
+// page_size=1e6 让对端扫全量；page 无上界时本地过滤分支还会按 page*pageSize
+// 再放大一次（见 client.datasetFilterFetchSize）。
+func queryIntBounded(c *gin.Context, key string, max int) int {
+	value := queryInt(c, key)
+	if value > max {
+		return max
+	}
+	return value
 }
 
 func queryInt64(c *gin.Context, key string) int64 {

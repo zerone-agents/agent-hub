@@ -35,16 +35,21 @@ export interface ChatMessage {
   aigc?: string
 }
 
+/**
+ * 分页入参。两个字段都由调用方（`useChatSessions` / `useChatMessages`）显式给出：
+ * 默认值只留在 hook 一处，避免 api 层出现「恒被覆盖」的死默认值，也避免两个端点
+ * 各自带一个与 hook 不一致的默认（历史上这里是 30 与 50，而 hook 用 20）。
+ */
 export interface ChatListParams {
-  page?: number
-  pageSize?: number
+  page: number
+  pageSize: number
 }
 
 export const chatApi = {
-  listSessions: ({ page = 1, pageSize = 30 }: ChatListParams = {}) =>
+  listSessions: ({ page, pageSize }: ChatListParams) =>
     apiClient.get(`/api/v1/admin/chat/sessions?page=${page}&page_size=${pageSize}`),
   getSession: (id: string) => apiClient.get(`/api/v1/admin/chat/sessions/${id}`),
-  listMessages: (sessionId: string, { page = 1, pageSize = 50 }: ChatListParams = {}) =>
+  listMessages: (sessionId: string, { page, pageSize }: ChatListParams) =>
     apiClient.get(
       `/api/v1/admin/chat/sessions/${sessionId}/messages?page=${page}&page_size=${pageSize}`
     ),
