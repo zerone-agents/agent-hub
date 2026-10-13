@@ -1125,8 +1125,8 @@ func TestDatasetFilterFetchSizeBounds(t *testing.T) {
 	}{
 		{name: "默认下限 1000", page: 1, pageSize: 10, wantFetchSize: 1000},
 		{name: "非正入参走默认后再取下限", page: 0, pageSize: 0, wantFetchSize: 1000},
-		{name: "乘积超过下限则按乘积", page: 20, pageSize: 1000, wantFetchSize: 20000},
-		{name: "乘积到上限为止", page: 20, pageSize: 1000, wantFetchSize: 20000},
+		// 乘积落在 (下限, 上限) 区间内：必须按乘积取，既不能被抬到 1000 也不能被削到 20000
+		{name: "乘积介于上下限之间则按乘积", page: 5, pageSize: 500, wantFetchSize: 2500},
 		{name: "被放大时封顶（handler 钳制后仍可达 1e8）", page: 1_000_000, pageSize: 100, wantFetchSize: 20000},
 		{name: "恰好等于上限", page: 200, pageSize: 100, wantFetchSize: 20000},
 		{name: "略低于上限不封顶", page: 199, pageSize: 100, wantFetchSize: 19900},
