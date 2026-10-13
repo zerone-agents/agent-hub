@@ -201,7 +201,11 @@ export default function SessionListPanel({ selectedId, onSelect, hideOnMobile }:
             pageSize={pageSize}
             size="small"
             simple
-            showSizeChanger={showSizeChanger}
+            // 条数下拉只有 10/20/50/100 几项，antd 默认给它的 Select 开了 showSearch
+            // （打开后可键入过滤），对个位数选项毫无意义，还会让内层 input 变可编辑
+            // （I 型光标 / 能选中）。antd 的 showSearch:true 是硬编码但展开顺序在传入
+            // props 之后，故传对象即可关掉；对象形态仍会渲染下拉（useShowSizeChanger）。
+            showSizeChanger={showSizeChanger ? { showSearch: false } : false}
             onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>

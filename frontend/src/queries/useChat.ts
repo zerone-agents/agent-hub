@@ -8,7 +8,10 @@ import { useTranslation } from 'react-i18next'
 
 export function useChatSessions() {
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(30)
+  // 20 必须在条数下拉的选项集合（antd 默认 10/20/50/100）内：rc-pagination 会把当前
+  // pageSize 并进选项，默认值若在集合外就会多出一个"野"选项，且与其它列表页（审计 20、
+  // 知识库 10）不一致。历史上这里是 30。
+  const [pageSize, setPageSize] = useState(20)
 
   const query = useQuery<PaginatedData<ChatSession>>({
     queryKey: ['chat-sessions', page, pageSize],

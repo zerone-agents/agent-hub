@@ -120,7 +120,9 @@ export default function MessageViewer({ session }: MessageViewerProps) {
             pageSize={pageSize}
             size="small"
             simple
-            showSizeChanger={showSizeChanger}
+            // 同 SessionListPanel：条数下拉只有 10/20/50/100 几项，没有搜索的意义，
+            // 关掉 antd 默认开的 showSearch（对象形态仍渲染下拉，只是不再可键入过滤）。
+            showSizeChanger={showSizeChanger ? { showSearch: false } : false}
             onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>

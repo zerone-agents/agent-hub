@@ -41,7 +41,7 @@ export interface ChatListParams {
 }
 
 export const chatApi = {
-  listSessions: ({ page = 1, pageSize = 30 }: ChatListParams = {}) =>
+  listSessions: ({ page = 1, pageSize = 20 }: ChatListParams = {}) =>
     apiClient.get(`/api/v1/admin/chat/sessions?page=${page}&page_size=${pageSize}`),
   getSession: (id: string) => apiClient.get(`/api/v1/admin/chat/sessions/${id}`),
   listMessages: (sessionId: string, { page = 1, pageSize = 50 }: ChatListParams = {}) =>
