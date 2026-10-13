@@ -64,8 +64,7 @@ async function switchPageSizeTo(size: number) {
 describe('chat pagination', () => {
   beforeEach(() => {
     vi.mocked(chatApi.listSessions).mockImplementation((params) => {
-      const page = params?.page ?? 1
-      const size = params?.pageSize ?? 20
+      const { page, pageSize: size } = params
       return Promise.resolve(
         envelope({
           items: [session(`s-${page}-${size}`, `会话 p${page} size${size}`)],
@@ -74,8 +73,7 @@ describe('chat pagination', () => {
       )
     })
     vi.mocked(chatApi.listMessages).mockImplementation((_id, params) => {
-      const page = params?.page ?? 1
-      const size = params?.pageSize ?? 20
+      const { page, pageSize: size } = params
       return Promise.resolve(
         envelope({
           items: [message(`m-${page}-${size}`, `消息 p${page} size${size}`)],
@@ -171,17 +169,20 @@ describe('chat pagination', () => {
 
     // 默认 pageSize 必须在选项集合内：rc-pagination 会把当前值 concat 进选项，
     // 默认值在集合外就会多出一个"野"选项（历史默认 30 即如此）。
+    // 按数值断言，不锁 antd 文案语言（title 形如 "10 / page" / "10 条/页"）。
     const combo = document.querySelector(
       '.ant-pagination-options-size-changer .ant-select-content'
     ) as HTMLElement
     fireEvent.mouseDown(combo)
     const opts = await screen.findAllByRole('option')
-    expect(opts.map((o) => (o.getAttribute('title') ?? '').trim())).toEqual([
-      '10 / page', '20 / page', '50 / page', '100 / page',
-    ])
+    expect(
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- getAttribute/textContent 运行时可为 null，TS 声明不完备的防御
+      opts.map((o) => parseInt((o.getAttribute('title') ?? o.textContent ?? '').trim(), 10))
+    ).toEqual([10, 20, 50, 100])
 
-    // 只有几项，不该是搜索框：antd 默认给条数下拉开 showSearch，本页显式关掉
-    expect(document.querySelector('.ant-select-show-search')).toBeNull()
+    // 只有几项，不该是搜索框：antd 默认给条数下拉开 showSearch，本页显式关掉。
+    // 断言范围限定在条数下拉内，避免误伤同页其它 Select。
+    expect(document.querySelector('.ant-pagination-options-size-changer.ant-select-show-search')).toBeNull()
     expect(document.querySelector('.ant-pagination-options-size-changer input')?.hasAttribute('readonly')).toBe(true)
   })
 
@@ -194,7 +195,7 @@ describe('chat pagination', () => {
       })
     )
     vi.mocked(chatApi.listMessages).mockImplementation((sessionId, params) => {
-      const page = params?.page ?? 1
+      const { page } = params
       const total = sessionId === 's1' ? 60 : 5
       return Promise.resolve(
         envelope({

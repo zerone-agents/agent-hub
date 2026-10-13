@@ -72,6 +72,7 @@ import {
   useDeleteDocuments,
 } from "@/queries/useKnowledge";
 import BorderedTable from "@/components/BorderedTable";
+import { sizeChangerProps } from "@/lib/pagination";
 import PrimaryButton, {
   usePrimaryButtonStyle,
 } from "@/components/PrimaryButton";
@@ -1178,6 +1179,7 @@ export default function KnowledgeDocumentsPage() {
           pageSize: PAGE_SIZE,
           total,
           showTotal: (count) => t("common.totalItems", { total: count }),
+          showSizeChanger: sizeChangerProps(total),
           onChange: (next) => {
             setPage(next);
           },

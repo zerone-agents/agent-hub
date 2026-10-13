@@ -11,10 +11,10 @@ let providersMock: any[] = []
 
 vi.mock('@/queries/useChat', () => ({
   useChatSessions: () => ({
-    data: { items: sessionsMock, total: sessionsMock.length, page: 1, page_size: 30, total_pages: 1 },
+    data: { items: sessionsMock, total: sessionsMock.length, page: 1, page_size: 20, total_pages: 1 },
     isLoading: false,
     page: 1,
-    pageSize: 30,
+    pageSize: 20,
     setPage: vi.fn(),
     setPageSize: vi.fn(),
   }),

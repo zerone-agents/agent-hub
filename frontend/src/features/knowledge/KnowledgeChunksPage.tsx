@@ -66,6 +66,7 @@ import KnowledgeOriginalPreview, {
   chunkPositions,
 } from "./KnowledgeOriginalPreview";
 import { useChunkReviewText } from "./chunkReviewText";
+import { sizeChangerProps } from "@/lib/pagination";
 import { tokens as t } from "@/styles/tokens";
 
 const useStyles = createStyles(({ css }) => ({
@@ -1733,6 +1734,7 @@ function KnowledgeChunksWorkbench() {
               pageSize={PAGE_SIZE}
               total={total}
               showTotal={(count) => t("common.totalItems", { total: count })}
+              showSizeChanger={sizeChangerProps(total)}
               onChange={(next) => {
                 setPage(next);
               }}

@@ -6,6 +6,7 @@ import type { ChatSession } from '@/api/chat'
 import { adminFileContentUrl } from '@/api/agent-files'
 import { useChatMessages } from '@/queries/useChat'
 import { formatTime } from '@/utils/time'
+import { SIZE_CHANGER_MIN_TOTAL, sizeChangerProps } from '@/lib/pagination'
 import { tokens as t } from '@/styles/tokens'
 import MessageBubble from './MessageBubble'
 
@@ -49,11 +50,8 @@ const useStyles = createStyles(({ css }) => ({
   `
 }))
 
-// antd Pagination 默认 totalBoundaryShowSizeChanger=50：total 超过它才渲染「每页条数」
-// 下拉。该下拉嵌在分页控件内部，所以控件可见性必须按 `total > pageSize` 与它取并集——
-// 只写前者的话，用户把条数切到 ≥ total 后控件会连下拉一起被卸载，页码和条数都再也改不回来。
-const SIZE_CHANGER_THRESHOLD = 50
-
+// 分页控件可见性必须与「每页条数」下拉取并集：条数切到 ≥ total 后 `total > pageSize`
+// 会翻 false，控件连同下拉一起卸载就再也切不回来。下拉配置见 @/lib/pagination。
 interface MessageViewerProps {
   session: ChatSession
 }
@@ -66,7 +64,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
 
   const messages = data?.items ?? []
   const total = data?.total ?? 0
-  const showSizeChanger = total > SIZE_CHANGER_THRESHOLD
+  const showSizeChanger = total > SIZE_CHANGER_MIN_TOTAL
 
   const buildAttachmentUrl = useMemo(
     () => (session.agent_id ? (p: string) => adminFileContentUrl(session.agent_id, p) : undefined),
@@ -120,9 +118,7 @@ export default function MessageViewer({ session }: MessageViewerProps) {
             pageSize={pageSize}
             size="small"
             simple
-            // 同 SessionListPanel：条数下拉只有 10/20/50/100 几项，没有搜索的意义，
-            // 关掉 antd 默认开的 showSearch（对象形态仍渲染下拉，只是不再可键入过滤）。
-            showSizeChanger={showSizeChanger ? { showSearch: false } : false}
+            showSizeChanger={sizeChangerProps(total)}
             onChange={(p, ps) => { setPage(p); setPageSize(ps); }}
           />
         </div>

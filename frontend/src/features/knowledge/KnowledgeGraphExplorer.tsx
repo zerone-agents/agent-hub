@@ -22,6 +22,7 @@ import {
 } from "./knowledgeDiagnostics";
 import { KnowledgeRawData } from "./KnowledgeDiagnosticDetails";
 import { useDiagnosticsText } from "./knowledgeDiagnostics.messages";
+import { sizeChangerProps } from "@/lib/pagination";
 
 function mindmapNodes(value: unknown, path = "root", depth = 0): DataNode[] {
   if (depth > 20) return [];
@@ -172,7 +173,7 @@ export default function KnowledgeGraphExplorer({
             dataSource={nodes}
             loading={loading}
             scroll={{ x: 560 }}
-            pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: sizeChangerProps(nodes.length) }}
             locale={{
               emptyText: filter.trim() ? text("noMatches") : text("noData"),
             }}
@@ -203,7 +204,7 @@ export default function KnowledgeGraphExplorer({
             dataSource={edges}
             loading={loading}
             scroll={{ x: 560 }}
-            pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: sizeChangerProps(edges.length) }}
             columns={[
               {
                 title: text("relationSource"),

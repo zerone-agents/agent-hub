@@ -13,6 +13,7 @@ import type { KnowledgeDataset, KnowledgeWriteOwner } from '@/api/knowledge'
 import { useAuthStore } from '@/stores/auth'
 import { getAccessToken, parseApiError } from '@/api/client'
 import { queryClient } from '@/lib/query-client'
+import { sizeChangerProps } from '@/lib/pagination'
 import { formatTime } from '@/utils/time'
 import { tokens as tk } from '@/styles/tokens'
 import BorderedTable from '@/components/BorderedTable'
@@ -333,6 +334,7 @@ export default function KnowledgeListPage() {
             pageSize: PAGE_SIZE,
             total,
             showTotal: (n) => t('common.totalItems', { total: n }),
+            showSizeChanger: sizeChangerProps(total),
             disabled: busy,
             onChange: (next) => { clearSelection(); setPage(next); }
           }}

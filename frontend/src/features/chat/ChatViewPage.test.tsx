@@ -17,11 +17,11 @@ vi.mock('@/queries/useChat', () => ({
         { id: 's1', title: '测试会话1', user_id: 'user-abc', model: 'gpt-4', agent_id: 'general', status: 'active', updated_at: '2026-06-15T10:00:00Z' },
         { id: 's2', title: '编程问答', user_id: 'user-def', model: 'claude-3', agent_id: 'coder', status: 'active', updated_at: '2026-06-16T10:00:00Z' }
       ],
-      total: 2, page: 1, page_size: 30, total_pages: 1
+      total: 2, page: 1, page_size: 20, total_pages: 1
     },
     isLoading: false,
     page: 1,
-    pageSize: 30,
+    pageSize: 20,
     setPage: vi.fn(),
     setPageSize: vi.fn()
   }),
@@ -31,11 +31,11 @@ vi.mock('@/queries/useChat', () => ({
         { id: 'm1', session_id: 's1', role: 'user', content: '你好', created_at: '2026-06-15T09:00:00Z', hidden: false, token_usage: '', user_id: 'u1', feedback: '' },
         { id: 'm2', session_id: 's1', role: 'assistant', content: '你好！有什么可以帮你的？', created_at: '2026-06-15T09:01:00Z', hidden: false, token_usage: '50 tokens', user_id: 'u1', feedback: '' }
       ],
-      total: 2, page: 1, page_size: 100, total_pages: 1
+      total: 2, page: 1, page_size: 20, total_pages: 1
     },
     isLoading: false,
     page: 1,
-    pageSize: 100,
+    pageSize: 20,
     setPage: vi.fn(),
     setPageSize: vi.fn()
   }),
