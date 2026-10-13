@@ -36,6 +36,7 @@ type handlerFakeKnowledgeEngine struct {
 	downloadFunc       func(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error)
 	imageFunc          func(ctx context.Context, imageID string) (*knowledge.StreamResult, error)
 	deleteDatasetsFunc func(ctx context.Context, req knowledge.DeleteRequest) error
+	listChunksFunc     func(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error)
 }
 
 func (f *handlerFakeKnowledgeEngine) Health(ctx context.Context) (*knowledge.HealthStatus, error) {
@@ -103,6 +104,9 @@ func (f *handlerFakeKnowledgeEngine) StopParsingDocuments(ctx context.Context, d
 	return nil
 }
 func (f *handlerFakeKnowledgeEngine) ListChunks(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+	if f.listChunksFunc != nil {
+		return f.listChunksFunc(ctx, datasetID, documentID, req)
+	}
 	return &knowledge.ChunkListResult{}, nil
 }
 func (f *handlerFakeKnowledgeEngine) CreateChunk(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkMutationRequest) (*knowledge.Chunk, error) {
@@ -619,5 +623,53 @@ func TestKnowledgeHandler_GetImagePropagatesCancel(t *testing.T) {
 	case <-canceled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("gateway did not cancel upstream")
+	}
+}
+
+// 分页入参钳制（issue：knowledge 的 datasets/chunks 此前无任何边界，page_size=1e6 会
+// 直透 multirag 扫全量）。documents 的 page_size 仍由 ValidateDocumentFilters 以 400
+// 拒绝（既有契约，见 TestManagementValidationNeverCallsUpstream），此处只钳它的 page。
+func TestKnowledgeHandler_PaginationBoundsClamp(t *testing.T) {
+	var gotDatasetReq knowledge.DatasetListRequest
+	var gotChunkReq knowledge.ChunkListRequest
+	router := setupKnowledgeRouter(&handlerFakeKnowledgeEngine{
+		listDatasetsFunc: func(ctx context.Context, req knowledge.DatasetListRequest) (*knowledge.DatasetListResult, error) {
+			gotDatasetReq = req
+			return &knowledge.DatasetListResult{Datasets: []knowledge.Dataset{}}, nil
+		},
+		listChunksFunc: func(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+			gotChunkReq = req
+			return &knowledge.ChunkListResult{}, nil
+		},
+	})
+
+	// datasets：超界的 page/page_size 钳到上界，不报错
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets?page=9999999&page_size=100000", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("datasets status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if gotDatasetReq.Page != maxPage || gotDatasetReq.PageSize != maxPageSize {
+		t.Fatalf("datasets clamp failed: page=%d page_size=%d", gotDatasetReq.Page, gotDatasetReq.PageSize)
+	}
+
+	// datasets：合法值原样透传
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets?page=3&page_size=50", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("datasets status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if gotDatasetReq.Page != 3 || gotDatasetReq.PageSize != 50 {
+		t.Fatalf("datasets passthrough failed: page=%d page_size=%d", gotDatasetReq.Page, gotDatasetReq.PageSize)
+	}
+
+	// chunks：同样钳制
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb/documents/doc1/chunks?page=9999999&page_size=100000", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("chunks status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if gotChunkReq.Page != maxPage || gotChunkReq.PageSize != maxPageSize {
+		t.Fatalf("chunks clamp failed: page=%d page_size=%d", gotChunkReq.Page, gotChunkReq.PageSize)
 	}
 }

@@ -754,6 +754,13 @@ func addBoolPtr(values url.Values, key string, value *bool) {
 	}
 }
 
+// maxDatasetFilterFetchSize 是「按名称/关键词本地过滤」单次向 multirag 拉取的行数上限。
+// datasetFilterFetchSize 按 page*pageSize 放大（下限 1000）；page/page_size 即使已被
+// handler 钳到 1e6/100，乘积仍可达 1e8——不封顶时 ?keywords=x&page=1e6&page_size=100
+// 会让 hub 试图拉 1e8 条并在本地物化。20_000 对齐控制台自身取全量目录的上限
+// （useKnowledgeListAll：20 页 × 1000 条），合法的既有用法不受影响。
+const maxDatasetFilterFetchSize = 20000
+
 func datasetFilterFetchSize(page int, pageSize int) int {
 	if page <= 0 {
 		page = 1
@@ -764,6 +771,9 @@ func datasetFilterFetchSize(page int, pageSize int) int {
 	size := page * pageSize
 	if size < 1000 {
 		return 1000
+	}
+	if size > maxDatasetFilterFetchSize {
+		return maxDatasetFilterFetchSize
 	}
 	return size
 }
