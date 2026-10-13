@@ -149,15 +149,32 @@ func chatScopeUserID(c *gin.Context) string {
 	return s
 }
 
+const (
+	// maxPageSize 分页条数上限，与前端下拉（10/20/50/100）及审计日志同口径：
+	// 不设限时 agent 聊天路径会把 page_size=1e6 直落 SQL LIMIT，把整表拉进内存。
+	maxPageSize = 100
+	// maxPage page 上界：防 (page-1)*pageSize 整型溢出成负 offset（GORM 忽略负
+	// offset 会静默返回首页数据）与超大 offset 慢查询——审计日志同款防线。
+	maxPage = 1_000_000
+)
+
 func parsePagination(c *gin.Context, defaultPage, defaultPageSize int) (page, pageSize int) {
 	page = defaultPage
 	pageSize = defaultPageSize
 
+	// 非法值仍按「未传」处理（取默认），不收紧成 400：存量客户端可能发脏值；
+	// 超界值则钳到边界（不报错），保证请求总能拿到数据。
 	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
 		page = p
 	}
+	if page > maxPage {
+		page = maxPage
+	}
 	if ps, err := strconv.Atoi(c.Query("page_size")); err == nil && ps > 0 {
 		pageSize = ps
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
 	}
 	return
 }
