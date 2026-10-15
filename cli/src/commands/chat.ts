@@ -13,16 +13,12 @@ import {
   type ChatMessage,
 } from "../client/chat";
 
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
-}
-
 function sessionRow(s: ChatSession): Record<string, unknown> {
   return {
-    id: shortId(s.id),
+    id: s.id,
     title: s.title || "-",
     agent: s.agent_id || "-",
-    user: s.display_name || s.user_name || shortId(s.user_id),
+    user: s.display_name || s.user_name || s.user_id,
     // hidden 会话不会被本端点过滤（与网页一致），因此列出来，避免"多出来的行"无解释
     hidden: s.hidden ? "yes" : "-",
     updated: s.updated_at,
@@ -55,6 +51,7 @@ export class ChatListCommand extends Command {
     details: [
       "--from/--to 作用于 updated_at（最后活动时间），不是创建时间。",
       "--text 是跨表扫描消息正文，可能较慢：非 member 角色需搭配 --agent/--user/--from/--to 之一，且至少 2 个字符。",
+      "LIKE 的大小写敏感性依数据库 collation（MySQL 默认不敏感、sqlite 敏感），不作为契约。",
     ].join(" "),
   });
 
@@ -74,7 +71,9 @@ export class ChatListCommand extends Command {
 
     // 本地只做与角色无关、且能确定非法的判断：时间顺序与 --text 最小长度。
     // 「是否需搭配收窄条件」取决于调用者角色，只有服务端知道，故不本地拦截。
-    if (this.text !== undefined && Array.from(this.text.trim()).length < 2) {
+    // 空串按未传处理（与 API 的「空串等同未传」及 from=""/to="" 的既有行为一致）。
+    const text = this.text?.trim() || undefined;
+    if (text !== undefined && Array.from(text).length < 2) {
       process.stderr.write("Error: --text needs at least 2 characters\n");
       return 2;
     }
@@ -99,7 +98,7 @@ export class ChatListCommand extends Command {
     }
 
     const res = await listChatSessions({
-      agentId: this.agent, user: this.user, keyword: this.keyword, messageContains: this.text,
+      agentId: this.agent, user: this.user, keyword: this.keyword, messageContains: text,
       from: from ?? undefined, to: to ?? undefined, page, pageSize,
     });
     if (this.output === "json") {
@@ -149,7 +148,7 @@ export class ChatMessagesCommand extends Command {
   page = Option.String("--page", { required: false });
   pageSize = Option.String("--page-size", { required: false });
   output = Option.String("--output", "table");
-  full = Option.Boolean("--full", false, { description: "Do not truncate message previews" });
+  full = Option.Boolean("--full", false, { description: "Widen message preview to 4000 characters (default 80)" });
 
   async execute(): Promise<number> {
     const invalid = validateOutput(this.output);

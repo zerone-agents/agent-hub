@@ -139,11 +139,13 @@ type ChatSessionFilter struct {
 	Page, PageSize  int
 }
 
-// escapeLike 把用户输入里的 LIKE 元字符变成字面量。ESCAPE '\' 与调用侧配对。
-// 注：审计端点既有 LIKE 未做转义（audit_repository.go "user" 筛选直拼 %），此处
-// 刻意不对齐——那是既有瑕疵，不扩大改动面。
+// escapeLike 把用户输入里的 LIKE 元字符变成字面量。转义符必须用 `!` 而非反斜杠：
+// MySQL 的 SQL 文本里 `ESCAPE '\'` 会让字符串字面量不闭合（ERROR 1064，曾为 PR #223
+// 评审阻塞项）；`ESCAPE '\\'` 又被 sqlite 解析成两字符（"must be a single character"）。
+// 两引擎不存在通用的反斜杠写法；`!` 在两侧都是单字符、且不受 NO_BACKSLASH_ESCAPES
+// 影响。转义只在此处做一次（spec §5 契约约束）。
 func escapeLike(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+	return strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`).Replace(s)
 }
 
 func likePattern(s string) string { return "%" + escapeLike(s) + "%" }
@@ -160,10 +162,10 @@ func (r *ChatRepository) applyChatSessionFilter(q *gorm.DB, f ChatSessionFilter)
 	}
 	if f.User != "" {
 		p := likePattern(f.User)
-		q = q.Where("(user_name LIKE ? ESCAPE '\\' OR user_id LIKE ? ESCAPE '\\')", p, p)
+		q = q.Where("(user_name LIKE ? ESCAPE '!' OR user_id LIKE ? ESCAPE '!')", p, p)
 	}
 	if f.Keyword != "" {
-		q = q.Where("title LIKE ? ESCAPE '\\'", likePattern(f.Keyword))
+		q = q.Where("title LIKE ? ESCAPE '!'", likePattern(f.Keyword))
 	}
 	if f.From != nil {
 		q = q.Where("updated_at >= ?", *f.From)
@@ -180,7 +182,7 @@ func (r *ChatRepository) applyChatSessionFilter(q *gorm.DB, f ChatSessionFilter)
 		q = q.Where(
 			"EXISTS (SELECT 1 FROM cloud_messages m WHERE m.user_id = cloud_sessions.user_id"+
 				" AND m.session_id = cloud_sessions.id AND m.tenant_id = ?"+
-				" AND m.content LIKE ? ESCAPE '\\')",
+				" AND m.content LIKE ? ESCAPE '!')",
 			f.TenantID, likePattern(f.MessageContains))
 	}
 	return q

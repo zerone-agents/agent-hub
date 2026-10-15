@@ -291,6 +291,9 @@ func TestChatListSessionsFilters(t *testing.T) {
 	t.Run("member 豁免收窄闸且范围不被放宽", func(t *testing.T) {
 		code, ids := listIDs([]string{"member"}, "u1", "message_contains=hi")
 		require.Equal(t, http.StatusOK, code)
+		// 正向断言先行：豁免后必须仍命中本人会话（m1 content="hi" 属 u1/s-own）——
+		// 只做反向断言的话空结果集也能过，是弱断言（评审建议 8）
+		require.Contains(t, ids, "s-own", "member 豁免收窄闸后应仍看到自己的会话")
 		for _, id := range ids {
 			require.NotEqual(t, "s-coder", id, "member 不得看到他人会话")
 		}
