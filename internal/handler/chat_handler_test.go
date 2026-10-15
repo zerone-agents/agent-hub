@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"control-panel/internal/domain/chat"
 	"control-panel/pkg/database"
@@ -226,4 +227,81 @@ func TestChatPush_TokenMode_IgnoresBodyIdentity(t *testing.T) {
 	require.Equal(t, "u1", s.UserID)
 	require.Equal(t, chatTestTenant, s.TenantID)
 	require.Equal(t, "u1-name", s.UserName)
+}
+
+// newChatContextQuery 与既有 newChatContext 同一套身份注入，只多带 query string。
+func newChatContextQuery(w *httptest.ResponseRecorder, roles []string, userID, rawQuery string) *gin.Context {
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?"+rawQuery, nil)
+	c.Set("roles", roles)
+	c.Set("user_id", userID)
+	c.Set("tenant_id", chatTestTenant)
+	return c
+}
+
+func seedChatFilterFixtures(t *testing.T) {
+	t.Helper()
+	db := database.GetDB()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&chat.Session{UserID: "u3", TenantID: chatTestTenant, ID: "s-coder", Title: "100% 命中", AgentID: "coder", UserName: "carol", CreatedAt: base, UpdatedAt: base.Add(time.Hour)}).Error)
+	require.NoError(t, db.Create(&chat.Message{UserID: "u3", TenantID: chatTestTenant, ID: "m-coder", SessionID: "s-coder", Role: "user", Content: `body-token-here`, CreatedAt: base}).Error)
+}
+
+func TestChatListSessionsFilters(t *testing.T) {
+	setupChatHandlerTestDB(t)
+	seedChatFilterFixtures(t)
+	h := NewChatHandler("builtin", func() (string, bool) { return "default", true })
+	listIDs := func(roles []string, uid, q string) (int, []string) {
+		w := httptest.NewRecorder()
+		h.ListSessions(newChatContextQuery(w, roles, uid, q))
+		var body struct {
+			Data struct {
+				Items []chat.Session `json:"items"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		ids := make([]string, 0, len(body.Data.Items))
+		for _, s := range body.Data.Items {
+			ids = append(ids, s.ID)
+		}
+		return w.Code, ids
+	}
+
+	t.Run("agent_id 精确命中", func(t *testing.T) {
+		code, ids := listIDs([]string{"admin"}, "1", "agent_id=coder")
+		require.Equal(t, http.StatusOK, code)
+		require.Equal(t, []string{"s-coder"}, ids)
+	})
+	t.Run("keyword 只命中标题", func(t *testing.T) {
+		_, ids := listIDs([]string{"admin"}, "1", "keyword=body-token-here")
+		require.Equal(t, []string{}, ids)
+	})
+	t.Run("message_contains 搭配收窄 → 命中", func(t *testing.T) {
+		_, ids := listIDs([]string{"admin"}, "1", "message_contains=body-token&agent_id=coder")
+		require.Equal(t, []string{"s-coder"}, ids)
+	})
+	t.Run("message_contains 无收窄（admin）→ 400", func(t *testing.T) {
+		code, _ := listIDs([]string{"admin"}, "1", "message_contains=body-token")
+		require.Equal(t, http.StatusBadRequest, code)
+	})
+	t.Run("message_contains 过短 → 400", func(t *testing.T) {
+		code, _ := listIDs([]string{"admin"}, "1", "message_contains=a&agent_id=coder")
+		require.Equal(t, http.StatusBadRequest, code)
+	})
+	t.Run("member 豁免收窄闸且范围不被放宽", func(t *testing.T) {
+		code, ids := listIDs([]string{"member"}, "u1", "message_contains=hi")
+		require.Equal(t, http.StatusOK, code)
+		for _, id := range ids {
+			require.NotEqual(t, "s-coder", id, "member 不得看到他人会话")
+		}
+	})
+	t.Run("非法 from → 400", func(t *testing.T) {
+		code, _ := listIDs([]string{"admin"}, "1", "from=not-a-time")
+		require.Equal(t, http.StatusBadRequest, code)
+	})
+	t.Run("不传筛选时与既有行为一致", func(t *testing.T) {
+		code, ids := listIDs([]string{"admin"}, "1", "")
+		require.Equal(t, http.StatusOK, code)
+		require.ElementsMatch(t, []string{"s-own", "s-other", "s-coder"}, ids)
+	})
 }
