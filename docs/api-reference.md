@@ -81,7 +81,7 @@ Covers CRUD + Probe for Agent / Tool / Skill / Scene / Provider / Knowledge / Ch
 | GET | `/api/v1/admin/agents/:name/deploy` | adminRead | Deployment status (runtimeUrl/apiKey included; member-readable) |
 | POST | `/api/v1/admin/agents/:name/deploy` (+ `/stop`, `/start`, DELETE) | adminWrite | Deploy / lifecycle control |
 | GET | `/api/v1/admin/agents/:name/files`, `/files/content` | read / write | Files listing is member-readable; **content is admin/maintainer only** |
-| GET×3 + DELETE | `/api/v1/admin/chat/sessions...` | adminRead | Chat history. Handler-level `chatScopeUserID` isolation: member sees/deletes only their own sessions (others → 404); admin/maintainer see all sessions of the tenant |
+| GET×3 + DELETE | `/api/v1/admin/chat/sessions...` | adminRead | Chat history. Handler-level `chatScopeUserID` isolation: member sees/deletes only their own sessions (others → 404); admin/maintainer see all sessions of the tenant — see [Chat History Filters](#chat-history-filters-admin) |
 | GET/PUT/DELETE | `/api/v1/admin/aigc/config` (+ `POST /config/rotate-key`) | adminWrite | Per-tenant AIGC content-labeling config (GB 45438-2025) |
 | GET/POST/DELETE | `/api/v1/admin/users`, `/admin/invites` | admin only | User management / invite links |
 | GET | `/api/v1/admin/audit-logs` | admin only | Audit log query — filters + snapshot pagination, see [Audit Logs](#audit-logs-admin-only) |
@@ -112,6 +112,23 @@ Response (ordered `createdAt DESC, id DESC`):
 - `id` / `snapshotId` are decimal strings: uint64 values above 2^53-1 lose precision as JS numbers — keep them as strings, never convert to number.
 - `detail` is a JSON object or `null`, shaped by a strongly-typed allowlist per `action`.
 - `status` is three-state: `success` / `failure` / `partial`.
+
+### Chat History Filters (admin)
+
+`GET /api/v1/admin/chat/sessions` — 除既有 `page` / `page_size` 外支持以下**可选**筛选；
+**空串等同未传**（不会退化成匹配全部）：
+
+| Param | 语义 | 越界处理 |
+|---|---|---|
+| `page` / `page_size` | 分页 | 钳制到 `1_000_000` / `100`，不报错 |
+| `agent_id` | 精确匹配 | — |
+| `user` | `user_name` OR `user_id` 模糊（列集与 Audit Logs `user` 一致） | — |
+| `keyword` | **仅**匹配会话标题 | — |
+| `message_contains` | 存在任一消息正文匹配；**跨表扫描**，须搭配 `agent_id`/`user`/`from`/`to` 之一（member 由强制自我范围豁免），且 ≥2 字符（按 rune） | 违规 → 400 `invalid_parameter` |
+| `from` / `to` | RFC3339，**闭区间作用于 `updated_at`（最后活动时间，非创建时间）** | 非法 → 400 `invalid_time_range` |
+
+响应顺序 `updated_at DESC`；`total` 与筛选后的结果集一致。大小写敏感性依数据库 collation
+（MySQL 默认不敏感、sqlite 敏感），不作为契约。
 
 ## CLI Tokens (`/api/v1/cli/*` — admin/maintainer only)
 
