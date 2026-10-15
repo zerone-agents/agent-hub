@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"control-panel/internal/domain/chat"
@@ -124,34 +125,95 @@ func normalizeMessageOrder(msgs []*chat.Message) {
 	}
 }
 
-func (r *ChatRepository) ListSessions(tenantID string, page, pageSize int) ([]*chat.Session, int64, error) {
+// ChatSessionFilter 会话列表的服务端筛选条件（spec 2026-10-14-cli-chat-fetch §5）。
+// 字符串字段一律存**调用方原始值**：LIKE 的转义与 % 包裹只在 applyChatSessionFilter
+// 内做一次，两层各转义一次会让 "%" 变成 "\\%" 这种字面量错配（spec §5 契约约束）。
+type ChatSessionFilter struct {
+	TenantID        string     // 强制租户范围，永不接受客户端输入
+	ScopeUserID     string     // member 的强制自我范围（admin 传空串）
+	AgentID         string     // 精确
+	User            string     // user_name / user_id 两列模糊，列集与审计端点严格一致
+	Keyword         string     // 仅命中标题
+	MessageContains string     // 跨表正文扫描，显式才走（成本见下方 EXISTS 注释）
+	From, To        *time.Time // 闭区间，作用于 updated_at（最后活动时间）
+	Page, PageSize  int
+}
+
+// escapeLike 把用户输入里的 LIKE 元字符变成字面量。ESCAPE '\' 与调用侧配对。
+// 注：审计端点既有 LIKE 未做转义（audit_repository.go "user" 筛选直拼 %），此处
+// 刻意不对齐——那是既有瑕疵，不扩大改动面。
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+func likePattern(s string) string { return "%" + escapeLike(s) + "%" }
+
+// applyChatSessionFilter 组装筛选 WHERE。COUNT 与 Find 必须共用它（同
+// audit_repository.go 的既有不变量）：两条语句 WHERE 不一致会让 total 与
+// 实际分页结果对不上。
+func (r *ChatRepository) applyChatSessionFilter(q *gorm.DB, f ChatSessionFilter) *gorm.DB {
+	if f.ScopeUserID != "" {
+		q = q.Where("user_id = ?", f.ScopeUserID)
+	}
+	if f.AgentID != "" {
+		q = q.Where("agent_id = ?", f.AgentID)
+	}
+	if f.User != "" {
+		p := likePattern(f.User)
+		q = q.Where("(user_name LIKE ? ESCAPE '\\' OR user_id LIKE ? ESCAPE '\\')", p, p)
+	}
+	if f.Keyword != "" {
+		q = q.Where("title LIKE ? ESCAPE '\\'", likePattern(f.Keyword))
+	}
+	if f.From != nil {
+		q = q.Where("updated_at >= ?", *f.From)
+	}
+	if f.To != nil {
+		q = q.Where("updated_at <= ?", *f.To)
+	}
+	if f.MessageContains != "" {
+		// 成本注记（spec §4.4，勿改写）：cloud_messages 主键是 (user_id, id, session_id)，
+		// 可作 ref 访问的前缀只有 user_id；session_id 排第三，不构成可用前缀。
+		// 所以这里是「扫该用户的全部消息再按会话过滤」，不是「按会话索引定位」。
+		// m.tenant_id 条件不是性能手段（一次表引用只用一个索引），其理由是纵深防御
+		// 并与既有 ListMessages 的 TenantOwned 口径一致。
+		q = q.Where(
+			"EXISTS (SELECT 1 FROM cloud_messages m WHERE m.user_id = cloud_sessions.user_id"+
+				" AND m.session_id = cloud_sessions.id AND m.tenant_id = ?"+
+				" AND m.content LIKE ? ESCAPE '\\')",
+			f.TenantID, likePattern(f.MessageContains))
+	}
+	return q
+}
+
+// ListSessionsFiltered 是会话列表筛选的唯一实现。
+func (r *ChatRepository) ListSessionsFiltered(f ChatSessionFilter) ([]*chat.Session, int64, error) {
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 20
+	}
 	var total int64
-	if err := TenantOwned(r.db.Model(&chat.Session{}), tenantID).Count(&total).Error; err != nil {
+	if err := r.applyChatSessionFilter(TenantOwned(r.db.Model(&chat.Session{}), f.TenantID), f).
+		Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-
 	var sessions []*chat.Session
-	offset := (page - 1) * pageSize
-	err := TenantOwned(r.db, tenantID).
-		Order("updated_at DESC").Offset(offset).Limit(pageSize).
+	err := r.applyChatSessionFilter(TenantOwned(r.db.Model(&chat.Session{}), f.TenantID), f).
+		Order("updated_at DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).
 		Find(&sessions).Error
 	return sessions, total, err
 }
 
-// ListSessionsByUser 仅返回指定用户的会话（member 数据范围）。
-func (r *ChatRepository) ListSessionsByUser(tenantID, userID string, page, pageSize int) ([]*chat.Session, int64, error) {
-	var total int64
-	if err := TenantOwned(r.db.Model(&chat.Session{}), tenantID).Where("user_id = ?", userID).Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
+// ListSessions 保留为薄包装：既有调用方与既有测试不破。
+func (r *ChatRepository) ListSessions(tenantID string, page, pageSize int) ([]*chat.Session, int64, error) {
+	return r.ListSessionsFiltered(ChatSessionFilter{TenantID: tenantID, Page: page, PageSize: pageSize})
+}
 
-	var sessions []*chat.Session
-	offset := (page - 1) * pageSize
-	err := TenantOwned(r.db, tenantID).Where("user_id = ?", userID).
-		Order("updated_at DESC").
-		Offset(offset).Limit(pageSize).
-		Find(&sessions).Error
-	return sessions, total, err
+// ListSessionsByUser 同上，userID 作为强制范围。
+func (r *ChatRepository) ListSessionsByUser(tenantID, userID string, page, pageSize int) ([]*chat.Session, int64, error) {
+	return r.ListSessionsFiltered(ChatSessionFilter{TenantID: tenantID, ScopeUserID: userID, Page: page, PageSize: pageSize})
 }
 
 func (r *ChatRepository) GetSession(tenantID, sessionID string) (*chat.Session, error) {
