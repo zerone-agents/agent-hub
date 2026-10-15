@@ -52,6 +52,7 @@ import {
   SkillDeleteCommand,
   SkillDownloadCommand,
 } from "./commands/skill";
+import { ChatListCommand, ChatGetCommand, ChatMessagesCommand } from "./commands/chat";
 
 const cli = new Cli({
   binaryName: "zhub",
@@ -111,5 +112,10 @@ cli.register(SkillCreateCommand);
 cli.register(SkillUpdateCommand);
 cli.register(SkillDeleteCommand);
 cli.register(SkillDownloadCommand);
+
+// chat
+cli.register(ChatListCommand);
+cli.register(ChatGetCommand);
+cli.register(ChatMessagesCommand);
 
 cli.runExit(process.argv.slice(2));
