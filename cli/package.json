@@ -1,6 +1,6 @@
 {
   "name": "@zerone-agent/zhub",
-  "version": "0.3.2",
+  "version": "0.7.0",
   "description": "Zerone Hub CLI — manage agents, skills, tools, MCPs, and providers from the terminal",
   "bin": {
     "zhub": "./src/index.ts"
