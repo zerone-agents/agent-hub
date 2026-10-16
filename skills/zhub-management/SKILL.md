@@ -303,7 +303,7 @@ zhub chat list [--agent <name>] [--user <u>] [--keyword <title-kw>] \
                [--page N] [--page-size N] [--output table|json|yaml]
 
 # Get one session's metadata
-zhub chat get <session-id> [--output yaml]
+zhub chat get <session-id> [--output yaml|json|table]
 
 # View a session's full message stream (paginated)
 zhub chat messages <session-id> [--page N] [--page-size N] [--full] [--output table|json|yaml]
@@ -340,7 +340,7 @@ zhub chat messages <session-id> [--page N] [--page-size N] [--full] [--output ta
   `data[].content` is a **JSON array of message parts** (e.g.
   `[{"type":"text","text":"..."}]`) — parse with `jq` to extract text:
   ```bash
-  zhub chat messages <id> --output json | jq -r '.data[].content | fromjson | map(select(.type=="text").text) | join("\n")'
+  zhub chat messages <id> --output json | jq -r '.data[].content | fromjson? // . | if type=="array" then map(select(.type=="text").text) | join("\n") else . end'
   ```
 - `--output yaml`: raw objects, no column-level processing
 - `--full` (messages only): widen content preview from 80 to 4000 chars;
@@ -366,9 +366,10 @@ only their own sessions (server-enforced, cannot be bypassed by any flag).
 - **MCP probe is required for create**: CLI automatically probes before creating. If probe fails, creation is aborted. SSE transport is not supported for probe yet.
 - **`--keyword` searches titles only**: To find sessions by message content, use `--text` (and combine with a narrowing filter if you're admin/maintainer — the server will 400 otherwise). Don't use `--keyword` expecting message-body hits.
 - **`--from`/`--to` filter on `updated_at`, not `created_at`**: A session created long ago but still active will match recent time ranges. If you need "recently created" semantics, this flag won't give it — there is no creation-time filter.
-- **`chat messages` content is parts JSON**: In `--output json`, `data[].content` is a JSON-encoded array of parts, not plain text. Use `jq` with `fromjson` to extract text (see Decision Tree 3.8). In table mode the CLI already renders a plain-text preview (80 chars, or 4000 with `--full`).
+- **`chat messages` content is parts JSON**: In `--output json`, `data[].content` is a JSON-encoded array of parts, not plain text. Use `jq` with `fromjson? // .` to extract text (see Decision Tree 3.8) — some legacy rows may contain plain text instead of JSON, and a bare `fromjson` will error on those. In table mode the CLI already renders a plain-text preview with graceful degradation (80 chars, or 4000 with `--full`).
 - **Session IDs in table output are NOT truncated**: The `id` column shows the full UUID — it can be directly copied to `zhub chat get <id>` or `zhub chat messages <id>`.
 - **Chat history is read-only**: There is no `chat create` / `chat delete` via CLI. To delete a session, use the control-panel web UI.
+- **Local validation exits** (all exit 2, no request sent): `--from` later than `--to`; `--text` shorter than 2 characters; invalid RFC3339 timestamp in `--from`/`--to`; `--page`/`--page-size` not a positive integer. These are checked locally — you'll never see a server error for them.
 
 ## Error Recovery
 
