@@ -91,6 +91,20 @@ zhub skill delete <name>
 zhub skill download <name> [--output json|table|yaml]
 ```
 
+### Chat (3 commands)
+```bash
+zhub chat list [--agent <name>] [--user <u>] [--keyword <kw>] [--text <kw>] \
+               [--from <RFC3339>] [--to <RFC3339>] [--page N] [--page-size N] [--output table|json|yaml]
+zhub chat get <session-id> [--output yaml|json|table]
+zhub chat messages <session-id> [--page N] [--page-size N] [--full] [--output table|json|yaml]
+```
+
+- `--keyword` 匹配**标题**；`--text` 跨表扫描**消息正文**（慢，非 member 角色需搭配
+  `--agent`/`--user`/`--from`/`--to` 之一，且 ≥2 字符）。
+- `--from`/`--to` 作用于 **`updated_at`（最后活动时间）**，不是创建时间。
+- 不传 `--page`/`--page-size` 时由服务端定默认（sessions 20 / messages 50）。
+- 表格模式的分页统计写 stderr，stdout 保持可管道；`hidden` 会话不会被过滤，故显式成列。
+
 ## Output Formats
 
 All list/get commands support `--output`:

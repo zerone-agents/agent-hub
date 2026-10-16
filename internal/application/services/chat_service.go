@@ -261,9 +261,22 @@ type ListResponse struct {
 	TotalPages int         `json:"total_pages"`
 }
 
-// ListSessions 返回会话列表。userID 非空时按该用户过滤（member 数据范围）；
-// 为空时返回全部（admin/maintainer）。两种模式都限定在 tenantID 内。
-func (s *ChatService) ListSessions(tenantID string, page, pageSize int, userID string) (*ListResponse, error) {
+// ChatSessionQuery 会话列表查询入参（handler 构造，字段语义见 repository.ChatSessionFilter）。
+type ChatSessionQuery struct {
+	TenantID        string
+	ScopeUserID     string
+	AgentID         string
+	User            string
+	Keyword         string
+	MessageContains string
+	From, To        *time.Time
+	Page, PageSize  int
+}
+
+// ListSessions 返回会话列表。ScopeUserID 非空时按该用户过滤（member 数据范围）；
+// 其余字段为可选服务端筛选，空值一律视为「未传」。
+func (s *ChatService) ListSessions(q ChatSessionQuery) (*ListResponse, error) {
+	page, pageSize := q.Page, q.PageSize
 	if page < 1 {
 		page = 1
 	}
@@ -271,14 +284,11 @@ func (s *ChatService) ListSessions(tenantID string, page, pageSize int, userID s
 		pageSize = 20
 	}
 
-	var sessions []*chat.Session
-	var total int64
-	var err error
-	if userID != "" {
-		sessions, total, err = s.repo.ListSessionsByUser(tenantID, userID, page, pageSize)
-	} else {
-		sessions, total, err = s.repo.ListSessions(tenantID, page, pageSize)
-	}
+	sessions, total, err := s.repo.ListSessionsFiltered(repository.ChatSessionFilter{
+		TenantID: q.TenantID, ScopeUserID: q.ScopeUserID, AgentID: q.AgentID,
+		User: q.User, Keyword: q.Keyword, MessageContains: q.MessageContains,
+		From: q.From, To: q.To, Page: page, PageSize: pageSize,
+	})
 	if err != nil {
 		return nil, err
 	}

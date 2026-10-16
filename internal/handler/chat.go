@@ -5,6 +5,9 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/tenant"
@@ -71,14 +74,64 @@ func (h *ChatHandler) Push(c *gin.Context) {
 
 func (h *ChatHandler) ListSessions(c *gin.Context) {
 	page, pageSize := parsePagination(c, 1, 20)
+	q := services.ChatSessionQuery{
+		TenantID:        tenant.GetTenantID(c),
+		ScopeUserID:     chatScopeUserID(c),
+		AgentID:         strings.TrimSpace(c.Query("agent_id")),
+		User:            strings.TrimSpace(c.Query("user")),
+		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		MessageContains: strings.TrimSpace(c.Query("message_contains")),
+		Page:            page,
+		PageSize:        pageSize,
+	}
+	if v := c.Query("from"); v != "" {
+		tv, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidTimeRange, "无效的时间范围")
+			return
+		}
+		q.From = &tv
+	}
+	if v := c.Query("to"); v != "" {
+		tv, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, ErrCodeInvalidTimeRange, "无效的时间范围")
+			return
+		}
+		q.To = &tv
+	}
+	if msg := chatMessageContainsGuard(q); msg != "" {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, msg)
+		return
+	}
 
-	resp, err := h.service.ListSessions(tenant.GetTenantID(c), page, pageSize, chatScopeUserID(c))
+	resp, err := h.service.ListSessions(q)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, ErrCodeInternalError, err.Error())
 		return
 	}
 
 	respondSuccess(c, resp)
+}
+
+// chatMessageContainsGuard 正文扫描的成本闸（spec 2026-10-14-cli-chat-fetch §4.3）。
+// 返回非空串即应拒绝。两道：(a) 最小长度 2 字符（按 rune，中文关键词不能被误判过短）；
+// (b) admin/maintainer 的扫描面是全租户，必须搭配收窄条件；member 已被
+// ScopeUserID 强制收窄，故豁免该闸——否则「member 用 --text」会拿到自相矛盾的 400。
+func chatMessageContainsGuard(q services.ChatSessionQuery) string {
+	if q.MessageContains == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(q.MessageContains) < 2 {
+		return "message_contains 至少需要 2 个字符"
+	}
+	if q.ScopeUserID != "" {
+		return ""
+	}
+	if q.AgentID == "" && q.User == "" && q.From == nil && q.To == nil {
+		return "message_contains 需搭配 agent_id / user / from / to 之一收窄结果集"
+	}
+	return ""
 }
 
 func (h *ChatHandler) GetSession(c *gin.Context) {
