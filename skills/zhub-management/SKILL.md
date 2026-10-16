@@ -2,8 +2,10 @@
 name: zhub-management
 description: |
   Manage Zerone Hub resources via the `zhub` CLI. Use when user asks to
-  create/update/delete agents, skills, tools, mcps, providers. Covers full CRUD on
-  five domains: Agent, Skill, Tool, MCP, and Provider+Model.
+  create/update/delete agents, skills, tools, mcps, providers, or to view chat
+  history (chat sessions, chat messages, conversation records). Covers full CRUD on
+  five domains: Agent, Skill, Tool, MCP, and Provider+Model, plus read-only chat
+  history access.
 ---
 
 # Zerone Hub Management
@@ -22,6 +24,7 @@ Trigger when the user asks to manage resources on Zerone Hub:
 - Creating, updating, or deleting tools and MCPs
 - Creating, updating, or deleting providers and models
 - Listing agents, skills, tools, MCPs, or providers
+- Viewing or searching chat history (sessions and messages, filtered by agent, user, keyword, time range, or message content)
 - Checking CLI login status or troubleshooting CLI access
 
 **Do NOT use when:** the user is asking about the control-panel web UI, runtime APIs, or frontend behavior that does not go through `zhub`.
@@ -33,6 +36,7 @@ Trigger when the user asks to manage resources on Zerone Hub:
 - **Tool** (CRUD, default flag)
 - **MCP** (CRUD, headers are masked in CLI output)
 - **Provider + Model** (CRUD, probe)
+- **Chat History** (read-only: list sessions with server-side filters, get session detail, view messages)
 
 ## Pre-flight Check
 
@@ -287,6 +291,64 @@ zhub agent undeploy <name>        # archive (keeps data)
 zhub agent undeploy <name> --purge  # permanently delete
 ```
 
+### 3.8 "View or search chat history"
+
+Chat history is **read-only** — there is no create/update/delete for sessions
+or messages via the CLI. Three commands:
+
+```bash
+# List sessions (ordered by last-activity DESC), with server-side filters
+zhub chat list [--agent <name>] [--user <u>] [--keyword <title-kw>] \
+               [--text <content-kw>] [--from <RFC3339>] [--to <RFC3339>] \
+               [--page N] [--page-size N] [--output table|json|yaml]
+
+# Get one session's metadata
+zhub chat get <session-id> [--output yaml]
+
+# View a session's full message stream (paginated)
+zhub chat messages <session-id> [--page N] [--page-size N] [--full] [--output table|json|yaml]
+```
+
+**Filter semantics** (all optional, empty string = not sent):
+
+| Flag | Matches | Notes |
+|------|---------|-------|
+| `--agent` | `agent_id` exact match | cheapest, indexed |
+| `--user` | `user_name` OR `user_id` fuzzy (LIKE) | same column set as audit logs |
+| `--keyword` | session **title** only (LIKE) | does NOT search message content |
+| `--text` | any message **content** (cross-table scan) | **expensive**; see guard rules below |
+| `--from` / `--to` | `updated_at` (last activity time, NOT creation time); RFC3339, closed interval | indexed |
+
+**`--text` guard rules** (cross-table scan on message content):
+
+- Must be ≥ 2 characters (CLI checks locally, exits 2 if shorter)
+- Non-member roles (admin/maintainer) **must** combine it with at least one
+  narrowing filter (`--agent` / `--user` / `--from` / `--to`), or the server
+  returns 400. Member role is exempt (already scoped to own sessions)
+- Case sensitivity depends on database collation (MySQL: case-insensitive by
+  default; sqlite: case-sensitive) — not a contract, don't rely on either
+
+**`--from > --to`** is rejected locally (exit 2, no request sent).
+
+**Output shapes**:
+
+- `table` (default): human-readable; `id` column shows the **full session ID**
+  (can be directly fed to `chat get` / `chat messages`); `hidden` column shows
+  whether a session is hidden; pagination stats go to **stderr** (stdout stays
+  pipe-friendly)
+- `--output json`: `{ data: [...], meta: { page, pageSize, total, totalPages } }`;
+  `data[].content` is a **JSON array of message parts** (e.g.
+  `[{"type":"text","text":"..."}]`) — parse with `jq` to extract text:
+  ```bash
+  zhub chat messages <id> --output json | jq -r '.data[].content | fromjson | map(select(.type=="text").text) | join("\n")'
+  ```
+- `--output yaml`: raw objects, no column-level processing
+- `--full` (messages only): widen content preview from 80 to 4000 chars;
+  for complete content always use `--output json` and parse `content`
+
+**Role scoping**: admin/maintainer see all sessions in the tenant; member sees
+only their own sessions (server-enforced, cannot be bypassed by any flag).
+
 ## Common Mistakes
 
 - **MCP headers are masked**: `zhub mcp get` always shows headers as `<hidden>`; you cannot read back the original secret after creation. If lost, update the MCP with new headers.
@@ -302,6 +364,11 @@ zhub agent undeploy <name> --purge  # permanently delete
 - **Using `update` to change associations**: `update` overwrites the whole config. Use `set-subagents`, `set-tools`, or `set-skills` instead.
 - **Tool/MCP names are URL-encoded internally**: Use the raw name in CLI commands, even with spaces or special characters.
 - **MCP probe is required for create**: CLI automatically probes before creating. If probe fails, creation is aborted. SSE transport is not supported for probe yet.
+- **`--keyword` searches titles only**: To find sessions by message content, use `--text` (and combine with a narrowing filter if you're admin/maintainer — the server will 400 otherwise). Don't use `--keyword` expecting message-body hits.
+- **`--from`/`--to` filter on `updated_at`, not `created_at`**: A session created long ago but still active will match recent time ranges. If you need "recently created" semantics, this flag won't give it — there is no creation-time filter.
+- **`chat messages` content is parts JSON**: In `--output json`, `data[].content` is a JSON-encoded array of parts, not plain text. Use `jq` with `fromjson` to extract text (see Decision Tree 3.8). In table mode the CLI already renders a plain-text preview (80 chars, or 4000 with `--full`).
+- **Session IDs in table output are NOT truncated**: The `id` column shows the full UUID — it can be directly copied to `zhub chat get <id>` or `zhub chat messages <id>`.
+- **Chat history is read-only**: There is no `chat create` / `chat delete` via CLI. To delete a session, use the control-panel web UI.
 
 ## Error Recovery
 
@@ -386,3 +453,17 @@ zhub mcp update <name> --file <path> | --json '<json>' [--output json|table|yaml
 zhub mcp delete <name>
 zhub mcp probe <name> | --file <path> | --json '<json>' [--output json|table|yaml]
 ```
+
+### Chat History (3 commands, read-only)
+```
+zhub chat list [--agent <name>] [--user <u>] [--keyword <kw>] [--text <kw>] \
+               [--from <RFC3339>] [--to <RFC3339>] [--page N] [--page-size N] [--output table|json|yaml]
+zhub chat get <session-id> [--output yaml|json|table]
+zhub chat messages <session-id> [--page N] [--page-size N] [--full] [--output table|json|yaml]
+```
+
+`--text` is a cross-table message-content scan: ≥ 2 chars required; admin/maintainer
+must combine it with `--agent`/`--user`/`--from`/`--to` (server 400 otherwise;
+member exempt). `--from`/`--to` apply to `updated_at` (last activity, not creation).
+Pagination stats go to stderr in table mode; `--output json` wraps in
+`{ data, meta }` where `data[].content` is parts JSON.
