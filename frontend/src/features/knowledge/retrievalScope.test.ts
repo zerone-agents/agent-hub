@@ -48,6 +48,11 @@ describe("retrieval source scope", () => {
       true,
     );
   });
+  it("rejects a null document selection instead of broadening it", () => {
+    expect(retrievalScopeMismatch(result, { ...request, doc_ids: null })).toBe(
+      true,
+    );
+  });
   it("rejects aggregates outside selected documents", () => {
     expect(
       retrievalScopeMismatch(

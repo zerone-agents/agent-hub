@@ -5,6 +5,7 @@ export function retrievalScopeMismatch(
   request: RetrievalInput,
 ): boolean {
   const documents = request.doc_ids;
+  if (documents === null) return true;
   return (
     result.chunks.some(
       (chunk) =>
