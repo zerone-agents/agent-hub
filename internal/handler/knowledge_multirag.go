@@ -19,6 +19,7 @@ type MultiRAGModel struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	FullID  string `json:"fullId"`
+	IsTools *bool  `json:"isTools,omitempty"`
 }
 
 // ListMultiRAGModels flattens MultiRAG's my_llms response, filters by `type`,
@@ -66,9 +67,10 @@ func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 	for factory, rawGroup := range perFactory {
 		var group struct {
 			LLM []struct {
-				Type   string `json:"type"`
-				Name   string `json:"name"`
-				Status string `json:"status"`
+				Type    string `json:"type"`
+				Name    string `json:"name"`
+				Status  string `json:"status"`
+				IsTools *bool  `json:"is_tools"`
 			} `json:"llm"`
 		}
 		if strings.TrimSpace(factory) == "" || json.Unmarshal(rawGroup, &group) != nil || group.LLM == nil {
@@ -89,6 +91,7 @@ func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 				Type:    m.Type,
 				Status:  m.Status,
 				FullID:  m.Name + "@" + factory,
+				IsTools: m.IsTools,
 			})
 		}
 	}

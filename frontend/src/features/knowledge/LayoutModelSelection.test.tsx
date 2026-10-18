@@ -79,7 +79,7 @@ describe('PDF layout model selection', () => {
     await user.click(screen.getByText('PaddleOCR-VL (PaddleOCR)'))
     await user.click(screen.getByRole('button', { name: /^保\s*存$/ }))
     await waitFor(() => { expect(h.update).toHaveBeenCalledTimes(1); })
-    expect(h.update.mock.calls[0][0].data.parser_config.layout_recognize).toBe('PaddleOCR-VL@PaddleOCR')
+    expect(h.update.mock.calls[0][0].data.parser_config.layout_recognize).toBe('PaddleOCR-VL@PaddleOCR@PaddleOCR')
     expect(h.sync).not.toHaveBeenCalled()
   })
 

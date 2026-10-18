@@ -26,7 +26,8 @@ import { usePrimaryButtonStyle } from "@/components/PrimaryButton";
 import type { Rule } from "antd/es/form";
 import { LockKeyIcon } from "@phosphor-icons/react";
 import { useCreateKnowledge, useUpdateKnowledge } from "@/queries/useKnowledge";
-import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
+import { useProviders } from "@/queries/useProviders";
+import { syncEmbeddingModel } from '@/features/providers/embeddingModelSync';
 import { useMultiragModels } from "@/queries/useMultirag";
 import type { KnowledgeDataset, DatasetFormInput, KnowledgeWriteOwner } from "@/api/knowledge";
 import {
@@ -586,6 +587,7 @@ export function DatasetFields({
   embeddingLoading,
   embeddingLocked = false,
   embeddingChunkCount = 0,
+  embeddingExtra,
   layoutOptions,
   layoutLoading,
   layoutGroups,
@@ -604,6 +606,7 @@ export function DatasetFields({
   embeddingLoading?: boolean;
   embeddingLocked?: boolean;
   embeddingChunkCount?: number;
+  embeddingExtra?: React.ReactNode;
   layoutOptions?: SelectOptionGroup[];
   layoutLoading?: boolean;
   layoutGroups?: CandidateGroup[];
@@ -657,6 +660,7 @@ export function DatasetFields({
         <Select disabled={preserveParserMode || undefined} options={parserOptions} showSearch={{ optionFilterProp: 'label' }} />
       </Form.Item>
       {embeddingField}
+      {embeddingExtra}
       {compact ? <Collapse ghost items={[{
         key: 'advanced-dataset', label: t('knowledge.form.advancedSettings'), forceRender: true, children: advancedFields,
       }]} /> : advancedFields}
@@ -727,9 +731,8 @@ export default function KnowledgeForm({
   const primaryStyle = usePrimaryButtonStyle();
   const createKnowledge = useCreateKnowledge({ getOwner: getOperationOwner });
   const updateKnowledge = useUpdateKnowledge({ getOwner: getOperationOwner });
-  const syncProvider = useSyncProviderMultiRAG({ getOwner: getOperationOwner });
 
-  const providers = useProviders();
+  const providers = useProviders(undefined, { owned: true });
   const multiragEmbedding = useMultiragModels("embedding");
   const multiragLayout = useMultiragModels("ocr");
   const multiragVision = useMultiragModels("image2text");
@@ -808,6 +811,7 @@ export default function KnowledgeForm({
             {
               label: t('knowledge.settings.modelUnavailable', { saved }),
               value: saved,
+              disabled: true,
             },
           ],
         },
@@ -879,50 +883,23 @@ export default function KnowledgeForm({
       return;
     }
 
-    // Decode the selected candidates to decide which providers need syncing.
-    const embd = embeddingLocked ? null : decodeCandidateValue(values.embd_id);
-
-    // Only embedding models may be synced on save. OCR parsers must already
-    // have been verified and registered before appearing in this form.
-    const modelMap = new Map<number, Set<string>>();
-    const addTarget = (decoded: ReturnType<typeof decodeCandidateValue>) => {
-      if (
-        decoded?.source !== "local" ||
-        !decoded.providerId ||
-        !decoded.rawValue
-      )
-        return;
-      let set = modelMap.get(decoded.providerId);
-      if (!set) {
-        set = new Set();
-        modelMap.set(decoded.providerId, set);
-      }
-      set.add(decoded.rawValue);
-    };
-    addTarget(embd);
-    const syncTargets = Array.from(modelMap.entries()).map(([id, models]) => ({
-      id,
-      modelIds: Array.from(models),
-    }));
-
-    // Sync each targeted provider before submitting. A sync failure aborts
-    // the submit and keeps the modal open (no KB create/update attempted).
-    if (syncTargets.length > 0) {
+    if (!embeddingLocked && values.embd_id && !isAllowedLayoutSelection(values.embd_id, embeddingGroups, editing?.embd_id)) {
+      form.setFields([{ name: 'embd_id', errors: [t('knowledge.settings.embeddingCandidateUnavailable')] }]);
+      return;
+    }
+    const selected = embeddingLocked ? null : decodeCandidateValue(values.embd_id);
+    if (selected?.source === 'local' && selected.providerId) {
       setSyncing(true);
       try {
-        for (const target of syncTargets) {
-          try {
-            guard.assertCurrent();
-            await syncProvider.mutateAsync({
-              id: target.id,
-              verifyOnly: false,
-              modelIds: target.modelIds,
-            });
-            guard.assertCurrent();
-          } catch {
-            return;
-          }
-        }
+        guard.assertCurrent();
+        const provider = providers.data?.find(candidate => candidate.id === selected.providerId);
+        if (!provider) throw new Error();
+        const synced = await syncEmbeddingModel(provider, selected.rawValue, guard);
+        guard.assertCurrent();
+        input.embd_id = synced.fullId;
+      } catch {
+        if (guard.isCurrent()) setSubmitError(t('knowledge.settings.embeddingSyncFailed'));
+        return;
       } finally {
         if (operation.current === current) setSyncing(false);
       }

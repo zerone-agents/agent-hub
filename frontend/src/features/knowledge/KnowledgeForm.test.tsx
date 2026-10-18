@@ -28,6 +28,7 @@ vi.mock("@/queries/useKnowledge", () => ({
   useUpdateKnowledge: () => ({ mutateAsync: h.updateMock, isPending: false }),
 }));
 
+vi.mock('@/features/providers/embeddingModelSync', () => ({ syncEmbeddingModel: h.syncMock }));
 vi.mock("@/queries/useProviders", () => ({
   useProviders: () => ({ data: h.providers, isLoading: false }),
   useSyncProviderMultiRAG: () => ({ mutateAsync: h.syncMock }),
@@ -152,7 +153,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
     localStorage.clear();
     h.createMock.mockReset();
     h.updateMock.mockReset();
-    h.syncMock.mockReset();
+    h.syncMock.mockReset().mockResolvedValue({ fullId: 'bge-large-zh@Anthropic' });
     h.onClose.mockReset();
     h.onCreated.mockReset();
     h.createMock.mockResolvedValue({ id: "kb-new" });
@@ -255,7 +256,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
 
   it("blocks dismissal while a provider synchronization is running", async () => {
     let release!: () => void;
-    h.syncMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    h.syncMock.mockImplementation(() => new Promise<{ fullId: string }>((resolve) => { release = () => resolve({ fullId: 'bge-large-zh@Anthropic' }); }));
     renderForm();
     const user = userEvent.setup();
     await user.type(screen.getByPlaceholderText("知识库名称"), "Busy draft");
@@ -279,14 +280,10 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
     await user.click(screen.getByRole("button", { name: /创\s*建/ }));
 
     await waitFor(() => expect(h.syncMock).toHaveBeenCalledTimes(1));
-    expect(h.syncMock).toHaveBeenCalledWith({
-      id: 42,
-      verifyOnly: false,
-      modelIds: ["bge-large-zh"],
-    });
+    expect(h.syncMock).toHaveBeenCalledWith(glmProvider, 'bge-large-zh', expect.any(Object));
     await waitFor(() => expect(h.createMock).toHaveBeenCalledTimes(1));
     expect(h.createMock).toHaveBeenCalledWith(
-      expect.objectContaining({ embd_id: "bge-large-zh" }),
+      expect.objectContaining({ embd_id: "bge-large-zh@Anthropic" }),
     );
     expect(h.onClose).toHaveBeenCalled();
   });
@@ -369,7 +366,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
   it("stops before creation when the account changes during provider sync", async () => {
     useAuthStore.setState({ user: { id: "owner-a", name: "A", email: "a@example.invalid", role: "admin" } });
     let release!: () => void;
-    h.syncMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    h.syncMock.mockImplementation(() => new Promise<{ fullId: string }>((resolve) => { release = () => resolve({ fullId: 'bge-large-zh@Anthropic' }); }));
     renderForm();
     const user = userEvent.setup();
     await user.type(screen.getByPlaceholderText("知识库名称"), "A private draft");
@@ -427,7 +424,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
     const ownerA = { id: "owner-a", name: "A", email: "a@example.invalid", role: "admin" };
     useAuthStore.setState({ user: ownerA });
     let release!: () => void;
-    h.syncMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    h.syncMock.mockImplementation(() => new Promise<{ fullId: string }>((resolve) => { release = () => resolve({ fullId: 'bge-large-zh@Anthropic' }); }));
     renderForm();
     const user = userEvent.setup();
     await user.type(screen.getByPlaceholderText("知识库名称"), "A private draft");
@@ -454,7 +451,7 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
 
   it("stops following requests after the form unmounts during sync", async () => {
     let release!: () => void;
-    h.syncMock.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    h.syncMock.mockImplementation(() => new Promise<{ fullId: string }>((resolve) => { release = () => resolve({ fullId: 'bge-large-zh@Anthropic' }); }));
     const view = renderForm();
     const user = userEvent.setup();
     await user.type(screen.getByPlaceholderText("知识库名称"), "Unmounted draft");
@@ -593,25 +590,21 @@ describe("KnowledgeForm merged-candidate Select + sync orchestration", () => {
   });
 
   it("syncs only a local embedding while using an already enabled MultiRAG OCR", async () => {
-    h.providers = [mineruDualProvider];
+    h.providers = [glmProvider];
     h.multiragEmbedding = [];
 
     const user = userEvent.setup();
     renderForm();
     await user.type(screen.getByPlaceholderText("知识库名称"), "KB");
-    await pickOption(user, "向量模型", "MinerU Embed (MinerU Local)");
+    await pickOption(user, "向量模型", "BGE Large ZH (ZhipuAI)");
     await pickOption(user, "解析布局", "mineru-x (MinerU)");
 
     await user.click(screen.getByRole("button", { name: /创\s*建/ }));
 
     await waitFor(() => expect(h.syncMock).toHaveBeenCalledTimes(1));
-    expect(h.syncMock).toHaveBeenCalledWith({
-      id: 7,
-      verifyOnly: false,
-      modelIds: ["mineru-embed"],
-    });
+    expect(h.syncMock).toHaveBeenCalledWith(glmProvider, 'bge-large-zh', expect.any(Object));
     await waitFor(() => expect(h.createMock).toHaveBeenCalledTimes(1));
-    expect(h.createMock.mock.calls[0][0].parser_config.layout_recognize).toBe('mineru-x@MinerU');
+    expect(h.createMock.mock.calls[0][0].parser_config.layout_recognize).toBe('mineru-x@MinerU@MinerU');
   });
   it('shows a recoverable GraphRAG conflict before any provider or dataset write', async () => {
     renderForm();

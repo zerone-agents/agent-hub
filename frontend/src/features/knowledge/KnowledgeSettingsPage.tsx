@@ -8,8 +8,10 @@ import { createStyles } from "antd-style";
 import { Link, useParams } from "react-router";
 import { useKnowledgeDetail, useUpdateKnowledge } from "@/queries/useKnowledge";
 import { useMultiragModels } from "@/queries/useMultirag";
-import { useProviders, useSyncProviderMultiRAG } from "@/queries/useProviders";
+import { useProviders } from "@/queries/useProviders";
 import { useCanWrite } from "@/hooks/useCanWrite";
+import { checkDatasetEmbedding, type EmbeddingCheck } from '@/api/knowledgeEmbedding';
+import { syncEmbeddingModel } from '@/features/providers/embeddingModelSync';
 import PrimaryButton from "@/components/PrimaryButton";
 import type { KnowledgeDataset, KnowledgeWriteOwner } from "@/api/knowledge";
 import { getAccessToken, parseApiError } from "@/api/client";
@@ -54,6 +56,8 @@ function KnowledgeBasicSettings() {
   const { id = "" } = useParams();
   const accountId = useAuthStore((state) => state.user?.id);
   const [form] = Form.useForm<DatasetFormValues>();
+  const watchedEmbedding: unknown = Form.useWatch('embd_id', form);
+  const selectedEmbedding = typeof watchedEmbedding === 'string' ? watchedEmbedding : undefined;
   const watchedLayout: unknown = Form.useWatch('layout_recognize', form);
   const selectedLayout = typeof watchedLayout === 'string' ? watchedLayout : undefined;
   const { data: dataset, origin, isLoading, isError, refetch } = useKnowledgeDetail(id, { owned: true });
@@ -61,18 +65,20 @@ function KnowledgeBasicSettings() {
   const formOrigin = useRef<KnowledgeListOrigin | undefined>(undefined);
   const getOperationOwner = () => operation.current?.guard;
   const updateKnowledge = useUpdateKnowledge({ getOwner: getOperationOwner });
-  const syncProvider = useSyncProviderMultiRAG({ getOwner: getOperationOwner });
-  const providers = useProviders();
+  const providers = useProviders(undefined, { owned: true });
   const multiragEmbedding = useMultiragModels("embedding");
   const multiragLayout = useMultiragModels("ocr");
   const multiragVision = useMultiragModels("image2text");
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ selection: string; data: EmbeddingCheck } | null>(null);
+  const [checkError, setCheckError] = useState('');
   const [saveError, setSaveError] = useState("");
   const hydrated = useRef("");
   const baseline = useRef<KnowledgeDataset | null>(null);
   const [confirmedDataset, setConfirmedDataset] = useState<KnowledgeDataset | null>(null);
   const canWrite = useCanWrite();
-  const embeddingLocked = (dataset?.chunk_num ?? 0) > 0;
+  const chunkCount = (confirmedDataset ?? dataset)?.chunk_num ?? 0;
   const readAuthorized = Boolean(origin && origin.id === accountId && origin.token === getAccessToken());
   const reloadIdentity = () => { void queryClient.invalidateQueries({ queryKey: ['userinfo'] }); void refetch(); };
 
@@ -102,25 +108,9 @@ function KnowledgeBasicSettings() {
     () => buildRawToValueMap(embeddingGroups),
     [embeddingGroups],
   );
-  const embeddingOptions = useMemo<SelectOptionGroup[]>(() => {
-    const saved = dataset?.embd_id;
-    const options = groupsToAntdOptions(embeddingGroups);
-    if (saved && !embdRawToValue.has(saved)) {
-      return [
-        {
-          label: t('knowledge.settings.currentValue'),
-          options: [
-            {
-              label: t('knowledge.settings.modelUnavailable', { saved }),
-              value: saved,
-            },
-          ],
-        },
-        ...options,
-      ];
-    }
-    return options;
-  }, [t, dataset?.embd_id, embdRawToValue, embeddingGroups]);
+  const embeddingOptions = useMemo<SelectOptionGroup[]>(() => groupsToAntdOptions(
+    retainLayoutCandidates(embeddingGroups, (confirmedDataset ?? dataset)?.embd_id, selectedEmbedding), t,
+  ), [t, confirmedDataset, dataset, selectedEmbedding, embeddingGroups]);
   const layoutGroups = useMemo(() => buildLayoutCandidates([...(multiragLayout.isError ? [] : multiragLayout.data ?? []), ...(multiragVision.isError ? [] : multiragVision.data ?? [])]), [multiragLayout.data, multiragLayout.isError, multiragVision.data, multiragVision.isError]);
   const layoutRawToValue = useMemo(() => buildRawToValueMap(layoutGroups), [layoutGroups]);
   const layoutOptions = useMemo<SelectOptionGroup[]>(() => {
@@ -148,7 +138,7 @@ function KnowledgeBasicSettings() {
   }, [dataset, form, layoutRawToValue]);
 
   useEffect(() => {
-    if (!dataset || embeddingLocked) return;
+    if (!dataset) return;
     const current = form.getFieldValue("embd_id") as string;
     if (current === dataset.embd_id) {
       const mapped = embdRawToValue.get(current);
@@ -156,10 +146,10 @@ function KnowledgeBasicSettings() {
         form.setFieldValue("embd_id", mapped);
       }
     }
-  }, [dataset, embeddingLocked, embdRawToValue, form]);
+  }, [dataset, embdRawToValue, form]);
 
   const handleSave = async () => {
-    if (isError || isLoading || !canWrite || saving || operation.current || hydrated.current !== id) return;
+    if (isError || isLoading || !canWrite || saving || checking || operation.current || hydrated.current !== id) return;
     const initiating = formOrigin.current;
     if (!initiating || !readAuthorized || initiating.id !== accountId || initiating.token !== getAccessToken() || !['admin', 'maintainer'].includes(initiating.role ?? '')) { setSaveError(t('knowledge.form.ownerChanged')); return; }
     const controller = new AbortController();
@@ -186,31 +176,35 @@ function KnowledgeBasicSettings() {
         form.setFields([{ name: 'layout_recognize', errors: [t('knowledge.form.parseLayoutUnavailable')] }]);
         return;
       }
-      const selected = embeddingLocked ? null : decodeCandidateValue(values.embd_id);
-      const targets = new Map<number, Set<string>>();
-      for (const candidate of [selected]) {
-        if (candidate?.source === "local" && candidate.providerId) {
-          const models = targets.get(candidate.providerId) ?? new Set<string>();
-          models.add(candidate.rawValue); targets.set(candidate.providerId, models);
-        }
+      if (values.embd_id && !isAllowedLayoutSelection(values.embd_id, embeddingGroups, (baseline.current ?? dataset)?.embd_id)) {
+        form.setFields([{ name: 'embd_id', errors: [t('knowledge.settings.embeddingCandidateUnavailable')] }]);
+        return;
       }
-      for (const [providerId, models] of targets) {
-        guard.assertCurrent();
-        await syncProvider.mutateAsync({ id: providerId, verifyOnly: false, modelIds: [...models] });
-        guard.assertCurrent();
+      // Resolve structured/advanced conflicts before any provider write.
+      const input = formValuesToInput(values, { original: baseline.current ?? undefined });
+      const selected = decodeCandidateValue(values.embd_id);
+      if (selected?.source === 'local' && selected.providerId) {
+        const provider = providers.data?.find(candidate => candidate.id === selected.providerId);
+        if (!provider) throw new Error(t('knowledge.settings.embeddingCandidateUnavailable'));
+        try {
+          const synced = await syncEmbeddingModel(provider, selected.rawValue, guard);
+          guard.assertCurrent();
+          input.embd_id = synced.fullId;
+        } catch {
+          guard.assertCurrent();
+          throw new Error(t('knowledge.settings.embeddingSyncFailed'));
+        }
       }
 
       guard.assertCurrent();
       const saved = await updateKnowledge.mutateAsync({
         id,
-        data: formValuesToInput(values, {
-          includeEmbeddingModel: !embeddingLocked,
-          original: baseline.current ?? undefined,
-        }),
+        data: input,
       });
       guard.assertCurrent();
       baseline.current = saved;
       setConfirmedDataset(saved);
+      setCheckResult(null);
       // Fields remain disabled throughout the operation. Rebase both visible
       // controls and advanced JSON onto the independently confirmed response,
       // including extensions the server changed during this save.
@@ -221,22 +215,44 @@ function KnowledgeBasicSettings() {
       if (typeof error === 'object' && error !== null && 'errorFields' in error) return;
       const message = parseApiError(error);
       setSaveError(message);
-      if (
-        message.includes("chunk_num") &&
-        message.includes("embedding_model")
-      ) {
-        form.setFields([
-          {
-            name: "embd_id",
-            errors: [
-              t('knowledge.settings.locked'),
-            ],
-          },
-        ]);
-        await refetch();
-      }
     } finally { if (operation.current === active) { operation.current = null; setSaving(false); } }
   };
+
+  const handleCheck = async () => {
+    if (isError || isLoading || !canWrite || saving || checking || operation.current || !selectedEmbedding) return;
+    const initiating = formOrigin.current;
+    if (!initiating || !readAuthorized || initiating.id !== accountId || initiating.token !== getAccessToken() || !['admin', 'maintainer'].includes(initiating.role ?? '')) { setCheckError(t('knowledge.form.ownerChanged')); return; }
+    const controller = new AbortController();
+    let token = initiating.token;
+    const current = () => !controller.signal.aborted && useAuthStore.getState().user?.id === initiating.id && ['admin', 'maintainer'].includes(useAuthStore.getState().user?.role ?? '');
+    const guard: KnowledgeWriteOwner = {
+      signal: controller.signal,
+      isCurrent: () => current() && token === getAccessToken(),
+      assertCurrent: (refresh) => {
+        if (refresh && current()) token = getAccessToken();
+        if (!current() || token !== getAccessToken()) throw new Error(t('knowledge.form.ownerChanged'));
+      },
+    };
+    const active = { controller, guard };
+    operation.current = active;
+    setChecking(true);
+    setCheckError('');
+    setCheckResult(null);
+    try {
+      guard.assertCurrent();
+      const selected = decodeCandidateValue(selectedEmbedding);
+      if (selected?.source === 'local' || !isAllowedLayoutSelection(selectedEmbedding, embeddingGroups)) throw new Error();
+      const result = await checkDatasetEmbedding(id, selected?.rawValue ?? selectedEmbedding, guard);
+      guard.assertCurrent();
+      if (form.getFieldValue('embd_id') === selectedEmbedding) setCheckResult({ selection: selectedEmbedding, data: result });
+    } catch {
+      if (guard.isCurrent()) setCheckError(t('knowledge.settings.embeddingCheckFailed'));
+    } finally {
+      if (operation.current === active) { operation.current = null; setChecking(false); }
+    }
+  };
+  const activeCheck = checkResult && checkResult.selection === selectedEmbedding ? checkResult.data : null;
+  const selectedLocal = decodeCandidateValue(selectedEmbedding)?.source === 'local';
 
   if (!dataset) {
     if (isLoading) return <div className={styles.loadingWrap} role="status" aria-label={t('common.loading')}><Spin /></div>;
@@ -250,14 +266,20 @@ function KnowledgeBasicSettings() {
       {saveError ? <Alert type="error" showIcon title={saveError} action={<Button onClick={() => { void refetch() }}>{t('knowledge.states.retry')}</Button>} style={{ marginBottom: 16 }} /> : null}
       {providers.isError || multiragEmbedding.isError || multiragLayout.isError || multiragVision.isError ? <Alert type="warning" showIcon title={t('knowledge.form.candidatesFailed')} description={t('knowledge.form.candidatesFailedHint')} action={<Button onClick={() => { void providers.refetch(); void multiragEmbedding.refetch(); void multiragLayout.refetch(); void multiragVision.refetch(); }}>{t('knowledge.states.retry')}</Button>} style={{ marginBottom: 16 }} /> : null}
       <Typography.Paragraph type="secondary">{t('knowledge.settings.scopeHint')}</Typography.Paragraph>
-      <Form form={form} layout="vertical" requiredMark={false} disabled={!canWrite || saving || isError}>
+      <Form form={form} layout="vertical" requiredMark={false} disabled={!canWrite || saving || checking || isError}>
         <DatasetFields
           savedParser={dataset.parser_id}
           preserveParserMode={typeof dataset.pipeline_id === "string" && Boolean(dataset.pipeline_id)}
           embeddingOptions={embeddingOptions}
           embeddingLoading={embeddingLoading}
-          embeddingLocked={embeddingLocked}
-          embeddingChunkCount={dataset.chunk_num}
+          embeddingExtra={chunkCount > 0 ? <div style={{ marginBottom: 20 }}>
+            <Typography.Paragraph type="secondary">{t('knowledge.settings.embeddingCheckHint', { n: chunkCount })}</Typography.Paragraph>
+            {canWrite ? <Button onClick={() => { void handleCheck(); }} loading={checking} disabled={saving || isError || selectedLocal || !selectedEmbedding || !isAllowedLayoutSelection(selectedEmbedding, embeddingGroups)}>{t('knowledge.settings.checkEmbedding')}</Button> : null}
+            {selectedLocal ? <Typography.Paragraph type="secondary">{t('knowledge.settings.embeddingLocalCheck')}</Typography.Paragraph> : null}
+            {checkError ? <Alert type="error" showIcon title={checkError} style={{ marginTop: 12 }} /> : null}
+            {activeCheck ? <Alert style={{ marginTop: 12 }} showIcon type={activeCheck.compatible ? 'success' : 'warning'} title={t(activeCheck.compatible ? 'knowledge.settings.embeddingCompatible' : 'knowledge.settings.embeddingIncompatible')}
+              description={t('knowledge.settings.embeddingCheckSummary', { model: activeCheck.summary.model, sampled: activeCheck.summary.sampled, valid: activeCheck.summary.valid, average: activeCheck.summary.avg_cos_sim.toFixed(3), minimum: activeCheck.summary.min_cos_sim.toFixed(3) })} /> : null}
+          </div> : undefined}
           layoutOptions={layoutOptions}
           layoutLoading={layoutLoading}
           layoutGroups={layoutGroups}
@@ -266,7 +288,7 @@ function KnowledgeBasicSettings() {
           {canWrite && (
             <PrimaryButton
               onClick={handleSave}
-              disabled={isError}
+              disabled={isError || checking}
               loading={saving || updateKnowledge.isPending}
             >
               {t('knowledge.settings.save')}
