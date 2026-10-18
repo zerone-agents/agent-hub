@@ -18,10 +18,10 @@ func TestKnowledgeFollowupFileContentAndBinding(t *testing.T) {
 		badBinding                               bool
 	}{
 		{"json-download", "download", "application/json", "attachment; filename=x.json", `{"code":109,"business":"file"}`, 200, 200, false},
-		{"json-preview", "preview", "application/json", "attachment", `{}`, 200, 200, false},
+		{"json-preview", "preview", "application/json", "", `{"success":false,"code":102}`, 200, 200, false},
 		{"empty-download", "download", "application/octet-stream", "attachment", "", 200, 200, false},
 		{"pdf-preview", "preview", "application/pdf", "", "%PDF", 200, 200, false},
-		{"json-error", "download", "application/json", "", `{"code":109,"message":"private-secret"}`, 200, 502, false},
+		{"json-error", "download", "application/json", "", `{"code":109,"message":"private-secret"}`, 403, 502, false},
 		{"binary-error", "download", "application/octet-stream", "attachment", "private-secret", 403, 502, false},
 		{"binding-denied", "download", "application/pdf", "attachment", "private-secret", 200, 502, true},
 	} {
@@ -54,6 +54,7 @@ func TestKnowledgeFollowupFileContentAndBinding(t *testing.T) {
 			if tc.wantStatus == 200 {
 				require.Equal(t, tc.content, w.Body.String())
 				require.Equal(t, tc.mime, w.Header().Get("Content-Type"))
+				require.NotEmpty(t, w.Header().Get("Content-Disposition"))
 			} else {
 				require.NotContains(t, w.Body.String(), "private-secret")
 			}

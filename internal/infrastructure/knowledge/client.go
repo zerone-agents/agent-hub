@@ -10,9 +10,11 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	domain "control-panel/internal/domain/knowledge"
 )
@@ -513,6 +515,9 @@ func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.Retriev
 	if raw == nil {
 		return nil, domain.NewUpstreamError("检索响应缺少结果", nil)
 	}
+	if err := c.verifyRetrievalParents(ctx, body, raw); err != nil {
+		return nil, err
+	}
 	normalizeRetrievalChunks(raw)
 	result := domain.RetrievalResult(raw)
 	return &result, nil
@@ -527,14 +532,38 @@ func (c *RemoteMultiragEngine) PreviewDocument(ctx context.Context, datasetID st
 }
 
 func (c *RemoteMultiragEngine) documentFile(ctx context.Context, datasetID, documentID, action string) (*domain.StreamResult, error) {
-	if _, err := c.readDocument(ctx, datasetID, documentID); err != nil {
+	doc, err := c.readDocument(ctx, datasetID, documentID)
+	if err != nil {
 		if domain.StatusCode(err) == http.StatusNotFound {
 			return nil, err
 		}
 		return nil, domain.NewUpstreamError("未确认本知识库文档的读取权限或归属", nil)
 	}
-	path := "/api/v1/documents/" + url.PathEscape(documentID) + "/" + action
-	return c.doStream(ctx, path, "application/octet-stream, */*")
+	filePath := "/api/v1/documents/" + url.PathEscape(documentID) + "/" + action
+	stream, err := c.doStream(ctx, filePath, "application/octet-stream, */*")
+	if err != nil {
+		return nil, err
+	}
+	disposition, _, dispositionErr := mime.ParseMediaType(stream.ContentDisposition)
+	if dispositionErr != nil || (disposition != "attachment" && disposition != "inline") || (action == "download" && disposition != "attachment") {
+		name, _ := (*doc)["name"].(string)
+		name = path.Base(strings.ReplaceAll(name, "\\", "/"))
+		name = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, name)
+		if name == "" || name == "." || name == "/" {
+			name = documentID
+		}
+		disposition = "inline"
+		if action == "download" {
+			disposition = "attachment"
+		}
+		stream.ContentDisposition = mime.FormatMediaType(disposition, map[string]string{"filename": name})
+	}
+	return stream, nil
 }
 
 func (c *RemoteMultiragEngine) GetImage(ctx context.Context, imageID string) (*domain.StreamResult, error) {
@@ -637,44 +666,26 @@ func (c *RemoteMultiragEngine) doStream(ctx context.Context, path string, accept
 	if accept != "" {
 		req.Header.Set("Accept", accept)
 	}
-	resp, err := c.client.Do(req)
+	// This helper is only used by the canonical file routes, whose errors use
+	// non-200 HTTP status. A JSON file may contain any business-looking object.
+	// Do not follow redirects into an envelope endpoint with different semantics.
+	client := *c.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, domain.NewUpstreamError("文档读取未完成，请重试", nil)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, domain.NewUpstreamError(fmt.Sprintf("文档读取失败 (HTTP %d)", resp.StatusCode), nil)
 	}
 	contentType := resp.Header.Get("Content-Type")
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	disposition, _, dispositionErr := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
-	if (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")) && (dispositionErr != nil || disposition != "attachment") {
-		resp.Body.Close()
-		return nil, domain.NewUpstreamError("文档读取返回了错误响应，未取得文件", nil)
-	}
 	return &domain.StreamResult{
 		Body:               resp.Body,
 		ContentType:        contentType,
 		ContentDisposition: resp.Header.Get("Content-Disposition"),
 		ContentLength:      resp.ContentLength,
 	}, nil
-}
-
-func streamJSONErrorMessage(body []byte) string {
-	var env envelope
-	if err := json.Unmarshal(body, &env); err != nil {
-		return ""
-	}
-	switch {
-	case env.RetMsg != "":
-		return env.RetMsg
-	case env.Message != "":
-		return env.Message
-	case env.Error != "":
-		return env.Error
-	default:
-		return ""
-	}
 }
 
 func (c *RemoteMultiragEngine) newRequest(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {

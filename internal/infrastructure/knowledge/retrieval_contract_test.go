@@ -14,8 +14,17 @@ import (
 
 func TestRetrievalJointScopeThresholdAndDenialNeverBroaden(t *testing.T) {
 	for _, denied := range []bool{false, true} {
-		calls := 0
+		calls, parentReads := 0, 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				parentReads++
+				docs := []map[string]any{}
+				if r.URL.Path == "/api/v1/datasets/kb2/documents" {
+					docs = append(docs, map[string]any{"id": "doc", "dataset_id": "kb2", "status": "1"})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"total": len(docs), "docs": docs}})
+				return
+			}
 			calls++
 			require.Equal(t, "/api/v1/datasets/search", r.URL.Path)
 			require.Equal(t, "POST", r.Method)
@@ -48,6 +57,11 @@ func TestRetrievalJointScopeThresholdAndDenialNeverBroaden(t *testing.T) {
 			require.Equal(t, "doc", chunk["document_id"])
 		}
 		require.Equal(t, 1, calls, "a denied selection must never retry another dataset or identity")
+		if denied {
+			require.Zero(t, parentReads)
+		} else {
+			require.Equal(t, 2, parentReads)
+		}
 		server.Close()
 	}
 }

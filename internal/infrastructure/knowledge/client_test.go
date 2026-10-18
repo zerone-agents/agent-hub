@@ -777,33 +777,29 @@ func TestDownloadDocument_Stream(t *testing.T) {
 	}
 }
 
-func TestDownloadDocument_RejectsJSONEnvelope(t *testing.T) {
+func TestDownloadDocument_PreservesJSONFileThatLooksLikeEnvelope(t *testing.T) {
+	const content = `{"success":false,"code":102,"message":"This document has been deleted"}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/datasets/kb1/documents" {
 			_, _ = io.WriteString(w, `{"code":0,"data":{"total":1,"docs":[{"id":"doc1","kb_id":"kb1"}]}}`)
 			return
 		}
 		if r.URL.Path != "/api/v1/documents/doc1/download" {
-			t.Errorf("path = %q, want document download path", r.URL.Path)
+			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"retcode": 102,
-			"retmsg":  "This document has been deleted",
-		})
+		_, _ = io.WriteString(w, content)
 	}))
 	defer server.Close()
-
 	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
 	stream, err := client.DownloadDocument(context.Background(), "kb1", "doc1")
-	if err == nil {
-		if stream != nil && stream.Body != nil {
-			stream.Body.Close()
-		}
-		t.Fatal("expected JSON stream error")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), "This document has been deleted") {
-		t.Fatalf("unsafe upstream detail leaked: %v", err)
+	defer stream.Body.Close()
+	body, err := io.ReadAll(stream.Body)
+	if err != nil || string(body) != content || !strings.HasPrefix(stream.ContentDisposition, "attachment;") {
+		t.Fatalf("file changed: %q %v disposition=%q", body, err, stream.ContentDisposition)
 	}
 }
 
@@ -953,6 +949,18 @@ func TestGetImage_ContextCancellation(t *testing.T) {
 
 func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			var docs []map[string]any
+			if r.URL.Path == "/api/v1/datasets/kb-1/documents" {
+				docs = []map[string]any{{"id": "doc-1", "dataset_id": "kb-1", "status": "1"}}
+			} else if r.URL.Path == "/api/v1/datasets/kb-2/documents" {
+				docs = []map[string]any{{"id": "doc-2", "dataset_id": "kb-2", "status": "1"}}
+			} else {
+				t.Errorf("unexpected parent request: %s", r.URL)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"total": len(docs), "docs": docs}})
+			return
+		}
 		if r.URL.Path != "/api/v1/datasets/search" {
 			t.Errorf("path = %q, want /api/v1/datasets/search", r.URL.Path)
 		}
@@ -961,8 +969,8 @@ func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
 			"data": map[string]any{
 				"total": 2,
 				"chunks": []map[string]any{
-					{"chunk_id": "ck-1", "content_with_weight": "内容一", "doc_id": "doc-1", "docnm_kwd": "指南.pdf", "similarity": 0.91},
-					{"chunk_id": "ck-2", "content_with_weight": "内容二", "doc_id": "doc-2", "document_keyword": "共识.docx", "similarity": 0.55},
+					{"chunk_id": "ck-1", "kb_id": "kb-1", "content_with_weight": "内容一", "doc_id": "doc-1", "docnm_kwd": "指南.pdf", "similarity": 0.91},
+					{"chunk_id": "ck-2", "kb_id": "kb-2", "content_with_weight": "内容二", "doc_id": "doc-2", "document_keyword": "共识.docx", "similarity": 0.55},
 				},
 			},
 		})
