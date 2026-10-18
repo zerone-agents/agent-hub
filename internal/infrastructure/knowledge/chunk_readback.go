@@ -15,7 +15,7 @@ const chunkVisibilityRetryDelay = 100 * time.Millisecond
 
 // Only the post-PATCH GET is replayed. The deadline covers network time as well
 // as waits, and a caller's shorter deadline/cancellation takes precedence.
-func (c *RemoteMultiragEngine) readVisibleChunk(ctx context.Context, path string) (map[string]any, error) {
+func (c *RemoteMultiragEngine) readVisibleChunk(ctx context.Context, path, datasetID, documentID, chunkID string, expected map[string]any) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(ctx, chunkVisibilityBudget)
 	defer cancel()
 	for {
@@ -23,6 +23,14 @@ func (c *RemoteMultiragEngine) readVisibleChunk(ctx context.Context, path string
 			return nil, err
 		}
 		raw, retryable, err := c.readChunkVisibilityAttempt(ctx, path)
+		if err == nil {
+			if !chunkReadbackIdentity(raw, datasetID, documentID, chunkID) {
+				return nil, fmt.Errorf("chunk readback identity unconfirmed")
+			}
+			if !chunkReadbackMatches(raw, expected) {
+				retryable, err = true, fmt.Errorf("chunk readback requested fields not visible")
+			}
+		}
 		if err == nil || !retryable {
 			return raw, err
 		}
@@ -34,6 +42,85 @@ func (c *RemoteMultiragEngine) readVisibleChunk(ctx context.Context, path string
 		case <-timer.C:
 		}
 	}
+}
+
+func chunkReadbackIdentity(raw map[string]any, datasetID, documentID, chunkID string) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for _, scope := range []struct {
+		aliases []string
+		id      string
+	}{
+		{[]string{"id", "chunk_id"}, chunkID},
+		{[]string{"doc_id", "document_id"}, documentID},
+		{[]string{"kb_id", "dataset_id"}, datasetID},
+	} {
+		id, ok := retrievalIdentity(raw, scope.aliases...)
+		if !ok || (id != "" && id != scope.id) {
+			return false
+		}
+	}
+	return true
+}
+
+func chunkReadbackMatches(raw, expected map[string]any) bool {
+	// Image input and update mode are write-only. This confirms observable DTO
+	// fields; byte confirmation remains the native image endpoint's contract.
+	aliases := map[string][]string{
+		"content":            {"content", "content_with_weight"},
+		"important_keywords": {"important_keywords", "important_kwd"},
+		"questions":          {"questions", "question_kwd"},
+		"positions":          {"positions", "position_int"},
+		"tag_kwd":            {"tag_kwd"},
+		"tag_feas":           {"tag_feas"},
+	}
+	for field, names := range aliases {
+		requested, changed := expected[field]
+		if !changed {
+			continue
+		}
+		found := false
+		for _, name := range names {
+			value, present := raw[name]
+			if present {
+				found = true
+				if !jsonEqualDocumentValue(value, requested) {
+					return false
+				}
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if requested, changed := expected["available"]; changed {
+		found := false
+		for _, name := range []string{"available", "available_int"} {
+			value, present := raw[name]
+			if !present {
+				continue
+			}
+			if name == "available_int" {
+				switch value {
+				case float64(1), "1":
+					value = true
+				case float64(0), "0":
+					value = false
+				default:
+					return false
+				}
+			}
+			found = true
+			if !jsonEqualDocumentValue(value, requested) {
+				return false
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // 102 also represents ownership/validation failures upstream. Require the

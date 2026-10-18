@@ -713,6 +713,13 @@ const zh = {
       tag: "标签",
     },
     manage: {
+      connectorBlobScopeChanged: "更改桶、前缀、端点、账号或图片范围前，请先关闭删除同步。保存并核对新范围后，再按需开启。",
+      deletionSyncLifecycle: "默认关闭。仅后续增量同步在完整、可信的源端清单及本次内容处理全部成功后清理；首次同步与重建不清理。分页、权限、读取或处理失败会保留已有文档。",
+      deletionSyncScope: "仅清理此连接器在当前知识库中的来源文档。成功读取的空清单也可能清理全部对应文档，请确认源端范围与权限。",
+      connectorSharedSettings: "此配置属于数据源；更改会影响链接到该数据源的知识库。同步状态与游标由服务端维护。",
+      connectorBlobSync: "常规同步根据版本指纹跳过未变对象；重建强制重新下载。ETag 是版本标记，不代表内容 MD5；失败清单不会触发删除。",
+      connectorSyncLogsHint: "查看服务端返回的同步状态、处理数与错误；同步调度使用 UTC。失败后请检查源端权限及范围再重试。",
+
       oauthSetup: 'Google / Box 浏览器授权',
       oauthHint: '先填写应用配置并发起授权，打开授权页面完成确认，再读取结果填入数据源配置。最后保存连接器。',
       oauthPending: '仍在等待授权完成，可完成授权后再次读取。',
@@ -1049,6 +1056,7 @@ const zh = {
     },
     chunks: {
       review: {
+        emptySource: "原文为空（0 字节）。可下载空文件。",
         pdfLoading: "正在渲染 PDF",
         pdfFailed: "PDF 渲染失败",
         zoomIn: "放大",
@@ -1247,6 +1255,16 @@ const zh = {
       emptyHint: '输入问题后点击「检索测试」查看召回结果'
     },
     settings: {
+      embeddingCheckHint: "已有 {{n}} 个文本块。保存时会检查兼容性；抽样检测可能产生模型调用费用。",
+      checkEmbedding: "检测兼容性",
+      embeddingCompatible: "抽样兼容",
+      embeddingIncompatible: "抽样不兼容，无法保存此模型",
+      embeddingCheckSummary: "模型：{{model}}；抽样 {{sampled}}，有效 {{valid}}；平均相似度 {{average}}，最低 {{minimum}}",
+      embeddingCheckFailed: "兼容性检测失败，请重试。草稿已保留。",
+      embeddingCandidateUnavailable: "该向量模型当前不可用，请选择已配置模型。",
+      embeddingSyncFailed: "向量模型同步或独立读回失败，未保存知识库设置。",
+      embeddingLocalCheck: "本地模型会在保存时同步并检查兼容性。",
+
       scopeHint: "库级默认设置影响后续资料解析；已有文档请从资料页重解析。元数据与标签可在各自设置页单独维护。",
       readbackFailed: "写入已返回，但配置读回未确认。草稿已保留，请重新读取核对后再保存。",
       currentValue: '当前值（不可用）',

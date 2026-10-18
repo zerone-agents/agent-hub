@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // runner individual tests can exceed the 5s default (observed as flaky 5000ms
 // timeouts on main). Give the whole file headroom — scoped to this file only.
 vi.setConfig({ testTimeout: 20_000 });
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { ConfigProvider } from "antd";
@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   documentsMock: vi.fn(),
   modelsMock: vi.fn(),
   metadataKeysMock: vi.fn(),
+  datasetsMock: vi.fn(),
   error: undefined as unknown,
   data: undefined as unknown,
 }));
@@ -40,7 +41,10 @@ vi.mock("@/stores/auth", async () =>
 );
 
 vi.mock("@/api/knowledge", () => ({
-  knowledgeApi: { documents: { list: h.documentsMock } },
+  knowledgeApi: {
+    documents: { list: h.documentsMock },
+    datasets: { list: h.datasetsMock },
+  },
 }));
 vi.mock("@/api/knowledgeManagement", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/knowledgeManagement")>()),
@@ -55,6 +59,7 @@ const sampleResult = {
       id: "c1",
       content: "matched chunk text",
       document_id: "d1",
+      dataset_id: "kb1",
       document_name: "guide.pdf",
       similarity: 0.873,
       vector_similarity: 0.9,
@@ -91,6 +96,13 @@ beforeEach(() => {
   h.retrievalMock.mockReset();
   h.error = undefined;
   h.data = undefined;
+  h.datasetsMock.mockReset().mockResolvedValue({
+    total: 2,
+    datasets: [
+      { id: "kb1", name: "Current library" },
+      { id: "kb2", name: "Second library" },
+    ],
+  });
   h.metadataKeysMock.mockReset().mockResolvedValue(["version", "category"]);
   h.documentsMock.mockReset().mockResolvedValue({
     total: 1,
@@ -174,14 +186,14 @@ it("renders emphasis without upstream active HTML", () => {
   expect(container).not.toHaveTextContent("bad()");
 });
 
-it("explains selected-document threshold bypass without changing the request or hiding zero scores", async () => {
+it("explains selected-document relevance threshold without changing the request or hiding zero scores", async () => {
   h.data = {
     ...sampleResult,
     chunks: [{ ...sampleResult.chunks[0], similarity: 0 }],
   };
   const user = userEvent.setup();
   const view = renderPage();
-  const hint = /已选择文档时，服务不会按此阈值过滤最终得分/;
+  const hint = /文档与元数据筛选仍保留相关度阈值/;
   expect(screen.queryByText(hint)).not.toBeInTheDocument();
   await user.click(screen.getByRole("combobox", { name: "文档范围" }));
   await user.click(
@@ -497,7 +509,13 @@ it("selects and clears configured rerank full IDs", async () => {
     );
   });
   expect(h.modelsMock).toHaveBeenCalledWith("rerank");
-  await user.click(screen.getByLabelText("close-circle"));
+  await user.click(
+    within(
+      screen
+        .getByRole("combobox", { name: "重排模型" })
+        .closest(".ant-select")! as HTMLElement,
+    ).getByLabelText("close-circle"),
+  );
   await user.click(screen.getByRole("button", { name: /检索测试/ }));
   await waitFor(() => {
     expect(h.retrievalMock).toHaveBeenLastCalledWith(
@@ -963,3 +981,64 @@ it.each(["自动推断", "限定字段自动推断"])(
     expect(screen.getByRole("combobox", { name: "筛选方式" })).toBeEnabled();
   },
 );
+
+it("submits every selected dataset in one joint request and clears former document selections", async () => {
+  const user = userEvent.setup();
+  renderPage();
+  await user.click(screen.getByRole("combobox", { name: "文档范围" }));
+  await user.click(
+    await screen.findByText("guide.pdf", {
+      selector: ".ant-select-item-option-content",
+    }),
+  );
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("combobox", { name: "知识库范围" }));
+  await user.click(
+    await screen.findByText("Second library", {
+      selector: ".ant-select-item-option-content",
+    }),
+  );
+  await user.keyboard("{Escape}");
+  await user.type(
+    screen.getByRole("textbox", { name: "检索问题" }),
+    "Joint question",
+  );
+  await user.click(screen.getByRole("button", { name: /检索测试/ }));
+  await waitFor(() => {
+    expect(h.retrievalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dataset_ids: ["kb1", "kb2"],
+        question: "Joint question",
+      }),
+    );
+  });
+  expect(h.retrievalMock.mock.calls[0][0].doc_ids).toBeUndefined();
+  expect(screen.getByText("联合检索 2 个知识库")).toBeInTheDocument();
+});
+
+it("uses each returned dataset for the source link after joint search", async () => {
+  h.data = {
+    ...sampleResult,
+    chunks: [{ ...sampleResult.chunks[0], dataset_id: "kb2" }],
+  };
+  const user = userEvent.setup();
+  renderPage();
+  await user.click(screen.getByRole("combobox", { name: "知识库范围" }));
+  await user.click(
+    await screen.findByText("Second library", {
+      selector: ".ant-select-item-option-content",
+    }),
+  );
+  await user.keyboard("{Escape}");
+  await user.type(
+    screen.getByRole("textbox", { name: "检索问题" }),
+    "Joint question",
+  );
+  await user.click(screen.getByRole("button", { name: /检索测试/ }));
+  await waitFor(() => {
+    expect(h.retrievalMock).toHaveBeenCalled();
+  });
+  expect(
+    screen.getByRole("link", { name: "查看来源切片（新标签页）" }),
+  ).toHaveAttribute("href", "/knowledge/kb2/documents/d1/chunks?chunkId=c1");
+});

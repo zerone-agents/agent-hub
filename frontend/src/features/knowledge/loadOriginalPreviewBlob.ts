@@ -1,4 +1,4 @@
-import apiClient from "@/api/client";
+import apiClient, { getAccessToken } from "@/api/client";
 import { chunkReviewText } from "./chunkReviewText";
 
 export async function loadOriginalPreviewBlob(
@@ -9,6 +9,7 @@ export async function loadOriginalPreviewBlob(
 ): Promise<Blob> {
   // The fetch adapter resolves a stream when headers arrive. Keep the shared
   // Authorization/refresh interceptors while bounding reads before Blob creation.
+  const ownerToken = getAccessToken();
   const response = await apiClient.get<ReadableStream<Uint8Array>>(url, {
     adapter: "fetch",
     responseType: "stream",
@@ -27,7 +28,20 @@ export async function loadOriginalPreviewBlob(
     await stream.cancel().catch(() => undefined);
     throw tooLarge();
   }
-  if (signal.aborted) {
+  const rawContentType = response.headers["content-type"];
+  const contentType =
+    typeof rawContentType === "string"
+      ? rawContentType
+      : "application/octet-stream";
+  const disposition = String(response.headers["content-disposition"] ?? "");
+  if (
+    /^(?:application\/json|[^;]+\+json)(?:;|$)/i.test(contentType) &&
+    !/^(?:attachment|inline)(?:;|$)/i.test(disposition.trim())
+  ) {
+    await stream.cancel().catch(() => undefined);
+    throw new Error(chunkReviewText("badResponse"));
+  }
+  if (signal.aborted || ownerToken !== getAccessToken()) {
     await stream.cancel().catch(() => undefined);
     throw new DOMException("Aborted", "AbortError");
   }
@@ -38,20 +52,15 @@ export async function loadOriginalPreviewBlob(
     for (;;) {
       const { done, value } = await reader.read();
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- abort can occur while reader.read is pending
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      if (signal.aborted || ownerToken !== getAccessToken())
+        throw new DOMException("Aborted", "AbortError");
       if (done) break;
       received += value.byteLength;
       if (received > limit) throw tooLarge();
       // Own each bounded chunk; never retain a shared/transferable source buffer.
       parts.push(new Uint8Array(value));
     }
-    const contentType = response.headers["content-type"];
-    return new Blob(parts, {
-      type:
-        typeof contentType === "string"
-          ? contentType
-          : "application/octet-stream",
-    });
+    return new Blob(parts, { type: contentType });
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();

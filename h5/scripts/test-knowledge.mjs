@@ -595,3 +595,66 @@ test("desktop document links require an explicit HTTP management base and retain
     "https://console.example.test/knowledge/kb%2F%E4%B8%AD%E6%96%87/documents/doc%2F1/chunks",
   );
 });
+
+test("JSON attachments and empty sources remain valid on mobile download and preview", async () => {
+  for (const read of [api.downloadOriginal, api.previewOriginal]) {
+    for (const body of [
+      "",
+      '{"success":false,"code":102,"message":"source data"}',
+    ]) {
+      globalThis.fetch = async (url, init) => {
+        assert.ok(
+          url.endsWith(
+            `/documents/doc1/${read === api.previewOriginal ? "preview" : "download"}`,
+          ),
+        );
+        assert.equal(init.cache, "no-store");
+        return new Response(body, {
+          headers: {
+            "content-type": "application/json",
+            "content-disposition": `${read === api.previewOriginal ? "inline" : "attachment"}; filename=source.json`,
+          },
+        });
+      };
+      assert.equal(await (await read("kb1", "doc1")).text(), body);
+    }
+  }
+});
+
+test("mobile rejects JSON envelopes and keeps HTTP storage details private", async () => {
+  globalThis.fetch = async () =>
+    new Response('{"success":false,"error":"private-storage-key"}', {
+      headers: { "content-type": "application/json" },
+    });
+  await assert.rejects(api.previewOriginal("kb1", "doc1"), /响应无效/);
+  globalThis.fetch = async () =>
+    new Response('{"error":"private-storage-key"}', {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  await assert.rejects(api.downloadOriginal("kb1", "doc1"), (err) => {
+    assert.match(err.message, /403/);
+    assert.doesNotMatch(err.message, /private-storage/);
+    return true;
+  });
+});
+
+test("mobile cancels an unread source body when identity changes before headers arrive", async () => {
+  let cancelled = 0;
+  globalThis.fetch = async () => {
+    storage.set(
+      "zerone_auth",
+      JSON.stringify({ token: "new-identity", role: "admin" }),
+    );
+    return new Response(
+      new ReadableStream({
+        cancel() {
+          cancelled++;
+        },
+      }),
+      { headers: { "content-type": "text/plain" } },
+    );
+  };
+  await assert.rejects(api.previewOriginal("kb1", "doc1"), /登录身份已变化/);
+  assert.equal(cancelled, 1);
+});

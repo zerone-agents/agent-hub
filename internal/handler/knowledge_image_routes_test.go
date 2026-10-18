@@ -114,6 +114,22 @@ func TestKnowledgeImageRoutingWithRealAuth(t *testing.T) {
 			require.Empty(t, w.Header().Get("Content-Disposition"))
 		})
 	}
+	for _, action := range []string{"preview", "download"} {
+		for _, tc := range cases[:5] {
+			t.Run(action+"-"+tc.name, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/datasets/kb1/documents/doc1/"+action, nil)
+				if tc.token != "" {
+					req.Header.Set("Authorization", "Bearer "+tc.token)
+				}
+				r.ServeHTTP(w, req)
+				require.Equal(t, tc.status, w.Code)
+				require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+				require.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+				require.Empty(t, w.Header().Get("Content-Disposition"))
+			})
+		}
+	}
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/health", nil))
 	require.Equal(t, http.StatusUnauthorized, w.Code)

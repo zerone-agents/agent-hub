@@ -712,6 +712,13 @@ const en = {
       tag: "Tag",
     },
     manage: {
+      connectorBlobScopeChanged: "Turn off deletion sync before changing the bucket, prefix, endpoint, account, or image scope. Save and verify the scope before enabling deletion sync again.",
+      deletionSyncLifecycle: "Off by default. Later incremental syncs remove documents only after a complete, trusted inventory and successful content processing. Initial syncs and rebuilds do not prune. Pagination, permission, read or processing failures preserve existing documents.",
+      deletionSyncScope: "Only source documents from this connector in the current dataset are pruned. A successfully read empty inventory may remove all corresponding documents; confirm source scope and permissions.",
+      connectorSharedSettings: "These settings belong to the source and affect datasets linked to it. The server maintains sync state and cursors.",
+      connectorBlobSync: "Regular syncs skip unchanged objects using version fingerprints; rebuilds download again. ETags identify versions and are not content MD5s. Failed inventories never trigger deletion.",
+      connectorSyncLogsHint: "Review the returned sync status, processed counts and errors. Scheduling uses UTC. Check source permissions and scope before retrying failures.",
+
       oauthSetup: 'Google / Box browser authorization',
       oauthHint: 'Enter app configuration, start authorization and open the consent page. Read the result into the source configuration, then save the connector.',
       oauthPending: 'Authorization is still pending. Finish consent and read again.',
@@ -1048,6 +1055,7 @@ const en = {
     },
     chunks: {
       review: {
+        emptySource: "The source file is empty (0 bytes). You can download the empty file.",
         pdfLoading: "Rendering PDF",
         pdfFailed: "PDF could not be rendered",
         zoomIn: "Zoom in",
@@ -1246,6 +1254,16 @@ const en = {
       emptyHint: 'Enter a question and click "Test Retrieval" to see results'
     },
     settings: {
+      embeddingCheckHint: "This dataset has {{n}} chunks. Saving checks compatibility; sampling may incur model costs.",
+      checkEmbedding: "Check compatibility",
+      embeddingCompatible: "Sample is compatible",
+      embeddingIncompatible: "Sample is incompatible; this model cannot be saved",
+      embeddingCheckSummary: "Model: {{model}}; sampled {{sampled}}, valid {{valid}}; average similarity {{average}}, minimum {{minimum}}",
+      embeddingCheckFailed: "Compatibility check failed. Retry; your draft is preserved.",
+      embeddingCandidateUnavailable: "This embedding model is unavailable. Choose a configured model.",
+      embeddingSyncFailed: "Embedding sync or independent readback failed; dataset settings were not saved.",
+      embeddingLocalCheck: "This local model will be synced and checked for compatibility when saving.",
+
       scopeHint: "Dataset defaults apply to subsequent parsing. Reparse existing documents from Documents. Manage metadata and tags in their own settings sections.",
       readbackFailed: "The write returned, but saved settings could not be confirmed. Your draft is kept. Reload and compare before saving again.",
       currentValue: 'Current value (unavailable)',

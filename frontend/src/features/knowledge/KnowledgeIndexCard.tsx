@@ -62,6 +62,7 @@ export default function KnowledgeIndexCard({
   }>();
   const state = getIndexState(task.data, cancelBaseline);
   const active = state === "queued" || state === "running";
+  const clearUnavailable = state === "empty";
   const unavailable =
     Boolean(task.error) || task.isLoading || !task.data || state === "unknown";
   const title =
@@ -98,7 +99,10 @@ export default function KnowledgeIndexCard({
         latest.error ||
         !latest.data ||
         current === "unknown" ||
-        (operation !== "run" && latest.data.id !== expectedId) ||
+        (operation !== "run" &&
+          (typeof expectedId !== "string" ||
+            !expectedId.trim() ||
+            latest.data.id !== expectedId)) ||
         (operation === "cancel"
           ? current !== "running" && current !== "queued"
           : current === "running" || current === "queued")
@@ -117,7 +121,10 @@ export default function KnowledgeIndexCard({
       const accepted = await action.mutateAsync({
         method: operation === "clear" ? "delete" : "post",
         resource: operation === "cancel" ? "index/cancel" : "index",
-        params: { type: kind },
+        params: {
+          type: kind,
+          ...(operation === "clear" ? { task_id: expectedId as string } : {}),
+        },
         ...(operation === "cancel" ? { data: { task_id: expectedId } } : {}),
       });
       const readback = await task.refetch();
@@ -136,7 +143,7 @@ export default function KnowledgeIndexCard({
         !readback.error &&
         readback.data &&
         (operation === "clear"
-          ? Object.keys(readback.data).length === 0
+          ? response !== undefined && Object.keys(readback.data).length === 0
           : operation === "cancel"
             ? readback.data.id === expectedId &&
               getIndexState(readback.data) !== "unknown" &&
@@ -304,14 +311,22 @@ export default function KnowledgeIndexCard({
                 okText={text(kind === "mindmap" ? "clearMindmap" : "clear")}
                 okButtonProps={{ className: primary.root, danger: true }}
                 disabled={
-                  unavailable || active || operating || action.isPending
+                  unavailable ||
+                  clearUnavailable ||
+                  active ||
+                  operating ||
+                  action.isPending
                 }
                 onConfirm={() => perform("clear")}
               >
                 <Button
                   danger
                   disabled={
-                    unavailable || active || operating || action.isPending
+                    unavailable ||
+                    clearUnavailable ||
+                    active ||
+                    operating ||
+                    action.isPending
                   }
                 >
                   {text(kind === "mindmap" ? "clearMindmap" : "clear")}

@@ -214,3 +214,15 @@ func TestClient_AddLLM_NestedAPIKeyObject(t *testing.T) {
 	require.Equal(t, "http://x", apiKey["mineru_apiserver"])
 	require.Equal(t, "pipeline", apiKey["mineru_backend"])
 }
+
+func TestClient_AddLLM_RejectsUnprovenSuccess(t *testing.T) {
+	for _, body := range []string{`{}`, `{"message":"ok"}`, `null`, `<html>ok</html>`, `{"retcode":0,"code":102}`, `{"retcode":0,"data":false}`} {
+		t.Run(body, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+			defer srv.Close()
+			result, err := NewClient(srv.URL, "fixture").AddLLM(context.Background(), AddLLMRequest{LLMFactory: "MinerU", LLMName: "owned", MdlType: "ocr"})
+			require.NoError(t, err)
+			require.False(t, result.Success)
+		})
+	}
+}

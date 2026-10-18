@@ -23,6 +23,7 @@ import { parseApiError } from "@/api/client";
 import type { KnowledgeObject } from "@/api/knowledgeManagement";
 import {
   ingestionLogResource,
+  graphPauseRequested,
   cancellationMarkerCount,
   knowledgeObject,
   knowledgeRows,
@@ -61,26 +62,36 @@ function LogStatus({
       ? String(status)
       : "";
   const known = /^[0-5]$/.test(value);
+  const paused = graphPauseRequested({ progress, progress_msg: message });
   const historicalMarker =
     value === "4" && progress === -1 && cancellationMarkerCount(message) > 0;
   return (
     <Space orientation="vertical" size={2}>
       <Tag
         color={
-          value === "4"
-            ? "error"
-            : value === "3"
-              ? "success"
-              : value === "1" || value === "5"
-                ? "processing"
-                : "default"
+          paused
+            ? "default"
+            : value === "4"
+              ? "error"
+              : value === "3"
+                ? "success"
+                : value === "1" || value === "5"
+                  ? "processing"
+                  : "default"
         }
       >
-        {known
-          ? text(statusKeys[Number(value)])
-          : `${text("unknown")}${value ? ` (${value})` : ""}`}
+        {paused
+          ? text("cancelRequestedStatus")
+          : known
+            ? text(statusKeys[Number(value)])
+            : `${text("unknown")}${value ? ` (${value})` : ""}`}
       </Tag>
-      {historicalMarker && (
+      {paused && (
+        <Typography.Text type="secondary">
+          {text("cancelRequested")}
+        </Typography.Text>
+      )}
+      {historicalMarker && !paused && (
         <Typography.Text
           type="secondary"
           title={text("cancellationHistoryHint")}

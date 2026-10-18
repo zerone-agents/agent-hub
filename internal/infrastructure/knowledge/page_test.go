@@ -87,7 +87,8 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.op, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if !(tc.op == "metadata-config-put" && r.Method == http.MethodGet) && r.Method != tc.method || r.URL.Path != "/api/v1"+tc.path || r.Header.Get("Authorization") != "Bearer key" {
+				readback := (tc.op == "metadata-config-put" || tc.op == "index-run" || tc.op == "index-delete") && r.Method == http.MethodGet
+				if !readback && r.Method != tc.method || r.URL.Path != "/api/v1"+tc.path || r.Header.Get("Authorization") != "Bearer key" {
 					t.Errorf("request=%s %s", r.Method, r.URL.String())
 				}
 				if tc.query && r.URL.Query().Get("type") != "graph" {
@@ -100,11 +101,27 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 						t.Errorf("unbound rebuild=%v", body)
 					}
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"kb_id": "foreign"}})
+				var data any = map[string]any{"kb_id": "foreign"}
+				switch tc.op {
+				case "index-get":
+					data = map[string]any{"id": "current", "progress": .5}
+				case "index-run":
+					data = map[string]any{"task_id": "current"}
+					if readback {
+						data = map[string]any{"id": "current", "progress": .5}
+					}
+				case "index-delete":
+					requireQuery := r.URL.Query()
+					if !readback && (requireQuery.Get("wipe") != "true" || requireQuery.Get("task_id") != "current") {
+						t.Errorf("unbound clear query: %v", requireQuery)
+					}
+					data = map[string]any{}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": data})
 			}))
 			defer server.Close()
 			c := NewRemoteMultiragEngine(server.URL, "key", time.Second, time.Hour)
-			_, err := c.KnowledgePage(context.Background(), domain.PageRequest{Operation: tc.op, DatasetID: "kb", ConnectorID: "c1", LogID: "log1", Query: url.Values{"type": []string{"graph"}}, Body: domain.Object{"kb_id": "foreign"}})
+			_, err := c.KnowledgePage(context.Background(), domain.PageRequest{Operation: tc.op, DatasetID: "kb", ConnectorID: "c1", LogID: "log1", Query: url.Values{"type": []string{"graph"}, "task_id": []string{"current"}}, Body: domain.Object{"kb_id": "foreign"}})
 			if err != nil {
 				t.Fatal(err)
 			}

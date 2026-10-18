@@ -1070,6 +1070,14 @@ func (s *ProviderService) SyncProviderToMultiRAG(ctx context.Context, tenantID s
 		p.Base().SetLockedAPIKey(plaintext)
 	}
 	if len(modelIds) > 0 {
+		// modelIds address registrations, not provider_models selection IDs.
+		// Reject absent/disabled/ambiguous rows before any paid upstream call.
+		for _, id := range modelIds {
+			matches := filterModels(p.DefaultModels(), []string{id})
+			if len(matches) != 1 || matches[0].Status == "0" {
+				return nil, provider.NewValidationErrorf("模型不存在、已禁用或同名配置不唯一")
+			}
+		}
 		filtered := filterModels(p.DefaultModels(), modelIds)
 		p.Base().SetDefaultModels(filtered)
 	}

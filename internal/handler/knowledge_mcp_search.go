@@ -37,7 +37,7 @@ func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Contex
 	if len(allowed) == 0 {
 		return mcpCodedErrorResult(id, mcpErrNoDatasetBound, "当前 Agent 未绑定任何知识库数据集"), nil
 	}
-	for _, field := range []string{"dataset_ids", "doc_ids", "meta_data_filter", "reference_metadata_fields"} {
+	for _, field := range []string{"dataset_ids", "doc_ids", "meta_data_filter", "reference_metadata_fields", "search_strategy"} {
 		if raw, exists := supplied[field]; exists && strings.TrimSpace(string(raw)) == "null" {
 			return mcpCodedErrorResult(id, mcpErrInvalidSearchArguments, field+" 不能为 null；不限制范围时请省略该字段"), nil
 		}
@@ -86,6 +86,20 @@ func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Contex
 
 	searchCtx, cancel := context.WithTimeout(ctx, mcpSearchTimeout)
 	defer cancel()
+	if args.SearchStrategy == "joint" {
+		req := mcpSearchRequest(args, datasetIDs[0])
+		req["dataset_ids"] = datasetIDs
+		result, err := h.knowledgeService.Retrieval(searchCtx, req)
+		if err != nil {
+			log.Printf("knowledge-mcp: joint retrieval failed: %v", err)
+			return mcpCodedErrorResult(id, mcpErrRetrievalFailed, "联合检索失败：请确认所选知识库使用同一嵌入模型实例，或显式改用 per_dataset 逐库检索；未返回部分结果"), nil
+		}
+		if err := validateMcpSearchResult(result, datasetIDs, args.DocIDs); err != nil {
+			log.Printf("knowledge-mcp: invalid joint retrieval scope: %v", err)
+			return mcpCodedErrorResult(id, mcpErrRetrievalScopeMismatch, "检索来源无法确认所属知识库或文档；结果已隐藏"), nil
+		}
+		return mcpTextResult(id, formatMcpJointSearch(result, datasetIDs, args)), nil
+	}
 	pages := make([]mcpSearchPage, 0, len(datasetIDs))
 	for _, datasetID := range datasetIDs {
 		req := mcpSearchRequest(args, datasetID)
@@ -99,7 +113,7 @@ func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Contex
 			}
 			return mcpCodedErrorResult(id, mcpErrRetrievalFailed, message), nil
 		}
-		if err := validateMcpSearchResult(result, datasetID, args.DocIDs); err != nil {
+		if err := validateMcpSearchResult(result, []string{datasetID}, args.DocIDs); err != nil {
 			log.Printf("knowledge-mcp: invalid retrieval scope (dataset=%s): %v", datasetID, err)
 			return mcpCodedErrorResult(id, mcpErrRetrievalScopeMismatch, "检索来源无法确认所属知识库或文档；结果已隐藏"), nil
 		}
@@ -109,6 +123,12 @@ func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Contex
 }
 
 func validateMcpSearchArgs(args *knowledgeSearchArgs) error {
+	if args.SearchStrategy == "" {
+		args.SearchStrategy = "per_dataset"
+	}
+	if args.SearchStrategy != "per_dataset" && args.SearchStrategy != "joint" {
+		return fmt.Errorf("search_strategy 必须是 per_dataset 或 joint")
+	}
 	if args.TopK == nil {
 		defaultTopK := 64
 		args.TopK = &defaultTopK
@@ -309,7 +329,7 @@ func mcpSearchRequest(args knowledgeSearchArgs, datasetID string) knowledge.Retr
 	return req
 }
 
-func validateMcpSearchResult(result *knowledge.RetrievalResult, datasetID string, docIDs *[]string) error {
+func validateMcpSearchResult(result *knowledge.RetrievalResult, datasetIDs []string, docIDs *[]string) error {
 	if result == nil {
 		return fmt.Errorf("nil result")
 	}
@@ -329,31 +349,75 @@ func validateMcpSearchResult(result *knowledge.RetrievalResult, datasetID string
 		if !ok {
 			return fmt.Errorf("invalid chunk")
 		}
-		kbID := mcpString(chunk["kb_id"])
-		if kbID == "" {
-			kbID = mcpString(chunk["dataset_id"])
-		}
-		chunkID := mcpString(chunk["id"])
-		if chunkID == "" {
-			chunkID = mcpString(chunk["chunk_id"])
-		}
-		docID := mcpString(chunk["document_id"])
-		if docID == "" {
-			docID = mcpString(chunk["doc_id"])
-		}
-		if kbID != datasetID || chunkID == "" || docID == "" || (docIDs != nil && !allowedDocs[docID]) {
+		kbID, kbOK := mcpSourceID(chunk, "kb_id", "dataset_id")
+		chunkID, chunkOK := mcpSourceID(chunk, "id", "chunk_id")
+		docID, docOK := mcpSourceID(chunk, "document_id", "doc_id")
+		if !kbOK || !chunkOK || !docOK || !isStringSubset([]string{kbID}, datasetIDs) || chunkID == "" || docID == "" || (docIDs != nil && !allowedDocs[docID]) {
 			return fmt.Errorf("source identity outside request scope")
+		}
+		if chunk["available"] == false || chunk["available_int"] == float64(0) || chunk["available_int"] == 0 {
+			return fmt.Errorf("disabled source")
+		}
+	}
+	if entries, present := raw["doc_aggs"]; present {
+		aggs, ok := entries.([]any)
+		if !ok {
+			return fmt.Errorf("invalid document aggregations")
+		}
+		for _, entry := range aggs {
+			agg, ok := entry.(map[string]any)
+			if !ok {
+				return fmt.Errorf("invalid document aggregation")
+			}
+			docID, docOK := mcpSourceID(agg, "doc_id", "document_id")
+			kbID, kbOK := mcpSourceID(agg, "kb_id", "dataset_id")
+			if !docOK || docID == "" || !kbOK || (kbID != "" && !isStringSubset([]string{kbID}, datasetIDs)) || (docIDs != nil && !allowedDocs[docID]) {
+				return fmt.Errorf("aggregation outside request scope")
+			}
 		}
 	}
 	return nil
+}
+
+// Every present source alias must agree. A preferred alias must never mask a
+// conflicting identity supplied by the retrieval service.
+func mcpSourceID(source map[string]any, names ...string) (string, bool) {
+	id := ""
+	for _, name := range names {
+		raw, exists := source[name]
+		if !exists || raw == nil {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", false
+		}
+		if id != "" && value != id {
+			return "", false
+		}
+		id = value
+	}
+	return id, true
+}
+
+func formatMcpJointSearch(result *knowledge.RetrievalResult, datasetIDs []string, args knowledgeSearchArgs) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "知识库联合检索完成：%d 个知识库，共享排序与候选池；第 %d 页，每页最多 %d 条。\n知识库范围：%s\n", len(datasetIDs), *args.Page, *args.PageSize, strings.Join(datasetIDs, ", "))
+	if total, ok := mcpPageTotal(result); ok {
+		fmt.Fprintf(&sb, "联合命中总数：%d（本次候选池内）。\n", total)
+	}
+	fmt.Fprintf(&sb, "候选池上限：%d；文档和元数据范围保留相关度阈值，纯关键词模式除外。\n", *args.TopK)
+	sb.WriteString(formatRetrievalResult(result))
+	return sb.String()
 }
 
 func formatMcpSearchPages(pages []mcpSearchPage, args knowledgeSearchArgs) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("知识库检索完成：%d 个知识库分别检索；第 %d 页，每库最多 %d 条。不同知识库的分数不作跨库合并排序。\n", len(pages), *args.Page, *args.PageSize))
 	if args.DocIDs != nil || args.MetadataFilter != nil {
-		sb.WriteString("注意：显式文档或元数据范围下，MultiRAG 可能绕过最终相似度阈值；请核对每条来源。\n")
+		sb.WriteString("文档和元数据范围仍保留相关度阈值；纯关键词模式除外，请核对每条来源。\n")
 	}
+	fmt.Fprintf(&sb, "每库候选池上限：%d；分页与命中总数均按库独立计算。\n", *args.TopK)
 	for _, page := range pages {
 		sb.WriteString("\n知识库 ID：")
 		sb.WriteString(page.datasetID)

@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   updateMock: vi.fn(),
   refetchMock: vi.fn(),
   syncMock: vi.fn(),
+  checkMock: vi.fn(),
   providers: [] as Record<string, unknown>[],
   multiragEmbedding: [] as Record<string, unknown>[],
   multiragVision: [] as Record<string, unknown>[],
@@ -44,6 +45,8 @@ vi.mock("@/queries/useKnowledge", () => ({
   }),
 }));
 
+vi.mock('@/api/knowledgeEmbedding', () => ({ checkDatasetEmbedding: h.checkMock }));
+vi.mock('@/features/providers/embeddingModelSync', () => ({ syncEmbeddingModel: h.syncMock }));
 vi.mock("@/queries/useProviders", () => ({
   useProviders: () => ({ data: h.providers, isLoading: false }),
   useSyncProviderMultiRAG: () => ({
@@ -103,6 +106,7 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
     h.refetchMock.mockReset();
     h.refetchMock.mockResolvedValue({});
     h.syncMock.mockReset();
+    h.checkMock.mockReset();
     h.syncMock.mockResolvedValue({});
     h.providers = [];
     h.multiragVision = [];
@@ -219,46 +223,57 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the current model read-only and omits it from locked updates", async () => {
+  it("allows switching an existing chunked dataset and delegates exactly once to UpdateDataset", async () => {
     h.dataset = { ...baseDataset, chunk_num: 8 };
+    h.multiragEmbedding.push({ name: 'other', factory: 'OpenAI', type: 'embedding', status: '1', fullId: 'other@OpenAI' });
+    h.updateMock.mockResolvedValue({ ...baseDataset, chunk_num: 8, embd_id: 'other@OpenAI' });
     renderPage();
-
-    const input = await screen.findByRole("textbox", {
-      name: "向量模型",
-    });
-    expect(input).toHaveAttribute("readonly");
-    expect(input).toHaveValue("bge-m3@ZHIPU-AI");
-    const descriptionId = input.getAttribute("aria-describedby");
-    expect(descriptionId).toBeTruthy();
-    expect(document.getElementById(descriptionId!)).toHaveTextContent(
-      "当前知识库已有 8 个文本块",
-    );
-
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "保存设置" }));
-
-    await waitFor(() => { expect(h.updateMock).toHaveBeenCalledTimes(1); });
-    expect(h.updateMock.mock.calls[0][0].data).not.toHaveProperty("embd_id");
+    await user.click(screen.getByRole('combobox', { name: '向量模型' }));
+    await user.click(await screen.findByText('other (OpenAI)'));
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => { expect(h.updateMock).toHaveBeenCalledWith({ id: 'kb-1', data: { embd_id: 'other@OpenAI' } }); });
+    expect(h.checkMock).not.toHaveBeenCalled();
     expect(h.syncMock).not.toHaveBeenCalled();
   });
 
-  it("refreshes and shows an inline error if chunks appear before save", async () => {
-    h.updateMock.mockRejectedValueOnce(
-      new Error(
-        "When chunk_num (2) > 0, embedding_model must remain bge-m3@ZHIPU-AI",
-      ),
-    );
+  it('preserves draft and selection after incompatible save and never runs an automatic check', async () => {
+    h.dataset = { ...baseDataset, chunk_num: 8 };
+    h.multiragEmbedding.push({ name: 'other', factory: 'OpenAI', type: 'embedding', status: '1', fullId: 'other@OpenAI' });
+    h.updateMock.mockRejectedValue(new Error('Embedding incompatible'));
     renderPage();
-
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await user.type(screen.getByRole('textbox', { name: '描述' }), 'Keep this draft');
+    await user.click(screen.getByRole('combobox', { name: '向量模型' }));
+    await user.click(await screen.findByText('other (OpenAI)'));
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+    expect(await screen.findByText('Embedding incompatible')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '描述' })).toHaveValue('Keep this draft');
+    expect(h.checkMock).not.toHaveBeenCalled();
+    expect(h.refetchMock).not.toHaveBeenCalled();
+  });
 
-    expect(
-      await screen.findByText(
-        "知识库已生成文本块，向量模型已锁定。页面已刷新，请重试。",
-      ),
-    ).toBeInTheDocument();
-    expect(h.refetchMock).toHaveBeenCalledTimes(1);
+  it.each([true, false])('shows an explicit sampled result compatible=%s without saving', async (compatible) => {
+    h.dataset = { ...baseDataset, chunk_num: 8 };
+    h.checkMock.mockResolvedValue({ code: compatible ? 0 : 10, compatible, summary: { kb_id: 'kb-1', model: baseDataset.embd_id, sampled: 5, valid: 5, avg_cos_sim: 0.98, min_cos_sim: 0.97, max_cos_sim: 0.99, match_mode: 'vector' }, results: [] });
+    renderPage();
+    await userEvent.setup().click(screen.getByRole('button', { name: '检测兼容性' }));
+    expect(await screen.findByText(compatible ? '抽样兼容' : '抽样不兼容，无法保存此模型')).toBeInTheDocument();
+    expect(h.checkMock).toHaveBeenCalledWith('kb-1', baseDataset.embd_id, expect.any(Object));
+    expect(h.updateMock).not.toHaveBeenCalled();
+  });
+
+  it('discards a late check after credentials change', async () => {
+    h.dataset = { ...baseDataset, chunk_num: 8 };
+    let finish: (value: unknown) => void = () => undefined;
+    h.checkMock.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    renderPage();
+    await userEvent.setup().click(screen.getByRole('button', { name: '检测兼容性' }));
+    await waitFor(() => { expect(h.checkMock).toHaveBeenCalledOnce(); });
+    localStorage.setItem('access_token', 'token-b');
+    await act(async () => { finish({ compatible: true, summary: {} }); });
+    expect(screen.queryByText('抽样兼容')).not.toBeInTheDocument();
+    expect(h.updateMock).not.toHaveBeenCalled();
   });
 
   it("member: hides save button and renders the form read-only", () => {

@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	domain "control-panel/internal/domain/knowledge"
 )
@@ -245,6 +248,9 @@ func (c *RemoteMultiragEngine) GetDataset(ctx context.Context, id string) (*doma
 
 func (c *RemoteMultiragEngine) UpdateDataset(ctx context.Context, id string, req domain.DatasetMutationRequest) (*domain.Dataset, error) {
 	body := domain.DatasetUpdateToRemote(req)
+	if err := c.guardEmbeddingSwitch(ctx, id, body); err != nil {
+		return nil, err
+	}
 	var raw map[string]any
 	if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(id), nil, body, &raw); err != nil {
 		return nil, err
@@ -358,8 +364,8 @@ func (c *RemoteMultiragEngine) documentParsingAction(ctx context.Context, datase
 
 func (c *RemoteMultiragEngine) ListChunks(ctx context.Context, datasetID string, documentID string, req domain.ChunkListRequest) (*domain.ChunkListResult, error) {
 	result, err := c.listChunksPage(ctx, datasetID, documentID, req)
-	var upstreamErr *domain.Error
-	if err == nil || req.ID == "" || ctx.Err() != nil || !errors.As(err, &upstreamErr) || !strings.HasPrefix(upstreamErr.Message, "multirag returned HTTP 500") {
+	var upstreamErr *knowledgeUpstreamFailure
+	if err == nil || req.ID == "" || ctx.Err() != nil || !errors.As(err, &upstreamErr) || upstreamErr.httpStatus != http.StatusInternalServerError {
 		return result, err
 	}
 
@@ -448,22 +454,28 @@ func (c *RemoteMultiragEngine) CreateChunk(ctx context.Context, datasetID string
 
 func (c *RemoteMultiragEngine) UpdateChunk(ctx context.Context, datasetID string, documentID string, chunkID string, req domain.ChunkMutationRequest) (*domain.Chunk, error) {
 	body := domain.ChunkMutationToRemote(req)
-	var raw map[string]any
 	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks/" + url.PathEscape(chunkID)
-	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &raw); err != nil {
-		return nil, err
-	}
-	// Current MultiRAG PATCH returns data:null. Read the durable chunk instead
-	// of normalizing that acknowledgement into a fictitious empty object.
-	if len(raw) == 0 {
-		var err error
-		raw, err = c.readVisibleChunk(ctx, path)
-		if err != nil {
-			return nil, domain.NewUpstreamError("切片更新已受理，但回读未确认，请刷新后核对", nil)
+	var acknowledgement map[string]any
+	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &acknowledgement); err != nil {
+		if domain.StatusCode(err) != http.StatusBadGateway {
+			return nil, err
 		}
+		status := ""
+		var upstream *knowledgeUpstreamFailure
+		if errors.As(err, &upstream) {
+			if upstream.businessCode != 0 {
+				status = fmt.Sprintf("（业务码 %d）", upstream.businessCode)
+			} else if upstream.httpStatus != 0 {
+				status = fmt.Sprintf(" (HTTP %d)", upstream.httpStatus)
+			}
+		}
+		return nil, safeKnowledgeUpstreamError("切片更新未完成或结果未确认"+status+"，请刷新核对后再操作；草稿已保留", err)
 	}
-	if len(raw) == 0 {
-		return nil, domain.NewUpstreamError("切片更新已受理，但回读结果为空，请刷新后核对", nil)
+	// A PATCH acknowledgement, or a visible but stale GET, does not prove the
+	// requested fields persisted. Only GET is retried; the mutation is sent once.
+	raw, err := c.readVisibleChunk(ctx, path, datasetID, documentID, chunkID, body)
+	if err != nil {
+		return nil, safeKnowledgeUpstreamError("切片更新已受理，但回读未确认，请刷新后核对；草稿已保留", err)
 	}
 	chunk := domain.NormalizeChunk(raw)
 	// The GET endpoint reads by path ID, but older index documents may omit
@@ -502,13 +514,15 @@ func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.Retriev
 	if domain.EmptyRetrievalScope(body) {
 		return domain.EmptyRetrievalResult(), nil
 	}
-	ids := body["dataset_ids"].([]string)
 	var raw map[string]any
-	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/"+url.PathEscape(ids[0])+"/search", nil, body, &raw); err != nil {
+	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/search", nil, body, &raw); err != nil {
 		return nil, err
 	}
 	if raw == nil {
 		return nil, domain.NewUpstreamError("检索响应缺少结果", nil)
+	}
+	if err := c.verifyRetrievalParents(ctx, body, raw); err != nil {
+		return nil, err
 	}
 	normalizeRetrievalChunks(raw)
 	result := domain.RetrievalResult(raw)
@@ -516,8 +530,46 @@ func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.Retriev
 }
 
 func (c *RemoteMultiragEngine) DownloadDocument(ctx context.Context, datasetID string, documentID string) (*domain.StreamResult, error) {
-	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID)
-	return c.doStream(ctx, path, "application/octet-stream, */*")
+	return c.documentFile(ctx, datasetID, documentID, "download")
+}
+
+func (c *RemoteMultiragEngine) PreviewDocument(ctx context.Context, datasetID string, documentID string) (*domain.StreamResult, error) {
+	return c.documentFile(ctx, datasetID, documentID, "preview")
+}
+
+func (c *RemoteMultiragEngine) documentFile(ctx context.Context, datasetID, documentID, action string) (*domain.StreamResult, error) {
+	doc, err := c.readDocument(ctx, datasetID, documentID)
+	if err != nil {
+		if domain.StatusCode(err) == http.StatusNotFound {
+			return nil, err
+		}
+		return nil, domain.NewUpstreamError("未确认本知识库文档的读取权限或归属", nil)
+	}
+	filePath := "/api/v1/documents/" + url.PathEscape(documentID) + "/" + action
+	stream, err := c.doStream(ctx, filePath, "application/octet-stream, */*")
+	if err != nil {
+		return nil, err
+	}
+	disposition, _, dispositionErr := mime.ParseMediaType(stream.ContentDisposition)
+	if dispositionErr != nil || (disposition != "attachment" && disposition != "inline") || (action == "download" && disposition != "attachment") {
+		name, _ := (*doc)["name"].(string)
+		name = path.Base(strings.ReplaceAll(name, "\\", "/"))
+		name = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, name)
+		if name == "" || name == "." || name == "/" {
+			name = documentID
+		}
+		disposition = "inline"
+		if action == "download" {
+			disposition = "attachment"
+		}
+		stream.ContentDisposition = mime.FormatMediaType(disposition, map[string]string{"filename": name})
+	}
+	return stream, nil
 }
 
 func (c *RemoteMultiragEngine) GetImage(ctx context.Context, imageID string) (*domain.StreamResult, error) {
@@ -589,7 +641,7 @@ func (c *RemoteMultiragEngine) doJSON(ctx context.Context, method, path string, 
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0, domain.NewUpstreamError("调用 multirag 失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库服务请求未完成，请稍后重试", err)
 	}
 	defer resp.Body.Close()
 	return decodeEnvelopeResponse(resp, out)
@@ -606,7 +658,7 @@ func (c *RemoteMultiragEngine) doMultipart(ctx context.Context, path string, upl
 	}
 	resp, err := c.uploadClient.Do(req)
 	if err != nil {
-		return 0, domain.NewUpstreamError("调用 multirag 上传文档失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库文档上传未完成，请稍后重试", err)
 	}
 	defer resp.Body.Close()
 	return decodeEnvelopeResponse(resp, out)
@@ -620,49 +672,26 @@ func (c *RemoteMultiragEngine) doStream(ctx context.Context, path string, accept
 	if accept != "" {
 		req.Header.Set("Accept", accept)
 	}
-	resp, err := c.client.Do(req)
+	// This helper is only used by the canonical file routes, whose errors use
+	// non-200 HTTP status. A JSON file may contain any business-looking object.
+	// Do not follow redirects into an envelope endpoint with different semantics.
+	client := *c.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, domain.NewUpstreamError("调用 multirag stream 失败", err)
+		return nil, domain.NewUpstreamError("文档读取未完成，请重试", nil)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, domain.NewUpstreamError(fmt.Sprintf("multirag returned HTTP %d", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))
+		return nil, domain.NewUpstreamError(fmt.Sprintf("文档读取失败 (HTTP %d)", resp.StatusCode), nil)
 	}
 	contentType := resp.Header.Get("Content-Type")
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	if mediaType == "application/json" {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		message := streamJSONErrorMessage(body)
-		if message == "" {
-			message = strings.TrimSpace(string(body))
-		}
-		return nil, domain.NewUpstreamError("multirag stream returned JSON instead of file content", errors.New(message))
-	}
 	return &domain.StreamResult{
 		Body:               resp.Body,
 		ContentType:        contentType,
 		ContentDisposition: resp.Header.Get("Content-Disposition"),
 		ContentLength:      resp.ContentLength,
 	}, nil
-}
-
-func streamJSONErrorMessage(body []byte) string {
-	var env envelope
-	if err := json.Unmarshal(body, &env); err != nil {
-		return ""
-	}
-	switch {
-	case env.RetMsg != "":
-		return env.RetMsg
-	case env.Message != "":
-		return env.Message
-	case env.Error != "":
-		return env.Error
-	default:
-		return ""
-	}
 }
 
 func (c *RemoteMultiragEngine) newRequest(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
@@ -685,26 +714,44 @@ func (c *RemoteMultiragEngine) newRequest(ctx context.Context, method, path stri
 func decodeEnvelopeResponse(resp *http.Response, out any) (int, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return 0, domain.NewUpstreamError(fmt.Sprintf("multirag returned HTTP %d", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))
+		return 0, &knowledgeUpstreamFailure{httpStatus: resp.StatusCode, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败 (HTTP %d)，请刷新后核对", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))}
 	}
 
 	var env envelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return 0, domain.NewUpstreamError("解析 multirag 响应失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库服务响应格式异常，请稍后重试", err)
 	}
 	code, ok := env.statusCode()
 	if !ok {
-		return 0, domain.NewUpstreamError("multirag 响应缺少 code/retcode", nil)
+		return 0, safeKnowledgeUpstreamError("知识库服务响应缺少业务状态，请稍后重试", nil)
+	}
+	if env.Code != nil && env.RetCode != nil && *env.Code != *env.RetCode {
+		return 0, safeKnowledgeUpstreamError("知识库服务响应的业务状态不一致，请稍后重试", nil)
 	}
 	if code != 0 {
-		return 0, domain.NewUpstreamError(fmt.Sprintf("multirag error %d: %s", code, env.message()), nil)
+		return 0, &knowledgeUpstreamFailure{businessCode: code, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败（业务码 %d），请刷新后核对", code), errors.New(env.message()))}
 	}
 	if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
 		if err := json.Unmarshal(env.Data, out); err != nil {
-			return 0, domain.NewUpstreamError("解析 multirag data 失败", err)
+			return 0, safeKnowledgeUpstreamError("知识库服务返回数据异常，请稍后重试", err)
 		}
 	}
 	return env.total(), nil
+}
+
+// Domain Error normally includes its Cause in Error(). Keep the original
+// diagnostic in the internal error chain while exposing only a stable message.
+type knowledgeUpstreamFailure struct {
+	cause        *domain.Error
+	httpStatus   int
+	businessCode int
+}
+
+func (e *knowledgeUpstreamFailure) Error() string { return e.cause.Message }
+func (e *knowledgeUpstreamFailure) Unwrap() error { return e.cause }
+
+func safeKnowledgeUpstreamError(message string, diagnostic error) error {
+	return &knowledgeUpstreamFailure{cause: domain.NewUpstreamError(message, diagnostic)}
 }
 
 func normalizeRetrievalChunks(raw map[string]any) {

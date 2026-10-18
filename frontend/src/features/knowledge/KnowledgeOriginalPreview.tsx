@@ -207,6 +207,13 @@ function OriginalResource({
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
   const matchRef = useRef<HTMLElement>(null);
+  const downloadController = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      downloadController.current?.abort();
+    },
+    [],
+  );
   const kind = doc ? originalPreviewKind(doc) : "unsupported";
   const positions = useMemo(
     () => chunkPositions(selectedChunk),
@@ -240,14 +247,14 @@ function OriginalResource({
       return;
     }
     void loadOriginalPreviewBlob(
-      knowledgeApi.documents.downloadUrl(datasetId, documentId),
+      knowledgeApi.documents.previewUrl(datasetId, documentId),
       previewLimit,
       controller.signal,
       kind === "text",
     )
       .then(async (blob) => {
-        if (!(blob instanceof Blob) || blob.size === 0)
-          throw new Error(chunkReviewText("empty"));
+        if (!(blob instanceof Blob))
+          throw new Error(chunkReviewText("badResponse"));
         if (blob.size > 50 * 1024 * 1024)
           throw new Error(chunkReviewText("tooLarge"));
         const mime = blob.type.split(";")[0].toLowerCase();
@@ -255,7 +262,9 @@ function OriginalResource({
           throw new Error(chunkReviewText("badResponse"));
         let sourceText = "";
         let detectedMime = mime;
-        if (kind === "pdf") {
+        if (blob.size === 0) {
+          // An empty source is a successful file response, including an empty PDF.
+        } else if (kind === "pdf") {
           const prefix = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
           if (String.fromCharCode(...prefix) !== "%PDF-")
             throw new Error(chunkReviewText("badResponse"));
@@ -286,25 +295,6 @@ function OriginalResource({
           if (blob.size > 5 * 1024 * 1024)
             throw new Error(chunkReviewText("textTooLarge"));
           sourceText = await blob.text();
-          // Never render a gateway business-error envelope as a source document.
-          if (mime === "application/json") {
-            try {
-              const body: unknown = JSON.parse(sourceText);
-              if (
-                body &&
-                typeof body === "object" &&
-                "success" in body &&
-                body.success === false
-              )
-                throw new Error(chunkReviewText("badResponse"));
-            } catch (err) {
-              if (
-                err instanceof Error &&
-                err.message === chunkReviewText("badResponse")
-              )
-                throw err;
-            }
-          }
         }
         if (!active) return;
         const safeMime = kind === "pdf" ? "application/pdf" : detectedMime;
@@ -335,10 +325,17 @@ function OriginalResource({
   }, [selectedChunk?.id, matchAt, resource, locationRequest]);
 
   const download = async () => {
+    downloadController.current?.abort();
+    const controller = new AbortController();
+    downloadController.current = controller;
     try {
-      const blob =
-        resource?.blob ??
-        (await knowledgeApi.documents.download(datasetId, documentId)).data;
+      // Download has its own authorization contract; preview bytes are not reused.
+      const blob = await loadOriginalPreviewBlob(
+        knowledgeApi.documents.downloadUrl(datasetId, documentId),
+        Number.MAX_SAFE_INTEGER,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement("a");
       anchor.href = url;
@@ -348,7 +345,7 @@ function OriginalResource({
         URL.revokeObjectURL(url);
       }, 0);
     } catch (err) {
-      setError(parseApiError(err));
+      if (!controller.signal.aborted) setError(parseApiError(err));
     }
   };
   return (
@@ -397,7 +394,7 @@ function OriginalResource({
         />
       ) : resource ? (
         <>
-          {resource.kind === "pdf" ? (
+          {resource.kind === "pdf" && resource.blob.size > 0 ? (
             <>
               <Space wrap>
                 <label htmlFor={`original-page-${documentId}`}>
@@ -463,7 +460,9 @@ function OriginalResource({
           <div
             className={resource.kind === "pdf" ? undefined : styles.viewport}
           >
-            {resource.kind === "pdf" ? (
+            {resource.blob.size === 0 ? (
+              <Empty description={text("emptySource")} />
+            ) : resource.kind === "pdf" ? (
               <Suspense fallback={<Spin size="small" />}>
                 <PdfPreview
                   blob={resource.blob}

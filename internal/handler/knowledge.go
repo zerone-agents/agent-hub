@@ -44,10 +44,12 @@ func RegisterKnowledgeRoutes(writeGroup, readGroup *gin.RouterGroup, h *Knowledg
 		knowledgeGroup.DELETE("/datasets", h.DeleteDatasets)
 		knowledgeReadGroup.GET("/datasets/:datasetId", h.GetDataset)
 		knowledgeGroup.PUT("/datasets/:datasetId", h.UpdateDataset)
+		knowledgeGroup.POST("/datasets/:datasetId/embedding/check", h.CheckEmbedding)
 		knowledgeReadGroup.GET("/datasets/:datasetId/documents", h.ListDocuments)
 		knowledgeGroup.POST("/datasets/:datasetId/documents", h.UploadDocuments)
 		knowledgeGroup.DELETE("/datasets/:datasetId/documents", h.DeleteDocuments)
 		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/download", h.DownloadDocument)
+		knowledgeReadGroup.GET("/datasets/:datasetId/documents/:documentId/preview", h.PreviewDocument)
 		knowledgeGroup.PUT("/datasets/:datasetId/documents/:documentId", h.UpdateDocument)
 		knowledgeGroup.PATCH("/datasets/:datasetId/documents/:documentId", h.UpdateDocument)
 		knowledgeGroup.POST("/datasets/:datasetId/documents/parse", h.ParseDocuments)
@@ -208,6 +210,8 @@ func (h *KnowledgeHandler) UploadDocuments(c *gin.Context) {
 }
 
 func (h *KnowledgeHandler) DownloadDocument(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
 	stream, err := h.service.DownloadDocument(c.Request.Context(), c.Param("datasetId"), c.Param("documentId"))
 	if err != nil {
 		respondKnowledgeError(c, err)
@@ -402,6 +406,11 @@ func (h *KnowledgeHandler) Retrieval(c *gin.Context) {
 // respondKnowledgeError 映射知识域错误：删除保护（issue #122）→ 409 +
 // data.datasets 名单；其余沿用 knowledge.StatusCode 桶。
 func respondKnowledgeError(c *gin.Context, err error) {
+	var incompatible *knowledge.EmbeddingIncompatibleError
+	if errors.As(err, &incompatible) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "knowledge_embedding_incompatible", "error": incompatible.Error(), "data": incompatible.Result})
+		return
+	}
 	var updateErr *knowledge.DocumentUpdateError
 	if errors.As(err, &updateErr) {
 		c.JSON(updateErr.HTTPStatus, gin.H{"success": false, "code": updateErr.Code, "error": updateErr.Message, "data": gin.H{"outcome": updateErr.Outcome, "request_id": updateErr.RequestID}})

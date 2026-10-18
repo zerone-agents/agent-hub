@@ -313,3 +313,20 @@ func TestKnowledgeMultiRAGModels_ResponseIsSortedDeterministically(t *testing.T)
 		require.Equalf(t, want.Name, resp.Data[i].Name, "position %d name", i)
 	}
 }
+
+func TestKnowledgeMultiRAGModels_PreservesExplicitToolsFalseAndRawNames(t *testing.T) {
+	h := &KnowledgeHandler{multiragMyLLMs: &stubMultiRAGMyLLMs{data: []byte(`{"OpenDataLoader":{"llm":[{"type":"ocr","name":"raw@OpenDataLoader","status":"1","is_tools":false},{"type":"ocr","name":"plain","status":"1","is_tools":true}]}}`)}}
+	w := httptest.NewRecorder()
+	newMultiRAGModelsRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/knowledge/multirag/models?type=ocr", nil))
+	require.Equal(t, 200, w.Code)
+	var response struct {
+		Data []MultiRAGModel `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Data, 2)
+	require.NotNil(t, response.Data[0].IsTools)
+	require.True(t, *response.Data[0].IsTools)
+	require.Equal(t, "raw@OpenDataLoader@OpenDataLoader", response.Data[1].FullID)
+	require.NotNil(t, response.Data[1].IsTools)
+	require.False(t, *response.Data[1].IsTools)
+}

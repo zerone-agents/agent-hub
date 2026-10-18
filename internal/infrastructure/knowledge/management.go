@@ -87,11 +87,12 @@ func (c *RemoteMultiragEngine) cancelDatasetIndex(ctx context.Context, r domain.
 	}
 	// No arbitrary task route is exposed. The ID comes from a freshly read
 	// dataset/type binding, and upstream cancellation also checks ownership.
-	var acknowledged *bool
-	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(id)+"/cancel", nil, nil, &acknowledged); err != nil {
+	var acknowledged domain.Object
+	pauseQuery := url.Values{"type": []string{kind}, "wipe": []string{"false"}, "task_id": []string{id}}
+	if _, err := c.doJSON(ctx, http.MethodDelete, "/api/v1/datasets/"+url.PathEscape(r.DatasetID)+"/index", pauseQuery, nil, &acknowledged); err != nil {
 		return nil, domain.NewUpstreamError("索引停止请求未确认；请刷新任务状态后重试", nil)
 	}
-	if acknowledged == nil || !*acknowledged {
+	if acknowledged == nil {
 		return nil, domain.NewUpstreamError("索引停止请求未被确认；请刷新任务状态", nil)
 	}
 	after, err := read()
@@ -102,13 +103,10 @@ func (c *RemoteMultiragEngine) cancelDatasetIndex(ctx context.Context, r domain.
 	if !ok {
 		return nil, domain.NewUpstreamError("索引停止请求已受理，但回读缺少进度状态；请刷新任务状态", nil)
 	}
-	// Python acknowledges terminal no-ops as well as actual cancellations. A
-	// natural completion/failure must keep its real terminal state. Only a new
-	// persisted cancellation marker at progress=-1 confirms a recorded request;
-	// this still does not prove that the worker has exited.
-	beforeMessage, _ := before["progress_msg"].(string)
+	// The dataset pause route persists this exact acknowledgement while its
+	// writer drains. A trace at -1 alone could be a natural failure. Neither
+	// value proves that the worker has stopped or that a restart is ready.
 	afterMessage, _ := after["progress_msg"].(string)
-	const marker = "[cancel_requested]"
-	recorded := afterProgress == -1 && strings.Count(afterMessage, marker) > strings.Count(beforeMessage, marker)
+	recorded := afterProgress == -1 && afterMessage == "Pause requested; waiting for the graph writer to settle."
 	return &domain.IndexCancelResult{TaskID: strings.TrimSpace(id), RequestAccepted: true, CancelRequested: recorded, Task: after}, nil
 }

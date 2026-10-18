@@ -179,6 +179,10 @@ func NewUpstreamError(message string, cause error) *Error {
 }
 
 func StatusCode(err error) int {
+	var incompatible *EmbeddingIncompatibleError
+	if errors.As(err, &incompatible) {
+		return http.StatusConflict
+	}
 	var updateErr *DocumentUpdateError
 	if errors.As(err, &updateErr) {
 		return updateErr.HTTPStatus

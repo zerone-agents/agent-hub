@@ -175,9 +175,19 @@ func TestKnowledgeMcpRerankModelsOnlyEnabledAndSearchValidated(t *testing.T) {
 
 func TestKnowledgeMcpJSONRPCThroughGoMultiRAGClient(t *testing.T) {
 	paths := make([]string, 0, 2)
+	parentReads := 0
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/documents") {
+			parentReads++
+			kb := strings.Split(r.URL.Path, "/")[4]
+			if (kb != "kb-1" && kb != "kb-2") || r.URL.Query().Get("page") != "1" || r.URL.Query().Get("page_size") != "100" || r.URL.Query().Get("ids") != "doc-"+kb {
+				t.Errorf("invalid parent verification: %s", r.URL.String())
+			}
+			fmt.Fprintf(w, `{"code":0,"data":{"total":1,"docs":[{"id":%q,"dataset_id":%q,"status":"1"}]}}`, "doc-"+kb, kb)
+			return
+		}
 		paths = append(paths, r.URL.Path)
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/search") {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/datasets/search" {
 			t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
 		}
 		var body map[string]any
@@ -185,7 +195,7 @@ func TestKnowledgeMcpJSONRPCThroughGoMultiRAGClient(t *testing.T) {
 			t.Errorf("upstream body: %v", err)
 		}
 		ids, _ := body["dataset_ids"].([]any)
-		if len(ids) != 1 || !strings.Contains(r.URL.Path, ids[0].(string)) {
+		if len(ids) != 1 || (ids[0] != "kb-1" && ids[0] != "kb-2") {
 			t.Errorf("search not isolated per KB: path=%s body=%v", r.URL.Path, body)
 		}
 		filter, _ := body["meta_data_filter"].(map[string]any)
@@ -197,17 +207,17 @@ func TestKnowledgeMcpJSONRPCThroughGoMultiRAGClient(t *testing.T) {
 		} else if values, ok := condition["value"].([]any); !ok || len(values) != 3 || values[0] != "guide" || values[1] != float64(2) || values[2] != true {
 			t.Errorf("typed membership changed: %v", condition["value"])
 		}
-		fmt.Fprintf(w, `{"retcode":0,"data":{"chunks":[{"chunk_id":"chunk-%s","kb_id":%q,"doc_id":"doc-1","docnm_kwd":"guide.pdf","content_with_weight":"answer","similarity":0.9}]}}`, ids[0], ids[0])
+		fmt.Fprintf(w, `{"retcode":0,"data":{"chunks":[{"chunk_id":"chunk-%s","kb_id":%q,"doc_id":%q,"docnm_kwd":"guide.pdf","content_with_weight":"answer","similarity":0.9}]}}`, ids[0], ids[0], "doc-"+ids[0].(string))
 	}))
 	defer remote.Close()
 	engine := knowledgeinfra.NewRemoteMultiragEngine(remote.URL, "test-key", time.Second, time.Second)
 	svc := services.NewKnowledgeService(engine, nil)
 	router := setupKnowledgeMcpRouter(svc, &fakeAgentMcpService{datasets: []string{"kb-1", "kb-2"}})
 	resp := mcpCall(t, router, "knowledge_search", `{"query":"hello","meta_data_filter":{"method":"manual","logic":"and","manual":[{"key":"topic","op":"in","value":["guide",2,true]}]}}`)
-	if isErrorResult(resp.Result) || len(paths) != 2 {
+	if isErrorResult(resp.Result) || len(paths) != 2 || parentReads != 2 {
 		t.Fatalf("MCP to Go to search failed: paths=%v response=%v", paths, resp.Result)
 	}
-	for _, want := range []string{"/api/v1/datasets/kb-1/search", "/api/v1/datasets/kb-2/search", "分块ID：chunk-kb-1", "分块ID：chunk-kb-2"} {
+	for _, want := range []string{"/api/v1/datasets/search", "分块ID：chunk-kb-1", "分块ID：chunk-kb-2"} {
 		if strings.HasPrefix(want, "/") {
 			if !strings.Contains(strings.Join(paths, " "), want) {
 				t.Errorf("missing path %s: %v", want, paths)

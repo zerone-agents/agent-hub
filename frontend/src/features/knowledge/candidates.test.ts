@@ -38,6 +38,16 @@ describe('buildEmbeddingCandidates', () => {
     expect(localGroup.options[0].value).toBe('local:42:bge-large-zh')
   })
 
+  it('excludes disabled, duplicate local instances and already synced canonical OpenAI registrations', () => {
+    const model = { modelId: 'embed', displayName: 'Embed', modelType: 'embedding' as const }
+    const p = { id: 1, name: 'One', protocol: 'openai', defaultModels: [model] } as Provider
+    expect(buildEmbeddingCandidates([], [p, { ...p, id: 2 }])).toEqual([])
+    expect(buildEmbeddingCandidates([], [{ ...p, defaultModels: [{ ...model, status: '0' }] }])).toEqual([])
+    const upstream = { name: 'embed___OpenAI-API', factory: 'OpenAI-API-Compatible', type: 'embedding', status: '1', fullId: 'embed___OpenAI-API@OpenAI-API-Compatible' }
+    expect(buildEmbeddingCandidates([upstream], [p]).flatMap(group => group.options).map(option => option.source)).toEqual(['multirag'])
+    expect(buildEmbeddingCandidates([{ ...upstream, status: '0' }], [])).toEqual([])
+  })
+
   it('returns empty array when both sources are empty', () => {
     expect(buildEmbeddingCandidates([], [])).toEqual([])
   })
@@ -64,7 +74,7 @@ describe('buildLayoutCandidates', () => {
     expect(builtinGroup.options.map(o => o.value)).toEqual(['builtin:DeepDOC', 'builtin:Plain Text'])
     const mrGroup = result.find(g => g.label === 'knowledge.candidates.ocr')!
     expect(mrGroup.options).toHaveLength(1)
-    expect(mrGroup.options[0].value).toBe('multirag:mineru-x@MinerU')
+    expect(mrGroup.options[0].value).toBe('multirag:mineru-x@MinerU@MinerU')
     expect(result.find(g => g.label === 'knowledge.candidates.local')).toBeUndefined()
     expect(result.flatMap(g => g.options).some(o => o.value.includes('PaddleOCR'))).toBe(false)
     expect(localProviders[0].baseUrl).toBe('')
@@ -76,10 +86,10 @@ describe('buildLayoutCandidates', () => {
       { name: 'mineru-other', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'mineru-other@MinerU' },
     ]
     const result = buildLayoutCandidates(multirag)
-    expect(result.find(g => g.label === 'knowledge.candidates.ocr')?.options.map(option => option.rawValue)).toEqual(['mineru-default@MinerU', 'mineru-other@MinerU'])
+    expect(result.find(g => g.label === 'knowledge.candidates.ocr')?.options.map(option => option.rawValue)).toEqual(['mineru-default@MinerU@MinerU', 'mineru-other@MinerU@MinerU'])
     expect(isAllowedLayoutSelection('local:7:mineru', result)).toBe(false)
     expect(isAllowedLayoutSelection('multirag:MinerU', result)).toBe(false)
-    expect(isAllowedLayoutSelection('multirag:mineru-other@MinerU', result)).toBe(true)
+    expect(isAllowedLayoutSelection('multirag:mineru-other@MinerU@MinerU', result)).toBe(true)
     expect(isAllowedLayoutSelection('DeepDOC', result)).toBe(true)
     expect(isAllowedLayoutSelection('OldParser', result, 'OldParser')).toBe(true)
     expect(isAllowedLayoutSelection('multirag:OldParser', result, 'OldParser')).toBe(true)
@@ -97,14 +107,15 @@ describe('buildLayoutCandidates', () => {
     expect(result.flatMap(group => group.options).some(option => option.rawValue === 'embedding@OpenAI')).toBe(false)
   })
 
-  it('does not offer unsupported exact OCR references or ambiguous cross-factory names', () => {
+  it('offers exact OCR references including OpenDataLoader and disambiguates same names', () => {
     const result = buildLayoutCandidates([
       { name: 'shared', factory: 'MinerU', type: 'ocr', status: '1', fullId: 'shared@MinerU' },
       { name: 'shared', factory: 'PaddleOCR', type: 'ocr', status: '0', fullId: 'shared@PaddleOCR' },
       { name: 'loader', factory: 'OpenDataLoader', type: 'ocr', status: '1', fullId: 'loader@OpenDataLoader' },
     ])
-    expect(result).toHaveLength(1)
-    expect(isAllowedLayoutSelection('shared@MinerU', result)).toBe(false)
+    expect(result.find(group => group.label === 'knowledge.candidates.ocr')?.options.map(option => option.rawValue)).toEqual(['shared@MinerU@MinerU', 'loader@OpenDataLoader@OpenDataLoader'])
+    expect(isAllowedLayoutSelection('shared@MinerU@MinerU', result)).toBe(true)
+    expect(isAllowedLayoutSelection('shared@PaddleOCR@PaddleOCR', result)).toBe(false)
     expect(isAllowedLayoutSelection('OpenDataLoader', result, 'OpenDataLoader')).toBe(true)
   })
 

@@ -82,3 +82,39 @@ it("keeps synthetic dataset tasks out of document navigation and supports graph 
   expect(graphEndpoint({ src_id: "A" }, "source")).toBe("A");
   expect(graphEndpoint({ target: { id: "B" } }, "target")).toBe("B");
 });
+
+it("recognizes the exact graph pause acknowledgement without claiming a stopped worker", () => {
+  expect(
+    getIndexState({
+      id: "g",
+      progress: -1,
+      progress_msg:
+        "12:30:00 Pause requested; waiting for graph writer to settle.",
+    }),
+  ).toBe("cancelRequested");
+  expect(
+    getIndexState({
+      id: "g",
+      progress: -1,
+      progress_msg:
+        "Pause requested; waiting for graph writer to settle.\n[ERROR] Natural failure",
+    }),
+  ).toBe("failed");
+  expect(
+    getIndexState({
+      id: "g",
+      progress: 0.5,
+      progress_msg: "Pause requested; waiting for graph writer to settle.",
+    }),
+  ).toBe("running");
+});
+
+it("recognizes the exact target pause message including its article", () => {
+  expect(
+    getIndexState({
+      id: "g",
+      progress: -1,
+      progress_msg: "Pause requested; waiting for the graph writer to settle.",
+    }),
+  ).toBe("cancelRequested");
+});

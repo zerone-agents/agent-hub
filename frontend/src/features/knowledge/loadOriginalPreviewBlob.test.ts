@@ -75,3 +75,38 @@ describe("bounded original preview transport", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 });
+
+it("rejects a JSON envelope before reading while accepting attached JSON bytes", async () => {
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const getReader = vi.fn();
+  h.get.mockResolvedValue({
+    data: { cancel, getReader },
+    headers: { "content-type": "application/json" },
+  });
+  await expect(
+    loadOriginalPreviewBlob("/preview", 100, new AbortController().signal),
+  ).rejects.toThrow();
+  expect(getReader).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledOnce();
+});
+
+it("rejects a response that arrives after the signed-in identity changes", async () => {
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const getReader = vi.fn();
+  h.get.mockImplementation(async () => {
+    localStorage.setItem("access_token", "changed-preview-identity");
+    return {
+      data: { cancel, getReader },
+      headers: { "content-type": "text/plain" },
+    };
+  });
+  try {
+    await expect(
+      loadOriginalPreviewBlob("/preview", 100, new AbortController().signal),
+    ).rejects.toThrow("Aborted");
+    expect(getReader).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  } finally {
+    localStorage.removeItem("access_token");
+  }
+});

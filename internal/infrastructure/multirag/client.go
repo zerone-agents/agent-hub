@@ -62,7 +62,13 @@ func (c *Client) do(ctx context.Context, path string, payload any) (*MultiRAGRes
 	}
 	defer resp.Body.Close()
 
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
+	if err != nil {
+		return nil, fmt.Errorf("MultiRAG model response could not be read")
+	}
+	if len(raw) > 64*1024 {
+		return nil, fmt.Errorf("MultiRAG model response exceeds limit")
+	}
 	out := &MultiRAGResponse{HTTPStatusCode: resp.StatusCode, Raw: raw}
 
 	// HTTP non-2xx -> surface as failure but not transport error.
@@ -100,7 +106,7 @@ func (c *Client) do(ctx context.Context, path string, payload any) (*MultiRAGRes
 			} else if env.Code != nil {
 				code = *env.Code
 			}
-			out.Success = code == 0
+			out.Success = code == 0 && (env.RetCode == nil || *env.RetCode == 0) && (env.Code == nil || *env.Code == 0)
 			if env.RetMsg != "" {
 				out.Message = env.RetMsg
 			} else {
@@ -110,6 +116,9 @@ func (c *Client) do(ctx context.Context, path string, payload any) (*MultiRAGRes
 			// provider probe failed: data={"success":false,"message":"..."}.
 			// Do not report that as a verified model to the caller.
 			if out.Success && len(env.Data) > 0 {
+				if string(env.Data) == "false" {
+					out.Success = false
+				}
 				var probe struct {
 					Success *bool  `json:"success"`
 					Message string `json:"message"`
@@ -136,8 +145,9 @@ func (c *Client) do(ctx context.Context, path string, payload any) (*MultiRAGRes
 		}
 	}
 
-	// Unknown shape; default to success since HTTP was 2xx.
-	out.Success = true
+	// A 2xx body is not evidence that the model was verified or persisted.
+	out.Success = false
+	out.Message = "MultiRAG model response has no success indicator"
 	return out, nil
 }
 

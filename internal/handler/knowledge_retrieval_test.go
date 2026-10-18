@@ -17,10 +17,25 @@ import (
 
 func TestKnowledgeRetrievalStableRouteUsesDatasetSearch(t *testing.T) {
 	calls := 0
+	parentReads := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			parentReads++
+			require.Equal(t, "Bearer key", r.Header.Get("Authorization"))
+			require.Equal(t, []string{"d"}, r.URL.Query()["ids"])
+			require.Equal(t, "1", r.URL.Query().Get("page"))
+			require.Equal(t, "100", r.URL.Query().Get("page_size"))
+			if r.URL.Path == "/api/v1/datasets/kb/documents" {
+				_, _ = w.Write([]byte(`{"code":0,"data":{"total":1,"docs":[{"id":"d","dataset_id":"kb","status":"1"}]}}`))
+			} else {
+				require.Equal(t, "/api/v1/datasets/kb2/documents", r.URL.Path)
+				_, _ = w.Write([]byte(`{"code":0,"data":{"total":0,"docs":[]}}`))
+			}
+			return
+		}
 		calls++
 		require.Equal(t, "POST", r.Method)
-		require.Equal(t, "/api/v1/datasets/kb/search", r.URL.Path)
+		require.Equal(t, "/api/v1/datasets/search", r.URL.Path)
 		require.Equal(t, "Bearer key", r.Header.Get("Authorization"))
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
@@ -37,7 +52,7 @@ func TestKnowledgeRetrievalStableRouteUsesDatasetSearch(t *testing.T) {
 		require.NotContains(t, body, "document_ids")
 		require.NotContains(t, body, "metadata_condition")
 		require.NotNil(t, body["reference_metadata"])
-		_, _ = w.Write([]byte(`{"code":0,"data":{"total":14,"chunks":[{"chunk_id":"c","doc_id":"d","docnm_kwd":"name","content_with_weight":"text","document_metadata":{"version":"v2"}}],"doc_aggs":[]}}`))
+		_, _ = w.Write([]byte(`{"code":0,"data":{"total":14,"chunks":[{"chunk_id":"c","kb_id":"kb","doc_id":"d","docnm_kwd":"name","content_with_weight":"text","document_metadata":{"version":"v2"}}],"doc_aggs":[]}}`))
 	}))
 	defer upstream.Close()
 	router := gin.New()
@@ -55,10 +70,12 @@ func TestKnowledgeRetrievalStableRouteUsesDatasetSearch(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"document_metadata":{"version":"v2"}`)
 	require.Contains(t, w.Body.String(), `"document_id":"d"`)
 	require.Equal(t, 1, calls)
+	require.Equal(t, 2, parentReads)
 	w = call(`{"question":"test","dataset_ids":["kb"],"doc_ids":[]}`)
 	require.Equal(t, 200, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"total":0`)
 	require.Equal(t, 1, calls, "empty scope must not reach upstream")
+	require.Equal(t, 2, parentReads, "empty scope must not perform parent reads")
 	w = call(`{"question":"test","dataset_ids":["kb"],"doc_ids":["d"],"meta_data_filter":{"method":"manual","manual":[{"key":"version","op":"is","value":"v2"}]}}`)
 	require.Equal(t, 200, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"total":0`)
@@ -79,7 +96,7 @@ func TestKnowledgeRetrievalGraphConstraintsDoNotReachUpstream(t *testing.T) {
 	var got map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		require.Equal(t, "/api/v1/datasets/kb/search", r.URL.Path)
+		require.Equal(t, "/api/v1/datasets/search", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
 		_, _ = w.Write([]byte(`{"code":0,"data":{"total":0,"chunks":[],"doc_aggs":[]}}`))
 	}))

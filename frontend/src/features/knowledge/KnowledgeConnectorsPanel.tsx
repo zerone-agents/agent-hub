@@ -63,7 +63,8 @@ const SOURCES = [
   "postgresql",
   "dingtalk_ai_table",
 ];
-// Match MultiRAG's trusted full-snapshot deletion sync sources.
+// Keep the sources already integrated by Hub. Newly available upstream
+// deletion capabilities remain gated until their integration is requested.
 const DELETION_SYNC_SOURCES = new Set([
   "rss",
   "webdav",
@@ -86,6 +87,30 @@ const DELETION_SYNC_SOURCES = new Set([
   "asana",
   "zendesk",
 ]);
+const BLOB_SYNC_SOURCES = new Set([
+  "s3",
+  "r2",
+  "google_cloud_storage",
+  "oci_storage",
+]);
+function blobSyncScope(config: KnowledgeObject, source: string) {
+  const credentials = config.credentials as KnowledgeObject | undefined;
+  const prefix = typeof config.prefix === "string" ? config.prefix : "";
+  return {
+    bucket_type: config.bucket_type ?? source,
+    bucket_name:
+      typeof config.bucket_name === "string"
+        ? config.bucket_name.trim()
+        : config.bucket_name,
+    prefix: prefix && !prefix.endsWith("/") ? `${prefix}/` : prefix,
+    allow_images: config.allow_images ?? false,
+    credentials: Object.fromEntries(
+      ["endpoint_url", "account_id", "namespace", "region", "aws_role_arn"].map(
+        (key) => [key, credentials?.[key]],
+      ),
+    ),
+  };
+}
 function DeletionSyncStatus({ id, row }: { id: string; row: ConnectorRow }) {
   const { t } = useTranslation();
   const supported = DELETION_SYNC_SOURCES.has(row.source);
@@ -95,7 +120,7 @@ function DeletionSyncStatus({ id, row }: { id: string; row: ConnectorRow }) {
   );
   if (!supported)
     return <Tag>{t("knowledge.manage.deletionSyncUnsupported")}</Tag>;
-  if (!query.data)
+  if (query.error || !query.data)
     return (
       <Tooltip title={query.error ? parseApiError(query.error) : undefined}>
         <Tag>
@@ -108,7 +133,13 @@ function DeletionSyncStatus({ id, row }: { id: string; row: ConnectorRow }) {
       </Tooltip>
     );
   const config = query.data.config;
-  if (!config || typeof config !== 'object' || Array.isArray(config)) return <Tag color="warning">{t('knowledge.manage.configUnconfirmed')}</Tag>;
+  if (
+    query.data.id !== row.id ||
+    !config ||
+    typeof config !== "object" ||
+    Array.isArray(config)
+  )
+    return <Tag color="warning">{t("knowledge.manage.configUnconfirmed")}</Tag>;
   const value = (config as KnowledgeObject).sync_deleted_files;
   if (value !== undefined && typeof value !== "boolean")
     return <Tag color="warning">{t("knowledge.manage.configUnconfirmed")}</Tag>;
@@ -326,6 +357,12 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
           setLogSource("");
         }}
       >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          title={t("knowledge.manage.connectorSyncLogsHint")}
+        />
         {logs.error && <Alert type="error" title={parseApiError(logs.error)} />}
         <Table
           rowKey={(row) => text(row.id)}
@@ -426,6 +463,9 @@ function ConnectorEditor({
     /* retain invalid JSON for correction */
   }
   const deletionSupported = DELETION_SYNC_SOURCES.has(source ?? "");
+  const sourceHint = BLOB_SYNC_SOURCES.has(source ?? "")
+    ? "knowledge.manage.connectorBlobSync"
+    : undefined;
   const [createdID, setCreatedID] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -435,6 +475,11 @@ function ConnectorEditor({
       setSaving(true);
       setError("");
       const config = parseObjectJSON(values.config);
+      // These checkpoints belong to the worker and may advance while this
+      // editor is open. Omit them from both PATCH and its readback comparison.
+      if (values.source === "imap") delete config.imap_sync_scopes;
+      if (values.source === "mysql" || values.source === "postgresql")
+        delete config.rdbms_sync_scopes;
       if (DELETION_SYNC_SOURCES.has(values.source)) {
         if (
           config.sync_deleted_files !== undefined &&
@@ -442,6 +487,23 @@ function ConnectorEditor({
         )
           throw new Error(t("knowledge.manage.deletionSyncBoolean"));
         config.sync_deleted_files = config.sync_deleted_files ?? false;
+      }
+      if (
+        BLOB_SYNC_SOURCES.has(values.source) &&
+        config.sync_deleted_files === true &&
+        existing.data
+      ) {
+        const previous = existing.data.config;
+        if (
+          !previous ||
+          typeof previous !== "object" ||
+          Array.isArray(previous) ||
+          !containsKnowledgeFields(
+            blobSyncScope(config, values.source),
+            blobSyncScope(previous as KnowledgeObject, values.source),
+          )
+        )
+          throw new Error(t("knowledge.manage.connectorBlobScopeChanged"));
       }
       const body = {
         config,
@@ -506,13 +568,21 @@ function ConnectorEditor({
       confirmLoading={saving || action.isPending}
       okButtonProps={{ className: styles.root }}
     >
-      {(error || existing.error) && (
-        <Alert type="error" title={error || parseApiError(existing.error)} />
+      {existing.error && (
+        <Alert type="error" title={parseApiError(existing.error)} />
       )}
       {createdID && (
         <Alert
           type="warning"
           title={t("knowledge.manage.connectorCreatedPending")}
+        />
+      )}
+      {connectorID && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          title={t("knowledge.manage.connectorSharedSettings")}
         />
       )}
       {(!connectorID || existing.data) && (
@@ -549,6 +619,12 @@ function ConnectorEditor({
               extra={t("knowledge.manage.deletionSyncHint")}
             >
               <Space orientation="vertical">
+                <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+                  {t("knowledge.manage.deletionSyncLifecycle")}
+                </Typography.Paragraph>
+                <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+                  {t("knowledge.manage.deletionSyncScope")}
+                </Typography.Paragraph>
                 <Switch
                   aria-label={t("knowledge.manage.deletionSync")}
                   disabled={!draft || saving}
@@ -580,6 +656,14 @@ function ConnectorEditor({
               type="info"
               showIcon
               title={t("knowledge.manage.deletionSyncUnsupportedHint")}
+            />
+          )}
+          {sourceHint && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              title={t(sourceHint)}
             />
           )}
           <Form.Item
@@ -644,6 +728,9 @@ function ConnectorEditor({
           >
             <InputNumber min={1} />
           </Form.Item>
+          {error && (
+            <Alert type="error" title={error} style={{ marginBottom: 16 }} />
+          )}
           {!connectorID && (
             <Alert
               type="info"

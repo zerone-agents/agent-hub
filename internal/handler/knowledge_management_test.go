@@ -20,6 +20,7 @@ func TestDocumentFiltersAllowlistAndEmptyResults(t *testing.T) {
 		`{"code":0,"data":{"total":0,"filter":{"suffix":{},"run_status":{},"metadata":{"empty_metadata":{"true":0}}}}}`,
 		`{"code":0,"data":{"total":2,"filter":{"suffix":{"pdf":2},"run_status":{"3":1,"4":1},"metadata":{"version":{"v2":2}}}}}`,
 		`{"code":109,"message":"denied","data":false}`,
+		`{"code":102,"message":"Document filters are unavailable."}`,
 		`{"code":0,"data":null}`,
 		`{"data":{"total":0,"filter":{}}}`,
 		`{"code":0,"data":{"total":0,"filter":{"suffix":{},"run_status":{}}}}`,
@@ -59,10 +60,12 @@ func TestIndexCancelOnlyTargetsCurrentDatasetBinding(t *testing.T) {
 			reads, cancels := 0, 0
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, "Bearer key", r.Header.Get("Authorization"))
-				if r.Method == "POST" {
+				if r.Method == "DELETE" {
 					cancels++
-					require.Equal(t, "/api/v1/tasks/current/cancel", r.URL.Path)
-					body := `{"code":0,"data":true}`
+					require.Equal(t, "/api/v1/datasets/kb/index", r.URL.Path)
+					require.Equal(t, "false", r.URL.Query().Get("wipe"))
+					require.Equal(t, "current", r.URL.Query().Get("task_id"))
+					body := `{"code":0,"data":{}}`
 					switch scenario {
 					case "denied-cancel":
 						body = `{"code":109,"data":false}`
@@ -101,7 +104,7 @@ func TestIndexCancelOnlyTargetsCurrentDatasetBinding(t *testing.T) {
 				}
 				if reads > 1 {
 					task["progress"] = -1
-					task["progress_msg"] = "[cancel_requested]"
+					task["progress_msg"] = "Pause requested; waiting for the graph writer to settle."
 					switch scenario {
 					case "completed-race":
 						task["progress"], task["progress_msg"] = 1, "completed"
@@ -114,7 +117,7 @@ func TestIndexCancelOnlyTargetsCurrentDatasetBinding(t *testing.T) {
 					case "failed-old-marker":
 						task["progress_msg"] = "old [cancel_requested] natural failure"
 					case "recorded-new-marker":
-						task["progress_msg"] = "old [cancel_requested]\nnew [cancel_requested]"
+						task["progress_msg"] = "Pause requested; waiting for the graph writer to settle."
 					}
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": task})
