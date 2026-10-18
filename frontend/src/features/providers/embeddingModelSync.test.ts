@@ -21,7 +21,7 @@ describe('embedding sync', () => {
     expect(h.sync).toHaveBeenCalledExactlyOnceWith(42, { verifyOnly: false, modelIds: ['embed'] }, guard)
     expect(h.inventory).toHaveBeenCalledExactlyOnceWith('embedding', guard)
   })
-  it.each([[], [{ ...stored, factory: 'Anthropic' }], [{ ...stored, status: '0' }]])('rejects missing, wrong-factory or disabled readback %j', async (rows) => {
+  it.each([{ rows: [] }, { rows: [{ ...stored, factory: 'Anthropic' }] }, { rows: [{ ...stored, status: '0' }] }])('rejects missing, wrong-factory or disabled readback %j', async ({ rows }) => {
     h.inventory.mockResolvedValue(wrap(rows))
     await expect(syncEmbeddingModel(provider, 'embed', owner())).rejects.toThrow('readback')
   })
