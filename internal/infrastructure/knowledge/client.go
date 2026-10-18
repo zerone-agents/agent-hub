@@ -364,8 +364,8 @@ func (c *RemoteMultiragEngine) documentParsingAction(ctx context.Context, datase
 
 func (c *RemoteMultiragEngine) ListChunks(ctx context.Context, datasetID string, documentID string, req domain.ChunkListRequest) (*domain.ChunkListResult, error) {
 	result, err := c.listChunksPage(ctx, datasetID, documentID, req)
-	var upstreamErr *domain.Error
-	if err == nil || req.ID == "" || ctx.Err() != nil || !errors.As(err, &upstreamErr) || !strings.HasPrefix(upstreamErr.Message, "multirag returned HTTP 500") {
+	var upstreamErr *knowledgeUpstreamFailure
+	if err == nil || req.ID == "" || ctx.Err() != nil || !errors.As(err, &upstreamErr) || upstreamErr.httpStatus != http.StatusInternalServerError {
 		return result, err
 	}
 
@@ -454,22 +454,28 @@ func (c *RemoteMultiragEngine) CreateChunk(ctx context.Context, datasetID string
 
 func (c *RemoteMultiragEngine) UpdateChunk(ctx context.Context, datasetID string, documentID string, chunkID string, req domain.ChunkMutationRequest) (*domain.Chunk, error) {
 	body := domain.ChunkMutationToRemote(req)
-	var raw map[string]any
 	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks/" + url.PathEscape(chunkID)
-	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &raw); err != nil {
-		return nil, err
-	}
-	// Current MultiRAG PATCH returns data:null. Read the durable chunk instead
-	// of normalizing that acknowledgement into a fictitious empty object.
-	if len(raw) == 0 {
-		var err error
-		raw, err = c.readVisibleChunk(ctx, path)
-		if err != nil {
-			return nil, domain.NewUpstreamError("切片更新已受理，但回读未确认，请刷新后核对", nil)
+	var acknowledgement map[string]any
+	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &acknowledgement); err != nil {
+		if domain.StatusCode(err) != http.StatusBadGateway {
+			return nil, err
 		}
+		status := ""
+		var upstream *knowledgeUpstreamFailure
+		if errors.As(err, &upstream) {
+			if upstream.businessCode != 0 {
+				status = fmt.Sprintf("（业务码 %d）", upstream.businessCode)
+			} else if upstream.httpStatus != 0 {
+				status = fmt.Sprintf(" (HTTP %d)", upstream.httpStatus)
+			}
+		}
+		return nil, safeKnowledgeUpstreamError("切片更新未完成或结果未确认"+status+"，请刷新核对后再操作；草稿已保留", err)
 	}
-	if len(raw) == 0 {
-		return nil, domain.NewUpstreamError("切片更新已受理，但回读结果为空，请刷新后核对", nil)
+	// A PATCH acknowledgement, or a visible but stale GET, does not prove the
+	// requested fields persisted. Only GET is retried; the mutation is sent once.
+	raw, err := c.readVisibleChunk(ctx, path, datasetID, documentID, chunkID, body)
+	if err != nil {
+		return nil, safeKnowledgeUpstreamError("切片更新已受理，但回读未确认，请刷新后核对；草稿已保留", err)
 	}
 	chunk := domain.NormalizeChunk(raw)
 	// The GET endpoint reads by path ID, but older index documents may omit
@@ -635,7 +641,7 @@ func (c *RemoteMultiragEngine) doJSON(ctx context.Context, method, path string, 
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0, domain.NewUpstreamError("调用 multirag 失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库服务请求未完成，请稍后重试", err)
 	}
 	defer resp.Body.Close()
 	return decodeEnvelopeResponse(resp, out)
@@ -652,7 +658,7 @@ func (c *RemoteMultiragEngine) doMultipart(ctx context.Context, path string, upl
 	}
 	resp, err := c.uploadClient.Do(req)
 	if err != nil {
-		return 0, domain.NewUpstreamError("调用 multirag 上传文档失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库文档上传未完成，请稍后重试", err)
 	}
 	defer resp.Body.Close()
 	return decodeEnvelopeResponse(resp, out)
@@ -708,26 +714,44 @@ func (c *RemoteMultiragEngine) newRequest(ctx context.Context, method, path stri
 func decodeEnvelopeResponse(resp *http.Response, out any) (int, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return 0, domain.NewUpstreamError(fmt.Sprintf("multirag returned HTTP %d", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))
+		return 0, &knowledgeUpstreamFailure{httpStatus: resp.StatusCode, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败 (HTTP %d)，请刷新后核对", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))}
 	}
 
 	var env envelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return 0, domain.NewUpstreamError("解析 multirag 响应失败", err)
+		return 0, safeKnowledgeUpstreamError("知识库服务响应格式异常，请稍后重试", err)
 	}
 	code, ok := env.statusCode()
 	if !ok {
-		return 0, domain.NewUpstreamError("multirag 响应缺少 code/retcode", nil)
+		return 0, safeKnowledgeUpstreamError("知识库服务响应缺少业务状态，请稍后重试", nil)
+	}
+	if env.Code != nil && env.RetCode != nil && *env.Code != *env.RetCode {
+		return 0, safeKnowledgeUpstreamError("知识库服务响应的业务状态不一致，请稍后重试", nil)
 	}
 	if code != 0 {
-		return 0, domain.NewUpstreamError(fmt.Sprintf("multirag error %d: %s", code, env.message()), nil)
+		return 0, &knowledgeUpstreamFailure{businessCode: code, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败（业务码 %d），请刷新后核对", code), errors.New(env.message()))}
 	}
 	if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
 		if err := json.Unmarshal(env.Data, out); err != nil {
-			return 0, domain.NewUpstreamError("解析 multirag data 失败", err)
+			return 0, safeKnowledgeUpstreamError("知识库服务返回数据异常，请稍后重试", err)
 		}
 	}
 	return env.total(), nil
+}
+
+// Domain Error normally includes its Cause in Error(). Keep the original
+// diagnostic in the internal error chain while exposing only a stable message.
+type knowledgeUpstreamFailure struct {
+	cause        *domain.Error
+	httpStatus   int
+	businessCode int
+}
+
+func (e *knowledgeUpstreamFailure) Error() string { return e.cause.Message }
+func (e *knowledgeUpstreamFailure) Unwrap() error { return e.cause }
+
+func safeKnowledgeUpstreamError(message string, diagnostic error) error {
+	return &knowledgeUpstreamFailure{cause: domain.NewUpstreamError(message, diagnostic)}
 }
 
 func normalizeRetrievalChunks(raw map[string]any) {

@@ -20,7 +20,7 @@ func TestUpdateChunkReadsBackNullAcknowledgement(t *testing.T) {
 		wantError        bool
 	}{
 		{"null", `{"code":0,"data":null}`, `{"code":0,"data":{"content_with_weight":"updated","doc_id":"d","tag_kwd":["v2"]}}`, 1, false},
-		{"object", `{"code":0,"data":{"content":"updated","id":"c","document_id":"d"}}`, "", 0, false},
+		{"object", `{"code":0,"data":{"content":"updated","id":"c","document_id":"d"}}`, `{"code":0,"data":{"content":"updated","id":"c","document_id":"d"}}`, 1, false},
 		{"patch-failure", `{"code":100,"data":null}`, "", 0, true},
 		{"read-failure", `{"code":0,"data":null}`, `{"code":100,"data":null}`, 1, true},
 		{"read-null", `{"code":0,"data":null}`, `{"code":0,"data":null}`, 1, true},

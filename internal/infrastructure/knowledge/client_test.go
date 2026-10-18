@@ -334,7 +334,7 @@ func TestClient_RetCodeError(t *testing.T) {
 
 	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
 	_, err := client.ListDatasets(context.Background(), domain.DatasetListRequest{})
-	if err == nil || !strings.Contains(err.Error(), "multirag error 101: bad request") {
+	if err == nil || !strings.Contains(err.Error(), "业务码 101") || strings.Contains(err.Error(), "bad request") {
 		t.Fatalf("expected retcode error, got %v", err)
 	}
 }
@@ -361,7 +361,7 @@ func TestClient_InvalidJSON(t *testing.T) {
 
 	client := NewRemoteMultiragEngine(server.URL, "test-key", time.Second, time.Hour)
 	_, err := client.ListDatasets(context.Background(), domain.DatasetListRequest{})
-	if err == nil || !strings.Contains(err.Error(), "解析 multirag 响应失败") {
+	if err == nil || !strings.Contains(err.Error(), "知识库服务响应格式异常") {
 		t.Fatalf("expected invalid JSON error, got %v", err)
 	}
 }
@@ -1068,7 +1068,7 @@ func TestKnowledgeMutationsMatchPinnedMultiRAGRoutes(t *testing.T) {
 					t.Errorf("wrong request %s %s", r.Method, r.URL.Path)
 				}
 				if tc.name == "chunk" && r.Method == "GET" {
-					_, _ = io.WriteString(w, `{"code":0,"data":{"content_with_weight":"fixed","doc_id":"doc1"}}`)
+					_, _ = io.WriteString(w, `{"code":0,"data":{"content_with_weight":"fixed","doc_id":"doc1","tag_kwd":["tag"]}}`)
 				} else if tc.name == "parse" || tc.name == "stop" {
 					_, _ = io.WriteString(w, `{"code":0,"data":{"success_count":1}}`)
 				} else {
