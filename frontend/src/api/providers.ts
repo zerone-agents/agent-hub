@@ -111,8 +111,8 @@ export interface SyncMultiRAGRequest {
 }
 
 export const providerApi = {
-  list: (type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat') =>
-    apiClient.get('/api/v1/admin/providers', { params: type ? { type } : {} }),
+  list: (type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat', owner?: RequestOwner) =>
+    apiClient.get('/api/v1/admin/providers', { params: type ? { type } : {}, ...ownedRequestConfig(owner) }),
   get: (id: number) => apiClient.get(`/api/v1/admin/providers/${id}`),
   create: (data: Partial<Provider>) => apiClient.post('/api/v1/admin/providers', data),
   update: (id: number, data: Partial<Provider>) =>

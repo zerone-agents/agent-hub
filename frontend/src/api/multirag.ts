@@ -9,6 +9,7 @@ export interface MultiRAGModel {
   type: string
   status: string
   fullId: string
+  isTools?: boolean
 }
 
 export const multiragApi = {

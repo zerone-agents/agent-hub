@@ -2,14 +2,58 @@ import type { KnowledgeWriteOwner } from '@/api/knowledge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
 import { providerApi, type Provider, type ProbeConfig, type ProbeOverride, type AttrRules } from '@/api/providers'
-import { parseApiError, unwrapResponse } from '@/api/client'
+import apiClient, { getAccessToken, parseApiError, unwrapResponse } from '@/api/client'
 import { useTranslation } from 'react-i18next'
+import i18next from '@/i18n'
+import { useAuthStore } from '@/stores/auth'
+import { ownedRequestConfig, type RequestOwner } from '@/api/requestOwnership'
+import type { UserInfoResponse } from '@/api/auth'
+import type { ApiResponse } from '@/types/api'
 
-export function useProviders(type?: 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat') {
-  return useQuery<Provider[]>({
-    queryKey: ['providers', type ?? 'all'],
-    queryFn: async () => unwrapResponse<Provider[]>(await providerApi.list(type)),
+type ProviderType = 'llm' | 'ocr' | 'embedding' | 'vlm' | 'chat'
+const providerOrigins = new WeakMap<Provider[], { id: string; token: string | null }>()
+
+export async function readOwnedProviders(type: ProviderType | undefined, signal: AbortSignal): Promise<Provider[]> {
+  const id = useAuthStore.getState().user?.id
+  let token = getAccessToken()
+  const current = () => Boolean(id && !signal.aborted && useAuthStore.getState().user?.id === id)
+  const owner: RequestOwner = {
+    signal,
+    isCurrent: () => current() && getAccessToken() === token,
+    assertCurrent: (refresh) => {
+      if (refresh && current()) token = getAccessToken()
+      if (!current() || getAccessToken() !== token) throw new Error(i18next.t('knowledge.list.deleteOwnerChanged'))
+    },
+  }
+  owner.assertCurrent()
+  const response = await apiClient.get<ApiResponse<UserInfoResponse>>('/auth/userinfo', ownedRequestConfig(owner))
+  owner.assertCurrent()
+  const identity = unwrapResponse<UserInfoResponse>(response)
+  if ((identity.user_id ?? identity.id) !== id) throw new Error(i18next.t('knowledge.list.deleteOwnerChanged'))
+  const providers = unwrapResponse<Provider[]>(await providerApi.list(type, owner))
+  owner.assertCurrent()
+  if (!Array.isArray(providers)) throw new Error(i18next.t('apiErrors.requestFailed'))
+  providerOrigins.set(providers, { id: id ?? '', token })
+  return providers
+}
+
+export function useProviders(type?: ProviderType, options: { owned?: boolean } = {}) {
+  const accountId = useAuthStore((state) => state.user?.id)
+  const query = useQuery<Provider[]>({
+    queryKey: options.owned ? ['providers', type ?? 'all', 'owned', accountId] : ['providers', type ?? 'all'],
+    queryFn: ({ signal }) => options.owned ? readOwnedProviders(type, signal) : providerApi.list(type).then(unwrapResponse<Provider[]>),
+    enabled: !options.owned || Boolean(accountId),
+    structuralSharing: options.owned ? false : undefined,
   })
+  const origin = query.data ? providerOrigins.get(query.data) : undefined
+  const ownerChanged = Boolean(options.owned && query.data && (origin?.id !== accountId || origin?.token !== getAccessToken()))
+  return {
+    ...query,
+    data: ownerChanged || (options.owned && query.isError) ? undefined : query.data,
+    isError: query.isError || ownerChanged,
+    isSuccess: query.isSuccess && !ownerChanged,
+    error: query.error ?? (ownerChanged ? new Error(i18next.t('knowledge.list.deleteOwnerChanged')) : null),
+  }
 }
 
 // useProviderAttrRules loads the attribute rules used to dynamically
