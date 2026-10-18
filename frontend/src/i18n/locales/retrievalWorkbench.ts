@@ -2,6 +2,15 @@ import i18next from "@/i18n";
 
 // A retrieval-owned namespace keeps this delivery independent of shared locale edits.
 const en = {
+  datasets: "Knowledge bases",
+  datasetsHint: "Joint search uses every selected knowledge base and requires the same embedding model instance. The service rejects incompatible selections. Changing knowledge bases clears document selections.",
+  datasetsEmpty: "Select at least one knowledge base.",
+  datasetsLoadError: "Could not load knowledge bases. Current selection is kept.",
+  datasetsMore: "Load more knowledge bases",
+  datasetId: "Knowledge base ID",
+  jointScope: "{{n}} knowledge bases searched jointly",
+  paginationLimit: "Pages are limited to the requested candidate pool ({{n}} chunks). The service total may exceed the accessible pages.",
+
   intro:
     "Test a real question, then check whether its sources support the answer.",
   scope: "Sources and metadata",
@@ -70,7 +79,7 @@ const en = {
     "The document list ended before its reported total. Retry to refresh the directory.",
   quality: "Retrieval quality",
   selectedDocumentThresholdHint:
-    "With documents selected, the service bypasses this threshold for final scores. In-scope chunks with a similarity of 0 may still be returned.",
+    "Selected document and metadata filters keep the relevance threshold. Zero scores can still occur with keyword-only retrieval or threshold 0.",
   candidates: "Candidate limit",
   candidatesHint:
     "Candidate pool before ranking, up to 2048. This is not the number of results displayed.",
@@ -123,6 +132,15 @@ const en = {
   resultsError: "Retrieval failed. Your question and filters are kept.",
 };
 const zh: typeof en = {
+  datasets: "知识库范围",
+  datasetsHint: "联合检索覆盖全部已选知识库，要求使用同一嵌入模型实例；不兼容时服务会报错。修改知识库范围会清空文档选择。",
+  datasetsEmpty: "请至少选择一个知识库。",
+  datasetsLoadError: "知识库目录加载失败，当前选择已保留。",
+  datasetsMore: "加载更多知识库",
+  datasetId: "知识库 ID",
+  jointScope: "联合检索 {{n}} 个知识库",
+  paginationLimit: "可翻页范围受本次候选池（{{n}} 条切片）限制；服务返回总数可能超过可访问页数。",
+
   intro: "用真实问题验证检索，再核对来源是否足以支持回答。",
   scope: "来源与元数据",
   metadata: "元数据筛选",
@@ -187,7 +205,7 @@ const zh: typeof en = {
   sourceIncomplete: "文档列表提前结束，尚未达到返回的总数。请重试刷新目录。",
   quality: "检索质量",
   selectedDocumentThresholdHint:
-    "已选择文档时，服务不会按此阈值过滤最终得分；范围内相似度为 0 的切片仍可能返回。",
+    "文档与元数据筛选仍保留相关度阈值；纯关键词检索或阈值为 0 时仍可能返回零分切片。",
   candidates: "候选切片上限",
   candidatesHint: "排序前的候选池，最多 2048 条，并非展示结果数量。",
   strategy: "检索策略与模型",

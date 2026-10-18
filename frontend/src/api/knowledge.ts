@@ -124,6 +124,7 @@ export interface RetrievalChunk {
 }
 
 export interface DocAggregation {
+  dataset_id?: string;
   doc_id: string;
   doc_name: string;
   count: number;
@@ -421,7 +422,15 @@ export function normalizeChunk(raw: RawObject): KnowledgeChunk {
   };
 }
 
+function assertSourceAliases(raw: RawObject, ...keys: string[]): void {
+  const values = keys.map((key) => optionalStr(raw[key])).filter((value) => value !== undefined);
+  if (new Set(values).size > 1) throw new Error(i18next.t('knowledge.retrievalWorkbench.scopeMismatch'));
+}
+
 export function normalizeRetrievalChunk(raw: RawObject): RetrievalChunk {
+  assertSourceAliases(raw, "dataset_id", "kb_id");
+  assertSourceAliases(raw, "document_id", "doc_id");
+  assertSourceAliases(raw, "id", "chunk_id");
   return {
     document_metadata: isRecord(raw.document_metadata) ? raw.document_metadata : undefined,
     reference_metadata: isRecord(raw.reference_metadata) ? raw.reference_metadata : undefined,
@@ -446,11 +455,17 @@ export function normalizeRetrievalResult(raw: RawObject): RetrievalResult {
     ? raw.chunks.filter(isRecord).map(normalizeRetrievalChunk)
     : [];
   const docAggs = Array.isArray(raw.doc_aggs)
-    ? raw.doc_aggs.filter(isRecord).map((item) => ({
-        doc_id: str(pick(item, "doc_id")),
-        doc_name: str(pick(item, "doc_name")),
-        count: num(pick(item, "count")),
-      }))
+    ? raw.doc_aggs.filter(isRecord).map((item) => {
+        assertSourceAliases(item, "dataset_id", "kb_id");
+        assertSourceAliases(item, "document_id", "doc_id");
+        const datasetID = optionalStr(pick(item, "dataset_id", "kb_id"));
+        return {
+          ...(datasetID === undefined ? {} : { dataset_id: datasetID }),
+          doc_id: str(pick(item, "doc_id", "document_id")),
+          doc_name: str(pick(item, "doc_name")),
+          count: num(pick(item, "count")),
+        };
+      })
     : [];
   return {
     total: num(pick(raw, "total")),

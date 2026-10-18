@@ -716,8 +716,6 @@ const en = {
       deletionSyncLifecycle: "Off by default. Later incremental syncs remove documents only after a complete, trusted inventory and successful content processing. Initial syncs and rebuilds do not prune. Pagination, permission, read or processing failures preserve existing documents.",
       deletionSyncScope: "Only source documents from this connector in the current dataset are pruned. A successfully read empty inventory may remove all corresponding documents; confirm source scope and permissions.",
       connectorSharedSettings: "These settings belong to the source and affect datasets linked to it. The server maintains sync state and cursors.",
-      connectorIMAPScope: "IMAP deletion sync covers mail and attachments within the initial import range. Rebuild this dataset after changing the account or mailbox scope.",
-      connectorRDBMSScope: "Databases use a separate cursor per dataset. Rebuild after changing query, account or field scope. The deletion inventory covers the full query; cursors advance only on success.",
       connectorBlobSync: "Regular syncs skip unchanged objects using version fingerprints; rebuilds download again. ETags identify versions and are not content MD5s. Failed inventories never trigger deletion.",
       connectorSyncLogsHint: "Review the returned sync status, processed counts and errors. Scheduling uses UTC. Check source permissions and scope before retrying failures.",
 
