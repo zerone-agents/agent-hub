@@ -848,6 +848,9 @@ export const knowledgeApi = {
     downloadUrl: (datasetId: string, documentId: string): string =>
       `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/download`,
 
+    previewUrl: (datasetId: string, documentId: string): string =>
+      `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/preview`,
+
     download: (
       datasetId: string,
       documentId: string,

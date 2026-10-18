@@ -1055,6 +1055,7 @@ const en = {
     },
     chunks: {
       review: {
+        emptySource: "The source file is empty (0 bytes). You can download the empty file.",
         pdfLoading: "Rendering PDF",
         pdfFailed: "PDF could not be rendered",
         zoomIn: "Zoom in",

@@ -1056,6 +1056,7 @@ const zh = {
     },
     chunks: {
       review: {
+        emptySource: "原文为空（0 字节）。可下载空文件。",
         pdfLoading: "正在渲染 PDF",
         pdfFailed: "PDF 渲染失败",
         zoomIn: "放大",

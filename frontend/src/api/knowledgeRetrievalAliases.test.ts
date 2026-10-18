@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { normalizeRetrievalChunk, normalizeRetrievalResult } from './knowledge';
+import { knowledgeApi, normalizeRetrievalChunk, normalizeRetrievalResult } from './knowledge';
+
+it('keeps preview dataset-scoped and encodes both opaque resource identifiers', () => {
+  expect(knowledgeApi.documents.previewUrl('kb /one', 'doc/two')).toBe('/api/v1/admin/knowledge/datasets/kb%20%2Fone/documents/doc%2Ftwo/preview');
+  expect(knowledgeApi.documents.downloadUrl('kb /one', 'doc/two')).toBe('/api/v1/admin/knowledge/datasets/kb%20%2Fone/documents/doc%2Ftwo/download');
+});
 
 it.each([
   { dataset_id: 'selected', kb_id: 'foreign' },
