@@ -29,23 +29,24 @@ export const knowledgeDiagnosticsMessages = {
     source: "来源",
     type: "任务类型",
     run: "运行索引",
-    cancel: "请求取消",
+    cancel: "请求暂停",
     clear: "删除索引产物",
     clearMindmap: "解除任务绑定",
-    cancelTitle: "请求取消当前 {{kind}} 任务？",
+    cancelTitle: "请求暂停当前 {{kind}} 任务？",
     cancelHint:
-      "只取消本库当前任务，保留已经生成的产物。受理后继续追踪状态，worker 可能仍在退出。",
-    cancelRequestedStatus: "取消已请求",
-    cancelRequested: "取消已请求；任务记录已停止，worker 退出尚未确认。",
-    cancelPending: "停止请求已受理；当前任务尚未结束，取消是否生效仍需确认。",
-    cancelUnconfirmed: "停止请求未被确认受理，请刷新任务状态后重试。",
+      "只请求暂停本库当前任务，保留已经生成的产物。请求受理不代表 worker 已停止；图写入收束前恢复可能失败。",
+    cancelRequestedStatus: "暂停已请求",
+    cancelRequested:
+      "暂停请求已受理，保留已有产物；worker 停止尚未确认。可尝试恢复，写入尚未收束时请稍后重试。",
+    cancelPending: "暂停请求已受理；当前任务尚未结束，worker 停止尚未确认。",
+    cancelUnconfirmed: "暂停请求未被确认受理，请刷新任务状态后重试。",
     endedUnconfirmed: "已结束（取消状态未确认）",
     cancellationHistory: "含取消请求标记",
     cancellationHistoryHint:
       "记录包含取消请求标记，但缺少本轮确认，无法据此判断任务是否因取消而结束。",
     clearTitle: "删除 {{kind}} 索引产物并解除任务绑定？",
     clearHint:
-      "清理会移除现有索引数据。建议先取消运行中的任务并核对状态，再清理或重新运行。",
+      "清理会移除现有索引数据，并绑定确认时的任务 ID。建议先请求暂停并核对状态；writer 尚未收束时清理或恢复可能失败。",
     mindmapClearHint:
       "当前接口只解除 Mindmap 任务绑定，不会删除已有思维导图数据。",
     activeHint: "当前任务尚未结束，暂不可重新运行或清理。",
@@ -60,7 +61,7 @@ export const knowledgeDiagnosticsMessages = {
     datasetLogs: "库级任务日志",
     logs: "历史与问题排查",
     logsHint:
-      "文件日志可定位到来源文档；库级任务日志记录 GraphRAG、RAPTOR 与 Mindmap 等生成历史。",
+      "文件日志可定位到来源文档；库级任务日志用于排查 GraphRAG、RAPTOR 与 Mindmap。日志按服务端长度上限保留尾部，可能不含完整历史。",
     keywords: "搜索文件或任务名称",
     filterStatus: "筛选操作状态",
     dateRange: "创建时间范围",
@@ -130,26 +131,26 @@ export const knowledgeDiagnosticsMessages = {
     source: "Source",
     type: "Task type",
     run: "Run index",
-    cancel: "Request cancellation",
+    cancel: "Request pause",
     clear: "Delete index outputs",
     clearMindmap: "Unbind task",
-    cancelTitle: "Request cancellation of the current {{kind}} task?",
+    cancelTitle: "Request pause of the current {{kind}} task?",
     cancelHint:
-      "Cancel only the current task in this dataset, retaining existing outputs. Continue tracking after acceptance; the worker may still be exiting.",
-    cancelRequestedStatus: "Cancellation requested",
+      "Pause only the current task in this dataset and retain existing outputs. Acceptance does not confirm worker exit; resume may fail while graph writes settle.",
+    cancelRequestedStatus: "Pause requested",
     cancelRequested:
-      "Cancellation requested; task record stopped, worker exit unconfirmed.",
+      "Pause request accepted; existing outputs are retained and worker exit is unconfirmed. Try resuming; retry later if graph writes are still settling.",
     cancelPending:
-      "Stop request accepted; the task is still active and cancellation is unconfirmed.",
+      "Pause request accepted; the task is still active and worker exit is unconfirmed.",
     cancelUnconfirmed:
-      "Stop request acceptance is unconfirmed. Refresh task state before retrying.",
+      "Pause request acceptance is unconfirmed. Refresh task state before retrying.",
     endedUnconfirmed: "Ended (cancellation unconfirmed)",
     cancellationHistory: "Contains a cancellation request marker",
     cancellationHistoryHint:
       "This record contains a cancellation request marker, but there is no confirmation for this attempt. It does not establish why the task ended.",
     clearTitle: "Delete {{kind}} outputs and unbind its task?",
     clearHint:
-      "Cleanup removes existing index data. Cancel an active task and check its state before cleanup or another run.",
+      "Cleanup removes existing index data and binds the task ID shown at confirmation. Request pause and check the state first; cleanup or resume can fail while graph writes settle.",
     mindmapClearHint:
       "The current API only unbinds the Mindmap task; existing mindmap data is retained.",
     activeHint:
@@ -166,7 +167,7 @@ export const knowledgeDiagnosticsMessages = {
     datasetLogs: "Dataset task logs",
     logs: "History and troubleshooting",
     logsHint:
-      "File logs link to source documents. Dataset logs record GraphRAG, RAPTOR and Mindmap generation history.",
+      "File logs link to source documents. Dataset logs help diagnose GraphRAG, RAPTOR and Mindmap. The server retains a bounded log tail, which may omit earlier history.",
     keywords: "Search file or task names",
     filterStatus: "Filter operation status",
     dateRange: "Creation time range",

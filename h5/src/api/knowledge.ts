@@ -593,19 +593,33 @@ async function authorizedBlob(
     signal,
     cache: "no-store",
   });
+  if (token !== getStoredAuth()?.token) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error("登录身份已变化，请重新加载知识库");
+  }
   if (!res.ok) {
     let message = `内容读取失败 ${res.status}`;
     try {
-      message = (await res.json()).error || message;
+      // Keep storage/provider details out of mobile error messages.
+      await res.body?.cancel();
     } catch {
       /* preserve status */
     }
     throw new Error(message);
   }
+  const mime = res.headers?.get("content-type") ?? "";
+  const disposition = res.headers?.get("content-disposition") ?? "";
+  if (
+    /^(?:application\/json|[^;]+\+json)(?:;|$)/i.test(mime) &&
+    !/^(?:attachment|inline)(?:;|$)/i.test(disposition.trim())
+  ) {
+    await res.body?.cancel();
+    throw new Error("内容读取响应无效，请重试");
+  }
   const blob = await res.blob();
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (token !== getStoredAuth()?.token)
     throw new Error("登录身份已变化，请重新加载知识库");
-  if (!blob.size) throw new Error("内容为空，请重试");
   return blob;
 }
 
@@ -616,6 +630,17 @@ export async function downloadOriginal(
 ): Promise<Blob> {
   return authorizedBlob(
     `/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/download`,
+    signal,
+  );
+}
+
+export async function previewOriginal(
+  datasetId: string,
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  return authorizedBlob(
+    `/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/preview`,
     signal,
   );
 }

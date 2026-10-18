@@ -14,7 +14,10 @@ vi.mock("@/api/client", async (importOriginal) => {
     default: {
       ...actual.default,
       get: async (...args: unknown[]) => {
-        const response = (await h.get(...args)) as { data: Blob };
+        const response = (await h.get(...args)) as {
+          data: Blob;
+          headers?: Record<string, string>;
+        };
         return {
           data: new ReadableStream<Uint8Array>(
             {
@@ -27,7 +30,7 @@ vi.mock("@/api/client", async (importOriginal) => {
             },
             { highWaterMark: 0 },
           ),
-          headers: { "content-type": response.data.type },
+          headers: { "content-type": response.data.type, ...response.headers },
         };
       },
     },
@@ -104,12 +107,12 @@ beforeEach(() => {
   });
 });
 describe("KnowledgeOriginalPreview", () => {
-  it("uses the protected download with cancellation and jumps to actual 1-based page positions", async () => {
+  it("uses the protected preview with cancellation and jumps to actual 1-based page positions", async () => {
     const { unmount } = mount();
     const iframe = await screen.findByRole("img", { name: "PDF original" });
     expect(iframe).toHaveAttribute("data-page", "3");
     expect(h.get).toHaveBeenCalledWith(
-      "/api/v1/admin/knowledge/datasets/kb1/documents/d1/download",
+      "/api/v1/admin/knowledge/datasets/kb1/documents/d1/preview",
       expect.objectContaining({
         signal: expect.any(AbortSignal),
         responseType: "stream",
@@ -227,4 +230,51 @@ describe("KnowledgeOriginalPreview", () => {
       await screen.findByRole("img", { name: "scan.png" }),
     ).toHaveAttribute("src", "blob:original");
   });
+});
+
+it("preserves an attached JSON source even when its fields look like a business error", async () => {
+  h.get.mockResolvedValue({
+    data: readableBlob(
+      '{"success":false,"code":102,"message":"source data"}',
+      "application/json",
+    ),
+    headers: { "content-disposition": "inline; filename=source.json" },
+  });
+  mount({ ...doc, name: "source.json" }, null);
+  expect(await screen.findByText(/source data/)).toBeInTheDocument();
+  expect(screen.queryByText("原文加载失败")).not.toBeInTheDocument();
+});
+
+it("shows a successful empty source without retrying or calling it a business error", async () => {
+  h.get.mockResolvedValue({ data: readableBlob("", "text/plain") });
+  mount({ ...doc, name: "empty.txt" }, null);
+  expect(
+    await screen.findByText("原文为空（0 字节）。可下载空文件。"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("原文加载失败")).not.toBeInTheDocument();
+  expect(h.get).toHaveBeenCalledTimes(1);
+});
+
+it("fetches the download endpoint again instead of reusing preview bytes", async () => {
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
+  const view = mount();
+  await screen.findByRole("img", { name: "PDF original" });
+  fireEvent.click(screen.getByRole("button", { name: "下载原文" }));
+  await waitFor(() => {
+    expect(h.get).toHaveBeenCalledWith(
+      "/api/v1/admin/knowledge/datasets/kb1/documents/d1/download",
+      expect.objectContaining({
+        responseType: "stream",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+  await waitFor(() => {
+    expect(click).toHaveBeenCalledOnce();
+  });
+  view.unmount();
+  expect((h.get.mock.calls[1][1].signal as AbortSignal).aborted).toBe(true);
+  click.mockRestore();
 });

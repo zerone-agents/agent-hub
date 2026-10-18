@@ -38,11 +38,11 @@ beforeEach(() => {
 });
 
 async function confirmCancel() {
-  fireEvent.click(screen.getByRole("button", { name: "请求取消" }));
+  fireEvent.click(screen.getByRole("button", { name: "请求暂停" }));
   await waitFor(() => {
-    expect(screen.getAllByRole("button", { name: "请求取消" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "请求暂停" })).toHaveLength(2);
   });
-  fireEvent.click(screen.getAllByRole("button", { name: "请求取消" })[1]);
+  fireEvent.click(screen.getAllByRole("button", { name: "请求暂停" })[1]);
 }
 
 it("cancels the current dataset/type task with its traced ID and reads state back without claiming worker exit", async () => {
@@ -70,7 +70,7 @@ it("cancels the current dataset/type task with its traced ID and reads state bac
   await waitFor(() => {
     expect(h.refetch).toHaveBeenCalledTimes(2);
   });
-  expect(screen.getByText(/worker 退出尚未确认/)).toBeInTheDocument();
+  expect(screen.getByText(/worker 停止尚未确认/)).toBeInTheDocument();
   expect(screen.queryByText("已取消")).not.toBeInTheDocument();
 });
 
@@ -88,13 +88,13 @@ it("refuses stale task confirmations and performs no mutation", async () => {
 
 it("pins the task ID when confirmation opens even if polling replaces the task before confirmation", async () => {
   const view = render(<KnowledgeIndexCard id="kb1" kind="graph" />);
-  fireEvent.click(screen.getByRole("button", { name: "请求取消" }));
+  fireEvent.click(screen.getByRole("button", { name: "请求暂停" }));
   await waitFor(() => {
-    expect(screen.getAllByRole("button", { name: "请求取消" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "请求暂停" })).toHaveLength(2);
   });
   h.data = { id: "replacement", progress: 0.3 };
   view.rerender(<KnowledgeIndexCard id="kb1" kind="graph" />);
-  fireEvent.click(screen.getAllByRole("button", { name: "请求取消" })[1]);
+  fireEvent.click(screen.getAllByRole("button", { name: "请求暂停" })[1]);
   expect(
     await screen.findByText("任务状态读取失败，请刷新后再操作。"),
   ).toBeInTheDocument();
@@ -140,7 +140,7 @@ it("explains that Mindmap cleanup only unbinds the task and requires an empty re
     expect(h.mutate).toHaveBeenCalledWith({
       method: "delete",
       resource: "index",
-      params: { type: "mindmap" },
+      params: { type: "mindmap", task_id: "m1" },
     });
   });
   expect(await screen.findByText("尚未建立索引任务")).toBeInTheDocument();
@@ -150,7 +150,7 @@ it("hides write controls for a read-only role", () => {
   h.writable = false;
   render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   expect(
-    screen.queryByRole("button", { name: "请求取消" }),
+    screen.queryByRole("button", { name: "请求暂停" }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "删除索引产物" }),
@@ -205,8 +205,8 @@ it.each([
       expect(h.refetch).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByText(label)).toBeInTheDocument();
-    expect(screen.queryByText(/停止请求已受理/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/取消已请求/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/暂停请求已受理/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/暂停已请求/)).not.toBeInTheDocument();
   },
 );
 
@@ -221,14 +221,14 @@ it("shows request acceptance separately while running, then removes that notice 
   await confirmCancel();
   expect(
     await screen.findByText(
-      "停止请求已受理；当前任务尚未结束，取消是否生效仍需确认。",
+      "暂停请求已受理；当前任务尚未结束，worker 停止尚未确认。",
     ),
   ).toBeInTheDocument();
-  expect(screen.queryByText(/取消已请求/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/暂停已请求/)).not.toBeInTheDocument();
   h.data = { id: "t1", progress: 1, progress_msg: "Completed naturally" };
   view.rerender(<KnowledgeIndexCard id="kb1" kind="graph" />);
   expect(screen.getByText("已完成")).toBeInTheDocument();
-  expect(screen.queryByText(/停止请求已受理/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/暂停请求已受理/)).not.toBeInTheDocument();
 });
 
 it("does not use cancel_requested as a substitute for request_accepted", async () => {
@@ -240,9 +240,9 @@ it("does not use cancel_requested as a substitute for request_accepted", async (
   render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   await confirmCancel();
   expect(
-    await screen.findByText("停止请求未被确认受理，请刷新任务状态后重试。"),
+    await screen.findByText("暂停请求未被确认受理，请刷新任务状态后重试。"),
   ).toBeInTheDocument();
-  expect(screen.queryByText(/停止请求已受理/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/暂停请求已受理/)).not.toBeInTheDocument();
 });
 
 it("does not mistake an old cancellation marker for a newly cancelled task after a natural failure", async () => {
@@ -271,8 +271,8 @@ it("does not mistake an old cancellation marker for a newly cancelled task after
     expect(h.refetch).toHaveBeenCalledTimes(2);
   });
   expect(screen.getByText("失败")).toBeInTheDocument();
-  expect(screen.queryByText("取消已请求")).not.toBeInTheDocument();
-  expect(screen.queryByText(/worker 退出尚未确认/)).not.toBeInTheDocument();
+  expect(screen.queryByText("暂停已请求")).not.toBeInTheDocument();
+  expect(screen.queryByText(/worker 停止尚未确认/)).not.toBeInTheDocument();
 });
 
 it("recognizes a new cancellation marker even when the task already contained a historical marker", async () => {
@@ -297,7 +297,7 @@ it("recognizes a new cancellation marker even when the task already contained a 
   });
   render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   await confirmCancel();
-  expect(await screen.findByText("取消已请求")).toBeInTheDocument();
+  expect(await screen.findByText("暂停已请求")).toBeInTheDocument();
   expect(screen.queryByText("失败")).not.toBeInTheDocument();
 });
 
@@ -313,8 +313,8 @@ it("does not treat a historical marker as confirmation after the index card remo
   view.unmount();
   render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   expect(screen.getByText("已结束（取消状态未确认）")).toBeInTheDocument();
-  expect(screen.queryByText("取消已请求")).not.toBeInTheDocument();
-  expect(screen.queryByText(/worker 退出尚未确认/)).not.toBeInTheDocument();
+  expect(screen.queryByText("暂停已请求")).not.toBeInTheDocument();
+  expect(screen.queryByText(/worker 停止尚未确认/)).not.toBeInTheDocument();
 });
 
 it("requires fresh cancellation evidence again after a locally confirmed card is remounted", async () => {
@@ -333,9 +333,66 @@ it("requires fresh cancellation evidence again after a locally confirmed card is
   });
   const view = render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   await confirmCancel();
-  expect(await screen.findByText("取消已请求")).toBeInTheDocument();
+  expect(await screen.findByText("暂停已请求")).toBeInTheDocument();
   view.unmount();
   render(<KnowledgeIndexCard id="kb1" kind="graph" />);
   expect(screen.getByText("已结束（取消状态未确认）")).toBeInTheDocument();
-  expect(screen.queryByText("取消已请求")).not.toBeInTheDocument();
+  expect(screen.queryByText("暂停已请求")).not.toBeInTheDocument();
+});
+
+it("recognizes the frozen graph pause trace after remount and preserves retry controls", () => {
+  h.data = {
+    id: "t1",
+    progress: -1,
+    progress_msg: "Pause requested; waiting for graph writer to settle.",
+  };
+  render(<KnowledgeIndexCard id="kb1" kind="graph" />);
+  expect(screen.getByText("暂停已请求")).toBeInTheDocument();
+  expect(
+    screen.getByText(/保留已有产物；worker 停止尚未确认/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "运行索引" })).toBeEnabled();
+  expect(screen.queryByText("失败")).not.toBeInTheDocument();
+});
+
+it("preserves a paused trace and visible retry when the graph writer rejects resume", async () => {
+  h.data = {
+    id: "t1",
+    progress: -1,
+    progress_msg: "Pause requested; waiting for graph writer to settle.",
+  };
+  h.mutate.mockRejectedValue(new Error("Graph writer is still settling"));
+  render(<KnowledgeIndexCard id="kb1" kind="graph" />);
+  fireEvent.click(screen.getByRole("button", { name: "运行索引" }));
+  expect(
+    await screen.findByText("Graph writer is still settling"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("暂停已请求")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "运行索引" })).toBeEnabled();
+  expect(h.mutate).toHaveBeenCalledTimes(1);
+});
+
+it("never clears a replacement task after an older clear confirmation was opened", async () => {
+  h.data = { id: "old", progress: 1 };
+  const view = render(<KnowledgeIndexCard id="kb1" kind="graph" />);
+  fireEvent.click(screen.getByRole("button", { name: "删除索引产物" }));
+  await waitFor(() => {
+    expect(
+      screen.getAllByRole("button", { name: "删除索引产物" }),
+    ).toHaveLength(2);
+  });
+  h.data = { id: "replacement", progress: 1 };
+  view.rerender(<KnowledgeIndexCard id="kb1" kind="graph" />);
+  fireEvent.click(screen.getAllByRole("button", { name: "删除索引产物" })[1]);
+  expect(
+    await screen.findByText("任务状态读取失败，请刷新后再操作。"),
+  ).toBeInTheDocument();
+  expect(h.mutate).not.toHaveBeenCalled();
+});
+
+it("disables cleanup when there is no task ID to bind", () => {
+  h.data = {};
+  render(<KnowledgeIndexCard id="kb1" kind="graph" />);
+  expect(screen.getByRole("button", { name: "删除索引产物" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "运行索引" })).toBeEnabled();
 });

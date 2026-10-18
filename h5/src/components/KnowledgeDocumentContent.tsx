@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   chunkPageNumbers,
   downloadOriginal,
+  previewOriginal,
   listDocumentChunks,
   loadChunkImage,
   type MobileChunk,
@@ -129,6 +130,13 @@ export const KnowledgeDocumentContent: React.FC<{
   name: string;
   initialChunk?: MobileChunk;
 }> = ({ datasetId, documentId, name, initialChunk }) => {
+  const downloadController = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      downloadController.current?.abort();
+    },
+    [datasetId, documentId],
+  );
   const [tab, setTab] = useState<"chunks" | "original">("chunks");
   const [page, setPage] = useState(1);
   const [pdfPage, setPdfPage] = useState<number | null>(null);
@@ -143,6 +151,7 @@ export const KnowledgeDocumentContent: React.FC<{
     url: string;
     kind: "pdf" | "image" | "text" | "download";
     text?: string;
+    empty: boolean;
   } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -161,7 +170,7 @@ export const KnowledgeDocumentContent: React.FC<{
         );
         if (!controller.signal.aborted) setData(result);
       } else {
-        const blob = await downloadOriginal(
+        const blob = await previewOriginal(
           datasetId,
           documentId,
           controller.signal,
@@ -183,7 +192,7 @@ export const KnowledgeDocumentContent: React.FC<{
         objectUrl = URL.createObjectURL(
           kind === "pdf" ? new Blob([blob], { type: "application/pdf" }) : blob,
         );
-        setOriginal({ url: objectUrl, kind, text });
+        setOriginal({ url: objectUrl, kind, text, empty: blob.size === 0 });
       }
     };
     load()
@@ -281,13 +290,38 @@ export const KnowledgeDocumentContent: React.FC<{
       )}
       {tab === "original" && original && (
         <>
-          <a
-            href={original.url}
-            download={name}
+          <button
             className="inline-flex items-center min-h-11 text-emerald-700 underline"
+            onClick={async () => {
+              downloadController.current?.abort();
+              const controller = new AbortController();
+              downloadController.current = controller;
+              try {
+                const blob = await downloadOriginal(
+                  datasetId,
+                  documentId,
+                  controller.signal,
+                );
+                if (controller.signal.aborted) return;
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = name;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 0);
+              } catch (err) {
+                if (!controller.signal.aborted)
+                  setError(
+                    err instanceof Error ? err.message : "原文下载失败，请重试",
+                  );
+              }
+            }}
           >
             下载原文
-          </a>
+          </button>
+          {original.empty && (
+            <p className="text-gray-500">原文为空（0 字节），可下载空文件。</p>
+          )}
           {original.kind === "pdf" && (
             <>
               <p className="text-gray-500">

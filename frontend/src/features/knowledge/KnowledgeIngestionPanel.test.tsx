@@ -195,3 +195,24 @@ it("blocks foreign document rows and discards selected details when switching da
   expect(h.request.mock.calls.at(-1)?.[0]).toBe("");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
+
+it("shows the frozen graph pause trace as a request in both history list and details", async () => {
+  const log = {
+    id: "paused-log",
+    kb_id: "kb1",
+    task_type: "GraphRAG",
+    operation_status: "4",
+    progress: -1,
+    progress_msg: "Pause requested; waiting for the graph writer to settle.",
+  };
+  h.logs = [log];
+  h.detail = log;
+  render(<KnowledgeIngestionPanel id="kb1" />);
+  expect(screen.getByText("暂停已请求")).toBeInTheDocument();
+  expect(screen.queryByText("失败")).not.toBeInTheDocument();
+  expect(screen.getByText(/日志按服务端长度上限保留尾部/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(screen.getAllByText("暂停已请求")).toHaveLength(2);
+  expect(screen.getAllByText(/worker 停止尚未确认/)).toHaveLength(2);
+});

@@ -55,6 +55,16 @@ export function cancellationMarkerCount(message: unknown): number {
     : 0;
 }
 
+// This exact current trace message is a pause acknowledgement, not worker exit.
+export function graphPauseRequested(task: KnowledgeObject): boolean {
+  if (task.progress !== -1 || typeof task.progress_msg !== "string")
+    return false;
+  const lines = task.progress_msg.trim().split("\n");
+  return /(?:^|\s)Pause requested; waiting for (?:the )?graph writer to settle\.$/.test(
+    lines.at(-1) ?? "",
+  );
+}
+
 export function getIndexState(
   task: KnowledgeObject | undefined,
   cancellationBaseline?: { taskId: unknown; markerCount: number },
@@ -71,10 +81,10 @@ export function getIndexState(
     return "unknown";
   if (progress >= 1) return "done";
   if (progress < 0) {
+    if (graphPauseRequested(task)) return "cancelRequested";
     const markers = cancellationMarkerCount(task.progress_msg);
     if (progress !== -1 || markers === 0) return "failed";
-    if (cancellationBaseline?.taskId !== task.id)
-      return "endedUnconfirmed";
+    if (cancellationBaseline?.taskId !== task.id) return "endedUnconfirmed";
     return markers > cancellationBaseline.markerCount
       ? "cancelRequested"
       : "failed";
