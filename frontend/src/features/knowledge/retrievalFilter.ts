@@ -24,12 +24,18 @@ export const isEmptyOperator = (op: string) =>
   op === "empty" || op === "not empty";
 export const isUnsupportedExclusionOperator = (op: string) =>
   ["not in", "≠", "not contains"].includes(op);
-export const retrievalMetadataKey = (datasetId: string) =>
-  ["knowledge", "retrieval-metadata-keys", datasetId] as const;
+export const retrievalMetadataKey = (datasetId: string | readonly string[]) =>
+  [
+    "knowledge",
+    "retrieval-metadata-keys",
+    ...(typeof datasetId === "string" ? [datasetId] : [...datasetId].sort()),
+  ] as const;
 export async function loadRetrievalMetadataKeys(
-  datasetId: string,
+  datasetId: string | readonly string[],
 ): Promise<string[]> {
-  const keys = await knowledgeMetadataApi.keys([datasetId]);
+  const keys = await knowledgeMetadataApi.keys(
+    typeof datasetId === "string" ? [datasetId] : [...datasetId],
+  );
   if (
     !Array.isArray(keys) ||
     keys.some((key) => typeof key !== "string" || !key.trim())
@@ -52,7 +58,7 @@ function operator(value: unknown): string {
   return op;
 }
 function validateExclusionOperator(op: string) {
-  // eb5546c expands each stored list value into a separate document bucket.
+  // Frozen dd01a241 still expands each stored list value into a separate document bucket.
   // Negative predicates union those buckets, so [Alice, Bob] incorrectly
   // survives exclusion of Alice via Bob. The directory has no scalar proof.
   if (isUnsupportedExclusionOperator(op))

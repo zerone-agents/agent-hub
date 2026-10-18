@@ -30,7 +30,10 @@ import PrimaryButton from "@/components/PrimaryButton";
 import { useCanWrite } from "@/hooks/useCanWrite";
 import { useRetrievalTest } from "@/queries/useKnowledge";
 import { useMultiragModels } from "@/queries/useMultirag";
-import RetrievalDocumentSelect from "./RetrievalDocumentSelect";
+import RetrievalDatasetSelect, {
+  RetrievalScopeDocuments,
+} from "./RetrievalDatasetSelect";
+import { retrievalScopeMismatch, retrievalPageTotal } from "./retrievalScope";
 import RetrievalMetadataBuilder from "./RetrievalMetadataBuilder";
 import {
   metadataFilterFromJSON,
@@ -143,6 +146,7 @@ const useStyles = createStyles(({ css }) => ({
 }));
 
 interface RetrievalFormValues {
+  dataset_ids: string[];
   reference_metadata: boolean;
   document_ids: string[];
   metadata_condition: string;
@@ -161,6 +165,7 @@ interface RetrievalFormValues {
 }
 
 const DEFAULTS: RetrievalFormValues = {
+  dataset_ids: [],
   reference_metadata: true,
   document_ids: [],
   metadata_condition: "",
@@ -204,6 +209,9 @@ function RetrievalWorkbench({ id }: { id: string }) {
   const [lastRequest, setLastRequest] = useState<RetrievalInput | null>(null);
   const [page, setPage] = useState(1);
   const [formError, setFormError] = useState("");
+  const selectedDatasets = (Form.useWatch("dataset_ids", form) as
+    | string[]
+    | undefined) ?? [id];
   const selectedDocuments = Form.useWatch("document_ids", form) as
     | string[]
     | undefined;
@@ -217,7 +225,9 @@ function RetrievalWorkbench({ id }: { id: string }) {
   try {
     draftFilter = metadataFilterFromJSON(
       conditionDraft ?? "",
-      queryClient.getQueryData<string[]>(retrievalMetadataKey(id)),
+      queryClient.getQueryData<string[]>(
+        retrievalMetadataKey(selectedDatasets),
+      ),
     );
   } catch {
     draftInvalid = true;
@@ -228,6 +238,10 @@ function RetrievalWorkbench({ id }: { id: string }) {
     if (retrieval.isPending || validating) return;
     const values = { ...DEFAULTS, ...submitted };
     try {
+      if (!values.dataset_ids.length) {
+        setFormError(rw("datasetsEmpty"));
+        return;
+      }
       let metadata = metadataFilterFromJSON(values.metadata_condition);
       if (values.use_kg && (values.document_ids.length > 0 || metadata)) {
         setFormError(t("knowledge.manage.graphScopeConflict"));
@@ -238,8 +252,8 @@ function RetrievalWorkbench({ id }: { id: string }) {
         let keys: string[];
         try {
           keys = await queryClient.fetchQuery({
-            queryKey: retrievalMetadataKey(id),
-            queryFn: () => loadRetrievalMetadataKeys(id),
+            queryKey: retrievalMetadataKey(selectedDatasets),
+            queryFn: () => loadRetrievalMetadataKeys(values.dataset_ids),
             staleTime: 0,
             retry: false,
           });
@@ -264,7 +278,7 @@ function RetrievalWorkbench({ id }: { id: string }) {
       }
       const request: RetrievalInput = {
         question: values.question.trim(),
-        dataset_ids: [id],
+        dataset_ids: values.dataset_ids,
         ...(values.document_ids.length ? { doc_ids: values.document_ids } : {}),
         top_k: values.top_k,
         similarity_threshold: values.similarity_threshold,
@@ -329,21 +343,10 @@ function RetrievalWorkbench({ id }: { id: string }) {
     }
   };
 
-  const requestedDocumentIds = lastRequest?.doc_ids ?? [];
   const scopeMismatch = Boolean(
     lastRequest &&
     retrieval.data &&
-    (retrieval.data.chunks.some(
-      (chunk) =>
-        (chunk.dataset_id !== undefined &&
-          !lastRequest.dataset_ids.includes(chunk.dataset_id)) ||
-        (requestedDocumentIds.length > 0 &&
-          !requestedDocumentIds.includes(chunk.document_id)),
-    ) ||
-      (requestedDocumentIds.length > 0 &&
-        retrieval.data.doc_aggs.some(
-          (doc) => !requestedDocumentIds.includes(doc.doc_id),
-        ))),
+    retrievalScopeMismatch(retrieval.data, lastRequest),
   );
   const result = retrieval.error || scopeMismatch ? undefined : retrieval.data;
   const errorCode = isAxiosError<{ code?: string }>(retrieval.error)
@@ -389,7 +392,7 @@ function RetrievalWorkbench({ id }: { id: string }) {
         disabled={validating}
         layout="vertical"
         className={styles.form}
-        initialValues={DEFAULTS}
+        initialValues={{ ...DEFAULTS, dataset_ids: [id] }}
         onFinish={handleFinish}
         onValuesChange={() => {
           setDirty(Boolean(lastRequest));
@@ -436,21 +439,48 @@ function RetrievalWorkbench({ id }: { id: string }) {
           </Form.Item>
         )}
         <Typography.Title level={5}>{rw("scope")}</Typography.Title>
+        <Form.Item
+          name="dataset_ids"
+          label={rw("datasets")}
+          extra={rw("datasetsHint")}
+          rules={[
+            {
+              required: true,
+              type: "array",
+              min: 1,
+              message: rw("datasetsEmpty"),
+            },
+          ]}
+        >
+          <RetrievalDatasetSelect
+            currentId={id}
+            onScopeChange={() => {
+              form.setFieldValue("document_ids", []);
+            }}
+          />
+        </Form.Item>
         <div className={styles.filters}>
           <Form.Item
             name="document_ids"
             label={t("knowledge.manage.documentScope")}
           >
-            <RetrievalDocumentSelect datasetId={id} />
+            <RetrievalScopeDocuments
+              key={JSON.stringify(selectedDatasets)}
+              datasetIds={selectedDatasets}
+            />
           </Form.Item>
           <Form.Item name="metadata_condition" label={rw("metadata")}>
-            <RetrievalMetadataBuilder datasetId={id} />
+            <RetrievalMetadataBuilder
+              datasetId={id}
+              datasetIds={selectedDatasets}
+            />
           </Form.Item>
         </div>
         <div className={styles.scope} aria-live="polite">
           <Typography.Text strong>
             {t("knowledge.manage.currentScope")}
           </Typography.Text>
+          <Tag>{rw("jointScope", { n: selectedDatasets.length })}</Tag>
           <Tag>
             {selectedDocuments?.length
               ? t("knowledge.manage.selectedDocumentScope", {
@@ -683,6 +713,7 @@ function RetrievalWorkbench({ id }: { id: string }) {
               <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                 {JSON.stringify(
                   {
+                    dataset_ids: lastRequest.dataset_ids,
                     doc_ids: lastRequest.doc_ids ?? null,
                     meta_data_filter: lastRequest.meta_data_filter ?? null,
                     search_mode: lastRequest.search_mode ?? "default",
@@ -747,16 +778,28 @@ function RetrievalWorkbench({ id }: { id: string }) {
               )}
               {result.doc_aggs.length > 0 && (
                 <div>
-                  {result.doc_aggs.map((doc) => (
-                    <Tag key={doc.doc_id}>
-                      {doc.doc_name}: {doc.count}
-                    </Tag>
-                  ))}
+                  {result.doc_aggs
+                    .filter((doc) =>
+                      result.chunks.some(
+                        (chunk) => chunk.document_id === doc.doc_id,
+                      ),
+                    )
+                    .map((doc) => (
+                      <Tag key={doc.doc_id}>
+                        {doc.doc_name}: {doc.count}
+                      </Tag>
+                    ))}
                 </div>
               )}
               {result.chunks.map((chunk) => (
-                <div key={chunk.id} className={styles.card}>
+                <div
+                  key={`${chunk.dataset_id}:${chunk.document_id}:${chunk.id}`}
+                  className={styles.card}
+                >
                   <div className={styles.cardMeta}>
+                    <Tag>
+                      {rw("datasetId")}: {chunk.dataset_id}
+                    </Tag>
                     <Tag color="blue">
                       {t("knowledge.retrieval.similarity", {
                         v: chunk.similarity.toFixed(3),
@@ -805,9 +848,9 @@ function RetrievalWorkbench({ id }: { id: string }) {
                       {JSON.stringify(chunk.reference_metadata)}
                     </Typography.Paragraph>
                   )}
-                  {chunk.image_id && (
+                  {chunk.image_id && chunk.dataset_id && (
                     <ChunkImage
-                      datasetId={chunk.dataset_id ?? id}
+                      datasetId={chunk.dataset_id}
                       imageId={chunk.image_id}
                     />
                   )}
@@ -825,21 +868,32 @@ function RetrievalWorkbench({ id }: { id: string }) {
                       {t("knowledge.manage.documentScope")}: {chunk.document_id}
                     </div>
                   </details>
-                  <Link
-                    className={styles.sourceLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    to={`/knowledge/${encodeURIComponent(chunk.dataset_id ?? id)}/documents/${encodeURIComponent(chunk.document_id)}/chunks?chunkId=${encodeURIComponent(chunk.id)}`}
-                  >
-                    {rw("sourceNewTab")}
-                  </Link>
+                  {chunk.dataset_id && (
+                    <Link
+                      className={styles.sourceLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      to={`/knowledge/${encodeURIComponent(chunk.dataset_id)}/documents/${encodeURIComponent(chunk.document_id)}/chunks?chunkId=${encodeURIComponent(chunk.id)}`}
+                    >
+                      {rw("sourceNewTab")}
+                    </Link>
+                  )}
                 </div>
               ))}
+              {lastRequest && (
+                <Typography.Paragraph type="secondary">
+                  {rw("paginationLimit", { n: lastRequest.top_k })}
+                </Typography.Paragraph>
+              )}
               {canWrite && lastRequest && (
                 <Pagination
                   current={page}
                   pageSize={30}
-                  total={result.total}
+                  total={retrievalPageTotal(
+                    result.total,
+                    lastRequest.top_k ?? 1024,
+                    30,
+                  )}
                   showSizeChanger={false}
                   disabled={retrieval.isPending}
                   onChange={(next) => {

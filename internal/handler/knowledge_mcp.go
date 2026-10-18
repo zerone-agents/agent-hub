@@ -76,6 +76,7 @@ type knowledgeSearchArgs struct {
 	DocIDs                  *[]string      `json:"doc_ids"`
 	MetadataFilter          map[string]any `json:"meta_data_filter"`
 	SearchMode              string         `json:"search_mode"`
+	SearchStrategy          string         `json:"search_strategy"`
 	HybridDenseWeight       *float64       `json:"hybrid_dense_weight"`
 	RerankID                string         `json:"rerank_id"`
 	ReferenceMetadataFields *[]string      `json:"reference_metadata_fields"`
@@ -235,7 +236,11 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 								"type":        "array",
 								"items":       map[string]interface{}{"type": "string"},
 								"maxItems":    mcpSearchMaxDatasets,
-								"description": "Optional. Search the agent's bound knowledge bases, each independently. Omit to search all bound bases when there are at most 8; otherwise select up to 8 IDs from knowledge_datasets.",
+								"description": "Optional. Select the agent's bound knowledge bases. Default per_dataset searches each independently; joint searches the complete selection in one request. Omit to search all bound bases when there are at most 8; otherwise select up to 8 IDs from knowledge_datasets.",
+							},
+							"search_strategy": map[string]interface{}{
+								"type": "string", "enum": []string{"per_dataset", "joint"}, "default": "per_dataset",
+								"description": "per_dataset supports heterogeneous embedding models, with independent pages/totals and no cross-dataset ranking. joint uses one shared ranking and candidate pool across all selected datasets and requires the same embedding model instance; incompatibility fails without fallback.",
 							},
 							"doc_ids": map[string]interface{}{
 								"type": "array", "items": map[string]interface{}{"type": "string"},
@@ -267,14 +272,14 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 							},
 							"top_k": map[string]interface{}{
 								"type":        "integer",
-								"description": "Candidate pool per knowledge base, not returned snippet count. Must cover page × page_size. Default is 64.",
+								"description": "Candidate pool per knowledge base in per_dataset; one shared pool in joint. This is not the returned snippet count. Must cover page × page_size. Default is 64.",
 								"default":     64,
 								"minimum":     1,
 								"maximum":     mcpSearchMaxTopK,
 							},
 							"similarity_threshold": map[string]interface{}{
 								"type":        "number",
-								"description": "Minimum similarity threshold; default 0.2. MultiRAG can bypass the final threshold for an explicit document or metadata scope.",
+								"description": "Minimum similarity threshold; default 0.2. Document and metadata scopes preserve this threshold. Keyword-only retrieval does not use the semantic threshold.",
 								"default":     0.2,
 								"minimum":     0,
 								"maximum":     1,

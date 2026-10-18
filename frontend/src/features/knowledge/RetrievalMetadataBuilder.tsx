@@ -61,11 +61,13 @@ const listLabel = (value: unknown) =>
       : JSON.stringify(value);
 export default function RetrievalMetadataBuilder({
   datasetId,
+  datasetIds,
   value = "",
   onChange,
   id,
 }: {
   datasetId: string;
+  datasetIds?: string[];
   value?: string;
   onChange?: (value: string) => void;
   id?: string;
@@ -73,9 +75,10 @@ export default function RetrievalMetadataBuilder({
   const { t } = useTranslation("retrievalWorkbench");
   const { styles } = useStyles();
   const fields = useQuery({
-    queryKey: retrievalMetadataKey(datasetId),
-    queryFn: () => loadRetrievalMetadataKeys(datasetId),
+    queryKey: retrievalMetadataKey(datasetIds ?? datasetId),
+    queryFn: () => loadRetrievalMetadataKeys(datasetIds ?? datasetId),
     retry: false,
+    enabled: datasetIds === undefined || datasetIds.length > 0,
   });
   let mode: Mode = "disabled";
   let logic: "and" | "or" = "and";
