@@ -82,7 +82,7 @@ func (c *RemoteMultiragEngine) KnowledgePage(ctx context.Context, r domain.PageR
 		method, path = http.MethodGet, base+"/ingestions/"+url.PathEscape(r.LogID)
 	case "index-get", "index-run", "index-delete":
 		kind := r.Query.Get("type")
-		if kind != "graph" && kind != "raptor" && kind != "mindmap" {
+		if len(r.Query["type"]) != 1 || (kind != "graph" && kind != "raptor" && kind != "mindmap") {
 			return nil, domain.NewBadRequestError("索引类型无效")
 		}
 		path = base + "/index"
@@ -92,6 +92,11 @@ func (c *RemoteMultiragEngine) KnowledgePage(ctx context.Context, r domain.PageR
 		}
 		if r.Operation == "index-delete" {
 			method = http.MethodDelete
+			id := r.Query.Get("task_id")
+			if len(r.Query["task_id"]) != 1 || !indexTaskIDPattern.MatchString(id) {
+				return nil, domain.NewBadRequestError("清除索引必须提供当前 task_id，请刷新任务状态")
+			}
+			r.Query = url.Values{"type": []string{kind}, "wipe": []string{"true"}, "task_id": []string{id}}
 		}
 	case "graph-search":
 		method, path = http.MethodGet, base+"/graph/search"
@@ -285,6 +290,34 @@ func (c *RemoteMultiragEngine) KnowledgePage(ctx context.Context, r domain.PageR
 	if len(env.Data) > 0 {
 		if json.Unmarshal(env.Data, &data) != nil {
 			return nil, domain.NewUpstreamError("知识库返回内容无效", nil)
+		}
+	}
+	if r.Operation == "index-get" {
+		task, ok := data.(map[string]any)
+		if !ok {
+			return nil, domain.NewUpstreamError("索引任务响应不完整", nil)
+		}
+		if len(task) > 0 {
+			id, validID := task["id"].(string)
+			_, validProgress := task["progress"].(float64)
+			if !validID || !indexTaskIDPattern.MatchString(id) || !validProgress {
+				return nil, domain.NewUpstreamError("索引任务缺少标识或进度，请刷新核对", nil)
+			}
+		}
+	}
+	if r.Operation == "index-run" || r.Operation == "index-delete" {
+		ack, ok := data.(map[string]any)
+		if !ok {
+			return nil, domain.NewUpstreamError("索引操作响应未确认，请刷新核对后再操作", nil)
+		}
+		id, _ := ack["task_id"].(string)
+		if r.Operation == "index-run" && !indexTaskIDPattern.MatchString(id) {
+			return nil, domain.NewUpstreamError("索引提交未返回有效任务标识，请刷新核对", nil)
+		}
+		persisted, err := c.KnowledgePage(ctx, domain.PageRequest{Operation: "index-get", DatasetID: r.DatasetID, Query: url.Values{"type": []string{r.Query.Get("type")}}})
+		task, valid := persisted.(map[string]any)
+		if err != nil || !valid || (r.Operation == "index-run" && task["id"] != id) || (r.Operation == "index-delete" && len(task) != 0) {
+			return nil, domain.NewUpstreamError("索引操作已受理，但任务回读未确认，请刷新核对后再操作", nil)
 		}
 	}
 	if r.Operation == "document-metadatas" {

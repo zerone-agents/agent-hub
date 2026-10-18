@@ -20,7 +20,7 @@ func TestKnowledgeRetrievalStableRouteUsesDatasetSearch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		require.Equal(t, "POST", r.Method)
-		require.Equal(t, "/api/v1/datasets/kb/search", r.URL.Path)
+		require.Equal(t, "/api/v1/datasets/search", r.URL.Path)
 		require.Equal(t, "Bearer key", r.Header.Get("Authorization"))
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
@@ -79,7 +79,7 @@ func TestKnowledgeRetrievalGraphConstraintsDoNotReachUpstream(t *testing.T) {
 	var got map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		require.Equal(t, "/api/v1/datasets/kb/search", r.URL.Path)
+		require.Equal(t, "/api/v1/datasets/search", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
 		_, _ = w.Write([]byte(`{"code":0,"data":{"total":0,"chunks":[],"doc_aggs":[]}}`))
 	}))

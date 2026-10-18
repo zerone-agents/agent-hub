@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -245,6 +246,9 @@ func (c *RemoteMultiragEngine) GetDataset(ctx context.Context, id string) (*doma
 
 func (c *RemoteMultiragEngine) UpdateDataset(ctx context.Context, id string, req domain.DatasetMutationRequest) (*domain.Dataset, error) {
 	body := domain.DatasetUpdateToRemote(req)
+	if err := c.guardEmbeddingSwitch(ctx, id, body); err != nil {
+		return nil, err
+	}
 	var raw map[string]any
 	if _, err := c.doJSON(ctx, http.MethodPut, "/api/v1/datasets/"+url.PathEscape(id), nil, body, &raw); err != nil {
 		return nil, err
@@ -502,9 +506,8 @@ func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.Retriev
 	if domain.EmptyRetrievalScope(body) {
 		return domain.EmptyRetrievalResult(), nil
 	}
-	ids := body["dataset_ids"].([]string)
 	var raw map[string]any
-	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/"+url.PathEscape(ids[0])+"/search", nil, body, &raw); err != nil {
+	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets/search", nil, body, &raw); err != nil {
 		return nil, err
 	}
 	if raw == nil {
@@ -516,7 +519,21 @@ func (c *RemoteMultiragEngine) Retrieval(ctx context.Context, req domain.Retriev
 }
 
 func (c *RemoteMultiragEngine) DownloadDocument(ctx context.Context, datasetID string, documentID string) (*domain.StreamResult, error) {
-	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID)
+	return c.documentFile(ctx, datasetID, documentID, "download")
+}
+
+func (c *RemoteMultiragEngine) PreviewDocument(ctx context.Context, datasetID string, documentID string) (*domain.StreamResult, error) {
+	return c.documentFile(ctx, datasetID, documentID, "preview")
+}
+
+func (c *RemoteMultiragEngine) documentFile(ctx context.Context, datasetID, documentID, action string) (*domain.StreamResult, error) {
+	if _, err := c.readDocument(ctx, datasetID, documentID); err != nil {
+		if domain.StatusCode(err) == http.StatusNotFound {
+			return nil, err
+		}
+		return nil, domain.NewUpstreamError("未确认本知识库文档的读取权限或归属", nil)
+	}
+	path := "/api/v1/documents/" + url.PathEscape(documentID) + "/" + action
 	return c.doStream(ctx, path, "application/octet-stream, */*")
 }
 
@@ -622,23 +639,18 @@ func (c *RemoteMultiragEngine) doStream(ctx context.Context, path string, accept
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, domain.NewUpstreamError("调用 multirag stream 失败", err)
+		return nil, domain.NewUpstreamError("文档读取未完成，请重试", nil)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, domain.NewUpstreamError(fmt.Sprintf("multirag returned HTTP %d", resp.StatusCode), errors.New(strings.TrimSpace(string(body))))
+		return nil, domain.NewUpstreamError(fmt.Sprintf("文档读取失败 (HTTP %d)", resp.StatusCode), nil)
 	}
 	contentType := resp.Header.Get("Content-Type")
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	if mediaType == "application/json" {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	disposition, _, dispositionErr := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
+	if (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")) && (dispositionErr != nil || disposition != "attachment") {
 		resp.Body.Close()
-		message := streamJSONErrorMessage(body)
-		if message == "" {
-			message = strings.TrimSpace(string(body))
-		}
-		return nil, domain.NewUpstreamError("multirag stream returned JSON instead of file content", errors.New(message))
+		return nil, domain.NewUpstreamError("文档读取返回了错误响应，未取得文件", nil)
 	}
 	return &domain.StreamResult{
 		Body:               resp.Body,

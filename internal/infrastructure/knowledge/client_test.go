@@ -749,7 +749,11 @@ func TestDownloadDocument_Stream(t *testing.T) {
 	var gotAccept string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAccept = r.Header.Get("Accept")
-		if r.URL.Path != "/api/v1/datasets/kb1/documents/doc1" {
+		if r.URL.Path == "/api/v1/datasets/kb1/documents" {
+			_, _ = io.WriteString(w, `{"code":0,"data":{"total":1,"docs":[{"id":"doc1","kb_id":"kb1"}]}}`)
+			return
+		}
+		if r.URL.Path != "/api/v1/documents/doc1/download" {
 			t.Errorf("path = %q, want document download path", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/pdf")
@@ -775,7 +779,11 @@ func TestDownloadDocument_Stream(t *testing.T) {
 
 func TestDownloadDocument_RejectsJSONEnvelope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/datasets/kb1/documents/doc1" {
+		if r.URL.Path == "/api/v1/datasets/kb1/documents" {
+			_, _ = io.WriteString(w, `{"code":0,"data":{"total":1,"docs":[{"id":"doc1","kb_id":"kb1"}]}}`)
+			return
+		}
+		if r.URL.Path != "/api/v1/documents/doc1/download" {
 			t.Errorf("path = %q, want document download path", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -794,8 +802,8 @@ func TestDownloadDocument_RejectsJSONEnvelope(t *testing.T) {
 		}
 		t.Fatal("expected JSON stream error")
 	}
-	if !strings.Contains(err.Error(), "This document has been deleted") {
-		t.Fatalf("error = %v, want upstream JSON message", err)
+	if strings.Contains(err.Error(), "This document has been deleted") {
+		t.Fatalf("unsafe upstream detail leaked: %v", err)
 	}
 }
 
@@ -945,8 +953,8 @@ func TestGetImage_ContextCancellation(t *testing.T) {
 
 func TestRetrieval_NormalizesDocumentNameFromDocnmKwd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/datasets/kb-1/search" {
-			t.Errorf("path = %q, want /api/v1/datasets/kb-1/search", r.URL.Path)
+		if r.URL.Path != "/api/v1/datasets/search" {
+			t.Errorf("path = %q, want /api/v1/datasets/search", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 0,

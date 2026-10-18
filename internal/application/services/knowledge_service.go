@@ -79,8 +79,53 @@ func (s *KnowledgeService) UpdateDataset(ctx context.Context, tenantID string, i
 	if id == "" {
 		return nil, knowledge.NewBadRequestError("datasetId 不能为空")
 	}
+	if canonical, present := req["embedding_model"]; present {
+		model, ok := canonical.(string)
+		if !ok || strings.TrimSpace(model) == "" {
+			return nil, knowledge.NewBadRequestError("embedding_model 必须是非空模型引用")
+		}
+		if legacy, exists := req["embd_id"]; exists && legacy != model {
+			return nil, knowledge.NewBadRequestError("embd_id 与 embedding_model 冲突")
+		}
+		delete(req, "embedding_model")
+		req["embd_id"] = canonical
+	}
 	s.translateModelRefs(ctx, tenantID, req)
 	return engine.UpdateDataset(ctx, id, req)
+}
+
+func (s *KnowledgeService) CheckEmbedding(ctx context.Context, tenantID, datasetID string, req knowledge.EmbeddingCheckRequest) (*knowledge.EmbeddingCheckResult, error) {
+	engine, err := s.requireEngine()
+	if err != nil {
+		return nil, err
+	}
+	if datasetID, err = requireID("datasetId", datasetID); err != nil {
+		return nil, err
+	}
+	checker, ok := engine.(knowledge.EmbeddingEngine)
+	if !ok {
+		return nil, knowledge.NewUnavailableError("嵌入模型兼容检查未配置")
+	}
+	req.EmbeddingID = s.translateLocalModelRef(ctx, tenantID, req.EmbeddingID, "embedding")
+	return checker.CheckEmbedding(ctx, datasetID, req)
+}
+
+func (s *KnowledgeService) PreviewDocument(ctx context.Context, datasetID, documentID string) (*knowledge.StreamResult, error) {
+	engine, err := s.requireEngine()
+	if err != nil {
+		return nil, err
+	}
+	if datasetID, err = requireID("datasetId", datasetID); err != nil {
+		return nil, err
+	}
+	if documentID, err = requireID("documentId", documentID); err != nil {
+		return nil, err
+	}
+	preview, ok := engine.(knowledge.PreviewEngine)
+	if !ok {
+		return nil, knowledge.NewUnavailableError("文档预览未配置")
+	}
+	return preview.PreviewDocument(ctx, datasetID, documentID)
 }
 
 func (s *KnowledgeService) DeleteDatasets(ctx context.Context, tenantID string, req knowledge.DeleteRequest) error {
