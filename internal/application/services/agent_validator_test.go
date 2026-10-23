@@ -599,7 +599,11 @@ func TestValidateConfig_Effort(t *testing.T) {
 		require.Contains(t, err.Error(), "effort 'low' 不在模型 sel-2 声明的候选列表内")
 	})
 
-	t.Run("无 providerId 只做形态校验", func(t *testing.T) {
+	// 纯函数边界（issue #226 评审修正）：ValidateConfig 只读 payload，无
+	// providerId 时白名单无从执行——Update 路径的闭环在 validateUpdateConfig
+	// 注入存量绑定（TestApplyUpdateConfig_EffortValidatesAgainstStoredBinding），
+	// 本用例钉的是纯函数自身的门控行为，不是端到端预期。
+	t.Run("无 providerId 跳过白名单（纯函数边界，service 层注入闭环）", func(t *testing.T) {
 		setupAgentValidatorTestDB(t)
 		err := ValidateConfig(map[string]interface{}{
 			"systemPrompt": "x", "effort": "high",

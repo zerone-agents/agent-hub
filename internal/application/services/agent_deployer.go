@@ -938,7 +938,13 @@ func (s *AgentDeployerService) validateEffortForDeploy(providerID uint64, cfg *a
 		}
 		return fmt.Errorf("read provider_models efforts failed: %w", err)
 	}
-	return checkEffortDeclared(cfg.Effort, cfg.ModelID, effortsRaw)
+	// displayModel 与保存侧（validateProviderModel）同源：selectionId 优先，
+	// 同一配置在保存/部署两侧报错文案指向同一模型行（评审建议①）。
+	displayModel := cfg.ModelSelectionID
+	if displayModel == "" {
+		displayModel = cfg.ModelID
+	}
+	return checkEffortDeclared(cfg.Effort, displayModel, effortsRaw)
 }
 
 // definitionOpts carries graph-position context into buildAgentDefinition.
