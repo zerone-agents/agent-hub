@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { antdTheme } from '@/lib/antd-theme'
 import AgentListPage from './AgentListPage'
-import type { Agent } from '@/api/agents'
+import type { Agent, AgentConfig } from '@/api/agents'
 import { setAuthRole } from '@/test/auth-store-mock'
 
 // vi.mock 工厂会被提升到 import 之前执行，不能引用静态 import；用 async 工厂动态 import helper。
@@ -31,15 +31,20 @@ const mockAgents: Agent[] = [
 // 测试可替换的列表数据（新数组引用模拟真实 react-query 刷新——原地 splice 骗过 useMemo 依赖比较）
 let mutableAgents: Agent[] | null = null
 
+// 模型弹窗保存载荷捕获（mutableAgents 同款模式：mock 工厂被提升，模块级 let 运行时求值）
+let mutableUpdateAgent: ReturnType<typeof vi.fn> | null = null
+// 连接测试结果捕获：canConfirm 门控要求 testPassed，probe mock 必须可控返回 success
+let mutableProbeAgent: ReturnType<typeof vi.fn> | null = null
+
 vi.mock('@/queries/useAgents', () => ({
   useAgents: () => ({ data: mutableAgents ?? mockAgents, isLoading: false }),
   useDeleteAgent: () => ({ mutate: vi.fn() }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateAgent: () => ({ mutateAsync: mutableUpdateAgent ?? vi.fn(), isPending: false }),
   useUpdateSubagents: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAgentTools: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAgentSkills: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useProbeAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useProbeAgent: () => ({ mutateAsync: mutableProbeAgent ?? vi.fn(), isPending: false }),
   useAgentKnowledgeDatasets: () => ({ data: [], isLoading: false }),
   useUpdateAgentKnowledgeDatasets: () => ({ mutateAsync: vi.fn(), isPending: false })
 }))
@@ -161,6 +166,40 @@ describe('AgentListPage', () => {
 
     expect(screen.getByRole('button', { name: '开始对话' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '批量操作' })).not.toBeInTheDocument()
+  })
+
+  it('模型弹窗保存携带推理强度 effort（issue #226）', async () => {
+    const user = userEvent.setup()
+    // 必须在 renderPage 之前赋值：mock 闭包在组件 render 时求值并捕获
+    // mutateAsync 引用，render 后再赋值只换模块变量、组件仍持旧 spy。
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    // canConfirm 门控要求先测试通过：probe mock 返回 success envelope
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    // 打开第一个 agent 的模型配置弹窗（模型 tag 即入口）
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    expect(screen.getByText('设置模型')).toBeInTheDocument()
+
+    // effort 经 label 容器定位 combobox（antd AutoComplete 的 placeholder 渲染为
+    // span 而非 input 属性，getByPlaceholderText 不可用——disallowedTools 用例同款坑）
+    const effortItem = screen.getByText('推理强度').closest<HTMLElement>('div')!
+    const effortInput = within(effortItem).getByRole('combobox')
+    await user.type(effortInput, 'high')
+
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+
+    // 确认（antd CJK 空格：accessible name 可能是「确 认」）
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    // 恒带 key：设置值随 config.effort 提交
+    expect(payload.data.config.effort).toBe('high')
+    mutableUpdateAgent = null
   })
 
   it('shows model modal with test and confirm buttons', async () => {
