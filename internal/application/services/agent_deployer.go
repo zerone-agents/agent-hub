@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/infrastructure/deployer"
 	repository "control-panel/internal/infrastructure/persistence"
+	"control-panel/pkg/database"
 )
 
 // ErrDeployerNoDeploymentKey reports that the connected agent-deployer does
@@ -913,11 +915,38 @@ func (s *AgentDeployerService) validateDeployable(cfg *agent.AgentConfig) error 
 	return nil
 }
 
+// validateEffortForDeploy 按当前 provider_models 行复验 effort 声明白名单
+// （issue #226 下发兜底）。查询键与 validateProviderModel 一致：selection_id
+// 优先。模型行不存在时放行——模型缺失由部署链路自身报错，不伪装成 effort
+// 问题；白名单规则与保存侧共享 checkEffortDeclared 单一来源。
+func (s *AgentDeployerService) validateEffortForDeploy(providerID uint64, cfg *agent.AgentConfig) error {
+	if database.DB == nil {
+		return nil
+	}
+	query := database.DB.Table("provider_models").
+		Where("provider_id = ?", providerID)
+	if cfg.ModelSelectionID != "" {
+		query = query.Where("selection_id = ?", cfg.ModelSelectionID)
+	} else {
+		query = query.Where("model_id = ?", cfg.ModelID)
+	}
+	var effortsRaw string
+	err := query.Select("COALESCE(efforts, '')").Row().Scan(&effortsRaw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("read provider_models efforts failed: %w", err)
+	}
+	return checkEffortDeclared(cfg.Effort, cfg.ModelID, effortsRaw)
+}
+
 // definitionOpts carries graph-position context into buildAgentDefinition.
 // The root node is the only node allowed to carry the runtime-global fields
-// (Model, MaxSessionQueries, PermissionMode) — the deployer v3 rejects them
-// on children. Root and child nodes all carry bare runtime names (issue
-// #114); the tenant-scoped identity lives in the dedicated deploymentKey.
+// (Model, MaxSessionQueries, PermissionMode, Effort) — the deployer v3
+// rejects them on children. Root and child nodes all carry bare runtime
+// names (issue #114); the tenant-scoped identity lives in the dedicated
+// deploymentKey.
 type definitionOpts struct {
 	isRoot bool
 }
@@ -948,6 +977,9 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		def.Model = cfg.ModelID
 		def.MaxSessionQueries = cfg.MaxSessionQueries
 		def.PermissionMode = cfg.PermissionMode
+		// Effort（issue #226）：root-only（deployer 拒 child 声明）；空串
+		// 走 DTO omitempty = 未声明。
+		def.Effort = cfg.Effort
 	}
 	// Agent-local deny list (issue #111): root and children are isomorphic —
 	// each node carries exactly its own user-configured disallowedTools on top
@@ -1137,6 +1169,15 @@ func (s *AgentDeployerService) buildCreateRequest(
 	agents, err := s.loadAgentGraph(ctx, tenantID, cfg)
 	if err != nil {
 		return nil, err
+	}
+	// effort 下发兜底（issue #226）：保存时已按当时的模型声明校验，但模型
+	// 切换 / efforts 声明改动后直接部署仍可能漂移——下发前按当前模型行复验。
+	// deployer 对 effort 不做枚举校验，白名单兜底必须在 hub 完成，否则非法值
+	// 会被透传到 provider 侧才失败（报错远离根因）。
+	if cfg.Effort != "" {
+		if err := s.validateEffortForDeploy(providerDTO.ID(), cfg); err != nil {
+			return nil, err
+		}
 	}
 	// Build provider config
 	baseURL := providerDTO.BaseURL()

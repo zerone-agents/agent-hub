@@ -679,6 +679,13 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MaxSessionQueries = &n
 	}
 
+	// Handle effort（issue #226）：显式传 string 即写（trim 后空串 = 清除
+	// 设置）；absent key 保持不动，与 maxSessionQueries 同惯例。trim 在解包
+	// 侧统一做，存储/下发值始终是去空白形态。
+	if v, ok := config["effort"].(string); ok {
+		cfg.Effort = strings.TrimSpace(v)
+	}
+
 	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
 	// trimming and boundary rules all live in parseDisallowedTools — the
 	// single source shared with ValidateConfig — so the stored/deployed
@@ -764,6 +771,9 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 	} else {
 		m["maxSessionQueries"] = nil
 	}
+
+	// effort（issue #226）：无条件携带，空串 = 未设置（前端按空串显示未配置）。
+	m["effort"] = cfg.Effort
 
 	if cfg.DisallowedTools != nil {
 		m["disallowedTools"] = cfg.DisallowedTools

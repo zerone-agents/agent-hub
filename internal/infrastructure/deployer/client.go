@@ -17,7 +17,7 @@ import (
 // Subagents are pure id references to other entries in the same graph;
 // mounted agents never inherit or fall back to parent capabilities — an
 // empty field stays empty. Runtime-global fields (Model, MaxSessionQueries,
-// PermissionMode) are root-only: the deployer rejects them on children.
+// PermissionMode, Effort) are root-only: the deployer rejects them on children.
 type AgentDefinition struct {
 	Name         string `json:"name"`
 	Description  string `json:"description"`
@@ -26,9 +26,17 @@ type AgentDefinition struct {
 	MaxTurns     *int   `json:"maxTurns,omitempty"`
 	// MaxSessionQueries is the session-level query cap (SDK 3.1.0 rename of
 	// maxSessionTurns; runtime >= v2.6.0). Root-only.
-	MaxSessionQueries *int     `json:"maxSessionQueries,omitempty"`
-	PermissionMode    string   `json:"permissionMode,omitempty"`
-	Tools             []string `json:"tools,omitempty"`
+	MaxSessionQueries *int   `json:"maxSessionQueries,omitempty"`
+	PermissionMode    string `json:"permissionMode,omitempty"`
+	// Effort is the reasoning effort level (SDK AgentOptions.effort, issue
+	// #226): a single passthrough value — SDK presets low|medium|high|xhigh|max
+	// plus custom values (hub validates against the model's declared efforts
+	// before sending). Mirrors the deployer's model.AgentDefinition.Effort
+	// (agent-deployer#23), which rejects blank values and child declarations.
+	// Root-only; declaring it raises the runtime image floor to >= v2.9.0
+	// (runtime #77 — older runtimes silently strip the key).
+	Effort string   `json:"effort,omitempty"`
+	Tools  []string `json:"tools,omitempty"`
 	// DisallowedTools is the agent-local deny list (issue #111): a
 	// user-configured tool-name blacklist (built-in names like "Bash" or
 	// MCP-qualified names, no referential integrity) applied on top of the

@@ -516,3 +516,94 @@ func TestValidateConfig_ProviderModelEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// TestValidateConfig_Effort 锁定 effort 校验契约（issue #226）：形态上限
+// 在 ValidateConfig（trim 后 ≤32 对齐列宽）；声明白名单在
+// validateProviderModel——模型声明了 efforts（非空数组）时 effort 必须在
+// 其中，无声明（空串/空数组）按 SDK「预设+自定义透传」放行。
+func TestValidateConfig_Effort(t *testing.T) {
+	seedModel := func(t *testing.T, efforts string) {
+		t.Helper()
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			ID: 1, Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		require.NoError(t, db.Create(&providerdomain.ProviderModel{
+			ProviderID: 1, SelectionID: "sel-1", ModelID: "glm-4",
+			ModelType: "llm", Efforts: efforts,
+		}).Error)
+	}
+
+	t.Run("超过 32 字符拒绝（列宽上限）", func(t *testing.T) {
+		seedModel(t, "")
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": strings.Repeat("x", 33),
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "effort 长度不能超过 32 个字符")
+	})
+
+	t.Run("声明内放行", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "effort": "high",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("声明外拒绝", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "effort": "ultra",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "effort 'ultra' 不在模型 glm-4 声明的候选列表内")
+	})
+
+	t.Run("无声明透传放行", func(t *testing.T) {
+		seedModel(t, "")
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "effort": "custom-value",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("空数组声明透传放行", func(t *testing.T) {
+		seedModel(t, `[]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "effort": "max",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("selectionId 优先按其行校验", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			ID: 1, Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		require.NoError(t, db.Create(&providerdomain.ProviderModel{
+			ProviderID: 1, SelectionID: "sel-1", ModelID: "glm-4", ModelType: "llm", Efforts: `["low"]`,
+		}).Error)
+		require.NoError(t, db.Create(&providerdomain.ProviderModel{
+			ProviderID: 1, SelectionID: "sel-2", ModelID: "glm-4", ModelType: "llm", Efforts: `["high"]`,
+		}).Error)
+		// 同 modelId 两条 selection：low 只在 sel-1 声明——按 sel-2 校验必须拒绝。
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1),
+			"modelId": "glm-4", "modelSelectionId": "sel-2", "effort": "low",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "effort 'low' 不在模型 sel-2 声明的候选列表内")
+	})
+
+	t.Run("无 providerId 只做形态校验", func(t *testing.T) {
+		setupAgentValidatorTestDB(t)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "effort": "high",
+		})
+		require.NoError(t, err)
+	})
+}

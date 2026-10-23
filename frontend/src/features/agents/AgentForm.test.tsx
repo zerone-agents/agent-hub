@@ -6,9 +6,10 @@ import { antdTheme } from '@/lib/antd-theme'
 import AgentForm from './AgentForm'
 import type { Agent, AgentConfig } from '@/api/agents'
 
-const { createAgent, updateAgent } = vi.hoisted(() => ({
+const { createAgent, updateAgent, providerApi } = vi.hoisted(() => ({
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
+  providerApi: { get: vi.fn() },
 }))
 
 vi.mock('@/queries/useAgents', () => ({
@@ -16,6 +17,14 @@ vi.mock('@/queries/useAgents', () => ({
   useUpdateAgent: () => ({ mutateAsync: updateAgent, isPending: false }),
   useAgents: () => ({ data: [] as Agent[] }),
 }))
+
+// AgentForm 内的 effort 候选 useQuery（issue #226）：默认 stub 为无声明
+// （data: []）；候选渲染用例在各自 describe 里覆盖 providerApi.get。
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: [] as string[] }),
+}))
+
+vi.mock('@/api/providers', () => ({ providerApi }))
 
 function renderForm(editingAgent: Agent | null) {
   return render(
@@ -127,6 +136,68 @@ describe('AgentForm disallowedTools', { timeout: 15000 }, () => {
     expect(payload.name).toBe('deny-agent')
     expect(payload.data.config.disallowedTools).toEqual(['Bash', 'WebSearch'])
   })
+})
+
+describe('AgentForm effort', { timeout: 15000 }, () => {
+  beforeEach(() => {
+    createAgent.mockReset()
+    updateAgent.mockReset()
+    providerApi.get.mockReset()
+  })
+
+  it('backfills effort when editing and submits it on update', async () => {
+    const user = userEvent.setup()
+    const editingAgent: Agent = {
+      id: 1,
+      name: 'effort-agent',
+      config: { permissionMode: 'auto', maxTurns: 50, effort: 'high' },
+    }
+    renderForm(editingAgent)
+
+    expect(screen.getByLabelText('推理强度')).toHaveValue('high')
+
+    await user.click(screen.getByRole('button', { name: '保存更新' }))
+    await waitFor(() => { expect(updateAgent).toHaveBeenCalledTimes(1) })
+    const payload = updateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.effort).toBe('high')
+  })
+
+  it('submits an explicit empty string when editing clears effort', async () => {
+    const user = userEvent.setup()
+    const editingAgent: Agent = {
+      id: 1,
+      name: 'effort-agent',
+      config: { permissionMode: 'auto', maxTurns: 50, effort: 'high' },
+    }
+    renderForm(editingAgent)
+
+    // 清空输入 → 提交必须显式带空串：hub unpack 对 absent key 不变更，
+    // 丢 key 会让「清除推理强度」静默失效（与 disallowedTools 同款坑）
+    await user.clear(screen.getByLabelText('推理强度'))
+    await user.click(screen.getByRole('button', { name: '保存更新' }))
+
+    await waitFor(() => { expect(updateAgent).toHaveBeenCalledTimes(1) })
+    const payload = updateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.effort).toBe('')
+    const serialized = JSON.parse(JSON.stringify(payload.data.config)) as AgentConfig
+    expect(serialized).toHaveProperty('effort', '')
+  })
+
+  it('submits a typed custom value in create config (passthrough when undeclared)', async () => {
+    const user = userEvent.setup()
+    renderForm(null)
+
+    await user.type(screen.getByLabelText('代理标识'), 'effort-agent')
+    await user.type(screen.getByLabelText('推理强度'), 'ultra')
+    await user.click(screen.getByRole('button', { name: '创建代理' }))
+
+    await waitFor(() => { expect(createAgent).toHaveBeenCalledTimes(1) })
+    const payload = createAgent.mock.calls[0][0] as { config: AgentConfig }
+    expect(payload.config.effort).toBe('ultra')
+  })
+  // 候选→options 映射（declaredEfforts → effortOptions）为纯 useMemo，
+  // 且组件内 useQuery 已文件级 stub——真实候选渲染需整 QueryClient 栈，
+  // 语义正确性由后端白名单测试（TestValidateConfig_Effort）兜底，不在此造假用例。
 })
 
 describe('AgentForm guestEnabled', { timeout: 15000 }, () => {

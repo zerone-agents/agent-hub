@@ -109,6 +109,18 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	// effort 推理强度（issue #226）：形态校验收在 ValidateConfig（trim 后
+	// 长度上限对齐列宽 varchar(32)）；声明白名单校验在 validateProviderModel
+	// （需要模型行的 efforts 声明）。deployer 对 effort 不做枚举校验（对齐
+	// SDK「预设+自定义透传」语义），白名单兜底必须在 hub 完成，否则非法值
+	// 会被透传到 provider 侧才失败。
+	if v, ok := config["effort"].(string); ok {
+		if trimmed := strings.TrimSpace(v); len(trimmed) > 32 {
+			return agent.NewCodedValidationErrorf(agent.CodeEffortTooLong,
+				map[string]string{"limit": "32"}, "effort 长度不能超过 32 个字符")
+		}
+	}
+
 	// disallowedTools（issue #111 agent-local deny list）: 形态校验全部
 	// 收在 parseDisallowedTools 单一来源，与 unpackConfigToModel 共享，
 	// 防两处规则漂移。
@@ -154,8 +166,14 @@ func ValidateConfig(config map[string]interface{}) error {
 		modelSelectionID = v
 	}
 
+	// effort 白名单随模型绑定一并校验（validateProviderModel 读模型行）
+	var effort string
+	if v, ok := config["effort"].(string); ok {
+		effort = strings.TrimSpace(v)
+	}
+
 	if providerID != nil {
-		if err := validateProviderModel(*providerID, modelID, modelSelectionID); err != nil {
+		if err := validateProviderModel(*providerID, modelID, modelSelectionID, effort); err != nil {
 			return err
 		}
 	}
@@ -244,7 +262,11 @@ func parseDisallowedTools(raw []interface{}) ([]string, error) {
 // disambiguates them.
 //
 // TODO: refactor to use a repository interface instead of database.DB global.
-func validateProviderModel(providerID uint64, modelID, modelSelectionID string) error {
+//
+// effort（issue #226）：非空时随同一次模型行查询校验声明白名单——模型声明了
+// efforts（非空数组）则 effort 必须在其中，无声明按 SDK「预设+自定义透传」
+// 语义放行（checkEffortDeclared 为保存侧与部署侧共享的单一来源）。
+func validateProviderModel(providerID uint64, modelID, modelSelectionID, effort string) error {
 	if database.DB == nil {
 		return nil
 	}
@@ -271,8 +293,8 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 		query = query.Where("model_id = ?", modelID)
 	}
 
-	var modelType string
-	err := query.Select("model_type").Row().Scan(&modelType)
+	var modelType, effortsRaw string
+	err := query.Select("model_type, COALESCE(efforts, '')").Row().Scan(&modelType, &effortsRaw)
 	if err == sql.ErrNoRows {
 		if modelSelectionID != "" {
 			return agent.NewCodedValidationErrorf(agent.CodeModelSelectionNotFound,
@@ -291,7 +313,36 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID string) 
 			map[string]string{"model": modelID, "actual": modelType},
 			"模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
 	}
+	if effort != "" {
+		displayModel := modelSelectionID
+		if displayModel == "" {
+			displayModel = modelID
+		}
+		if err := checkEffortDeclared(effort, displayModel, effortsRaw); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// checkEffortDeclared 校验 effort 与模型声明的候选列表（issue #226）：声明
+// 非空数组时 effort 必须在其中；无声明（空串/空数组/解析失败）放行——对齐
+// SDK「预设+自定义透传」语义，deployer 不做枚举校验，白名单兜底必须在 hub
+// 完成。保存侧（validateProviderModel）与部署侧（buildCreateRequest 兜底）
+// 共享本单一来源，防止两处规则漂移。
+func checkEffortDeclared(effort, displayModel, effortsRaw string) error {
+	declared := effortsFromJSON(effortsRaw)
+	if len(declared) == 0 {
+		return nil
+	}
+	for _, d := range declared {
+		if d == effort {
+			return nil
+		}
+	}
+	return agent.NewCodedValidationErrorf(agent.CodeEffortNotDeclared,
+		map[string]string{"effort": effort, "model": displayModel},
+		"effort '%s' 不在模型 %s 声明的候选列表内", effort, displayModel)
 }
 
 // validateFieldOverridesKeys checks that fieldOverrides keys are a subset of Provider.fields keys.

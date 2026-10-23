@@ -205,6 +205,8 @@ openssl rand -hex 32
 
 **Agent graph 部署协议（issue #111）**：hub 部署 Agent 时向 agent-deployer 下发完整 Agent 图——`rootAgentId + agents[]`，subagent 为纯 id 引用，每个 Agent 携带自身完整能力（不继承、不回退父级配置），`maxSessionQueries` 等运行时全局字段仅 root 携带；自 issue #114 起 `rootAgentId` 为裸 Agent ID，租户限定移至独立的 `deploymentKey` 字段。链路版本要求：**agent-deployer ≥ v3.1.0（v3 graph 契约 + deploymentKey 必填拆分，hub 部署前探测并拒绝旧版）+ agent-runtime ≥ v2.6.1 + agent-sdk ≥ v3.1.0**；hub 升级后需**重新部署存量 Agent**。
 
+**推理强度 effort（issue #226）**：Agent 配置支持 `effort` 单值档位（SDK `AgentOptions.effort` 透传，预设 `low|medium|high|xhigh|max` + 自定义值），属运行时全局字段、仅 root 携带（child 声明会被 deployer 400 拒绝）。**版本前提：声明 effort 要求 agent-runtime ≥ v2.9.0**（runtime #77 引入该键，低版本静默 strip 不生效）——deployer 侧对声明 effort 的部署按镜像版本拒绝（503），因此凡需使用 effort 的环境，`AGENT_DEPLOYER_RUNTIME_IMAGE` 必须指向 v2.9.0+ 镜像 tag（或配置 `AGENT_DEPLOYER_RUNTIME_IMAGE_ASSUME_LATEST=true`，自担漂移风险）。值校验在 hub 完成：模型声明了 `provider_models.efforts` 时取值必须在该候选列表内，无声明时允许任意非空自定义值透传。`thinking`（思考预算）为独立字段、无额外版本门槛，与 effort 语义不同不可互相替代。
+
 ## Multirag (Knowledge Base)
 
 | Variable | Required | Default | Description |

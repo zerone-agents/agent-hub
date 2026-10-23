@@ -84,6 +84,9 @@ const (
 	CodeDisallowedToolsEntryTooLong    StableCode = "disallowed_tools_entry_too_long"
 	CodeDisallowedToolsDuplicate       StableCode = "disallowed_tools_duplicate"
 	CodeProviderNotBound               StableCode = "provider_not_bound"
+	// effort 推理强度（issue #226）：单形态码（zh/en 键逐字契约）。
+	CodeEffortTooLong     StableCode = "effort_too_long"
+	CodeEffortNotDeclared StableCode = "effort_not_declared"
 )
 
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按

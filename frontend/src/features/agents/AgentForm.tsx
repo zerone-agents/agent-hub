@@ -1,10 +1,13 @@
 import React, { useEffect } from 'react'
 import { Modal, Form, Input, Select, InputNumber, Switch, AutoComplete, Button } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { XIcon, CaretDownIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
 import PrimaryButton from '@/components/PrimaryButton'
 import type { Agent, AgentConfig } from '@/api/agents'
 import { useCreateAgent, useUpdateAgent, useAgents } from '@/queries/useAgents'
+import { providerApi, type Provider } from '@/api/providers'
+import { unwrapResponse } from '@/api/client'
 import { agentIdentifierFormRules } from '@/utils/identifier'
 import { AGENT_ICON_OPTIONS, PRESET_COLORS, PRESET_BG_COLORS } from '@/utils/agent-icons'
 import { useTranslation } from 'react-i18next'
@@ -99,6 +102,8 @@ interface FormValues {
   iconBgColor: string
   maxTurns: number
   maxSessionQueries?: number
+  /** 推理强度（issue #226）：恒为 string——'' = 未设置/清除（显式下发，避免 absent key 让清除静默失效） */
+  effort?: string
   disallowedTools?: string[]
   systemPrompt: string
   desktopEnabled: boolean
@@ -134,6 +139,29 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
   const iconColor = Form.useWatch('iconColor', form)
   const iconBgColor = Form.useWatch('iconBgColor', form)
 
+  // effort 候选（issue #226）：当前绑定模型的 provider_models.efforts 声明。
+  // 有声明 → 候选过滤；无声明/未绑定模型 → 空候选仍可自由输入（SDK「预设+
+  // 自定义透传」语义，白名单兜底由 hub 保存/部署侧执行）。
+  const providerId = editingAgent?.config.providerId
+  const modelSelectionId = editingAgent?.config.modelSelectionId ?? ''
+  const modelId = editingAgent?.config.modelId ?? ''
+  const { data: declaredEfforts = [] } = useQuery<string[]>({
+    queryKey: ['provider-model-efforts', providerId, modelSelectionId, modelId],
+    queryFn: async () => {
+      if (!providerId) return []
+      const provider = unwrapResponse<Provider>(await providerApi.get(providerId))
+      const model = provider.defaultModels.find((m) =>
+        modelSelectionId ? m.selectionId === modelSelectionId : m.modelId === modelId
+      )
+      return model?.efforts ?? []
+    },
+    enabled: !!providerId && !!modelId,
+  })
+  const effortOptions = React.useMemo(
+    () => declaredEfforts.map((e) => ({ value: e })),
+    [declaredEfforts]
+  )
+
   useEffect(() => {
     if (open) {
       if (editingAgent) {
@@ -149,6 +177,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           iconBgColor: editingAgent.config.iconBgColor ?? '',
           maxTurns: editingAgent.config.maxTurns ?? 50,
           maxSessionQueries: editingAgent.config.maxSessionQueries,
+          effort: editingAgent.config.effort ?? '',
           disallowedTools: editingAgent.config.disallowedTools ?? [],
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
@@ -161,7 +190,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, guestEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, disallowedTools: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, effort: '', disallowedTools: undefined
         })
       }
     }
@@ -190,6 +219,9 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       permissionMode: v.permissionMode,
       maxTurns: v.maxTurns,
       maxSessionQueries: v.maxSessionQueries ?? undefined,
+      // effort 恒带 key：'' = 显式清除（hub unpack 对 absent key 不变更，
+      // 不发 key 会让清除静默失效——与 disallowedTools 同款坑）
+      effort: v.effort ?? '',
       // undefined（新建未触碰）→ 不下发 key（hub 视为未配置）；编辑态清空后 antd Select 值为 []，
       // 必须显式发空数组——hub applyUpdateConfig 对 absent key 不变更，丢 key 会让清空静默失效
       disallowedTools: v.disallowedTools ?? undefined,
@@ -358,6 +390,14 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </Form.Item>
         <Form.Item label={t('agents.form.maxSessionQueries')} name="maxSessionQueries" tooltip={t('agents.form.maxSessionQueriesTip')}>
           <InputNumber min={1} placeholder={t('agents.form.noLimit')} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label={t('agents.form.effort')} name="effort" tooltip={t('agents.form.effortTip')}>
+          <AutoComplete
+            options={effortOptions}
+            placeholder={t('agents.form.effortPh')}
+            allowClear
+            style={{ width: '100%' }}
+          />
         </Form.Item>
         <Form.Item label={t('agents.form.disallowedTools')} name="disallowedTools" tooltip={t('agents.form.disallowedToolsTip')}>
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder={t('agents.form.disallowedToolsPh')} style={{ width: '100%' }} />

@@ -8,6 +8,8 @@ export interface AgentConfig {
   permissionMode?: string
   maxTurns?: number
   maxSessionQueries?: number
+  /** 推理强度档位（issue #226）：SDK AgentOptions.effort 透传；'' = 未设置 */
+  effort?: string
   disallowedTools?: string[]
   title?: Record<string, string>
   description?: Record<string, string>
