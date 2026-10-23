@@ -52,7 +52,11 @@ const (
 	// 完整；agent_not_found 复用上方既有码（404 sentinel 专用，400 校验
 	// 路径用 agent_reference_not_found 拆键带 name 插值）。两注册表由
 	// TestErrcodes_RegistryPinsDomainAgentCodes 钉死防漂移。
-	ErrCodeAgentNameExists        = "agent_name_exists"
+	ErrCodeAgentNameExists = "agent_name_exists"
+	// effort 推理强度（issue #226）：services 层 NewCodedValidationErrorf
+	// 构造（码常量见 domain/agent/errors.go），注册表钉死测试同步收录。
+	ErrCodeEffortTooLong          = "effort_too_long"
+	ErrCodeEffortNotDeclared      = "effort_not_declared"
 	ErrCodeAgentNameInvalid       = "agent_name_invalid"
 	ErrCodeAgentNameRequired      = "agent_name_required"
 	ErrCodeAgentNameTooLong       = "agent_name_too_long"

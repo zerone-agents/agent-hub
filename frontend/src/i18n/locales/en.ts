@@ -26,6 +26,9 @@ const en = {
   apiErrors: {
     knowledgeServiceName: 'knowledge service',
     requestFailed: 'Request failed',
+    // effort (issue #226): en translations for the stable codes (zh mode passes the backend's Chinese original through)
+    effortTooLong: 'effort must not exceed 32 characters',
+    effortNotDeclared: "effort '{{effort}}' is not in the declared candidate list of model {{model}}",
     unauthorized: 'Session expired, please sign in again',
     forbidden: 'You do not have permission to perform this action',
     notFound: 'Resource does not exist or has been deleted',
@@ -487,6 +490,9 @@ const en = {
       maxTurns: 'Max Turns',
       maxSessionQueries: 'Max Session Queries',
       maxSessionQueriesTip: 'Maximum queries within a single session; empty means unlimited',
+      effort: 'Reasoning effort',
+      effortTip: 'Reasoning effort level passed to the model; options follow the model-declared efforts, custom values allowed when not declared',
+      effortPh: 'e.g. high, or a custom value',
       noLimit: 'Unlimited',
       disallowedTools: 'Disallowed Tools',
       disallowedToolsTip: 'Blocklist of tool names excluded from the allowed set; built-in names or MCP names in mcp__server__tool form',

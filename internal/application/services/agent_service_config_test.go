@@ -17,6 +17,59 @@ import (
 	"gorm.io/gorm"
 )
 
+// TestEffortConfigKeys 锁定 effort 的 config map 契约（issue #226）：
+// 解包 trim、absent key 不变更、显式空串清除；pack 恒带 key（空串 = 未设置）。
+func TestEffortConfigKeys(t *testing.T) {
+	t.Run("unpack 去空白", func(t *testing.T) {
+		cfg := &agent.AgentConfig{}
+		if err := unpackConfigToModel(map[string]interface{}{
+			"effort":       "  high  ",
+			"systemPrompt": "p",
+		}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		if cfg.Effort != "high" {
+			t.Fatalf("cfg.Effort = %q, want %q", cfg.Effort, "high")
+		}
+	})
+
+	t.Run("unpack 显式空串清除", func(t *testing.T) {
+		cfg := &agent.AgentConfig{Effort: "high"}
+		if err := unpackConfigToModel(map[string]interface{}{
+			"effort":       "",
+			"systemPrompt": "p",
+		}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		if cfg.Effort != "" {
+			t.Fatalf("cfg.Effort = %q, want empty (explicit clear)", cfg.Effort)
+		}
+	})
+
+	t.Run("unpack absent key 不变更", func(t *testing.T) {
+		cfg := &agent.AgentConfig{Effort: "high"}
+		if err := unpackConfigToModel(map[string]interface{}{
+			"systemPrompt": "p",
+		}, cfg, ""); err != nil {
+			t.Fatalf("unpackConfigToModel: %v", err)
+		}
+		if cfg.Effort != "high" {
+			t.Fatalf("cfg.Effort = %q, want unchanged %q", cfg.Effort, "high")
+		}
+	})
+
+	t.Run("pack 恒带 key 空串即未设置", func(t *testing.T) {
+		m := modelToConfigMap(&agent.AgentConfig{Effort: "high"}, "")
+		if v, ok := m["effort"].(string); !ok || v != "high" {
+			t.Fatalf(`m["effort"] = %#v, want "high"`, m["effort"])
+		}
+		mEmpty := modelToConfigMap(&agent.AgentConfig{}, "")
+		if v, ok := mEmpty["effort"].(string); !ok || v != "" {
+			t.Fatalf(`m["effort"] = %#v, want "" (always-present key)`, mEmpty["effort"])
+		}
+	})
+}
+
 // TestMaxSessionQueriesConfigKeys locks the issue #111 rename: the config map
 // speaks maxSessionQueries only, and legacy maxSessionTurns requests are
 // rejected at the unpack entry before any field is applied (no partial
@@ -305,6 +358,7 @@ func setupAgentKnowledgeAuthTestDB(t *testing.T) *gorm.DB {
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
+			effort TEXT DEFAULT '',
 			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',

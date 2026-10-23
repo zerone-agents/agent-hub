@@ -522,10 +522,42 @@ func (s *AgentService) UpdateAgent(tenantID, name string, input *UpdateAgentInpu
 	return s.GetAgent(tenantID, name)
 }
 
+// validateUpdateConfig validates an update payload, injecting the agent's
+// stored provider/model binding when the payload carries an effort key but
+// no providerId (issue #226 review fix). The main UI path (AgentForm)
+// submits config without providerId/modelId — model binding is set through
+// other entry points — so a bare-payload validation would never run the
+// effort whitelist: an out-of-declaration effort would silently store and
+// only fail at deploy time, one screen too late. The injection is a shallow
+// copy consulted only when the payload omits providerId; every other
+// validation (fieldOverrides provider requirement included) behaves exactly
+// as before. unpackConfigToModel still consumes the original payload, so
+// absent-key-stays semantics are unchanged.
+func validateUpdateConfig(cfg *agent.AgentConfig, payload map[string]interface{}) error {
+	if _, hasEffort := payload["effort"]; !hasEffort {
+		return ValidateConfig(payload)
+	}
+	if _, hasProvider := payload["providerId"]; hasProvider || cfg.ProviderID == nil {
+		return ValidateConfig(payload)
+	}
+	merged := make(map[string]interface{}, len(payload)+3)
+	for k, v := range payload {
+		merged[k] = v
+	}
+	merged["providerId"] = float64(*cfg.ProviderID)
+	if _, has := merged["modelId"]; !has {
+		merged["modelId"] = cfg.ModelID
+	}
+	if _, has := merged["modelSelectionId"]; !has {
+		merged["modelSelectionId"] = cfg.ModelSelectionID
+	}
+	return ValidateConfig(merged)
+}
+
 // applyUpdateConfig applies the update input fields to an existing agent config.
 func (s *AgentService) applyUpdateConfig(tenantID string, cfg *agent.AgentConfig, input *UpdateAgentInput) error {
 	if input.Config != nil {
-		if err := ValidateConfig(*input.Config); err != nil {
+		if err := validateUpdateConfig(cfg, *input.Config); err != nil {
 			return err
 		}
 		if err := unpackConfigToModel(*input.Config, cfg, s.encryptionKey); err != nil {
@@ -679,6 +711,13 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MaxSessionQueries = &n
 	}
 
+	// Handle effort（issue #226）：显式传 string 即写（trim 后空串 = 清除
+	// 设置）；absent key 保持不动，与 maxSessionQueries 同惯例。trim 在解包
+	// 侧统一做，存储/下发值始终是去空白形态。
+	if v, ok := config["effort"].(string); ok {
+		cfg.Effort = strings.TrimSpace(v)
+	}
+
 	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
 	// trimming and boundary rules all live in parseDisallowedTools — the
 	// single source shared with ValidateConfig — so the stored/deployed
@@ -764,6 +803,9 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 	} else {
 		m["maxSessionQueries"] = nil
 	}
+
+	// effort（issue #226）：无条件携带，空串 = 未设置（前端按空串显示未配置）。
+	m["effort"] = cfg.Effort
 
 	if cfg.DisallowedTools != nil {
 		m["disallowedTools"] = cfg.DisallowedTools

@@ -169,6 +169,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.ModelID = "root-model"
 		c.PermissionMode = "plan"
 		c.MaxSessionQueries = intPtr(42)
+		c.Effort = "high"
 		c.Description = map[string]string{"zh": "父 Agent", "en": "parent agent"}
 		c.DisallowedTools = []string{"Bash"}
 	})
@@ -178,6 +179,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.ModelID = "child-a-model-must-not-leak"
 		c.PermissionMode = "bypassPermissions"
 		c.MaxSessionQueries = intPtr(99)
+		c.Effort = "child-a-effort-must-not-leak"
 		// Agent-local deny list (issue #111 F3a): children carry their own.
 		c.DisallowedTools = []string{"WebSearch", "mcp__knowledge__lookup"}
 	})
@@ -361,14 +363,17 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		}
 	})
 
-	t.Run("4: model/maxSessionQueries/permissionMode are root-only", func(t *testing.T) {
+	t.Run("4: model/maxSessionQueries/permissionMode/effort are root-only", func(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
 		nodes := graphAgents(t, body)
 		root := nodes[0]
 		require.Equal(t, "root-model", root["model"])
 		require.Equal(t, "plan", root["permissionMode"])
+		// effort（issue #226）：root 携带 DB 值；child 的值被 deployer 视为
+		// runtime-global 声明而 400，所以 wire 上必须缺席。
+		require.Equal(t, "high", root["effort"])
 		for _, child := range nodes[1:] {
-			for _, key := range []string{"model", "maxSessionQueries", "permissionMode"} {
+			for _, key := range []string{"model", "maxSessionQueries", "permissionMode", "effort"} {
 				require.NotContains(t, child, key, "child node must not declare root-only key %q", key)
 			}
 		}

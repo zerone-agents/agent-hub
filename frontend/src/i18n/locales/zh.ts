@@ -24,6 +24,9 @@ const zh = {
   apiErrors: {
     knowledgeServiceName: '知识库服务',
     requestFailed: '请求失败',
+    // effort（issue #226）：zh 值与后端原文逐字一致（P5 双写契约，单形态码）
+    effortTooLong: 'effort 长度不能超过 32 个字符',
+    effortNotDeclared: "effort '{{effort}}' 不在模型 {{model}} 声明的候选列表内",
     unauthorized: '登录已过期，请重新登录',
     forbidden: '没有权限执行此操作',
     notFound: '资源不存在或已被删除',
@@ -488,6 +491,9 @@ const zh = {
       maxTurns: '最大轮次',
       maxSessionQueries: '会话查询数上限',
       maxSessionQueriesTip: '控制单个会话内的最大查询次数，留空表示无限制',
+      effort: '推理强度',
+      effortTip: '下发到模型的推理强度档位；候选跟随模型声明的 efforts，无声明时可填自定义值',
+      effortPh: '如 high，或自定义值',
       noLimit: '无限制',
       disallowedTools: '禁用工具',
       disallowedToolsTip: '在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名',

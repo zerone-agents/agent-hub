@@ -31,13 +31,17 @@ type AgentConfig struct {
 	IsDefault         bool              `gorm:"column:is_default;default:false"`
 	Group             string            `gorm:"column:group_name;type:varchar(64);default:''"`
 	MaxSessionQueries *int              `gorm:"column:max_session_queries;type:int;default:null"`
-	DisallowedTools   []string          `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
-	RuntimePort       int               `gorm:"column:runtime_port;default:0"`
-	DeploymentStatus  string            `gorm:"column:deployment_status;type:varchar(32);default:''"`
-	DeployedAt        *time.Time        `gorm:"column:deployed_at"`
-	RuntimeToken      string            `gorm:"column:runtime_token;type:text"` // AES-GCM encrypted, write-only from DB POV
-	CreatedAt         time.Time         `gorm:"column:created_at"`
-	UpdatedAt         time.Time         `gorm:"column:updated_at;index"`
+	// Effort 推理强度档位（issue #226）：SDK AgentOptions.effort 的单值透传
+	// （预设 low|medium|high|xhigh|max 或自定义值）；空串 = 未设置。下发
+	// root-only（deployer 拒 child 声明），声明 effort 要求 runtime >= v2.9.0。
+	Effort           string     `gorm:"column:effort;type:varchar(32);default:''"`
+	DisallowedTools  []string   `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
+	RuntimePort      int        `gorm:"column:runtime_port;default:0"`
+	DeploymentStatus string     `gorm:"column:deployment_status;type:varchar(32);default:''"`
+	DeployedAt       *time.Time `gorm:"column:deployed_at"`
+	RuntimeToken     string     `gorm:"column:runtime_token;type:text"` // AES-GCM encrypted, write-only from DB POV
+	CreatedAt        time.Time  `gorm:"column:created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;index"`
 }
 
 func (AgentConfig) TableName() string {

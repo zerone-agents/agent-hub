@@ -47,6 +47,7 @@ func setupAgentRepoTestDB(t *testing.T) *gorm.DB {
 			is_default INTEGER DEFAULT 0,
 			group_name VARCHAR(64) DEFAULT '',
 			max_session_queries INTEGER,
+			effort TEXT DEFAULT '',
 			disallowed_tools TEXT,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',
