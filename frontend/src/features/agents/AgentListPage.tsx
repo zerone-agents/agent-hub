@@ -117,6 +117,8 @@ export default function AgentListPage() {
   const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
   const [selectedModelId, setSelectedModelId] = useState<string>('')
   const [selectedSelectionId, setSelectedSelectionId] = useState<string>('')
+  // 推理强度（issue #226）：模型配置弹窗内的单值档位，'' = 未设置/清除
+  const [selectedEffort, setSelectedEffort] = useState<string>('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [initialApiKey, setInitialApiKey] = useState<string>('') // masked api_key from backend
   const [testPassed, setTestPassed] = useState(false)
@@ -345,6 +347,7 @@ export default function AgentListPage() {
     setSelectedProviderId(pid)
     setSelectedModelId(mid)
     setSelectedSelectionId(sid)
+    setSelectedEffort(agent.config.effort ?? '')
     setTestPassed(false)
     setTesting(false)
     setSaving(false)
@@ -407,6 +410,7 @@ export default function AgentListPage() {
     setSelectedProviderId(value)
     setSelectedModelId('')
     setSelectedSelectionId('')
+    setSelectedEffort('')
     setFieldValues(initial)
   }
 
@@ -482,6 +486,8 @@ export default function AgentListPage() {
             modelId: selectedModelId,
             modelSelectionId: selectedSelectionId,
             fieldOverrides: overrides,
+            // 恒带 key：'' = 显式清除（hub 对 absent key 不变更，丢 key 会让清除静默失效）
+            effort: selectedEffort,
           }
         }
       })
@@ -563,6 +569,19 @@ export default function AgentListPage() {
     () => modelSuggestions.find(m => (selectedSelectionId ? m.selectionId === selectedSelectionId : m.value === selectedModelId)),
     [modelSuggestions, selectedSelectionId, selectedModelId],
   )
+
+  // effort 候选（issue #226）：当前绑定模型声明的 efforts。有声明 → 候选过滤；
+  // 无声明/自定义输入模型 → 空候选仍可自由输入（SDK「预设+自定义透传」语义，
+  // 声明外值由 hub 保存侧白名单拦截）。
+  const declaredModelEfforts = useMemo(() => {
+    if (!selectedProviderId) return []
+    const provider = providers.find(p => p.id === selectedProviderId)
+    if (!provider) return []
+    const model = provider.defaultModels.find(m =>
+      selectedSelectionId ? m.selectionId === selectedSelectionId : m.modelId === selectedModelId
+    )
+    return model?.efforts ?? []
+  }, [providers, selectedProviderId, selectedSelectionId, selectedModelId])
 
   // Reverse-lookup map: 主键 `providerId::selectionId`，次键 `providerId::modelId`
   // （兼容存量 agent 没存 selectionId 的情况；同 modelId 多条记录时取最后一条）。
@@ -995,6 +1014,25 @@ export default function AgentListPage() {
                       setModelDropdownOpen(false)
                     }
                   }}
+                />
+              </div>
+            )}
+
+            {/* Effort（issue #226）：候选跟随当前模型声明的 efforts，无声明可自由输入 */}
+            {selectedProviderId && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {t('agents.form.effort')}
+                </label>
+                <AutoComplete
+                  style={{ width: '100%' }}
+                  size="large"
+                  placeholder={t('agents.form.effortPh')}
+                  disabled={!canWrite}
+                  value={selectedEffort}
+                  onChange={(value) => { setSelectedEffort(value) }}
+                  options={declaredModelEfforts.map((e) => ({ value: e }))}
+                  allowClear
                 />
               </div>
             )}
