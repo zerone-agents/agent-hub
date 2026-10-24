@@ -125,8 +125,16 @@ func (c *RemoteMultiragEngine) KnowledgePage(ctx context.Context, r domain.PageR
 		case "connector-logs":
 			path += "/logs"
 		case "connector-resume":
-			path += "/resume"
-			method = http.MethodPost
+			resume, ok := r.Body["resume"].(bool)
+			if !ok {
+				return nil, domain.NewBadRequestError("resume 必须为布尔值")
+			}
+			status := "2"
+			if resume {
+				status = "5"
+			}
+			method = http.MethodPatch
+			r.Body = domain.Object{"status": status}
 		case "connector-rebuild":
 			path += "/rebuild"
 			method = http.MethodPost
