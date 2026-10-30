@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -47,6 +48,28 @@ func (r *ChatRepository) PushSessions(tenantID, userID string, sessions []*chat.
 		for i, sess := range sessions {
 			sess.UserID = userID
 			sess.TenantID = tenantID
+
+			// v2 写入隔离（issue #232 H2）：已 claim / 已同步 / 已删除的同步键
+			// 拒绝 v1 写入（旧 App 回写保护）。锁序与 claim/apply 一致（状态行
+			// → 会话行）：MySQL 锁定读会等待未提交的占位插入，消除检查后写入
+			// 竞态；SQLite 靠单写者序列化。
+			var syncRow chat.SessionSyncState
+			syncQ := tx.Where("tenant_id = ? AND user_id = ? AND session_id = ?", tenantID, userID, sess.ID)
+			if tx.Dialector.Name() == "mysql" {
+				syncQ = syncQ.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			syncErr := syncQ.First(&syncRow).Error
+			if syncErr == nil {
+				result.SkippedSessions++
+				result.Conflicts = append(result.Conflicts, ConflictInfo{
+					SessionID:  sess.ID,
+					Resolution: "skipped: session_managed_by_sync_v2",
+				})
+				continue
+			}
+			if !errors.Is(syncErr, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to query sync state for session %s: %w", sess.ID, syncErr)
+			}
 
 			var existing chat.Session
 			err := TenantOwned(tx, tenantID).Where("user_id = ? AND id = ?", userID, sess.ID).First(&existing).Error
@@ -235,7 +258,11 @@ func (r *ChatRepository) ListMessages(tenantID, sessionID string, page, pageSize
 
 	var messages []*chat.Message
 	offset := (page - 1) * pageSize
+	// v2 同步会话按 sync_ordinal 稳定排序（同 timestamp / created_at 与序
+	// 相逆时仍按快照序）；NULL（v1 legacy 会话全 NULL）在 ASC 下排前且互
+	// 相回退 created_at 排序——两类会话不会混排（claim 后 v1 写入被拒）。
 	err := TenantOwned(r.db, tenantID).Where("session_id = ?", sessionID).
+		Order("sync_ordinal ASC").
 		Order("created_at ASC").
 		Offset(offset).Limit(pageSize).
 		Find(&messages).Error
@@ -295,7 +322,29 @@ func (r *ChatRepository) GetSessionForUser(tenantID, sessionID, userID string) (
 
 // CreateSession inserts a new session. The tenant is always stamped from the
 // tenantID argument — the caller-provided model value is not trusted.
+// syncManagedErr：会话是否由 v2 同步管理（存在任意 sync-state 行即受管，
+// 返回 chat.ErrSyncManagedSession）。UpdateSessionTitle / DeleteMessageByID
+// 无 user 参数——v1 模型下 user 与 tenant 1:1（见 PushSessions 注释），按
+// tenant+session 判定即可；CreateMessage/CreateSession 携带 user 时精确到
+// user（跨用户同名 session id 不误伤）。
+func syncManagedErr(tx *gorm.DB, tenantID, userID, sessionID string) error {
+	q := tx.Where("tenant_id = ? AND session_id = ?", tenantID, sessionID)
+	if userID != "" {
+		q = q.Where("user_id = ?", userID)
+	}
+	var row chat.SessionSyncState
+	if err := q.First(&row).Error; err == nil {
+		return chat.ErrSyncManagedSession
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return nil
+}
+
 func (r *ChatRepository) CreateSession(tenantID string, sess *chat.Session) error {
+	if err := syncManagedErr(r.db, tenantID, sess.UserID, sess.ID); err != nil {
+		return err
+	}
 	sess.TenantID = tenantID
 	return r.db.Create(sess).Error
 }
@@ -303,6 +352,9 @@ func (r *ChatRepository) CreateSession(tenantID string, sess *chat.Session) erro
 // CreateMessage inserts a new message. The tenant is always stamped from the
 // tenantID argument — the caller-provided model value is not trusted.
 func (r *ChatRepository) CreateMessage(tenantID string, msg *chat.Message) error {
+	if err := syncManagedErr(r.db, tenantID, msg.UserID, msg.SessionID); err != nil {
+		return err
+	}
 	msg.TenantID = tenantID
 	return r.db.Create(msg).Error
 }
@@ -322,6 +374,9 @@ func (r *ChatRepository) UpdateSessionRuntimeSessionID(tenantID, sessionID, runt
 // UpdateSessionTitle updates the title of a chat session. The title is only
 // overwritten when the current title is empty, preserving any user-edited title.
 func (r *ChatRepository) UpdateSessionTitle(tenantID, sessionID, title string) error {
+	if err := syncManagedErr(r.db, tenantID, "", sessionID); err != nil {
+		return err
+	}
 	return TenantOwned(r.db.Model(&chat.Session{}), tenantID).
 		Where("id = ? AND (title IS NULL OR title = '')", sessionID).
 		Update("title", title).Error
@@ -372,5 +427,8 @@ func (r *ChatRepository) HasUploadRecordPath(tenantID, sessionID, path, containe
 // DeleteMessageByID deletes one message of a session (used to roll back the
 // optimistic user-message persist when the runtime rejects the run).
 func (r *ChatRepository) DeleteMessageByID(tenantID, sessionID, messageID string) error {
+	if err := syncManagedErr(r.db, tenantID, "", sessionID); err != nil {
+		return err
+	}
 	return TenantOwned(r.db, tenantID).Where("session_id = ? AND id = ?", sessionID, messageID).Delete(&chat.Message{}).Error
 }

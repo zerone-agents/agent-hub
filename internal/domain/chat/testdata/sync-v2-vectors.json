@@ -1,0 +1,198 @@
+{
+  "protocolVersion": 2,
+  "projectionVersion": 1,
+  "generatedBy": "python rfc8785 (independent reference; NOT the Go code under test)",
+  "rfc8785": [
+    {
+      "name": "rfc8785-0",
+      "input": "{\"a\":1e30}",
+      "sha256": "13f5594124c542d1d3091a0e228882d3409631813988bbd5ef6ad05824cef6b3"
+    },
+    {
+      "name": "rfc8785-1",
+      "input": "{\"b\":1.0000000000000002}",
+      "sha256": "305d17d4fcbd85c431385ddc9fa422860c9639daafa12b48fd48e1b299b9308c"
+    },
+    {
+      "name": "rfc8785-2",
+      "input": "{\"c\":1000000000000000100}",
+      "sha256": "aa7eea7bc7951148bbe4df8c1152d940ab9f89359447d708689556d43bf1ec5b"
+    },
+    {
+      "name": "rfc8785-3",
+      "input": "{\"d\":0.000001}",
+      "sha256": "cb58bf8f0d8570d3d68def8b57b33981e5ed3a9fcbcff5e95e0a4d1fa928d892"
+    },
+    {
+      "name": "rfc8785-4",
+      "input": "{\"e\":333333333.33333329}",
+      "sha256": "0395e3b50b1a3800a89b8bd7c9ac3899450b58399b6cb7d14896111729ffe259"
+    },
+    {
+      "name": "rfc8785-5",
+      "input": "{\"zh\":\"中文\",\"emoji\":\"😀\",\"esc\":\"line1\\nline2\\t\\\"q\\\"\"}",
+      "sha256": "dfbe524c5d0a05b5c6a7b7fffab610fb5b1e4c7784645a1ed515762f60c41486"
+    }
+  ],
+  "accept": [
+    {
+      "name": "replace-basic",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8\"}",
+      "digest": "3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8",
+      "version": "7"
+    },
+    {
+      "name": "replace-key-order",
+      "raw": "{\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"kind\":\"replace\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"version\":\"7\",\"appSessionId\":\"session-alpha-001\",\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"projectionVersion\":1,\"protocolVersion\":2,\"digest\":\"3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8\"}",
+      "digest": "3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8",
+      "version": "7",
+      "digestEquals": "replace-basic"
+    },
+    {
+      "name": "replace-unicode-escapes",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"8\",\"snapshotId\":\"11112222-3333-4444-5555-666677778888\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"转义 \\\"测试\\\" \\\\ 反斜杠 😀 中文\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"line1\\nline\\t2 \\u0007 bell\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"quote \\\" and back\\\\slash and 😀 and 中文\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"multi\\nline\\ttab\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1}]},\"digest\":\"57b03fdbd04adbee03e57d5230580f817efec9686a024ed8b2d6171ef1948499\"}",
+      "digest": "57b03fdbd04adbee03e57d5230580f817efec9686a024ed8b2d6171ef1948499",
+      "version": "8"
+    },
+    {
+      "name": "replace-empty-messages",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"1\",\"snapshotId\":\"aaaa0000-0000-4000-8000-00000000000d\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[]},\"digest\":\"95c66b688172a363a622274a49ae671039578814868d0dbb3e41684a6c269bca\"}",
+      "digest": "95c66b688172a363a622274a49ae671039578814868d0dbb3e41684a6c269bca",
+      "version": "1"
+    },
+    {
+      "name": "replace-max-version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"9223372036854775807\",\"snapshotId\":\"beefbeef-cafe-4000-8000-feedfacecafe\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"max version\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0}]},\"digest\":\"6dac16b3b8dfc55c90d517e9bf21cc9720e9f4096746161a322b37c9fc295e57\"}",
+      "digest": "6dac16b3b8dfc55c90d517e9bf21cc9720e9f4096746161a322b37c9fc295e57",
+      "version": "9223372036854775807"
+    },
+    {
+      "name": "delete-basic",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"9\",\"snapshotId\":\"deaddead-0000-4000-8000-1ead5e555e55\",\"kind\":\"delete\",\"payload\":null,\"digest\":\"3d31c1c1af14c826c96d88bcee73fc4530c9b2d8049aa19990b21a46dd662d3d\"}",
+      "digest": "3d31c1c1af14c826c96d88bcee73fc4530c9b2d8049aa19990b21a46dd662d3d",
+      "version": "9"
+    }
+  ],
+  "reject": [
+    {
+      "name": "duplicate-key",
+      "reason": "duplicate key",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"1\",\"version\":\"2\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":null,\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "unknown-field",
+      "reason": "unknown field",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"extra\":1,\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "version-overflow",
+      "reason": "version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"9223372036854775808\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "version-leading-zero",
+      "reason": "version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"007\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "version-zero",
+      "reason": "version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"0\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "version-not-string",
+      "reason": "version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":7,\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "version-exponent",
+      "reason": "version",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"1e3\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "kind-invalid",
+      "reason": "kind",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"upsert\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "protocol-unsupported",
+      "reason": "protocolVersion",
+      "raw": "{\"protocolVersion\":3,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "projection-unsupported",
+      "reason": "projectionVersion",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":0,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "source-id-not-uuid",
+      "reason": "sourceId",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"not-a-uuid\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "snapshot-id-uppercase",
+      "reason": "snapshotId",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0F8B3C2A-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "digest-uppercase",
+      "reason": "digest",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}"
+    },
+    {
+      "name": "digest-short",
+      "reason": "digest",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"000000000000000000000000000000000000000000000000000000000000000\"}"
+    },
+    {
+      "name": "digest-mismatch",
+      "reason": "digest mismatch",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"}"
+    },
+    {
+      "name": "digest-missing",
+      "reason": "digest",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]}}"
+    },
+    {
+      "name": "delete-payload-not-null",
+      "reason": "payload",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"9\",\"snapshotId\":\"deaddead-0000-4000-8000-1ead5e555e55\",\"kind\":\"delete\",\"payload\":{},\"digest\":\"a3d122f08e2de58a6f27c723b0de177d8e0274fcf09ecc08d5a0fed8a072ea7e\"}"
+    },
+    {
+      "name": "replace-payload-missing-messages",
+      "reason": "payload",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true}},\"digest\":\"071a371fc9189aaa7747cc2d81eab49093820f9400e122f659f4672c0399a283\"}"
+    },
+    {
+      "name": "ordinal-gap",
+      "reason": "ordinal",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"m0\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"m2\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"dfb43b2f789124034946f81060e32c6d0320fba1fb1d22dc42701a03966c0cd0\"}"
+    },
+    {
+      "name": "ordinal-not-from-zero",
+      "reason": "ordinal",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-001\",\"role\":\"user\",\"content\":\"m1\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"m2\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"0965ccc27d27d1d253cf683002eeaba3a33c44584f69428933f562c18a706c95\"}"
+    },
+    {
+      "name": "nan-literal",
+      "reason": "invalid character",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"m1\",\"role\":\"user\",\"content\":\"x\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"\",\"feedback\":\"\",\"ordinal\":NaN}]},\"digest\":\"3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8\"}"
+    },
+    {
+      "name": "trailing-object",
+      "reason": "trailing content",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"7\",\"snapshotId\":\"0f8b3c2a-1111-4222-8333-444455556666\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[{\"id\":\"msg-000\",\"role\":\"user\",\"content\":\"帮我看下这份计划😀\",\"created_at\":\"2026-10-01T09:00:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":0}\",\"feedback\":\"\",\"ordinal\":0},{\"id\":\"msg-001\",\"role\":\"assistant\",\"content\":\"好的，先给结论：\\n1. \\\"范围\\\" 偏大\\n\\t建议拆分\",\"created_at\":\"2026-10-01T09:01:00Z\",\"hidden\":false,\"token_usage\":\"{\\\"total\\\":1}\",\"feedback\":\"\",\"ordinal\":1},{\"id\":\"msg-002\",\"role\":\"user\",\"content\":\"同意，拆成两期\",\"created_at\":\"2026-10-01T09:02:00Z\",\"hidden\":true,\"token_usage\":\"{\\\"total\\\":2}\",\"feedback\":\"\",\"ordinal\":2}]},\"digest\":\"3e3e11c170dd332bfb851eeebddbc78f31bff3098952ef935357607d41fa92c8\"} {\"x\":1}"
+    },
+    {
+      "name": "session-id-mismatch",
+      "reason": "session id",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"another-session\",\"title\":\"计划评审\",\"created_at\":\"2026-10-01T09:00:00Z\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[]},\"digest\":\"fb4062f3efc0fdcdd4a4900d0bb5f4234ca9c67911a2ebebaf285e4549229ad5\"}"
+    },
+    {
+      "name": "session-created-at-empty",
+      "reason": "created_at",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[]},\"digest\":\"9a8d8968b0bb86bdd1c5749d3b21a81bc94a398e3075160f6797f1c3c3ab1256\"}"
+    }
+  ]
+}

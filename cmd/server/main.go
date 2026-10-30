@@ -598,6 +598,21 @@ func main() {
 		adminChatReadGroup.DELETE("/sessions/:id", chatHandler.DeleteSession)
 	}
 
+	// ---------- Chat Sync v2（issue #232）----------
+	// App → Hub 单向快照同步协议（版本化全量快照 + 永久 tombstone）。
+	// JWT/CLI 用户身份：sourceId 不是身份凭证，不开放无用户身份的
+	// push-key 通道；guest 由 GuestGuard 拦截；同步键自带 owner 范围，
+	// 无需管理角色（member 即 App 用户本人）。serverIdentity 复用
+	// ChatPushPublicURL（hub 对外可达 base URL，部署身份）。
+	chatSyncHandler := handler.NewChatSyncHandler(services.NewChatSyncService(cfg.ChatPush.PublicURL))
+	syncV2 := r.Group("/api/v2/chat/sync", middleware.JWTAuthWithCLI(cliTokenSvc, authProvider), jwtutil.GuestGuard())
+	{
+		syncV2.GET("/capabilities", chatSyncHandler.Capabilities)
+		syncV2.POST("/sessions/:id/claim", chatSyncHandler.Claim)
+		syncV2.PUT("/sessions/:id", chatSyncHandler.Apply)
+		syncV2.GET("/sessions/:id", chatSyncHandler.GetState)
+	}
+
 	// ---------- AIGC 标识配置 ----------
 	// 全部端点含敏感配置（密钥），整体留 write 组，member 不开放
 	adminAigcGroup := adminWrite.Group("/aigc")

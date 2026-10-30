@@ -268,6 +268,13 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	msg, err := h.svc.SaveUserMessage(tenantID, userID, sessionID, req.Content, req.Attachments)
 	if err != nil {
+		// v2 同步管理的会话：正文以 App 端为准，不接受绕过协议的直接消息
+		//（issue #232 复审建议）——409 + 明确文案，避免误导性的「会话不存在」。
+		if errors.Is(err, chat.ErrSyncManagedSession) {
+			respondError(c, http.StatusConflict, ErrCodeConflict,
+				"该会话由云同步管理，消息以 App 端为准，云端不接受直接发送")
+			return
+		}
 		log.Printf("[chat] save user message failed: tenant=%s session=%s user=%s err=%v",
 			tenantID, sessionID, userID, err)
 		respondError(c, http.StatusNotFound, ErrCodeSessionNotFound, "会话不存在")
