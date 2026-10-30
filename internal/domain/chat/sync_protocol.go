@@ -73,7 +73,9 @@ const (
 )
 
 // SyncSessionPayload：v2 会话元数据。字段集 = v1 SessionInput 去掉 messages /
-// user_name / org（身份只取认证上下文，不信任 body）。
+// user_name / org（身份只取认证上下文，不信任 body）。agent_id 属 v1 元数据
+// （v1 push 同步该字段），必须携带——否则 replace 会清空 agent 绑定、破坏
+// agent chat 的归属校验。
 type SyncSessionPayload struct {
 	ID                string `json:"id"`
 	Title             string `json:"title"`

@@ -46,7 +46,16 @@ func setupSyncMySQLDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+		// 评审补充（S8 后续）：唯一库名的专用库用后即删，不在共享实例残留
+		if admin, aerr := gorm.Open(mysql.Open(dsn), &gorm.Config{}); aerr == nil {
+			_ = admin.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbName)).Error
+			if sqlA, cerr := admin.DB(); cerr == nil {
+				_ = sqlA.Close()
+			}
+		}
+	})
 
 	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}))
 	// ChatRepository 经全局 database.GetDB() 取库

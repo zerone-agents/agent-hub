@@ -117,6 +117,7 @@ func syncEnvelopeBody(t *testing.T, sourceID, sessionID string, version int64, k
 			Session: chat.SyncSessionPayload{
 				ID: sessionID, Title: fmt.Sprintf("t-v%d", version),
 				CreatedAt: "2026-10-01T00:00:00Z", UpdatedAt: "2026-10-02T00:00:00Z",
+				AgentID: "agent-1", // SendMessage 归属校验按会话 agent_id 判定
 			},
 			Messages: []chat.SyncMessagePayload{},
 		}
