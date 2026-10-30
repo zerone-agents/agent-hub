@@ -166,6 +166,10 @@ var (
 	digestPattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
+// IsValidSyncUUID：小写规范 UUID（sourceId / snapshotId 的公共形态约束，
+// claim 入口复用于 sourceId 校验）。
+func IsValidSyncUUID(s string) bool { return uuidPattern.MatchString(s) }
+
 // wireEnvelope 是传输层形状（version 为字符串）；仅用于解码与摘要重建。
 type wireEnvelope struct {
 	ProtocolVersion   int64           `json:"protocolVersion"`
