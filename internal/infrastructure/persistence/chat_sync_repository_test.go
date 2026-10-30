@@ -28,7 +28,7 @@ func setupSyncTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}, &chat.UploadRecord{}))
 	// ChatRepository 经全局 database.GetDB() 取库（setupChatRepoTestDB 同款注入）
 	old := database.DB
 	database.DB = db

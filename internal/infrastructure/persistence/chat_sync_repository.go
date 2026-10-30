@@ -300,10 +300,12 @@ func replaceSyncedSession(tx *gorm.DB, owner chat.Owner, e chat.Envelope) error 
 		if err != nil {
 			return fmt.Errorf("message %s: invalid created_at: %w", m.ID, err)
 		}
+		ord := m.Ordinal // 逐条取址：写入 v2 展示序（读路径按其稳定排序）
 		msgs[i] = &chat.Message{
 			TenantID: owner.TenantID, UserID: owner.UserID, SessionID: e.AppSessionID,
 			ID: m.ID, Role: m.Role, Content: m.Content, CreatedAt: mc,
 			Hidden: m.Hidden, TokenUsage: m.TokenUsage, Feedback: m.Feedback,
+			SyncOrdinal: &ord,
 		}
 	}
 	if len(msgs) > 0 {

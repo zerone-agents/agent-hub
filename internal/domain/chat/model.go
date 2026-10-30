@@ -44,6 +44,11 @@ type Message struct {
 	TokenUsage string    `json:"token_usage" gorm:"type:text"`
 	Feedback   string    `json:"feedback" gorm:"type:text"`
 	Aigc       string    `json:"aigc" gorm:"type:text"`
+	// SyncOrdinal：v2 同步快照的展示序（契约 §6：消息排序由快照显式
+	// ordinal 决定，不靠 created_at）。v1 写入路径不设置（NULL），读路径
+	// 对 NULL（legacy 会话）回退 created_at 排序——会话要么全 v2 要么全
+	// legacy，混合形态不存在（v1 写入在 claim 后被拒）。
+	SyncOrdinal *int64 `json:"-" gorm:"column:sync_ordinal"`
 }
 
 func (Message) TableName() string { return "cloud_messages" }

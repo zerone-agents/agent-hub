@@ -258,7 +258,11 @@ func (r *ChatRepository) ListMessages(tenantID, sessionID string, page, pageSize
 
 	var messages []*chat.Message
 	offset := (page - 1) * pageSize
+	// v2 同步会话按 sync_ordinal 稳定排序（同 timestamp / created_at 与序
+	// 相逆时仍按快照序）；NULL（v1 legacy 会话全 NULL）在 ASC 下排前且互
+	// 相回退 created_at 排序——两类会话不会混排（claim 后 v1 写入被拒）。
 	err := TenantOwned(r.db, tenantID).Where("session_id = ?", sessionID).
+		Order("sync_ordinal ASC").
 		Order("created_at ASC").
 		Offset(offset).Limit(pageSize).
 		Find(&messages).Error
