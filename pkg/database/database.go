@@ -133,6 +133,7 @@ func AutoMigrate(backfillTenant string) error {
 		&skill.Skill{},
 		&chat.Session{},
 		&chat.Message{},
+		&chat.SessionSyncState{},
 		&chat.UploadRecord{},
 		&aigc.Config{},
 		&provider.ProviderSummary{},

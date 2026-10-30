@@ -134,7 +134,7 @@ func setupGuestVisibilityTestDB(t *testing.T) *gorm.DB {
 	} {
 		require.NoError(t, db.Exec(stmt).Error)
 	}
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.UploadRecord{}, &scene.Scene{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}, &chat.UploadRecord{}, &scene.Scene{}))
 
 	previousDB := database.DB
 	database.DB = db

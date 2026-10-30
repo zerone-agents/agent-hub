@@ -23,6 +23,7 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	jsoncanonicalizer "github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
@@ -32,6 +33,36 @@ const (
 	ProtocolVersion   int64 = 2
 	ProjectionVersion int64 = 1
 )
+
+// Owner：同步键的归属（target + 认证 tenant/user）。不来自 body——
+// 账号或 Hub 切换必须建立独立绑定（契约 §3）。
+type Owner struct {
+	TenantID string
+	UserID   string
+}
+
+// syncTimeFormats 与 v1（services/chat_service.go timeFormats）保持一致：
+// v2 载荷沿用 v1 的时间字符串形态，两端解析域必须相同。
+var syncTimeFormats = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.999Z07:00",
+	"2006-01-02T15:04:05Z07:00",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05.999 -0700 MST",
+	"2006-01-02 15:04:05 -0700 MST",
+	"2006-01-02 15:04:05",
+}
+
+// ParseSyncTime 解析 v2 载荷时间字段；全部格式不匹配时返回错误。
+func ParseSyncTime(s string) (time.Time, error) {
+	for _, f := range syncTimeFormats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
+}
 
 // Kind 是快照种类；delete 携带永久 tombstone（见契约 §8）。
 type Kind string
@@ -114,7 +145,9 @@ type Reply struct {
 	State  SyncState `json:"state"`
 }
 
-// 状态常量（Reply.Status / SyncState.Status）。
+// 状态常量（Reply.Status / SyncState.Status）。Status* 是 apply 的精确确认；
+// State* 是同步键的阶段状态；"deleted" 在两侧同名同值（tombstone 既是确认
+// 结果也是键的终态）。
 const (
 	StatusApplied      = "applied"
 	StatusDuplicate    = "duplicate"
@@ -124,6 +157,7 @@ const (
 	StateClaimedEmpty  = "claimed-empty"
 	StateClaimedLegacy = "claimed-legacy"
 	StateActive        = "active"
+	StateDeleted       = "deleted"
 )
 
 var (

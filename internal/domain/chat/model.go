@@ -47,3 +47,28 @@ type Message struct {
 }
 
 func (Message) TableName() string { return "cloud_messages" }
+
+// SessionSyncState：v2 同步键的权威状态行（tenant/user/session 唯一）。
+// version=0 是 claim 占位（claimed-empty / claimed-legacy，无快照身份）；
+// deleted=true 为永久 tombstone，identity 字段保留删除 envelope 的最小身份。
+// 该行是同步协议的 ownership/version 权威，不随 cloud_sessions 级联删除
+// （issue #232 契约 §8）。
+type SessionSyncState struct {
+	// 代理主键：业务唯一键是 (tenant_id, user_id, session_id) 唯一索引；
+	// 代理 ID 仅为 GORM 行更新（Save）提供定位。
+	ID          uint64 `gorm:"primaryKey;autoIncrement"`
+	TenantID    string `gorm:"type:varchar(64);not null;uniqueIndex:uk_session_sync_state,priority:1"`
+	UserID      string `gorm:"type:varchar(255);not null;uniqueIndex:uk_session_sync_state,priority:2"`
+	SessionID   string `gorm:"type:varchar(255);not null;uniqueIndex:uk_session_sync_state,priority:3"`
+	SourceID    string `gorm:"type:varchar(36);not null;default:''"`
+	Version     int64  `gorm:"not null;default:0"`
+	SnapshotID  string `gorm:"type:varchar(36);not null;default:''"`
+	Digest      string `gorm:"type:varchar(64);not null;default:''"`
+	Kind        string `gorm:"type:varchar(16);not null;default:''"`
+	LegacyClaim bool   `gorm:"not null;default:false"`
+	Deleted     bool   `gorm:"not null;default:false"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (SessionSyncState) TableName() string { return "session_sync_states" }

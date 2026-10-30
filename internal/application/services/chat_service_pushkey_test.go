@@ -17,7 +17,7 @@ func setupPushKeyTestDB(t *testing.T) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = old })

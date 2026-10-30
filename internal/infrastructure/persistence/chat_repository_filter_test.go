@@ -147,7 +147,7 @@ func TestChatSessionFilter_MySQLSmoke(t *testing.T) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: capLog})
 	require.NoError(t, err)
 	require.NoError(t, db.Migrator().DropTable(&chat.Message{}, &chat.Session{}))
-	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}))
+	require.NoError(t, db.AutoMigrate(&chat.Session{}, &chat.Message{}, &chat.SessionSyncState{}))
 	old := database.DB
 	database.DB = db
 	t.Cleanup(func() {

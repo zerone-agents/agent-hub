@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -47,6 +48,28 @@ func (r *ChatRepository) PushSessions(tenantID, userID string, sessions []*chat.
 		for i, sess := range sessions {
 			sess.UserID = userID
 			sess.TenantID = tenantID
+
+			// v2 写入隔离（issue #232 H2）：已 claim / 已同步 / 已删除的同步键
+			// 拒绝 v1 写入（旧 App 回写保护）。锁序与 claim/apply 一致（状态行
+			// → 会话行）：MySQL 锁定读会等待未提交的占位插入，消除检查后写入
+			// 竞态；SQLite 靠单写者序列化。
+			var syncRow chat.SessionSyncState
+			syncQ := tx.Where("tenant_id = ? AND user_id = ? AND session_id = ?", tenantID, userID, sess.ID)
+			if tx.Dialector.Name() == "mysql" {
+				syncQ = syncQ.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			syncErr := syncQ.First(&syncRow).Error
+			if syncErr == nil {
+				result.SkippedSessions++
+				result.Conflicts = append(result.Conflicts, ConflictInfo{
+					SessionID:  sess.ID,
+					Resolution: "skipped: session_managed_by_sync_v2",
+				})
+				continue
+			}
+			if !errors.Is(syncErr, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("failed to query sync state for session %s: %w", sess.ID, syncErr)
+			}
 
 			var existing chat.Session
 			err := TenantOwned(tx, tenantID).Where("user_id = ? AND id = ?", userID, sess.ID).First(&existing).Error
