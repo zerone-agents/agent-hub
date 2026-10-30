@@ -12,16 +12,8 @@ import (
 
 const maxSessionsPerPush = 50
 
-var timeFormats = []string{
-	time.RFC3339Nano,
-	time.RFC3339,
-	"2006-01-02T15:04:05.999Z07:00",
-	"2006-01-02T15:04:05Z07:00",
-	"2006-01-02T15:04:05",
-	"2006-01-02 15:04:05.999 -0700 MST",
-	"2006-01-02 15:04:05 -0700 MST",
-	"2006-01-02 15:04:05",
-}
+// 时间格式表已收敛至 chat 域（chat.ParseSyncTime，评审修订 S7）——v2 载荷
+// 与 v1 的时间字符串形态一致，解析域单一来源。
 
 type ChatService struct {
 	repo *repository.ChatRepository
@@ -407,11 +399,8 @@ func convertMessages(inputs []MessageInput) []*chat.Message {
 	return messages
 }
 
+// parseTime 复用 chat 域的同步时间解析（v2 载荷与 v1 时间字符串形态一致，
+// 解析域必须相同——评审修订 S7 消除双份格式表）。
 func parseTime(s string) (time.Time, error) {
-	for _, format := range timeFormats {
-		if t, err := time.Parse(format, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("cannot parse time: %s", s)
+	return chat.ParseSyncTime(s)
 }

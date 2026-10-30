@@ -183,6 +183,29 @@ func TestChatSyncClaimLegacyImportedAndV1Isolation(t *testing.T) {
 	require.Equal(t, int64(2), msgCount(t, db, owner, "s1"), "跳过时不得覆盖既有正文")
 }
 
+// 评审修订 B1（PR #233）：runtime/agent_chat 来源的会话不允许 claim（契约
+// §3：服务端必须验证它是该用户拥有的 App 来源会话）。来源判定用
+// Session.Source——agent chat 页面会话 Source="agent_chat_page"（services
+// 常量，跨层引用避免，此处字面量+注释），App v1 push 会话 Source=""。
+func TestChatSyncClaimRejectsRuntimeSourceSession(t *testing.T) {
+	db := setupSyncTestDB(t)
+	repo := NewChatSyncRepository(db)
+	owner := syncOwner("t1", "u1")
+
+	sess := &chat.Session{
+		TenantID: owner.TenantID, UserID: owner.UserID, ID: "s-agent",
+		Title: "agent chat", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Source: "agent_chat_page",
+	}
+	require.NoError(t, db.Create(sess).Error)
+
+	_, err := repo.Claim(context.Background(), owner, "s-agent", syncSrcA, "imported")
+	require.ErrorIs(t, err, chat.ErrSyncClaimConflict)
+
+	_, err = repo.GetState(context.Background(), owner, "s-agent")
+	require.ErrorIs(t, err, chat.ErrSyncNotFound, "冲突回滚：不留占位行")
+}
+
 func TestChatSyncClaimNativeOverV1Conflict(t *testing.T) {
 	db := setupSyncTestDB(t)
 	chatRepo := NewChatRepository()

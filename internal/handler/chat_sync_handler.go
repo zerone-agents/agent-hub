@@ -90,14 +90,15 @@ func (h *ChatSyncHandler) Apply(c *gin.Context) {
 	sessionID := c.Param("id")
 
 	// 大小限制：Content-Length 预检 + MaxBytesReader 兜底（谎报头部的长体）
-	// → 413，不分片、不部分替换。
+	// → 413，不分片、不部分替换。限额为本体 maxBytes（评审修订 S2：恰好超
+	// 一字节的体也必须 413，不得漏进解析层变 400）。
 	const maxBytes = services.SyncMaxRequestBytes
 	tooLarge := fmt.Sprintf("payload exceeds maxRequestBytes %d", maxBytes)
 	if c.Request.ContentLength > maxBytes {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "error": tooLarge})
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+1)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 	raw, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "error": tooLarge})

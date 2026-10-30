@@ -6,6 +6,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -26,11 +27,13 @@ func setupSyncMySQLDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("TEST_MYSQL_DSN 未设置，跳过 MySQL 同步并发测试")
 	}
-	// 管理连接：重建专用库（不用 USE——并发用例需要连接池多连接）
+	// 管理连接：重建专用库（不用 USE——并发用例需要连接池多连接）。库名按
+	// 运行时间唯一化（评审修订 S8：共享 DSN 下并行测试互不干扰）
+	dbName := fmt.Sprintf("hub_sync_v2_test_%d", time.Now().UnixNano())
 	admin, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, admin.Exec("DROP DATABASE IF EXISTS hub_sync_v2_test").Error)
-	require.NoError(t, admin.Exec("CREATE DATABASE hub_sync_v2_test CHARACTER SET utf8mb4").Error)
+	require.NoError(t, admin.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbName)).Error)
+	require.NoError(t, admin.Exec(fmt.Sprintf("CREATE DATABASE %s CHARACTER SET utf8mb4", dbName)).Error)
 	sqlAdmin, err := admin.DB()
 	require.NoError(t, err)
 	require.NoError(t, sqlAdmin.Close())
@@ -38,7 +41,7 @@ func setupSyncMySQLDB(t *testing.T) *gorm.DB {
 	// 改写 DSN 定位专用库（ParseDSN 兼容各 DSN 形态）
 	cfg, err := mysqldriver.ParseDSN(dsn)
 	require.NoError(t, err)
-	cfg.DBName = "hub_sync_v2_test"
+	cfg.DBName = dbName
 	db, err := gorm.Open(mysql.Open(cfg.FormatDSN()), &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()

@@ -307,6 +307,19 @@ func parseReplacePayload(payload json.RawMessage) (*ReplacePayload, error) {
 	if rp.Session.UpdatedAt == "" {
 		return nil, errors.New("invalid payload: session updated_at is required")
 	}
+	// 评审修订 S3：时间格式解析期校验（fail-fast 400）——apply 期解析保留为
+	// 防御性兜底。
+	if _, err := ParseSyncTime(rp.Session.CreatedAt); err != nil {
+		return nil, fmt.Errorf("invalid payload: session created_at %q: %w", rp.Session.CreatedAt, err)
+	}
+	if _, err := ParseSyncTime(rp.Session.UpdatedAt); err != nil {
+		return nil, fmt.Errorf("invalid payload: session updated_at %q: %w", rp.Session.UpdatedAt, err)
+	}
+	for i := range rp.Messages {
+		if _, err := ParseSyncTime(rp.Messages[i].CreatedAt); err != nil {
+			return nil, fmt.Errorf("invalid payload: messages[%d].created_at %q: %w", i, rp.Messages[i].CreatedAt, err)
+		}
+	}
 	for i := range rp.Messages {
 		m := &rp.Messages[i]
 		if m.ID == "" {
@@ -375,6 +388,7 @@ func checkJSONShape(raw []byte) error {
 		keys      map[string]struct{}
 	}
 	var stack []frame
+	sawTopObject := false // 顶层对象完成后，任何后续 token 均为尾随内容（评审探针 P5）
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -384,11 +398,15 @@ func checkJSONShape(raw []byte) error {
 			return fmt.Errorf("invalid JSON: %w", err)
 		}
 		if len(stack) == 0 {
-			if d, ok := tok.(json.Delim); ok && d == '{' {
-				stack = append(stack, frame{isObject: true, expectKey: true, keys: map[string]struct{}{}})
-				continue
+			if !sawTopObject {
+				if d, ok := tok.(json.Delim); ok && d == '{' {
+					sawTopObject = true
+					stack = append(stack, frame{isObject: true, expectKey: true, keys: map[string]struct{}{}})
+					continue
+				}
+				return errors.New("invalid JSON: envelope must be a single object")
 			}
-			return errors.New("invalid JSON: envelope must be a single object")
+			return errors.New("invalid JSON: trailing content after envelope")
 		}
 		switch t := tok.(type) {
 		case json.Delim:

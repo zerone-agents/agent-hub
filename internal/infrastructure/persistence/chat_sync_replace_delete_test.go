@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"control-panel/internal/domain/chat"
 
@@ -129,6 +130,98 @@ func TestChatSyncAtomicReplace(t *testing.T) {
 		listMsgIDs(t, chatRepo, "t1", "s1"), "同 timestamp 消息不得交换顺序")
 }
 
+// 评审修订 B2（PR #233）：source 校验必须先于 tombstone 分支——异 source 的
+// delete 不得推进墓碑身份（修复前 applied 且版本被推进）。
+func TestChatSyncTombstoneBlocksOtherSourceDelete(t *testing.T) {
+	db := setupSyncTestDB(t)
+	repo := NewChatSyncRepository(db)
+	owner := syncOwner("t1", "u1")
+	ctx := context.Background()
+
+	_, err := repo.Claim(ctx, owner, "s1", syncSrcA, "imported")
+	require.NoError(t, err)
+	_, err = repo.Apply(ctx, owner, mkEnvelopeRawMsgs(t, syncSrcA, "s1", 5, []chat.SyncMessagePayload{
+		syncMsg("s1-a", "A", "2026-10-01T00:00:00Z", 0),
+	}))
+	require.NoError(t, err)
+
+	// srcA 自己的 delete v7 建立永久 tombstone（对齐评审探针 P4 场景）
+	_, err = repo.Apply(ctx, owner, mkEnvelope(t, syncSrcA, "s1", 7, chat.KindDelete, 0))
+	require.NoError(t, err)
+
+	// 异 source 的 delete v9 → source 校验先于 tombstone 分支 → conflict
+	r, err := repo.Apply(ctx, owner, mkEnvelope(t, syncSrcB, "s1", 9, chat.KindDelete, 0))
+	require.NoError(t, err)
+	require.Equal(t, chat.StatusConflict, r.Status, "异 source 不得推进墓碑身份")
+
+	st, err := repo.GetState(ctx, owner, "s1")
+	require.NoError(t, err)
+	require.Equal(t, syncSrcA, st.SourceID, "墓碑归属不得被异 source 改写")
+	require.Equal(t, "7", st.Version, "墓碑版本不得被异 source 推进")
+}
+
+// 评审修订（重要项）：大批量消息单条 Create 超占位符上限（SQLite 32766 /
+// MySQL 65535）→ 长会话稳定失败；CreateInBatches 对齐 v1 路径。
+func TestChatSyncLargeBatchInsert(t *testing.T) {
+	db := setupSyncTestDB(t)
+	repo := NewChatSyncRepository(db)
+	owner := syncOwner("t1", "u1")
+	ctx := context.Background()
+
+	_, err := repo.Claim(ctx, owner, "s1", syncSrcA, "imported")
+	require.NoError(t, err)
+
+	const n = 3000
+	msgs := make([]chat.SyncMessagePayload, n)
+	for i := range msgs {
+		msgs[i] = syncMsg(fmt.Sprintf("s1-m%d", i), fmt.Sprintf("c%d", i), "2026-10-01T00:00:00Z", int64(i))
+	}
+	r, err := repo.Apply(ctx, owner, mkEnvelopeRawMsgs(t, syncSrcA, "s1", 1, msgs))
+	require.NoError(t, err, "大批量插入必须分批执行（占位符上限）")
+	require.Equal(t, chat.StatusApplied, r.Status)
+	require.EqualValues(t, n, msgCount(t, db, owner, "s1"))
+}
+
+// 评审修订 B3：v2 管理的会话不接受绕过协议的正文 mutation——CreateMessage /
+// UpdateSessionTitle / DeleteMessageByID / CreateSession 在存在 sync-state
+// 时拒绝（修复前 CreateMessage 的 NULL ordinal 会破坏展示顺序，评审探针 P2）。
+func TestChatSyncProtocolBypassGuards(t *testing.T) {
+	db := setupSyncTestDB(t)
+	chatRepo := NewChatRepository()
+	repo := NewChatSyncRepository(db)
+	owner := syncOwner("t1", "u1")
+	ctx := context.Background()
+
+	_, err := repo.Claim(ctx, owner, "s1", syncSrcA, "imported")
+	require.NoError(t, err)
+	_, err = repo.Apply(ctx, owner, mkEnvelopeRawMsgs(t, syncSrcA, "s1", 1, []chat.SyncMessagePayload{
+		syncMsg("s1-a", "A", "2026-10-01T00:00:00Z", 0),
+	}))
+	require.NoError(t, err)
+
+	err = chatRepo.CreateMessage("t1", &chat.Message{
+		TenantID: "t1", UserID: "u1", SessionID: "s1", ID: "rogue-1",
+		Role: "user", Content: "rogue", CreatedAt: time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, chat.ErrSyncManagedSession)
+
+	err = chatRepo.UpdateSessionTitle("t1", "s1", "hijacked")
+	require.ErrorIs(t, err, chat.ErrSyncManagedSession)
+
+	err = chatRepo.DeleteMessageByID("t1", "s1", "s1-a")
+	require.ErrorIs(t, err, chat.ErrSyncManagedSession)
+
+	err = chatRepo.CreateSession("t1", &chat.Session{
+		TenantID: "t1", UserID: "u1", ID: "s1",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	require.ErrorIs(t, err, chat.ErrSyncManagedSession)
+
+	// 全部拒绝后正文不变
+	require.Equal(t, []string{"s1-a"}, listMsgIDs(t, chatRepo, "t1", "s1"))
+}
+
+// TestChatSyncDeleteWins 验证……（见下）
 func TestChatSyncDeleteWins(t *testing.T) {
 	db := setupSyncTestDB(t)
 	chatRepo := NewChatRepository()
@@ -145,6 +238,12 @@ func TestChatSyncDeleteWins(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
+	// 评审修订 S5：会话有上传记录时，v2 delete 同时清掉（与 DeleteSession
+	// 语义一致——上传记录不得脱离会话存续）
+	ur := &chat.UploadRecord{ID: "ur-s1", TenantID: "t1", SessionID: "s1", UserID: "u1",
+		Name: "f.bin", CreatedAt: time.Now().UTC()}
+	require.NoError(t, db.Create(ur).Error)
+
 	delEnv := mkEnvelope(t, syncSrcA, "s1", 7, chat.KindDelete, 0)
 	r, err := repo.Apply(ctx, owner, delEnv)
 	require.NoError(t, err)
@@ -153,6 +252,9 @@ func TestChatSyncDeleteWins(t *testing.T) {
 	require.Equal(t, "7", r.State.Version)
 	require.Equal(t, chat.KindDelete, chat.Kind(r.State.Kind))
 	require.Empty(t, listMsgIDs(t, chatRepo, "t1", "s1"), "delete 后无正文")
+	var urCount int64
+	require.NoError(t, db.Model(&chat.UploadRecord{}).Where("session_id = ?", "s1").Count(&urCount).Error)
+	require.Zero(t, urCount, "评审修订 S5：v2 delete 同时清上传记录")
 
 	// 超时重试：同一 delete envelope 重发 → duplicate 且返回原删除身份
 	r, err = repo.Apply(ctx, owner, delEnv)

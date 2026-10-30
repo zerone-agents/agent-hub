@@ -45,8 +45,9 @@ func lockSyncRow(tx *gorm.DB, owner chat.Owner, sessionID string) (*chat.Session
 	return &row, nil
 }
 
-// lockSessionRow 锁读同键 v1 会话行；返回是否存在。
-func lockSessionRow(tx *gorm.DB, owner chat.Owner, sessionID string) (bool, error) {
+// lockSessionRow 锁读同键 v1 会话行；返回会话行（含 Source 来源判定用）
+// 与是否存在。
+func lockSessionRow(tx *gorm.DB, owner chat.Owner, sessionID string) (*chat.Session, bool, error) {
 	q := tx.Where("tenant_id = ? AND user_id = ? AND id = ?", owner.TenantID, owner.UserID, sessionID)
 	if tx.Dialector.Name() == "mysql" {
 		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
@@ -54,12 +55,12 @@ func lockSessionRow(tx *gorm.DB, owner chat.Owner, sessionID string) (bool, erro
 	var sess chat.Session
 	err := q.First(&sess).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	return true, nil
+	return &sess, true, nil
 }
 
 // isDuplicateKey 跨方言判定唯一约束冲突（MySQL 1062 Duplicate entry /
@@ -126,13 +127,16 @@ func (r *ChatSyncRepository) Claim(ctx context.Context, owner chat.Owner, sessio
 			out = stateOfRow(row)
 			return nil
 		}
-		// 新占位：锁读同键 v1 会话分类；native 接管 → 冲突回滚占位行
-		legacy, err := lockSessionRow(tx, owner, sessionID)
+		// 新占位：锁读同键 v1 会话分类；runtime/其他来源不可认领、native
+		// 接管 v1 → 冲突回滚占位行
+		legacySess, legacy, err := lockSessionRow(tx, owner, sessionID)
 		if err != nil {
 			return fmt.Errorf("check legacy session: %w", err)
 		}
 		if legacy {
-			if origin == "native" {
+			// 契约 §3：只有 App push 来源（Source 为空）的 v1 会话可被认领；
+			// runtime / agent_chat 等其他来源不允许 claim（评审 B1，探针 P3）。
+			if legacySess.Source != "" || origin == "native" {
 				return chat.ErrSyncClaimConflict
 			}
 			placeholder.LegacyClaim = true
@@ -165,6 +169,13 @@ func (r *ChatSyncRepository) Apply(ctx context.Context, owner chat.Owner, e chat
 		}
 		current := stateOfRow(row)
 
+		// source 校验先于 tombstone（评审 B2，探针 P4）：异 source 不得推进
+		// 墓碑身份——归属判定优先于一切阶段分支。
+		if row.SourceID != e.SourceID {
+			out = chat.Reply{Status: chat.StatusConflict, State: current}
+			return nil
+		}
+
 		// tombstone 已生效：replace 一律拒绝复活；delete 仅按版本推进身份
 		if row.Deleted {
 			switch {
@@ -187,11 +198,6 @@ func (r *ChatSyncRepository) Apply(ctx context.Context, owner chat.Owner, e chat
 				return fmt.Errorf("update tombstone: %w", err)
 			}
 			out = chat.Reply{Status: chat.StatusApplied, State: stateOfRow(row)}
-			return nil
-		}
-
-		if row.SourceID != e.SourceID {
-			out = chat.Reply{Status: chat.StatusConflict, State: current}
 			return nil
 		}
 
@@ -309,20 +315,28 @@ func replaceSyncedSession(tx *gorm.DB, owner chat.Owner, e chat.Envelope) error 
 		}
 	}
 	if len(msgs) > 0 {
-		if err := tx.Create(&msgs).Error; err != nil {
+		// 分批插入：长会话（数千条）单条 Create 会超占位符上限
+		//（SQLite 32766 / MySQL 65535），与 v1 路径同款分批（评审重要项）。
+		if err := tx.CreateInBatches(&msgs, 100).Error; err != nil {
 			return fmt.Errorf("insert messages for %s: %w", e.AppSessionID, err)
 		}
 	}
 	return nil
 }
 
-// removeSyncedSession：delete 应用路径——移除可见正文（会话 + 消息），
-// 状态行由 Apply 保留为 tombstone（不随内容删除）。
+// removeSyncedSession：delete 应用路径——移除可见正文（会话 + 消息 + 上传
+// 记录，上传记录不得脱离会话存续），状态行由 Apply 保留为 tombstone
+// （不随内容删除）。
 func removeSyncedSession(tx *gorm.DB, owner chat.Owner, sessionID string) error {
 	if err := TenantOwned(tx, owner.TenantID).
 		Where("user_id = ? AND session_id = ?", owner.UserID, sessionID).
 		Delete(&chat.Message{}).Error; err != nil {
 		return fmt.Errorf("delete messages for %s: %w", sessionID, err)
+	}
+	if err := TenantOwned(tx, owner.TenantID).
+		Where("user_id = ? AND session_id = ?", owner.UserID, sessionID).
+		Delete(&chat.UploadRecord{}).Error; err != nil {
+		return fmt.Errorf("delete upload records for %s: %w", sessionID, err)
 	}
 	if err := TenantOwned(tx, owner.TenantID).
 		Where("user_id = ? AND id = ?", owner.UserID, sessionID).

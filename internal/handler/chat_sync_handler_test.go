@@ -338,6 +338,73 @@ func TestChatSyncHandlerTooLarge(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, "body=%.200s", rec.Body.String())
 }
 
+// 评审修订 S2：谎报 Content-Length 的超限体必须 413——MaxBytesReader 限额
+// 应为本体 maxBytes（修复前 +1 使恰好超一字节的体漏进解析层变 400）。
+func TestChatSyncHandlerLyingContentLength413(t *testing.T) {
+	r, _ := setupChatSyncHandlerEnv(t)
+	huge := []byte(`{"pad":"` + strings.Repeat("x", int(services.SyncMaxRequestBytes)+1) + `"}`)
+	require.Greater(t, int64(len(huge)), services.SyncMaxRequestBytes)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v2/chat/sync/sessions/s1", bytes.NewReader(huge))
+	req.Header.Set("Authorization", "Bearer tok-u1")
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = 10 // 谎报
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, "body=%.120s", rec.Body.String())
+}
+
+// 评审修订 S3：解析期校验时间格式——非法时间在 wire 层 400（此前落到
+// apply 期以 500 暴露，违背错误分层）。
+func TestChatSyncHandlerInvalidTime400(t *testing.T) {
+	r, db := setupChatSyncHandlerEnv(t)
+	ctx := "/api/v2/chat/sync/sessions/s1"
+
+	rec := syncDo(r, http.MethodPost, ctx+"/claim", "tok-u1",
+		[]byte(`{"sourceId":"`+syncHSrcA+`","origin":"imported"}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// 合法形状 + 非法 session.created_at（摘要按原始字节重算对齐，确保到达
+	// 时间校验层而非摘要层）
+	rp := &chat.ReplacePayload{
+		Session: chat.SyncSessionPayload{ID: "s1", CreatedAt: "not-a-time", UpdatedAt: "2026-10-02T00:00:00Z"},
+		Messages: []chat.SyncMessagePayload{
+			{ID: "s1-m0", Role: "user", Content: "c", CreatedAt: "2026-10-01T00:00:00Z", Ordinal: 0},
+		},
+	}
+	e := chat.Envelope{
+		ProtocolVersion:   chat.ProtocolVersion,
+		ProjectionVersion: chat.ProjectionVersion,
+		SourceID:          syncHSrcA, AppSessionID: "s1", Version: 1,
+		SnapshotID: "11112222-3333-4444-5555-666677778888", Kind: chat.KindReplace,
+	}
+	e.Payload = rp
+	b, err := json.Marshal(rp)
+	require.NoError(t, err)
+	e.RawPayload = b
+	d, err := chat.DigestEnvelope(e)
+	require.NoError(t, err)
+	e.Digest = d
+	body, err := json.Marshal(map[string]any{
+		"protocolVersion": 2, "projectionVersion": 1, "sourceId": e.SourceID,
+		"appSessionId": "s1", "version": "1", "snapshotId": e.SnapshotID,
+		"kind": "replace", "payload": rp, "digest": d,
+	})
+	require.NoError(t, err)
+
+	rec = syncDo(r, http.MethodPut, ctx, "tok-u1", body)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "created_at")
+
+	// 状态不推进（仍是 claim 占位）
+	rec = syncDo(r, http.MethodGet, ctx, "tok-u1", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "0", jsonMap(t, rec)["version"])
+	var msgCount int64
+	require.NoError(t, db.Model(&chat.Message{}).Where("user_id = ? AND session_id = ?", "u1", "s1").Count(&msgCount).Error)
+	require.Zero(t, msgCount)
+}
+
 func TestChatSyncHandlerUnknownAndUnclaimed(t *testing.T) {
 	r, _ := setupChatSyncHandlerEnv(t)
 

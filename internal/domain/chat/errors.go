@@ -38,4 +38,8 @@ var (
 	ErrSyncClaimConflict = errors.New("sync claim ownership conflict")
 	// ErrSyncClaimDeleted：已删除的键（永久 tombstone）不允许 claim。
 	ErrSyncClaimDeleted = errors.New("sync key deleted (tombstone)")
+	// ErrSyncManagedSession：会话由 v2 同步管理——绕过协议的正文 mutation
+	//（CreateMessage/UpdateSessionTitle/DeleteMessageByID/CreateSession）
+	// 必须拒绝（issue #232 H3：v2 会话不接受绕过协议的正文变更）。
+	ErrSyncManagedSession = errors.New("session managed by sync v2")
 )
