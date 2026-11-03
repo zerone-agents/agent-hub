@@ -103,7 +103,7 @@ agent-hub ships two interchangeable auth backends, selected by `AUTH_MODE`.
 | `OPS_API_KEY` | No | — | 运维 API 鉴权密钥。**空（默认）= 运维端点不挂载**，请求 `/api/v1/ops/*` 等效 404；配置后所有请求需携带请求头 `X-Ops-Key: <OPS_API_KEY>`，匹配放行，否则拒绝。仅在需要接入新组织时配置。 |
 | `CHAT_PUSH_API_KEY` | No | — | `/api/v1/chat/push` 专用推送密钥。**空（默认）= X-Chat-Push-Key 通道禁用**，push 仅走 JWT/CLI 鉴权；配置后携带请求头 `X-Chat-Push-Key: <CHAT_PUSH_API_KEY>` 的请求可走该通道（会话归属由请求 body 的 per-session `user_name`/`org` 决定，`user_name` 必填；`org` 语义按模式分：**builtin 忽略该字段恒落 `default`**；**casdoor 显式传则用所传值，缺省解析为 tenant_oauth_clients 的 default 行组织**——未登记 default 行时缺省 `org` 的推送返回 400）。**与 `CHAT_PUSH_PUBLIC_URL` 同时配置时，部署 agent 会把回传配置经 deployer 写入 runtime 的 agents.yaml `hub` 段**（见下）。独立于 `OPS_API_KEY`，泄漏互不影响。建议使用 ≥32 字节高熵随机值，入 secret manager 管理。 |
 | `CHAT_PUSH_PUBLIC_URL` | No | — | hub 自身对外可达的 base URL（如 `https://console.example.com`，**裸 base 不带路径**——runtime 会自拼 `/api/v1/chat/push`）。与 `CHAT_PUSH_API_KEY` 同时配置时，新部署的 agent runtime 开启聊天记录回传，hub 同时下发**该 agent 的部署租户作为可信 org**（builtin 恒 `default`，casdoor 为部署时的租户——issue #78）：runtime 以此为回传会话盖章租户，`X-Org` 头已被 runtime 移除、无法影响落点。**hub 自身代理的聊天不回传**（hub 自记录，runtime 因无身份头自动跳过）。仅配置其一 = 不下发回传配置（回传关闭，向后兼容）。存量 agent 需重新部署才会带上该配置（含 org）。外部调用者直连 runtime 只需携带 `X-User-Name`（会话归属用户）。 |
-| `TENANT_SYNC_ENABLED` | No | `false` | 开启 casdoor 租户周期同步（#238 part 2）：hub 自动把 casdoor 组织 + hub 应用凭据注册进 `tenant_oauth_clients`，新组织无需再走下方 runbook 手工登记。**默认关闭**——ops 显式注册仍是单一来源，直至灰度放行。仅 casdoor 模式生效（builtin 模式下开启会记日志跳过，不会启动）。 |
+| `TENANT_SYNC_ENABLED` | No | `true` | casdoor 租户周期同步开关（#238 part 2）：hub 自动把 casdoor 组织 + hub 应用凭据注册进 `tenant_oauth_clients`，新组织无需再走下方 runbook 手工登记。**默认开启**（#246 合并后的放行决策）；`TENANT_SYNC_ENABLED=false` 可覆盖关断（止血阀：改环境变量重启即停，无需发版回滚）。仅 casdoor 模式生效（builtin 模式下启动时记日志跳过，不会启动）。 |
 | `TENANT_SYNC_RECONCILE_SEC` | No | `300` | 租户同步轮询间隔（秒）。 |
 
 **租户同步的前置与语义（开启 `TENANT_SYNC_ENABLED` 前必读）**：
@@ -138,7 +138,7 @@ curl -X POST https://<hub>/api/v1/ops/tenant-clients \
   -d '{"org":"acme","clientId":"...","clientSecret":"..."}'
 ```
 
-> **自动同步替代（灰度中，#238 part 2）**：若 hub 已开启 `TENANT_SYNC_ENABLED=true`（casdoor 模式），casdoor 侧建好组织 + 合规 hub 应用（命名/redirect/owner 要求见上方「租户同步的前置与语义」）后**无需本步手工登记**——同步 job 在下一轮询周期（默认 300s）自动完成注册。此时 casdoor 是租户 truth：删除组织请在 casdoor 侧进行（ops DELETE 的行会被下轮同步恢复）。
+> **自动同步替代（默认开启，#238 part 2）**：casdoor 模式下 hub 默认启用租户同步（`TENANT_SYNC_ENABLED` 默认 `true`，可 `false` 覆盖关断）——casdoor 侧建好组织 + 合规 hub 应用（命名/redirect/owner 要求见上方「租户同步的前置与语义」）后**无需本步手工登记**，同步 job 在下一轮询周期（默认 300s）自动完成注册。此时 casdoor 是租户 truth：删除组织请在 casdoor 侧进行（ops DELETE 的行会被下轮同步恢复）。
 
 字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文；非空时必须为合法 PEM 证书（`-----BEGIN CERTIFICATE-----` 开头），否则 400）；`isDefault` 可选。
 
