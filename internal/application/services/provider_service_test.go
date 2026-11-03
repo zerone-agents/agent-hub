@@ -469,6 +469,158 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 	require.Len(t, all, 2)
 }
 
+// TestProviderService_ListAll_ZeroModelChatCompatible 锁定 issue #240：零预置
+// 模型的 openai/anthropic 兼容预设（模型全部由用户自带）必须在 chat 过滤下
+// 保留（App「添加供应商」经 type=chat 加载预设），豁免仅限这两个 key 且仅限
+// chat 伪类型——其他零模型 provider（含 OCR/embedding-only）照旧排除，不过滤
+// 与严格类型过滤的行为不变。
+func TestProviderService_ListAll_ZeroModelChatCompatible(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+
+	zero := func(key, name string) {
+		_, err := svc.Create("", &CreateProviderInput{
+			Key: key, Name: name,
+			Protocol: "openai", AuthStyle: "api_key",
+			BaseURL: "http://" + key + ".example.com",
+		})
+		require.NoError(t, err)
+	}
+	// 两个豁免 key：零预置模型。
+	zero("openai-thirdparty", "OpenAI Compatible")
+	zero("anthropic-thirdparty", "Anthropic Compatible")
+	// 非豁免 key 的零模型 provider：chat 下必须仍被排除。
+	zero("other-zero", "Other Zero Model")
+	// OCR-only 与 embedding-only：chat 下照旧排除（非 LLM/VLM）。
+	_, err := svc.Create("", &CreateProviderInput{
+		Key: "ocr-only", Name: "OCR Only",
+		Protocol: "openai", AuthStyle: "api_key",
+		BaseURL: "http://ocr.example.com",
+		DefaultModels: []provider.CatalogModel{
+			{ModelID: "mineru", DisplayName: "MinerU", ModelType: "ocr"},
+		},
+	})
+	require.NoError(t, err)
+	_, err = svc.Create("", &CreateProviderInput{
+		Key: "emb-only", Name: "Embedding Only",
+		Protocol: "openai", AuthStyle: "api_key",
+		BaseURL: "http://emb.example.com",
+		DefaultModels: []provider.CatalogModel{
+			{ModelID: "text-embedding-3", DisplayName: "Emb", ModelType: "embedding"},
+		},
+	})
+	require.NoError(t, err)
+
+	// type=chat → 仅两个兼容预设（豁免），其余三零模型/非 LLM 全排除。
+	chat, err := svc.ListAll("", "chat")
+	require.NoError(t, err)
+	require.Len(t, chat, 2)
+	got := map[string]bool{}
+	for _, p := range chat {
+		got[p.Key()] = true
+	}
+	require.True(t, got["openai-thirdparty"], "openai-thirdparty must stay visible under chat filter")
+	require.True(t, got["anthropic-thirdparty"], "anthropic-thirdparty must stay visible under chat filter")
+	require.False(t, got["other-zero"], "non-exempt zero-model provider must stay excluded")
+	require.False(t, got["ocr-only"], "OCR-only provider must stay excluded from chat")
+	require.False(t, got["emb-only"], "embedding-only provider must stay excluded from chat")
+
+	// 严格类型过滤行为不变：兼容预设零模型，llm 过滤下照旧排除。
+	llm, err := svc.ListAll("", "llm")
+	require.NoError(t, err)
+	require.Len(t, llm, 0)
+
+	// vlm 过滤与 llm 对称（issue #240 评审补充）：兼容预设零模型，照旧排除。
+	vlm, err := svc.ListAll("", "vlm")
+	require.NoError(t, err)
+	require.Len(t, vlm, 0)
+
+	// 其他类型过滤不变：ocr 过滤只中 ocr-only。
+	ocr, err := svc.ListAll("", "ocr")
+	require.NoError(t, err)
+	require.Len(t, ocr, 1)
+	require.Equal(t, "ocr-only", ocr[0].Key())
+
+	// embedding 过滤与其他 type-filtered 行为对称：只中 emb-only。
+	emb, err := svc.ListAll("", "embedding")
+	require.NoError(t, err)
+	require.Len(t, emb, 1)
+	require.Equal(t, "emb-only", emb[0].Key())
+
+	// 不过滤行为不变：全部 5 个可见。
+	all, err := svc.ListAll("", "")
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+}
+
+// TestProviderService_ListAll_ZeroModelChatCompatible_TenantCoW 锁定租户覆盖
+// × chat 豁免组合（issue #240 评审补充；issue 正文要求 verify against
+// tenant-specific provider overrides）：CoW 后同 key 存在共享行 + 租户行时，
+// chat 过滤必须恰一条、且按「租户行胜出」后的存活行评估——零模型租户行走
+// 豁免，加了 llm 模型的租户行走模型规则，共享行一律被遮蔽。
+func TestProviderService_ListAll_ZeroModelChatCompatible_TenantCoW(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+	require.NoError(t, svc.SeedIfEmpty())
+
+	// 找 openai-thirdparty 共享行（种子零模型，评审亲验 seed_data.go）。
+	summaries, err := svc.repo.ListAll("tenant-a")
+	require.NoError(t, err)
+	var shared *provider.ProviderSummary
+	for _, s := range summaries {
+		if s.Key == "openai-thirdparty" {
+			shared = s
+		}
+	}
+	require.NotNil(t, shared, "seed data must contain the openai-thirdparty shared row")
+	require.Equal(t, "", shared.TenantID)
+
+	// 场景①：租户 CoW 改名（租户行仍零模型）→ chat 恰一条、租户行胜出。
+	newName := "tenant-a openai"
+	cowDTO, err := svc.Update("tenant-a", shared.ID, &UpdateProviderInput{Name: &newName})
+	require.NoError(t, err)
+	require.NotEqual(t, shared.ID, cowDTO.ID, "CoW must produce a tenant-scoped copy row")
+
+	chat, err := svc.ListAll("tenant-a", "chat")
+	require.NoError(t, err)
+	var hits []provider.Provider
+	for _, p := range chat {
+		if p.Key() == "openai-thirdparty" {
+			hits = append(hits, p)
+		}
+	}
+	require.Len(t, hits, 1, "CoW 后 chat 过滤必须恰一条（租户行遮蔽共享行）")
+	require.Equal(t, cowDTO.ID, hits[0].ID(), "必须命中租户拷贝行而非共享模板行")
+
+	// 场景②：租户行加 llm 模型 → chat 仍恰一条（命中模型规则），共享行仍被遮蔽。
+	llmModels := []provider.CatalogModel{
+		{ModelID: "custom-gpt", DisplayName: "Custom GPT", ModelType: "llm"},
+	}
+	_, err = svc.Update("tenant-a", cowDTO.ID, &UpdateProviderInput{DefaultModels: &llmModels})
+	require.NoError(t, err)
+
+	chat2, err := svc.ListAll("tenant-a", "chat")
+	require.NoError(t, err)
+	var hits2 []provider.Provider
+	for _, p := range chat2 {
+		if p.Key() == "openai-thirdparty" {
+			hits2 = append(hits2, p)
+		}
+	}
+	require.Len(t, hits2, 1, "加了 llm 模型的租户行 chat 下仍恰一条")
+	require.Equal(t, cowDTO.ID, hits2[0].ID())
+
+	// 租户行有 llm 模型后，llm 严格过滤下也恰一条——模型规则命中而非豁免
+	// （豁免不泄漏到严格过滤器；种子其他 provider 不参与本 key 计数）。
+	llmList, err := svc.ListAll("tenant-a", "llm")
+	require.NoError(t, err)
+	llmHits := 0
+	for _, p := range llmList {
+		if p.Key() == "openai-thirdparty" {
+			llmHits++
+		}
+	}
+	require.Equal(t, 1, llmHits, "租户行有 llm 模型后 llm 过滤下该 key 恰一条")
+}
+
 func TestProviderService_Create_RejectsEmptyModelType(t *testing.T) {
 	svc := setupEmptyProviderService(t)
 

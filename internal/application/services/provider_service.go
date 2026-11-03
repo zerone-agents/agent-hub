@@ -191,6 +191,19 @@ func matchProviderType(filter, modelType string) bool {
 	return filter == modelType
 }
 
+// zeroModelChatCompatibleKeys lists the generic compatible-provider presets
+// whose models are entirely user-supplied (zero preset rows in provider_models).
+// They must stay visible in the chat-filtered provider list (issue #240) —
+// the App's "Add Provider" entry loads presets via type=chat, and dropping
+// these keys hides the very providers users need to add their own models to.
+// Exemption is deliberately narrow: only these two keys, only the chat
+// pseudo-filter — strict type filters (llm/ocr/embedding/vlm) and unfiltered
+// listings keep the existing has-at-least-one-model behavior.
+var zeroModelChatCompatibleKeys = map[string]bool{
+	"openai-thirdparty":    true,
+	"anthropic-thirdparty": true,
+}
+
 // dedupeSummariesTenantFirst CoW 后同 key 会同时存在共享行（tenant_id==”
 // 的种子模板）与本租户拷贝行；对外口径是"每个 key 一个 provider"——本租户
 // 行遮蔽共享行，避免列表出现同 key 双行、以及 first-match 命中模板配置。
@@ -246,7 +259,11 @@ func (s *ProviderService) ListAll(tenantID string, typeFilter string) ([]provide
 	result := make([]provider.Provider, 0, len(summaries))
 	for _, summary := range summaries {
 		if typeFilter != "" && !providerHasType[summary.ID] {
-			continue
+			// 兼容预设豁免（issue #240）：零预置模型的 openai/anthropic 兼容
+			// 供应商在 chat 过滤下保留（用户自带模型），其余 provider 照旧排除。
+			if typeFilter != "chat" || !zeroModelChatCompatibleKeys[summary.Key] {
+				continue
+			}
 		}
 		p, err := provider.NewProviderFromSummary(summary)
 		if err != nil {
