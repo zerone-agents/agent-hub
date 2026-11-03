@@ -132,12 +132,39 @@ func SwapCasdoorForTest(cfg *config.CasdoorConfig) func() {
 	}
 }
 
-// ClientForOrg returns a cached SDK client whose organization scope is org.
+// ClientForOrg returns an SDK client whose organization scope is org.
 // Falls back to the configured default organization when org is empty.
 // Must be called after InitCasdoor.
+//
+// Issue #236: for a NON-empty org the client MUST use that org's OWN
+// application credentials (tenant_oauth_clients) — casdoor's get-user
+// filters the isAdmin field by the calling application's organization, so
+// the global (default-tenant) credentials see isAdmin=false for every
+// other tenant's users, silently breaking org-admin → hub-admin
+// synthesis. Unlike perOrgJWTClient, no certificate is required here
+// (basic auth only): CertPEM is used when present, else the global cert.
+// Per-org clients are built fresh (a cheap struct, no IO) so credential
+// rotation in tenant_oauth_clients takes effect immediately; only the
+// global-credential fallback path stays cached.
 func ClientForOrg(org string) *casdoorsdk.Client {
 	if org == "" {
 		return client
+	}
+	if tenantClientLookup != nil {
+		if creds, ok := tenantClientLookup(org); ok && creds != nil {
+			cert := casdoorConfig.Certificate
+			if creds.CertPEM != "" {
+				cert = creds.CertPEM
+			}
+			return casdoorsdk.NewClient(
+				casdoorConfig.Endpoint,
+				creds.ClientID,
+				creds.ClientSecret,
+				cert,
+				org,
+				applicationNameUnused,
+			)
+		}
 	}
 	clientsByOrgMu.Lock()
 	defer clientsByOrgMu.Unlock()
