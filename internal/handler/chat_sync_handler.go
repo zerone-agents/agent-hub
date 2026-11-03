@@ -13,6 +13,8 @@ package handler
 // 的租户字段在 wire 严格解析层即被拒）。协议响应用裸 JSON（claim/GET 返回
 // SyncState、PUT 返回 Reply）——精确回显优先于 house envelope；409 为协议
 // 结果（conflict/deleted 附状态），400/404/413 走稳定码错误信封。
+// 不带机读 code 属有意设计（issue #234 决策）：App 按语义字段（status/state）
+// 判定，机读 code 无消费方，补码需走注册表/i18n/前端契约三处同步、收益不抵。
 
 import (
 	"errors"
