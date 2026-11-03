@@ -703,6 +703,20 @@ func main() {
 	defer reconcileCancel()
 	kongService.StartReconciler(reconcileCtx)
 
+	// Start casdoor tenant sync (issue #238 part 2). Disabled by default; when
+	// enabled, hub registers casdoor org + hub-app credentials into
+	// tenant_oauth_clients (default stays ops-registered).
+	if cfg.TenantSync.Enabled {
+		tenantSync := services.NewTenantSyncService(
+			repository.NewTenantOAuthClientRepository(),
+			services.NewSDKCasdoorSource(auth.GetClient()),
+			cfg.Provider.EncryptionKey,
+			cfg.TenantSync.ReconcileSec,
+			nil,
+		)
+		tenantSync.StartSyncer(reconcileCtx)
+	}
+
 	log.Printf("Server starting on %s", cfg.GetServerAddr())
 	if err := r.Run(cfg.GetServerAddr()); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
