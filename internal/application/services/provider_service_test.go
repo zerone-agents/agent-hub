@@ -621,6 +621,36 @@ func TestProviderService_ListAll_ZeroModelChatCompatible_TenantCoW(t *testing.T)
 	require.Equal(t, 1, llmHits, "租户行有 llm 模型后 llm 过滤下该 key 恰一条")
 }
 
+// TestZeroModelChatCompatibleKeysCoverSeedSpecs 把共编义务变成可执行门禁
+// （issue #243 评审跟进）：BuiltinSeedSpecs 中零预置模型（DefaultModels 为空）
+// 的预设 key 必须全部命中 chat 豁免集合（正向）；豁免集合也不得残留已改模型
+// 形态或已删除的 key（反向）。任一方向漂移都会让预设错误地出现/消失在 chat
+// 过滤列表，而纯注释约定无法阻止这种漂移。
+func TestZeroModelChatCompatibleKeysCoverSeedSpecs(t *testing.T) {
+	zeroModelKeys := map[string]bool{}
+	for _, spec := range provider.BuiltinSeedSpecs() {
+		if len(spec.DefaultModels) == 0 {
+			zeroModelKeys[spec.Key] = true
+		}
+	}
+
+	// 正向：零模型种子预设必须命中 chat 豁免集合，否则会被 chat 过滤隐藏。
+	for key := range zeroModelKeys {
+		require.True(t, zeroModelChatCompatibleKeys[key],
+			"seed preset %q has zero preset models but is missing from zeroModelChatCompatibleKeys (issue #243 ①)", key)
+	}
+
+	// 反向：豁免集合中的 key 必须仍是零模型种子预设（防改名/改模型形态后残留）。
+	for key := range zeroModelChatCompatibleKeys {
+		require.True(t, zeroModelKeys[key],
+			"zeroModelChatCompatibleKeys contains %q which is no longer a zero-model BuiltinSeedSpecs entry (issue #243 ①)", key)
+	}
+
+	// 豁免集合非空：防止集合被清空后正向断言空转、门禁失效。
+	require.NotEmpty(t, zeroModelChatCompatibleKeys,
+		"zeroModelChatCompatibleKeys must not be empty (issue #243 ①)")
+}
+
 func TestProviderService_Create_RejectsEmptyModelType(t *testing.T) {
 	svc := setupEmptyProviderService(t)
 
