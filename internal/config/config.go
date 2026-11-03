@@ -118,7 +118,7 @@ type KongConfig struct {
 
 // TenantSyncConfig 是 casdoor 租户周期同步配置（#238 part 2）。
 type TenantSyncConfig struct {
-	Enabled      bool `mapstructure:"enabled"`       // 关闭（默认）时不同步；casdoor 侧新组织需 ops 显式注册
+	Enabled      bool `mapstructure:"enabled"`       // 默认开启（#247 放行决策）；TENANT_SYNC_ENABLED=false 覆盖关断（止血阀：改 env 重启即停）
 	ReconcileSec int  `mapstructure:"reconcile_sec"` // 同步间隔秒，默认 300
 }
 
