@@ -69,8 +69,10 @@ var orgSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // orgSlug defensively normalizes a tenant/org identifier for use in entity
 // names and URL segments: lowercase, non-alphanumeric runs folded to "-",
-// leading/trailing "-" trimmed. Registration-side validation already restricts
-// orgs to ^[a-z][a-z0-9]{0,62}$ (Task 3); this is a safety net for legacy rows.
+// leading/trailing "-" trimmed. Registration-side validation
+// (domain/tenant.ValidateOrgName, #235) allows hyphens, so folding matters
+// mainly for legacy rows and casdoor owner claims hub never gated; DeployKey
+// gives hyphenated orgs their "--" separator.
 func orgSlug(tenantID string) string {
 	s := strings.ToLower(tenantID)
 	s = orgSlugRe.ReplaceAllString(s, "-")

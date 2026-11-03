@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"control-panel/internal/domain/agent"
+	"control-panel/internal/domain/tenant"
 )
 
 // RuntimeProxyAgentRepo is the tenant-scoped agent lookup the runtime proxy
@@ -59,15 +59,11 @@ var proxyAllowlist = []proxyRoute{
 	{methods: []string{http.MethodGet, http.MethodHead}, pattern: "/v1/files/content", timeout: 10 * time.Minute},
 }
 
-// proxyOrgNameRe 是 org 命名契约：小写字母开头，仅小写字母数字，≤63 字符。
-// 契约源同 internal/handler/ops_tenant_client.go 的 opsOrgNameRe（unexported，
-// 无法跨包引用，故在此重复声明并锚定来源）；动机见彼处注释——org 用于拼接
-// 部署键与 URL 路径段，禁止连字符/大写/下划线/前导数字消除跨租户键歧义。
-// agent 名契约复用同包 agent_validator.go 的 validAgentNamePattern，不重复声明。
-// agent 名无独立长度校验：org 契约 ^[a-z][a-z0-9]{0,62}$ 内嵌 ≤63，
-// agent 名依赖创建路径的 ≤64 校验；代理门无界仅意味着超长名多走一次
-// GetByName 才 404，行为无差异。
-var proxyOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,62}$`)
+// org/agent 命名契约分别见 internal/domain/tenant.ValidateOrgName（#235 起的
+// 唯一声明处，ops 登记入口同引用它）与同包 agent_validator.go 的
+// validAgentNamePattern（不重复声明）。
+// agent 名无独立长度校验：依赖创建路径的 ≤64 校验；代理门无界仅意味着
+// 超长名多走一次 GetByName 才 404，行为无差异。
 
 type RuntimeProxyService struct {
 	repo         RuntimeProxyAgentRepo
@@ -86,7 +82,7 @@ func (s *RuntimeProxyService) Resolve(org, agentName, method, escapedRemainder, 
 	// 命名门必须在 GetByName 之前拒绝：MySQL 大小写不敏感 collation 或 legacy
 	// 存量行可能让大写/下划线/前导数字 ID 命中数据（issue #77 验收 #2，
 	// legacy 命名一律 404，不触 DB）。
-	if !proxyOrgNameRe.MatchString(org) || !validAgentNamePattern.MatchString(agentName) {
+	if !tenant.ValidateOrgName(org) || !validAgentNamePattern.MatchString(agentName) {
 		return nil, notFound
 	}
 	canon, ok := canonicalizePath(escapedRemainder, decodedRemainder)

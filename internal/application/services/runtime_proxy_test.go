@@ -191,7 +191,6 @@ func TestResolveLegacyInvalidNames(t *testing.T) {
 		{"underscore agent", "default", "under_score"},
 		{"leading-digit org", "0rg", "test"},
 		{"trailing-hyphen agent", "default", "test-"},
-		{"hyphenated org", "ac-me", "test"},
 		{"uppercase agent", "default", "Test"},
 	}
 	for _, tc := range cases {
