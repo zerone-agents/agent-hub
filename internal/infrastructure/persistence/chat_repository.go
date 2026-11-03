@@ -327,6 +327,11 @@ func (r *ChatRepository) GetSessionForUser(tenantID, sessionID, userID string) (
 // 无 user 参数——v1 模型下 user 与 tenant 1:1（见 PushSessions 注释），按
 // tenant+session 判定即可；CreateMessage/CreateSession 携带 user 时精确到
 // user（跨用户同名 session id 不误伤）。
+//
+// 已知边界（issue #234，按已接受风险记录）：守卫为无锁读后写
+// （check-then-act），理论存在极窄 claim 竞态窗口——但协议路径（claim/apply）
+// 有行锁与唯一约束保证，本守卫仅防御非协议路径的误用，竞态影响面可忽略；
+// 修复需事务化包裹读与写，收益不抵复杂度。
 func syncManagedErr(tx *gorm.DB, tenantID, userID, sessionID string) error {
 	q := tx.Where("tenant_id = ? AND session_id = ?", tenantID, sessionID)
 	if userID != "" {
