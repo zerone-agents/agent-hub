@@ -127,6 +127,14 @@ describe('AgentListPage', () => {
     setAuthRole('admin')
   })
 
+  // 评审修订 ②（PR #230 后续）：mutable spy 在用例内手动置 null，中途断言
+  // 失败会泄漏到后续用例——统一在 afterEach 复位（对齐 bulk describe 的
+  // mutableAgents 清理惯例）。
+  afterEach(() => {
+    mutableUpdateAgent = null
+    mutableProbeAgent = null
+  })
+
   it('renders agent cards with names and stats', () => {
     renderPage()
 

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, message } from 'antd'
+import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, Tooltip, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -389,6 +389,7 @@ export default function AgentListPage() {
     if (!value) {
       setSelectedProviderId(null)
       setSelectedModelId('')
+      setSelectedEffort('')
       setFieldValues({})
       setInitialApiKey('')
       return
@@ -419,6 +420,10 @@ export default function AgentListPage() {
   // 和 selectionId；用户自定义输入（无匹配建议）时，selectionId 置空，只存 modelId
   // 兼容运行时直接传任意模型 ID 的场景。
   const handleModelChange = (value: string) => {
+    // 同 provider 内换模型不重置 effort（issue #231 评审 ③，有意取舍）：
+    // effort 是用户声明的推理强度偏好，同 provider 换模型时可能仍适用；
+    // 若新模型不支持该 effort，保存会被 hub 校验 400 拒绝、表单可改可恢复。
+    // 与 provider 切换清空 effort（模型目录全变）显式不同，勿"对称化"。
     setTestPassed(false)
     const hit = modelSuggestions.find((m) => m.value === value)
     if (hit) {
@@ -1022,7 +1027,7 @@ export default function AgentListPage() {
             {selectedProviderId && (
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                  {t('agents.form.effort')}
+                  <Tooltip title={t('agents.form.effortTip')}>{t('agents.form.effort')}</Tooltip>
                 </label>
                 <AutoComplete
                   style={{ width: '100%' }}
