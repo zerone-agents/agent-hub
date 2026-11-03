@@ -36,8 +36,10 @@ type Config struct {
 	Ops       OpsConfig       `mapstructure:"ops"`
 	ChatPush  ChatPushConfig  `mapstructure:"chat_push"`
 	// TenantSync 是 casdoor 租户周期同步配置（#238 part 2）；Enabled 默认
-	// false——打开后 hub 自动把 casdoor 组织+hub 应用注册进
-	// tenant_oauth_clients（default 行仍必须由 ops 显式注册）。
+	// true（#246 合并后的放行决策）——hub 自动把 casdoor 组织+hub 应用注册进
+	// tenant_oauth_clients（default 行仍必须由 ops 显式注册）。env
+	// TENANT_SYNC_ENABLED=false 可覆盖关断（止血阀：改环境变量重启即停，
+	// 无需发版回滚）；仅 casdoor 模式生效（builtin 下启动时记日志跳过）。
 	TenantSync TenantSyncConfig `mapstructure:"tenant_sync"`
 }
 
@@ -116,7 +118,7 @@ type KongConfig struct {
 
 // TenantSyncConfig 是 casdoor 租户周期同步配置（#238 part 2）。
 type TenantSyncConfig struct {
-	Enabled      bool `mapstructure:"enabled"`       // 关闭（默认）时不同步；casdoor 侧新组织需 ops 显式注册
+	Enabled      bool `mapstructure:"enabled"`       // 默认开启（#247 放行决策）；TENANT_SYNC_ENABLED=false 覆盖关断（止血阀：改 env 重启即停）
 	ReconcileSec int  `mapstructure:"reconcile_sec"` // 同步间隔秒，默认 300
 }
 
@@ -220,6 +222,8 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("knowledge.timeout_seconds", 30)
 	viper.SetDefault("knowledge.upload_timeout_seconds", 3600)
 	viper.SetDefault("kong.reconcile_sec", 300)
+	// 租户同步默认开启（#246 放行决策）；TENANT_SYNC_ENABLED=false 覆盖关断。
+	viper.SetDefault("tenant_sync.enabled", true)
 	viper.SetDefault("tenant_sync.reconcile_sec", 300)
 
 	var cfg Config

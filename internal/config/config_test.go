@@ -22,6 +22,25 @@ func TestAuthConfigDefaults(t *testing.T) {
 	}
 }
 
+// TestTenantSyncDefaults：租户同步默认开启（#247 放行决策）。空串 env 按
+// viper BindEnv 的 AllowEmptyEnv=false 语义回落默认值。
+func TestTenantSyncDefaults(t *testing.T) {
+	t.Setenv("TENANT_SYNC_ENABLED", "")
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.True(t, cfg.TenantSync.Enabled, "tenant sync should default to enabled (#247)")
+	require.Equal(t, 300, cfg.TenantSync.ReconcileSec)
+}
+
+// TestTenantSyncEnabledOverride：TENANT_SYNC_ENABLED=false 覆盖默认值——
+// 止血阀语义（env > default，改环境变量重启即停）。
+func TestTenantSyncEnabledOverride(t *testing.T) {
+	t.Setenv("TENANT_SYNC_ENABLED", "false")
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.False(t, cfg.TenantSync.Enabled, "TENANT_SYNC_ENABLED=false must override the default (stop-valve)")
+}
+
 // 显式配置的 secret 原样加载（生成/持久化逻辑在 main.go 经
 // systemsetting.EnsureJWTSecret 完成，LoadConfig 不做任何改写）。
 func TestLoadConfigKeepsExplicitJWTSecret(t *testing.T) {

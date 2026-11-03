@@ -703,9 +703,10 @@ func main() {
 	defer reconcileCancel()
 	kongService.StartReconciler(reconcileCtx)
 
-	// Start casdoor tenant sync (issue #238 part 2). Disabled by default; when
-	// enabled, hub registers casdoor org + hub-app credentials into
-	// tenant_oauth_clients (default stays ops-registered).
+	// Start casdoor tenant sync (issue #238 part 2). Enabled by default
+	// (#247 rollout decision; TENANT_SYNC_ENABLED=false overrides as a
+	// stop-valve) — hub registers casdoor org + hub-app credentials into
+	// tenant_oauth_clients (default row stays ops-registered).
 	// Guards: casdoor mode only — builtin's GetClient() is nil and the syncer's
 	// immediate first round would nil-deref inside an unrecovered goroutine
 	// (process crash). The explicit nil check is the second line of defense.
