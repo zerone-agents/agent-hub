@@ -469,6 +469,78 @@ func TestProviderService_ListAll_FiltersByModelType(t *testing.T) {
 	require.Len(t, all, 2)
 }
 
+// TestProviderService_ListAll_ZeroModelChatCompatible 锁定 issue #240：零预置
+// 模型的 openai/anthropic 兼容预设（模型全部由用户自带）必须在 chat 过滤下
+// 保留（App「添加供应商」经 type=chat 加载预设），豁免仅限这两个 key 且仅限
+// chat 伪类型——其他零模型 provider（含 OCR/embedding-only）照旧排除，不过滤
+// 与严格类型过滤的行为不变。
+func TestProviderService_ListAll_ZeroModelChatCompatible(t *testing.T) {
+	svc := setupEmptyProviderService(t)
+
+	zero := func(key, name string) {
+		_, err := svc.Create("", &CreateProviderInput{
+			Key: key, Name: name,
+			Protocol: "openai", AuthStyle: "api_key",
+			BaseURL: "http://" + key + ".example.com",
+		})
+		require.NoError(t, err)
+	}
+	// 两个豁免 key：零预置模型。
+	zero("openai-thirdparty", "OpenAI Compatible")
+	zero("anthropic-thirdparty", "Anthropic Compatible")
+	// 非豁免 key 的零模型 provider：chat 下必须仍被排除。
+	zero("other-zero", "Other Zero Model")
+	// OCR-only 与 embedding-only：chat 下照旧排除（非 LLM/VLM）。
+	_, err := svc.Create("", &CreateProviderInput{
+		Key: "ocr-only", Name: "OCR Only",
+		Protocol: "openai", AuthStyle: "api_key",
+		BaseURL: "http://ocr.example.com",
+		DefaultModels: []provider.CatalogModel{
+			{ModelID: "mineru", DisplayName: "MinerU", ModelType: "ocr"},
+		},
+	})
+	require.NoError(t, err)
+	_, err = svc.Create("", &CreateProviderInput{
+		Key: "emb-only", Name: "Embedding Only",
+		Protocol: "openai", AuthStyle: "api_key",
+		BaseURL: "http://emb.example.com",
+		DefaultModels: []provider.CatalogModel{
+			{ModelID: "text-embedding-3", DisplayName: "Emb", ModelType: "embedding"},
+		},
+	})
+	require.NoError(t, err)
+
+	// type=chat → 仅两个兼容预设（豁免），其余三零模型/非 LLM 全排除。
+	chat, err := svc.ListAll("", "chat")
+	require.NoError(t, err)
+	require.Len(t, chat, 2)
+	got := map[string]bool{}
+	for _, p := range chat {
+		got[p.Key()] = true
+	}
+	require.True(t, got["openai-thirdparty"], "openai-thirdparty must stay visible under chat filter")
+	require.True(t, got["anthropic-thirdparty"], "anthropic-thirdparty must stay visible under chat filter")
+	require.False(t, got["other-zero"], "non-exempt zero-model provider must stay excluded")
+	require.False(t, got["ocr-only"], "OCR-only provider must stay excluded from chat")
+	require.False(t, got["emb-only"], "embedding-only provider must stay excluded from chat")
+
+	// 严格类型过滤行为不变：兼容预设零模型，llm 过滤下照旧排除。
+	llm, err := svc.ListAll("", "llm")
+	require.NoError(t, err)
+	require.Len(t, llm, 0)
+
+	// 其他类型过滤不变：ocr 过滤只中 ocr-only。
+	ocr, err := svc.ListAll("", "ocr")
+	require.NoError(t, err)
+	require.Len(t, ocr, 1)
+	require.Equal(t, "ocr-only", ocr[0].Key())
+
+	// 不过滤行为不变：全部 5 个可见。
+	all, err := svc.ListAll("", "")
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+}
+
 func TestProviderService_Create_RejectsEmptyModelType(t *testing.T) {
 	svc := setupEmptyProviderService(t)
 
