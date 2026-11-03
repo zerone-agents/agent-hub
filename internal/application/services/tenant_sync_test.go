@@ -45,10 +45,21 @@ func tsOrg(name string) *casdoorsdk.Organization {
 	return &casdoorsdk.Organization{Name: name}
 }
 
+// tsApp 构造测试用 hub 应用（默认带合法 redirect——hasHubRedirect 校验要求）。
 func tsApp(name, orgName, clientID, secret, cert string) *casdoorsdk.Application {
 	return &casdoorsdk.Application{
 		Name: name, Organization: orgName,
 		ClientId: clientID, ClientSecret: secret, Cert: cert,
+		RedirectUris: []string{"https://console.zerone.life/auth/callback"},
+	}
+}
+
+// tsAppNoRedirect 构造 redirect 不含 hub 回调路径的应用（识别应跳过）。
+func tsAppNoRedirect(name, orgName, clientID, secret string) *casdoorsdk.Application {
+	return &casdoorsdk.Application{
+		Name: name, Organization: orgName,
+		ClientId: clientID, ClientSecret: secret,
+		RedirectUris: []string{"https://evil.example/callback"},
 	}
 }
 
@@ -249,4 +260,95 @@ func TestTenantSync_UnknownOrgAndMissingCredsSkipped(t *testing.T) {
 	rows, err := repo.List()
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
+}
+
+// TestTenantSync_PrefixBeatsSuffix：同 org 多 hub 应用时前缀 agent-hub-*
+// 确定胜出（review 重要 2：无关 *-hub 应用不得靠遍历顺序覆盖 ops 注册的
+// 凭据——否则轮换路径会把正确的 client_id/secret 覆写成登录坏）。
+func TestTenantSync_PrefixBeatsSuffix(t *testing.T) {
+	repo, src := newTenantSyncFixture(t)
+	seedDefault(t, repo, "zerone", "sec-x")
+	src.orgs = []*casdoorsdk.Organization{tsOrg("acme")}
+	// 顺序故意后缀应用在前：两轮扫描（前缀轮先跑）必须让 agent-hub-acme 胜出。
+	src.apps = []*casdoorsdk.Application{
+		tsApp("decoy-hub", "acme", "cid-decoy", "sec-decoy", ""),
+		tsApp("agent-hub-acme", "acme", "cid-acme", "sec-acme", ""),
+	}
+	svc := NewTenantSyncService(repo, src, tenantSyncTestKey, 0, nil)
+
+	report, err := svc.SyncOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Added)
+
+	row, err := repo.Find("acme")
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	require.Equal(t, "cid-acme", row.ClientID, "prefix app must win regardless of list order")
+}
+
+// TestTenantSync_SkipsAppsWithoutHubRedirect：redirect_uris 不含 hub 回调
+// 路径的应用不是给本 hub 的——跳过，不落库（review 重要 2 的兜底校验）。
+func TestTenantSync_SkipsAppsWithoutHubRedirect(t *testing.T) {
+	repo, src := newTenantSyncFixture(t)
+	seedDefault(t, repo, "zerone", "sec-x")
+	src.orgs = []*casdoorsdk.Organization{tsOrg("suspicious")}
+	src.apps = []*casdoorsdk.Application{
+		tsAppNoRedirect("agent-hub-suspicious", "suspicious", "cid-x", "sec-x"),
+	}
+	svc := NewTenantSyncService(repo, src, tenantSyncTestKey, 0, nil)
+
+	report, err := svc.SyncOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, report.Added)
+
+	row, err := repo.Find("suspicious")
+	require.NoError(t, err)
+	require.Nil(t, row)
+}
+
+// failingUpsertRepo 包一层真 repo：第 failAt 次（从 1 计）Upsert 返回 error，
+// 用于钉住写阶段逐行收敛语义（review 重要 1）。
+type failingUpsertRepo struct {
+	*repository.TenantOAuthClientRepository
+	calls  int
+	failAt int
+}
+
+func (f *failingUpsertRepo) Upsert(org, clientID, secretEnc, certEnc string, isDefault bool) error {
+	f.calls++
+	if f.calls == f.failAt {
+		return errors.New("db down mid-write")
+	}
+	return f.TenantOAuthClientRepository.Upsert(org, clientID, secretEnc, certEnc, isDefault)
+}
+
+// TestTenantSync_MidWriteFailureConverges：写阶段逐行收敛——按 org 排序后第 2
+// 个 org 落库失败时，第 1 个已提交、本轮返回 error、失败行不存在；差异由下轮
+// tick 补齐（周期同步的收敛模型，非单事务）。
+func TestTenantSync_MidWriteFailureConverges(t *testing.T) {
+	real, _ := newTenantSyncFixture(t)
+	require.NoError(t, real.Upsert("zerone", "cid-zerone", "sec-zerone", "", true)) // default 行（表非空）
+
+	failing := &failingUpsertRepo{TenantOAuthClientRepository: real, failAt: 2}
+	src := &fakeTenantSource{
+		orgs: []*casdoorsdk.Organization{tsOrg("zerone"), tsOrg("orga"), tsOrg("orgb")},
+		apps: []*casdoorsdk.Application{
+			tsApp("agent-hub-zerone", "zerone", "cid-zerone", "sec-zerone", ""),
+			tsApp("agent-hub-orga", "orga", "cid-orga", "sec-orga", ""),
+			tsApp("agent-hub-orgb", "orgb", "cid-orgb", "sec-orgb", ""),
+		},
+	}
+	svc := NewTenantSyncService(failing, src, tenantSyncTestKey, 0, nil)
+
+	report, err := svc.SyncOnce(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orgb") // 排序 orga<orgb<zerone；zerone 无变化不落库
+	require.Equal(t, 1, report.Added, "前序行（orga）已提交并计入报告")
+
+	orga, ferr := real.Find("orga")
+	require.NoError(t, ferr)
+	require.NotNil(t, orga, "排序首行已提交")
+	orgb, ferr := real.Find("orgb")
+	require.NoError(t, ferr)
+	require.Nil(t, orgb, "失败行未落库——差异由下轮收敛")
 }

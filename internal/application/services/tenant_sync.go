@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	authdom "control-panel/internal/domain/auth"
 	providerdom "control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
-	repository "control-panel/internal/infrastructure/persistence"
 )
 
 // CasdoorTenantSource 抽象 casdoor 侧组织/应用读取（测试注入假源；生产用
@@ -40,11 +40,32 @@ func (s SDKCasdoorSource) GetApplications() ([]*casdoorsdk.Application, error) {
 	return s.client.GetApplications()
 }
 
-// isHubAppName 判定 casdoor 应用名是否为 hub 的 OAuth 应用：前缀
+const (
+	// hubAppPrefix 是 ops 注册的标准 hub 应用名前缀（issue #114 起）。
+	hubAppPrefix = "agent-hub-"
+	// hubAppSuffix 是兼容形态后缀（存量 ai-games-hub——先于前缀约定命名）。
+	hubAppSuffix = "-hub"
+	// hubRedirectPath 是 hub OAuth 回调路径：应用的 redirect_uris 必须包含
+	// 它，否则不是给这个 hub 用的应用（防误认无关 *-hub 应用，review 重要 2）。
+	hubRedirectPath = "/auth/callback"
+)
+
+// isHubAppName 判定 casdoor 应用名是否可能是 hub 的 OAuth 应用：前缀
 // "agent-hub-"（issue #114 起的命名约定）或后缀 "-hub"（兼容存量
-// ai-games-hub——先于约定命名的组织，见 #238 决策评论）。
+// ai-games-hub——先于约定命名的组织，见 #238 决策评论）。识别优先级
+// 见 SyncOnce 的两轮扫描（前缀优先，勿依赖单一遍历顺序）。
 func isHubAppName(name string) bool {
-	return strings.HasPrefix(name, "agent-hub-") || strings.HasSuffix(name, "-hub")
+	return strings.HasPrefix(name, hubAppPrefix) || strings.HasSuffix(name, hubAppSuffix)
+}
+
+// hasHubRedirect 报告应用的 redirect_uris 是否包含 hub 回调路径。
+func hasHubRedirect(app *casdoorsdk.Application) bool {
+	for _, uri := range app.RedirectUris {
+		if strings.Contains(uri, hubRedirectPath) {
+			return true
+		}
+	}
+	return false
 }
 
 // TenantSyncReport 汇总一轮同步的结果（日志与测试断言用）。
@@ -55,12 +76,20 @@ type TenantSyncReport struct {
 	Skipped []string // casdoor 有 hub 应用但 org 名不合规的组织（跳过 + 告警）
 }
 
+// tenantSyncRepo 是 TenantSyncService 依赖的窄接口（生产为
+// *repository.TenantOAuthClientRepository；测试可注入失败实现）。
+type tenantSyncRepo interface {
+	Count() (int64, error)
+	List() ([]authdom.TenantOAuthClient, error)
+	Upsert(org, clientID, secretEnc, certEnc string, isDefault bool) error
+}
+
 // TenantSyncService 周期同步 casdoor 组织 → tenant_oauth_clients
 // （#238 part 2）。决策点落地：casdoor 新组织可直接登录（无闸门）；
 // default 归属不动（同步只新增/更新非 default 行）；casdoor 删组织后
 // hub 行保留（orphan 告警，不自动删）。
 type TenantSyncService struct {
-	repo          *repository.TenantOAuthClientRepository
+	repo          tenantSyncRepo
 	source        CasdoorTenantSource
 	encryptionKey string
 	reconcileSec  int
@@ -69,7 +98,7 @@ type TenantSyncService struct {
 
 // NewTenantSyncService 构造同步服务。reconcileSec <= 0 时默认 300s。
 func NewTenantSyncService(
-	repo *repository.TenantOAuthClientRepository,
+	repo tenantSyncRepo,
 	source CasdoorTenantSource,
 	encryptionKey string,
 	reconcileSec int,
@@ -90,13 +119,25 @@ func NewTenantSyncService(
 	}
 }
 
-// SyncOnce 执行一轮同步。fail-closed：casdoor 读取/加密/落库任一失败整轮
-// 放弃（返回 error），绝不落半套数据。
+// SyncOnce 执行一轮同步。两段式失败语义（review 精确化，勿再笼统称
+// fail-closed）：
+//   - 读阶段 fail-closed：casdoor 读取或加密失败 → 整轮不动笔（返回 error）；
+//   - 写阶段逐行收敛：第 k 个 org 落库失败 → 前 k-1 个已提交、剩余放弃，
+//     返回 error——下轮 tick 自然补齐差异（周期同步的收敛模型）。
+//
+// 不提供单事务全量应用：repo 无批量事务入口，且逐行收敛对周期性同步足够。
 func (s *TenantSyncService) SyncOnce(ctx context.Context) (TenantSyncReport, error) {
 	var report TenantSyncReport
+	if err := ctx.Err(); err != nil {
+		return report, err
+	}
 
 	// 表空守卫：repo.Upsert 对空表会把首行自动提为 default——同步绝不代劳
 	// default 的创建（default 必须是 ops 显式注册的首行），空表整轮跳过。
+	// 已知窄窗（TOCTOU）：Count 与后续 Upsert 之间 ops 若并发注册首行，同步
+	// 新行理论上可能赶上「空表首行自动 default」判定——需 ops 首注册与同步
+	// 首轮在无 default 时精确并发（灰度初期一次性窗口）；default_key 哨兵
+	// 唯一索引兜底防双 default。
 	n, err := s.repo.Count()
 	if err != nil {
 		return report, fmt.Errorf("count existing rows: %w", err)
@@ -123,27 +164,43 @@ func (s *TenantSyncService) SyncOnce(ctx context.Context) (TenantSyncReport, err
 		}
 	}
 
-	// 识别每个组织的 hub 应用（一个组织多个 → 保留首个 + 告警）。
+	// 识别每个组织的 hub 应用（review 重要 2：前缀优先两轮扫描 + redirect
+	// 校验——无关的 *-hub 应用不得靠遍历顺序覆盖 ops 注册的 agent-hub-<org>，
+	// redirect_uri 含 /auth/callback 兜底防误认）。
 	hubApps := make(map[string]*casdoorsdk.Application)
-	for _, app := range apps {
-		if app == nil || !isHubAppName(app.Name) {
-			continue
+	consider := func(match func(string) bool) {
+		for _, app := range apps {
+			if app == nil || !match(app.Name) {
+				continue
+			}
+			org := app.Organization
+			if !orgNames[org] {
+				s.logger.Printf("tenant-sync: app %q references unknown org %q — skipped", app.Name, org)
+				continue
+			}
+			if app.ClientId == "" || app.ClientSecret == "" {
+				s.logger.Printf("tenant-sync: app %q (org %q) missing clientId/clientSecret — skipped", app.Name, org)
+				continue
+			}
+			if !hasHubRedirect(app) {
+				s.logger.Printf("tenant-sync: app %q (org %q) has no %s redirect — skipped", app.Name, org, hubRedirectPath)
+				continue
+			}
+			if prev, ok := hubApps[org]; ok {
+				s.logger.Printf("tenant-sync: org %q has multiple hub apps (%q, %q) — keeping %q",
+					org, prev.Name, app.Name, prev.Name)
+				continue
+			}
+			hubApps[org] = app
 		}
-		if !orgNames[app.Organization] {
-			s.logger.Printf("tenant-sync: app %q references unknown org %q — skipped", app.Name, app.Organization)
-			continue
-		}
-		if app.ClientId == "" || app.ClientSecret == "" {
-			s.logger.Printf("tenant-sync: app %q (org %q) missing clientId/clientSecret — skipped", app.Name, app.Organization)
-			continue
-		}
-		if prev, ok := hubApps[app.Organization]; ok {
-			s.logger.Printf("tenant-sync: org %q has multiple hub apps (%q, %q) — keeping %q",
-				app.Organization, prev.Name, app.Name, prev.Name)
-			continue
-		}
-		hubApps[app.Organization] = app
 	}
+	// 第一轮：agent-hub-* 前缀（ops 注册的标准命名）优先。
+	consider(func(name string) bool { return strings.HasPrefix(name, hubAppPrefix) })
+	// 第二轮：*-hub 后缀且非前缀形态（补充存量 ai-games-hub；若前缀轮已命中
+	// 该 org，下面的 prev 检查保留前缀应用）。
+	consider(func(name string) bool {
+		return !strings.HasPrefix(name, hubAppPrefix) && strings.HasSuffix(name, hubAppSuffix)
+	})
 
 	existing, err := s.repo.List()
 	if err != nil {
@@ -154,7 +211,16 @@ func (s *TenantSyncService) SyncOnce(ctx context.Context) (TenantSyncReport, err
 		existingByOrg[existing[i].Org] = &existing[i]
 	}
 
-	for org, app := range hubApps {
+	// 写阶段按 org 名排序后逐行应用：顺序确定（失败点可推、日志/测试稳定），
+	// 失败语义见 SyncOnce 注释（前序行已提交、本轮放弃剩余、下轮收敛）。
+	sortedOrgs := make([]string, 0, len(hubApps))
+	for org := range hubApps {
+		sortedOrgs = append(sortedOrgs, org)
+	}
+	sort.Strings(sortedOrgs)
+
+	for _, org := range sortedOrgs {
+		app := hubApps[org]
 		if !tenant.ValidateOrgName(org) {
 			report.Skipped = append(report.Skipped, org)
 			s.logger.Printf("tenant-sync: org %q fails the naming contract — skipped", org)
@@ -209,9 +275,14 @@ func (s *TenantSyncService) SyncOnce(ctx context.Context) (TenantSyncReport, err
 	}
 
 	// orphan：hub 有行但 casdoor 无对应 hub 应用——保留（casdoor 删组织不
-	// 自动清行，防误删租户数据），仅告警。
+	// 自动清行，防误删租户数据），仅告警。被合规门跳过的 org（app 存在但
+	// 名字不合规）不算 orphan——那不是「casdoor 侧已删除」，是本地拒绝。
+	skippedSet := make(map[string]bool, len(report.Skipped))
+	for _, org := range report.Skipped {
+		skippedSet[org] = true
+	}
 	for org := range existingByOrg {
-		if _, ok := hubApps[org]; !ok {
+		if _, ok := hubApps[org]; !ok && !skippedSet[org] {
 			report.Orphans = append(report.Orphans, org)
 			s.logger.Printf("tenant-sync: orphan org %q (no casdoor hub app) — kept", org)
 		}

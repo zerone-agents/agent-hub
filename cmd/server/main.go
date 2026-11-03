@@ -706,15 +706,24 @@ func main() {
 	// Start casdoor tenant sync (issue #238 part 2). Disabled by default; when
 	// enabled, hub registers casdoor org + hub-app credentials into
 	// tenant_oauth_clients (default stays ops-registered).
-	if cfg.TenantSync.Enabled {
-		tenantSync := services.NewTenantSyncService(
-			repository.NewTenantOAuthClientRepository(),
-			services.NewSDKCasdoorSource(auth.GetClient()),
-			cfg.Provider.EncryptionKey,
-			cfg.TenantSync.ReconcileSec,
-			nil,
-		)
-		tenantSync.StartSyncer(reconcileCtx)
+	// Guards: casdoor mode only — builtin's GetClient() is nil and the syncer's
+	// immediate first round would nil-deref inside an unrecovered goroutine
+	// (process crash). The explicit nil check is the second line of defense.
+	if cfg.TenantSync.Enabled && !cfg.Auth.IsCasdoor() {
+		log.Printf("tenant-sync: enabled but auth mode is %q (casdoor required) — sync not started", cfg.Auth.Mode)
+	} else if cfg.TenantSync.Enabled {
+		if client := auth.GetClient(); client != nil {
+			tenantSync := services.NewTenantSyncService(
+				repository.NewTenantOAuthClientRepository(),
+				services.NewSDKCasdoorSource(client),
+				cfg.Provider.EncryptionKey,
+				cfg.TenantSync.ReconcileSec,
+				nil,
+			)
+			tenantSync.StartSyncer(reconcileCtx)
+		} else {
+			log.Printf("tenant-sync: enabled but casdoor client is nil — sync not started")
+		}
 	}
 
 	log.Printf("Server starting on %s", cfg.GetServerAddr())
