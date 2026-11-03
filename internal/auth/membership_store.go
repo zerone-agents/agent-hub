@@ -22,6 +22,8 @@ type MembershipStore interface {
 	// SetRole 直接更新成员的 role/status（用户管理路径专用，绕过合成规则）。
 	// 调用方应先经 FindByExternalID 确认记录存在；记录不存在时返回错误。
 	SetRole(provider, externalID, role, status string) error
+	// CountActiveByTenant 返回租户下 active 成员数（bootstrap 判定用，#238）。
+	CountActiveByTenant(tenantID string) (int, error)
 }
 
 // gormMembershipStore 是 MembershipStore 的 gorm 实现。
@@ -70,6 +72,17 @@ func (s *gormMembershipStore) SetRole(provider, externalID, role, status string)
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// CountActiveByTenant 统计租户下 active 成员数（bootstrap 判定，#238）。
+func (s *gormMembershipStore) CountActiveByTenant(tenantID string) (int, error) {
+	var n int64
+	if err := s.db.Model(&authdom.UserIdentity{}).
+		Where("tenant_id = ? AND status = ?", tenantID, authdom.StatusActive).
+		Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // ApplyDecision 按合成结果落库：

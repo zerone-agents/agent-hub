@@ -145,7 +145,11 @@ func (p *CasdoorProvider) SyncMembership(u *casdoorsdk.User) (*AuthUser, error) 
 	if err != nil {
 		return nil, err
 	}
-	d := SynthesizeMembership(fresh.IsAdmin, rec)
+	isFirst, err := firstInTenant(p.store, fresh.Owner, rec)
+	if err != nil {
+		return nil, err
+	}
+	d := SynthesizeMembership(fresh.IsAdmin, rec, isFirst)
 	au, err := toAuthUser(fresh, rolesFromDecision(d))
 	if err != nil {
 		return nil, err
@@ -183,7 +187,11 @@ func (p *CasdoorProvider) GetUserIdentity(userID string) (*AuthUser, bool) {
 	if err != nil {
 		return nil, false
 	}
-	d := SynthesizeMembership(u.IsAdmin, rec)
+	isFirst, err := firstInTenant(p.store, u.Owner, rec)
+	if err != nil {
+		return nil, false
+	}
+	d := SynthesizeMembership(u.IsAdmin, rec, isFirst)
 	au, err := toAuthUser(u, rolesFromDecision(d))
 	if err != nil {
 		return nil, false

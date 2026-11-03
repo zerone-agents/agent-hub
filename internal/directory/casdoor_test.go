@@ -147,6 +147,17 @@ func (f *fakeStore) SetRole(provider, externalID, role, status string) error {
 	return nil
 }
 
+// CountActiveByTenant（#238）：按 tenant + active 计数，语义对齐 gorm 实现。
+func (f *fakeStore) CountActiveByTenant(tenantID string) (int, error) {
+	n := 0
+	for _, rec := range f.recs {
+		if rec.TenantID == tenantID && rec.Status == authdom.StatusActive {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (f *fakeStore) rec(externalID string) *authdom.UserIdentity { return f.recs[externalID] }
 
 // ===================== ListUsers =====================

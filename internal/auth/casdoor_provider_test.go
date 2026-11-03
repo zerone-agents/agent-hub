@@ -19,6 +19,7 @@ type fakeMembershipStore struct {
 	lastApply MembershipDecision               // 最后一次 ApplyDecision 的 decision
 	findErr   error
 	applyErr  error
+	countErr  error // CountActiveByTenant 注入错误（fail-closed 测试）
 }
 
 func newFakeMembershipStore() *fakeMembershipStore {
@@ -31,6 +32,14 @@ func storeKey(provider, externalID string) string { return provider + "\x00" + e
 func (f *fakeMembershipStore) seed(provider, externalID, role, status string) {
 	f.recs[storeKey(provider, externalID)] = &authdom.UserIdentity{
 		Provider: provider, ExternalID: externalID, Role: role, Status: status,
+	}
+}
+
+// seedTenant 预置一条带租户的成员记录（bootstrap 计数需要按租户判定，#238）。
+func (f *fakeMembershipStore) seedTenant(provider, externalID, tenantID, role, status string) {
+	f.recs[storeKey(provider, externalID)] = &authdom.UserIdentity{
+		Provider: provider, ExternalID: externalID, TenantID: tenantID,
+		Role: role, Status: status,
 	}
 }
 
@@ -93,6 +102,20 @@ func (f *fakeMembershipStore) SetRole(provider, externalID, role, status string)
 		rec.Role, rec.Status = role, status
 	}
 	return nil
+}
+
+// CountActiveByTenant 统计租户下 active 成员（bootstrap 判定，#238）。
+func (f *fakeMembershipStore) CountActiveByTenant(tenantID string) (int, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	n := 0
+	for _, rec := range f.recs {
+		if rec.TenantID == tenantID && rec.Status == authdom.StatusActive {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // newTestProvider 构造注入 fake store 的 provider，外部依赖由用例自行替换。
@@ -190,6 +213,10 @@ func TestValidateAccessTokenInvalidLocalRoleGetsEmptyRoles(t *testing.T) {
 // fetchUser 必须收到用户的 Owner 作为 org（跨组织解析 client 的关键参数）。
 func TestSyncMembershipCreatesPendingForNewUser(t *testing.T) {
 	store := newFakeMembershipStore()
+	// #238 bootstrap：租户已有 active 成员时，新用户不再 bootstrap。本用例
+	// 覆盖「非组织管理员 → pending」的常规路径；空租户首登的 bootstrap 语义
+	// 由 TestSyncMembershipBootstrapFirstUser 专门覆盖。
+	store.seedTenant("casdoor", "existing-admin", "org1", authdom.RoleAdmin, authdom.StatusActive)
 	p := newTestProvider(store)
 	var gotOrg string
 	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
@@ -391,5 +418,104 @@ func TestSyncMembershipEmptyOwnerRejected(t *testing.T) {
 	}
 	if len(store.recs) != 0 {
 		t.Fatalf("拒绝路径不得建记录: %d", len(store.recs))
+	}
+}
+
+// --- issue #238 bootstrap：新租户首登用户自动成为 admin ---
+
+// TestSyncMembershipBootstrapFirstUser：租户无 active 成员时，首个登录的
+// 非组织管理员用户直接成为 admin/active（founder），无需超管审批。
+func TestSyncMembershipBootstrapFirstUser(t *testing.T) {
+	store := newFakeMembershipStore()
+	p := newTestProvider(store)
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		return &casdoorsdk.User{Id: id, Name: "founder", Owner: "org-new", IsAdmin: false}, nil
+	}
+
+	au, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org-new"})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(au.Roles) != 1 || au.Roles[0] != authdom.RoleAdmin {
+		t.Fatalf("roles = %v, want [admin]（bootstrap founder）", au.Roles)
+	}
+	if store.lastApply.Op != OpCreate {
+		t.Fatalf("op = %v, want OpCreate", store.lastApply.Op)
+	}
+	rec := store.get("casdoor", "id1")
+	if rec == nil || rec.Role != authdom.RoleAdmin || rec.Status != authdom.StatusActive {
+		t.Fatalf("rec = %+v, want admin/active", rec)
+	}
+	if rec.TenantID != "org-new" {
+		t.Fatalf("tenant = %q, want org-new", rec.TenantID)
+	}
+}
+
+// TestSyncMembershipBootstrapSecondUserPending：founder 落库后，第二个用户
+// 登录同一租户时 count=1 → 不 bootstrap，落 pending（等租户 admin 审批）。
+func TestSyncMembershipBootstrapSecondUserPending(t *testing.T) {
+	store := newFakeMembershipStore()
+	p := newTestProvider(store)
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		return &casdoorsdk.User{Id: id, Name: id, Owner: "org-new", IsAdmin: false}, nil
+	}
+
+	// 第一个用户：bootstrap admin。
+	if _, err := p.SyncMembership(&casdoorsdk.User{Id: "founder", Owner: "org-new"}); err != nil {
+		t.Fatalf("founder login: %v", err)
+	}
+	// 第二个用户：pending。
+	au, err := p.SyncMembership(&casdoorsdk.User{Id: "second", Owner: "org-new"})
+	if err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+	if len(au.Roles) != 0 {
+		t.Fatalf("second roles = %v, want 空（pending）", au.Roles)
+	}
+	rec := store.get("casdoor", "second")
+	if rec == nil || rec.Role != "" || rec.Status != authdom.StatusPending {
+		t.Fatalf("second rec = %+v, want 空/pending", rec)
+	}
+	// founder 的 admin 不受第二个用户影响。
+	founder := store.get("casdoor", "founder")
+	if founder == nil || founder.Role != authdom.RoleAdmin {
+		t.Fatalf("founder rec = %+v, want admin 保持", founder)
+	}
+}
+
+// TestSyncMembershipBootstrapFailClosed：计数查询失败时 SyncMembership 必须
+// 报错（fail closed）——绝不在未知计数的情况下授 admin。
+func TestSyncMembershipBootstrapFailClosed(t *testing.T) {
+	store := newFakeMembershipStore()
+	store.countErr = errors.New("db down")
+	p := newTestProvider(store)
+	p.fetchUser = func(id, org string) (*casdoorsdk.User, error) {
+		return &casdoorsdk.User{Id: id, Name: "x", Owner: "org-new", IsAdmin: false}, nil
+	}
+
+	if _, err := p.SyncMembership(&casdoorsdk.User{Id: "id1", Owner: "org-new"}); err == nil {
+		t.Fatal("count 查询失败时应报错（fail closed，不 bootstrap）")
+	}
+	if len(store.recs) != 0 {
+		t.Fatalf("失败路径不得建记录: %d", len(store.recs))
+	}
+}
+
+// TestFirstInTenantSkipsQueryForActiveRecord：已有 active 记录的租户必然有
+// active 成员（记录自身）——不得再查计数（countErr 下也不得报错）。
+func TestFirstInTenantSkipsQueryForActiveRecord(t *testing.T) {
+	store := newFakeMembershipStore()
+	store.countErr = errors.New("must not query")
+	rec := &authdom.UserIdentity{Role: authdom.RoleMember, Status: authdom.StatusActive}
+	first, err := firstInTenant(store, "org1", rec)
+	if err != nil {
+		t.Fatalf("active 记录不应触发计数查询: %v", err)
+	}
+	if first {
+		t.Fatal("active 记录存在时 isFirstInTenant 必须为 false")
+	}
+	// nil / pending 记录才会查询。
+	if _, err := firstInTenant(store, "org1", nil); err == nil {
+		t.Fatal("nil 记录应触发计数查询并透传错误")
 	}
 }

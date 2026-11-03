@@ -253,3 +253,47 @@ func TestSetRoleMissing(t *testing.T) {
 		t.Fatalf("want gorm.ErrRecordNotFound, got %v", err)
 	}
 }
+
+// TestCountActiveByTenant：bootstrap 判定依赖的计数——按 tenant + active
+// 过滤，pending/其他租户不计入（#238）。
+func TestCountActiveByTenant(t *testing.T) {
+	db := newMembershipTestDB(t)
+	store := NewMembershipStore(db)
+
+	seed := func(externalID, tenantID, status string) {
+		t.Helper()
+		if err := db.Create(&authdom.UserIdentity{
+			Provider: "casdoor", ExternalID: externalID, TenantID: tenantID,
+			Username: externalID, Role: authdom.RoleMember, Status: status,
+		}).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	seed("a1", "t1", authdom.StatusActive)
+	seed("a2", "t1", authdom.StatusActive)
+	seed("p1", "t1", authdom.StatusPending) // pending 不计
+	seed("o1", "t2", authdom.StatusActive)  // 其他租户不计
+
+	n, err := store.CountActiveByTenant("t1")
+	if err != nil {
+		t.Fatalf("count t1: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("count t1 = %d, want 2", n)
+	}
+	n, err = store.CountActiveByTenant("t2")
+	if err != nil {
+		t.Fatalf("count t2: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("count t2 = %d, want 1", n)
+	}
+	n, err = store.CountActiveByTenant("empty-tenant")
+	if err != nil {
+		t.Fatalf("count empty: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("count empty-tenant = %d, want 0", n)
+	}
+}

@@ -46,6 +46,10 @@ func (stubMembershipStore) ApplyDecision(provider string, au *auth.AuthUser, d a
 }
 func (stubMembershipStore) SetRole(provider, externalID, role, status string) error { return nil }
 
+// CountActiveByTenant（#238 bootstrap 新增接口方法）：本用例的 SyncMembership
+// 在假 casdoor 的 admin fetch 上即失败返回，不会触达计数——无害实现。
+func (stubMembershipStore) CountActiveByTenant(tenantID string) (int, error) { return 0, nil }
+
 // genCasdoorTestKey 测试 RSA 私钥（登录取证验签密钥对的一半）。
 func genCasdoorTestKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()

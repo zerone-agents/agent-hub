@@ -154,7 +154,7 @@ func TestClientForOrg_GetUserSynthesisEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, fresh.IsAdmin, "org admin must resolve isAdmin=true via the org's own credentials")
 
-	d := SynthesizeMembership(fresh.IsAdmin, nil)
+	d := SynthesizeMembership(fresh.IsAdmin, nil, false)
 	require.Equal(t, authdom.RoleAdmin, d.Role)
 	require.Equal(t, authdom.StatusActive, d.Status)
 	require.Equal(t, OpCreate, d.Op)
