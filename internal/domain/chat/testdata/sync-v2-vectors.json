@@ -193,6 +193,11 @@
       "name": "session-created-at-empty",
       "reason": "created_at",
       "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"6f9619ff-8b86-d011-b42d-00cf4fc964ff\",\"appSessionId\":\"session-alpha-001\",\"version\":\"3\",\"snapshotId\":\"12345678-1234-4123-8123-123456789abc\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"session-alpha-001\",\"title\":\"计划评审\",\"created_at\":\"\",\"updated_at\":\"2026-10-29T18:30:00Z\",\"model\":\"glm-5\",\"model_selection_id\":\"glm-5-air\",\"system_prompt\":\"你是助手\\n规则：\\t1) 引用来源 \\\"doc.md\\\"\",\"status\":\"active\",\"mode\":\"plan\",\"provider_id\":\"prov-1\",\"agent_id\":\"agent-9\",\"permission_profile\":\"default\",\"hidden\":false,\"extra_directories\":\"\",\"is_user_bound\":true},\"messages\":[]},\"digest\":\"9a8d8968b0bb86bdd1c5749d3b21a81bc94a398e3075160f6797f1c3c3ab1256\"}"
+    },
+    {
+      "name": "lone-surrogate-escape",
+      "reason": "lone surrogate",
+      "raw": "{\"protocolVersion\":2,\"projectionVersion\":1,\"sourceId\":\"aaaa0000-0000-4000-8000-00000000a001\",\"appSessionId\":\"s-lone\",\"version\":\"1\",\"snapshotId\":\"bbbb0000-0000-4000-8000-00000000beef\",\"kind\":\"replace\",\"payload\":{\"session\":{\"id\":\"s-lone\",\"title\":\"\\ud800 孤立代理测试\",\"created_at\":\"2026-10-01T00:00:00Z\",\"updated_at\":\"2026-10-02T00:00:00Z\"},\"messages\":[]},\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"
     }
   ]
 }

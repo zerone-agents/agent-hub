@@ -23,7 +23,8 @@ const (
 
 // ChatSyncCapabilities：能力查询响应。serverIdentity 为 hub 对外可达
 // base URL（复用 ChatPushPublicURL 配置——部署身份语义一致；未配置为空串，
-// App 以实际请求 origin 兜底）。
+// App 以实际请求 origin 兜底）。空串回退语义已经 App 侧确认（issue #234
+// 决策记录，2026-11-02）：App 不以 serverIdentity 做路由判定。
 type ChatSyncCapabilities struct {
 	ProtocolVersions   []int64 `json:"protocolVersions"`
 	ProjectionVersions []int64 `json:"projectionVersions"`

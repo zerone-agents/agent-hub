@@ -172,6 +172,69 @@ var (
 // claim 入口复用于 sourceId 校验）。
 func IsValidSyncUUID(s string) bool { return uuidPattern.MatchString(s) }
 
+// hasLoneSurrogateEscape 扫描原始字节的 \uXXXX 转义，拒绝未配对的代理
+// 码点（D800–DFFF）：encoding/json 解码时把孤立代理静默替换为 U+FFFD，
+// 而 JS 字符串保留孤立代理——Go/JS 两端对同一文档会得出不同字符串，摘要
+// 必然分叉（契约禁止非法 Unicode；issue #234 评审补充项 ②）。
+//
+// string-aware：字符串内的 \\（转义反斜杠）之后的内容是字面文本而非转义
+// （如 "\\ud800" 是字面文本 "\ud800"，合法不拒）；高代理后紧跟低代理转义
+// 视为合法配对，一并跳过。
+func hasLoneSurrogateEscape(raw []byte) bool {
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !inString {
+			if c == '"' {
+				inString = true
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = false
+		case '\\':
+			if i+1 >= len(raw) {
+				return false // 残缺转义，交给 JSON 解码报错
+			}
+			if raw[i+1] == 'u' && i+6 <= len(raw) {
+				cp, ok := parseHex4(string(raw[i+2 : i+6]))
+				if !ok {
+					i++ // \u 后非十六进制，交给 JSON 解码报错
+					continue
+				}
+				if cp >= 0xD800 && cp <= 0xDFFF {
+					// 高代理后紧跟低代理转义 = 合法配对，跳过整对
+					if cp <= 0xDBFF && i+12 <= len(raw) && raw[i+6] == '\\' && raw[i+7] == 'u' {
+						if lo, ok2 := parseHex4(string(raw[i+8 : i+12])); ok2 && lo >= 0xDC00 && lo <= 0xDFFF {
+							i += 12 - 1 // 抵消循环自增：跳过 12 字节配对
+							continue
+						}
+					}
+					return true // 孤立代理转义
+				}
+				i++ // 跳过 \u 中的 u：后 4 位十六进制是普通字符
+				continue
+			}
+			i++ // 其余转义（\n \" \\ ...）：跳过转义字符本身
+			continue
+		}
+	}
+	return false
+}
+
+// parseHex4 解析 4 位十六进制（大小写均可）；位数或字符不符返回 false。
+func parseHex4(s string) (rune, bool) {
+	if len(s) != 4 {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
+		return 0, false
+	}
+	return rune(v), true
+}
+
 // wireEnvelope 是传输层形状（version 为字符串）；仅用于解码与摘要重建。
 type wireEnvelope struct {
 	ProtocolVersion   int64           `json:"protocolVersion"`
@@ -189,6 +252,9 @@ type wireEnvelope struct {
 func ParseEnvelope(raw []byte) (Envelope, error) {
 	if !utf8.Valid(raw) {
 		return Envelope{}, errors.New("invalid envelope: not valid UTF-8")
+	}
+	if hasLoneSurrogateEscape(raw) {
+		return Envelope{}, errors.New("invalid envelope: lone surrogate escape — invalid Unicode per JCS (issue #234)")
 	}
 	if err := checkJSONShape(raw); err != nil {
 		return Envelope{}, err

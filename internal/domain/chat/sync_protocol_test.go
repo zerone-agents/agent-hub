@@ -134,3 +134,27 @@ func TestSyncEnvelopeBasicShape(t *testing.T) {
 		}
 	}
 }
+
+// hasLoneSurrogateEscape 的配对边界（issue #234 评审补充项 ②）：合法配对
+// 不误伤、孤立代理拒绝、转义反斜杠后的字面文本不是转义。
+func TestHasLoneSurrogateEscape(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"paired escapes are legal", `{"a":"\ud83d\ude00 ok"}`, false},
+		{"lone high surrogate escape", `{"a":"\ud800"}`, true},
+		{"lone low surrogate escape", `{"a":"\udfff"}`, true},
+		{"high followed by non-escape char", `{"a":"\ud800x"}`, true},
+		{"high followed by another high", `{"a":"\ud800\ud800"}`, true},
+		{"non-surrogate escape fine", `{"a":"\u0041"}`, false},
+		{"escaped backslash makes ud800 literal text", `{"a":"\\ud800"}`, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, hasLoneSurrogateEscape([]byte(tc.raw)),
+				"raw=%s", tc.raw)
+		})
+	}
+}
