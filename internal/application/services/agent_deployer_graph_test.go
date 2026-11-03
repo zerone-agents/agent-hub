@@ -318,7 +318,7 @@ func TestDeploy_AgentGraph(t *testing.T) {
 	t.Run("2: bare rootAgentId + scoped deploymentKey; agents holds root + child-a + child-b; root.subagents are pure ids", func(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
 		require.Equal(t, "parent", body["rootAgentId"])
-		require.Equal(t, "tenant-a-parent", body["deploymentKey"])
+		require.Equal(t, "tenant-a--parent", body["deploymentKey"])
 		nodes := graphAgents(t, body)
 		require.Len(t, nodes, 3)
 		require.Equal(t, "parent", nodes[0]["name"])
@@ -441,14 +441,14 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		}
 
 		// The issued capabilities verify against the deployment's binding
-		// triple: tenant-a, deploy key tenant-a-parent, and the fingerprint
+		// triple: tenant-a, deploy key tenant-a--parent, and the fingerprint
 		// of the token actually sent in the same request.
 		token := f.sentToken(t)
 		allowed := map[string]struct{}{"parent": {}, "child-a": {}, "child-b": {}}
-		name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a--parent", tokenFingerprint(token), allowed)
 		require.NoError(t, err)
 		require.Equal(t, "parent", name)
-		name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a-parent", tokenFingerprint(token), allowed)
+		name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a--parent", tokenFingerprint(token), allowed)
 		require.NoError(t, err)
 		require.Equal(t, "child-a", name)
 

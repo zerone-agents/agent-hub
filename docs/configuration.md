@@ -131,7 +131,7 @@ curl -X POST https://<hub>/api/v1/ops/tenant-clients \
 
 字段说明：`org` = Casdoor 组织名（即租户 ID）；`cert` 可选，仅当该组织使用**独立于全局 `CASDOOR_CERTIFICATE` 的验签证书**时才需要传（PEM 明文；非空时必须为合法 PEM 证书（`-----BEGIN CERTIFICATE-----` 开头），否则 400）；`isDefault` 可选。
 
-**org 命名约束**：组织名必须匹配 `^[a-z][a-z0-9]{0,62}$`（小写字母开头，仅小写字母和数字，不超过 63 字符），**不允许连字符、大写、下划线等**，不合法返回 400。原因：组织名用于拼接部署键 `<org>-<agent>` 与 runtime URL 路径段 `/<org>/<agent>`（见下文「部署键与 runtime URL」），而 agent 名本身允许连字符——若 org 也允许连字符，`(org "a", agent "b-c")` 与 `(org "a-b", agent "c")` 会拼出同一个部署键，产生跨租户覆盖/误删的歧义。已登记的存量组织（`zerone` / `ayu` / `zhengxin` 等）天然合规，无需迁移。
+**org 命名约束**（#235 起）：组织名须匹配 `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`（小写字母开头，小写字母/数字/连字符，连字符仅在字母数字之间——不以连字符开头/结尾、不含连续连字符），不超过 63 字符；不合法返回 400。组织名用于 URL 路径段 `/<org>/<agent>`。部署键歧义——`(org "a", agent "b-c")` 与 `(org "a-b", agent "c")` 曾拼出同一部署键——由混合制分隔符消除：org 不含连字符时键为 `<org>-<agent>`（存量形态），org 含连字符时键为 `<org>--<agent>`（`--` 只可能出现在分隔位：org 校验禁连续连字符 + agent 名折叠连续非法字符为单 `-`）。已登记的存量组织（`zerone` / `ayu` / `zhengxin` 等）天然合规，无需迁移。
 
 default tenant 语义（不变式：**有且唯一**）：
 
@@ -162,7 +162,7 @@ default tenant 语义（不变式：**有且唯一**）：
 | 标识 | 形态 | 用途 |
 |---|---|---|
 | **Agent ID** | 裸 `<name>` | runtime agent 图与 chat 语义；hub 的聊天/详情代理经 `/v1/agents/<name>` 裸名寻址 runtime（subagent 同为裸名） |
-| **Deployment key** | `<org>-<name>` | deployer 容器/数据目录/生命周期寻址（Get/Start/Stop/Delete）；Kong service/route 实体名（带 `agent-` 前缀，如 `agent-acme-general`） |
+| **Deployment key** | `<org>-<name>`（org 不含连字符）或 `<org>--<name>`（org 含连字符，#235） | deployer 容器/数据目录/生命周期寻址（Get/Start/Stop/Delete）；Kong service/route 实体名（带 `agent-` 前缀，如 `agent-acme-general`；连字符 org 形如 `agent-ai-games--quiz`） |
 | **Public URL** | casdoor：`/<org>/<name>`；builtin：`/<name>` | Kong 路由与无 Kong 时的 hub 代理路径（`/runtime` 前缀）；builtin 不暴露内部 `default` 租户名，但 deployment key 仍保持 `default-<name>` |
 
 - **数据库仍存裸名**（`agents.name` 等），租户归属由 `tenant_id` 列表达，部署键仅在部署/网关层拼接。

@@ -69,8 +69,10 @@ var orgSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // orgSlug defensively normalizes a tenant/org identifier for use in entity
 // names and URL segments: lowercase, non-alphanumeric runs folded to "-",
-// leading/trailing "-" trimmed. Registration-side validation already restricts
-// orgs to ^[a-z][a-z0-9]{0,62}$ (Task 3); this is a safety net for legacy rows.
+// leading/trailing "-" trimmed. Registration-side validation
+// (domain/tenant.ValidateOrgName, #235) allows hyphens, so folding matters
+// mainly for legacy rows and casdoor owner claims hub never gated; DeployKey
+// gives hyphenated orgs their "--" separator.
 func orgSlug(tenantID string) string {
 	s := strings.ToLower(tenantID)
 	s = orgSlugRe.ReplaceAllString(s, "-")
@@ -78,11 +80,29 @@ func orgSlug(tenantID string) string {
 }
 
 // DeployKey returns the tenant-scoped deployment key for an agent:
-// "<org>-<NormalizeAgentName(name)>". The key names Kong service/route
-// entities (via svcName/routeName) and deployer containers, decoupling them
-// from the DB bare name so same-name agents across tenants no longer collide.
+// "<org><sep><NormalizeAgentName(name)>" where sep is "-" for orgs without
+// hyphens (the legacy shape — zero migration for every pre-#235 tenant) and
+// "--" for hyphenated orgs (kebab-case, allowed since #235). The key names
+// Kong service/route entities (via svcName/routeName) and deployer
+// containers, decoupling them from the DB bare name so same-name agents
+// across tenants no longer collide.
+//
+// issue #235 disambiguation: "--" appears in a key ONLY as the org/agent
+// separator, never inside a segment — ops validation rejects consecutive
+// hyphens in org names, and NormalizeAgentName folds runs of invalid chars
+// to a single "-" (so agent segments never contain "--"). Therefore the
+// key's first "--" (or, when absent, its first "-") is unambiguously the
+// boundary: (org "a", agent "b-c") → "a--b-c" and (org "a-b", agent "c") →
+// "a-b--c" no longer collide. Both sides treat the key as opaque; only the
+// Kong entity-name charset ([a-z0-9-], agentNameRe) matters, which "--"
+// satisfies.
 func DeployKey(tenantID, agentName string) string {
-	return orgSlug(tenantID) + "-" + NormalizeAgentName(agentName)
+	org := orgSlug(tenantID)
+	sep := "-"
+	if strings.Contains(org, "-") {
+		sep = "--"
+	}
+	return org + sep + NormalizeAgentName(agentName)
 }
 
 // AuthMode distinguishes the hub's user system and the public-path policy

@@ -946,7 +946,7 @@ func TestKnowledgeMcpHandler_ToolsCall_TenantScopedDatasets(t *testing.T) {
 	var gotTenantID, gotTokenAgent, gotCapability, gotBearer string
 	agentSvc := &tenantAwareAgentMcpService{fn: func(tenantID, tokenAgentName, capabilityHeader, bearerToken string) ([]string, string, error) {
 		gotTenantID, gotTokenAgent, gotCapability, gotBearer = tenantID, tokenAgentName, capabilityHeader, bearerToken
-		return []string{"tenant-a-dataset"}, tokenAgentName, nil
+		return []string{"tenant-a--dataset"}, tokenAgentName, nil
 	}}
 	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, agentSvc)
 	params := json.RawMessage(`{"name":"knowledge_search","arguments":{"query":"hello"}}`)
