@@ -35,6 +35,10 @@ type Config struct {
 	Kong      KongConfig      `mapstructure:"kong"`
 	Ops       OpsConfig       `mapstructure:"ops"`
 	ChatPush  ChatPushConfig  `mapstructure:"chat_push"`
+	// TenantSync 是 casdoor 租户周期同步配置（#238 part 2）；Enabled 默认
+	// false——打开后 hub 自动把 casdoor 组织+hub 应用注册进
+	// tenant_oauth_clients（default 行仍必须由 ops 显式注册）。
+	TenantSync TenantSyncConfig `mapstructure:"tenant_sync"`
 }
 
 // OpsConfig 是运维端点（/api/v1/ops/*）配置。APIKey 可选：为空时 ops 端点
@@ -108,6 +112,12 @@ type DeployerConfig struct {
 type KongConfig struct {
 	AdminURL     string `mapstructure:"admin_url"`     // Kong Admin API；空 = 禁用 Kong 集成（no-op）
 	ReconcileSec int    `mapstructure:"reconcile_sec"` // 对账间隔秒，默认 300
+}
+
+// TenantSyncConfig 是 casdoor 租户周期同步配置（#238 part 2）。
+type TenantSyncConfig struct {
+	Enabled      bool `mapstructure:"enabled"`       // 关闭（默认）时不同步；casdoor 侧新组织需 ops 显式注册
+	ReconcileSec int  `mapstructure:"reconcile_sec"` // 同步间隔秒，默认 300
 }
 
 type KnowledgeConfig struct {
@@ -195,6 +205,8 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("knowledge.upload_timeout_seconds", "MULTIRAG_UPLOAD_TIMEOUT_SECONDS")
 	viper.BindEnv("kong.admin_url", "KONG_ADMIN_URL")
 	viper.BindEnv("kong.reconcile_sec", "KONG_RECONCILE_SEC")
+	viper.BindEnv("tenant_sync.enabled", "TENANT_SYNC_ENABLED")
+	viper.BindEnv("tenant_sync.reconcile_sec", "TENANT_SYNC_RECONCILE_SEC")
 	viper.BindEnv("ops.api_key", "OPS_API_KEY")
 	viper.BindEnv("chat_push.api_key", "CHAT_PUSH_API_KEY")
 	viper.BindEnv("chat_push.public_url", "CHAT_PUSH_PUBLIC_URL")
@@ -208,6 +220,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("knowledge.timeout_seconds", 30)
 	viper.SetDefault("knowledge.upload_timeout_seconds", 3600)
 	viper.SetDefault("kong.reconcile_sec", 300)
+	viper.SetDefault("tenant_sync.reconcile_sec", 300)
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
