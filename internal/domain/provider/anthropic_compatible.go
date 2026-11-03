@@ -5,7 +5,7 @@ import "context"
 func NewAnthropicCompatible() *AnthropicCompatible {
 	return &AnthropicCompatible{
 		BaseProvider: BaseProvider{
-			key:           "anthropic-thirdparty",
+			key:           KeyAnthropicThirdparty,
 			name:          "Anthropic Compatible API",
 			description:   "自定义 Anthropic 兼容 API，自行填写地址和密钥",
 			descriptionEn: "Custom Anthropic-compatible API, fill in your own URL and key",

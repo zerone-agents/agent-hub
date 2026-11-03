@@ -1,5 +1,15 @@
 package provider
 
+// 通用兼容预设 key 常量（issue #243 ④）：种子预设数据（BuiltinSeedSpecs /
+// SeedPresets）、factory.go 的实例化 switch、兼容构造器、service 层的 chat
+// 豁免集合共用同一来源——Go 生产代码内修改 key 只改这里；改名须同步前端
+// （ProviderForm.tsx）、docs 与测试（跨语言不共享 Go 常量，测试保留钉住性
+// 字面量，均不受本常量约束）。
+const (
+	KeyAnthropicThirdparty = "anthropic-thirdparty"
+	KeyOpenAIThirdparty    = "openai-thirdparty"
+)
+
 // SeedPreset is the "nice" representation used for initial data seeding.
 // The service layer handles JSON marshalling and encryption before inserting.
 type SeedPreset struct {
@@ -23,7 +33,7 @@ type SeedPreset struct {
 func SeedPresets() []SeedPreset {
 	return []SeedPreset{
 		{
-			Key:           "anthropic-thirdparty",
+			Key:           KeyAnthropicThirdparty,
 			Name:          "Anthropic Compatible API",
 			Description:   "自定义 Anthropic 兼容 API，自行填写地址和密钥",
 			DescriptionEn: "Custom Anthropic-compatible API, fill in your own URL and key",
@@ -39,7 +49,7 @@ func SeedPresets() []SeedPreset {
 			IconKey: "anthropic",
 		},
 		{
-			Key:           "openai-thirdparty",
+			Key:           KeyOpenAIThirdparty,
 			Name:          "OpenAI Compatible API",
 			Description:   "自定义 OpenAI 兼容 API，自行填写地址和密钥",
 			DescriptionEn: "Custom OpenAI-compatible API, fill in your own URL and key",

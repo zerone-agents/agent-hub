@@ -90,7 +90,7 @@ func BuiltinSeedSpecs() []SeedSpec {
 			},
 		},
 		{
-			Key:           "anthropic-thirdparty",
+			Key:           KeyAnthropicThirdparty,
 			Name:          "Anthropic Compatible API",
 			Description:   "自定义 Anthropic 兼容 API，自行填写地址和密钥",
 			DescriptionEn: "Custom Anthropic-compatible API, fill in your own URL and key",
@@ -108,7 +108,7 @@ func BuiltinSeedSpecs() []SeedSpec {
 		},
 		// ── LLM (OpenAI-compatible) ─────────────────────────────────
 		{
-			Key:           "openai-thirdparty",
+			Key:           KeyOpenAIThirdparty,
 			Name:          "OpenAI Compatible API",
 			Description:   "自定义 OpenAI 兼容 API，自行填写地址和密钥",
 			DescriptionEn: "Custom OpenAI-compatible API, fill in your own URL and key",

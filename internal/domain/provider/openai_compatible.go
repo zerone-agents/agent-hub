@@ -7,7 +7,7 @@ import (
 func NewOpenAICompatible() *OpenAICompatible {
 	return &OpenAICompatible{
 		BaseProvider: BaseProvider{
-			key:           "openai-thirdparty",
+			key:           KeyOpenAIThirdparty,
 			name:          "OpenAI Compatible API",
 			description:   "自定义 OpenAI 兼容 API，自行填写地址和密钥",
 			descriptionEn: "Custom OpenAI-compatible API, fill in your own URL and key",
