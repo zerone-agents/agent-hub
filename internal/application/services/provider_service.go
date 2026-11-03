@@ -199,9 +199,23 @@ func matchProviderType(filter, modelType string) bool {
 // Exemption is deliberately narrow: only these two keys, only the chat
 // pseudo-filter — strict type filters (llm/ocr/embedding/vlm) and unfiltered
 // listings keep the existing has-at-least-one-model behavior.
+//
+// 共编义务（issue #243 ①）：本集合与 provider 域的种子预设
+// （SeedPresets / BuiltinSeedSpecs，含 factory.go 各构造器）中
+// DefaultModels 为空的预设必须保持同步——新增零预置模型的兼容预设并希望
+// 其出现在 chat 过滤列表时，必须同时把 key 加进本集合，否则新预设会被
+// chat 过滤隐藏。
+//
+// 租户自命名同 key（issue #243 ②）：租户创建与预设同名 key 的 provider
+// 也会命中本集合豁免——当前行为可接受（key 即身份），不做租户行排除。
+//
+// 「无 chat 模型」vs「零模型」取舍（issue #243 ③）：豁免判定基于
+// 零预置模型（用户全自带），而非「无 llm/vlm 模型」——后者会误豁免
+// 仅配了 OCR/嵌入模型的 provider（用户仍看不到可聊模型但预设出现在列表
+// 反而误导）。零模型形态 UX 更好，不做更细的区分。
 var zeroModelChatCompatibleKeys = map[string]bool{
-	"openai-thirdparty":    true,
-	"anthropic-thirdparty": true,
+	provider.KeyOpenAIThirdparty:    true,
+	provider.KeyAnthropicThirdparty: true,
 }
 
 // dedupeSummariesTenantFirst CoW 后同 key 会同时存在共享行（tenant_id==”

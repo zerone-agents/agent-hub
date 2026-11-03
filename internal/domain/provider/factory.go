@@ -10,9 +10,9 @@ import (
 // BuiltinSeedSpecs() and reconstructed from DB as generic providers.
 func NewProvider(key string) (Provider, error) {
 	switch key {
-	case "anthropic-thirdparty":
+	case KeyAnthropicThirdparty:
 		return NewAnthropicCompatible(), nil
-	case "openai-thirdparty":
+	case KeyOpenAIThirdparty:
 		return NewOpenAICompatible(), nil
 	case "mineru":
 		return NewMinerU(), nil
