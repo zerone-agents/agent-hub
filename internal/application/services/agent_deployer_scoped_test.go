@@ -157,7 +157,7 @@ func TestDeploy_PayloadSplitsBareRootAndScopedKey(t *testing.T) {
 	if _, err := s.Deploy("tenant-a", "general", false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	const wantKey = "tenant-a-general"
+	const wantKey = "tenant-a--general"
 	if !rec.hasEntry("GET /api/v1/agents/" + wantKey) {
 		t.Errorf("existence probe should hit /api/v1/agents/%s, got %v", wantKey, rec.paths)
 	}
@@ -282,7 +282,7 @@ func TestGetStatus_QueriesScopedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	const wantKey = "tenant-a-general"
+	const wantKey = "tenant-a--general"
 	if !rec.hasEntry("GET /api/v1/agents/" + wantKey) {
 		t.Errorf("agent query should hit /api/v1/agents/%s, got %v", wantKey, rec.paths)
 	}
@@ -300,7 +300,7 @@ func TestGetStatus_QueriesScopedKey(t *testing.T) {
 // TestLifecycleCalls_UseScopedKey asserts Stop/Start/Delete address the
 // deployer with the tenant-scoped key.
 func TestLifecycleCalls_UseScopedKey(t *testing.T) {
-	const wantKey = "tenant-a-general"
+	const wantKey = "tenant-a--general"
 
 	t.Run("stop", func(t *testing.T) {
 		rec := &scopedRecorder{}
@@ -465,12 +465,12 @@ func TestRegisterWhenHealthy_RegistersScopedRoute(t *testing.T) {
 
 	s.registerWhenHealthy("tenant-a", "general", 3000)
 
-	if fk.services["agent-tenant-a-general"] == nil {
-		t.Fatal("expected scoped service agent-tenant-a-general")
+	if fk.services["agent-tenant-a--general"] == nil {
+		t.Fatal("expected scoped service agent-tenant-a--general")
 	}
-	r := fk.routes["agent-tenant-a-general-route"]
+	r := fk.routes["agent-tenant-a--general-route"]
 	if r == nil {
-		t.Fatal("expected scoped route agent-tenant-a-general-route")
+		t.Fatal("expected scoped route agent-tenant-a--general-route")
 	}
 	if len(r.Paths) != 1 || r.Paths[0] != "/tenant-a/general" {
 		t.Fatalf("scoped route paths = %v, want [/tenant-a/general]", r.Paths)
@@ -491,10 +491,10 @@ func TestWaitForHealthy_UsesScopedKey(t *testing.T) {
 	client := deployer.NewClient(srv.URL, "test-key")
 	s := &AgentDeployerService{client: client, publicHost: "10.0.0.1", upstreamHost: "10.0.0.1", healthProbe: func(ctx context.Context, host string, port int) bool { return false }}
 
-	if _, err := s.WaitForHealthy(context.Background(), "tenant-a-general", 5*time.Second); err != nil {
+	if _, err := s.WaitForHealthy(context.Background(), "tenant-a--general", 5*time.Second); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !rec.hasEntry("GET /api/v1/agents/tenant-a-general/status") {
-		t.Errorf("status poll should hit /api/v1/agents/tenant-a-general/status, got %v", rec.paths)
+	if !rec.hasEntry("GET /api/v1/agents/tenant-a--general/status") {
+		t.Errorf("status poll should hit /api/v1/agents/tenant-a--general/status, got %v", rec.paths)
 	}
 }

@@ -131,7 +131,7 @@ func TestTokenFingerprint(t *testing.T) {
 
 // capabilityFixture is the shared universe for the crypto attack matrix:
 // tenant-a/root with child-a + child-b mounted, deployment key
-// "tenant-a-root", and one runtime token.
+// "tenant-a--root", and one runtime token.
 type capabilityFixture struct {
 	secret  []byte
 	tenant  string
@@ -144,7 +144,7 @@ func newCapabilityFixture() *capabilityFixture {
 	return &capabilityFixture{
 		secret: []byte(testCapabilitySecret),
 		tenant: "tenant-a",
-		dep:    "tenant-a-root",
+		dep:    "tenant-a--root",
 		token:  "0123456789abcdef0123456789abcdef",
 		allowed: map[string]struct{}{
 			"root":    {},
@@ -195,7 +195,7 @@ func TestKnowledgeCapabilityFormat(t *testing.T) {
 	require.NoError(t, json.Unmarshal(payloadJSON, &raw))
 	require.Equal(t, float64(1), raw["v"])
 	require.Equal(t, "tenant-a", raw["t"])
-	require.Equal(t, "tenant-a-root", raw["d"])
+	require.Equal(t, "tenant-a--root", raw["d"])
 	require.Equal(t, "child-a", raw["a"])
 	require.Equal(t, tokenFingerprint(f.token), raw["f"])
 	_, err = base64.RawURLEncoding.DecodeString(parts[2])
@@ -342,7 +342,7 @@ func TestKnowledgeCapabilityVerifyEmptySecretFailsClosed(t *testing.T) {
 // The root also mounts an unrelated MCP that must stay untouched.
 func capabilityRequestFixture() *deployer.CreateAgentRequest {
 	return &deployer.CreateAgentRequest{
-		DeploymentKey: "tenant-a-root",
+		DeploymentKey: "tenant-a--root",
 		RuntimeToken:  "0123456789abcdef0123456789abcdef",
 		Agents: []deployer.AgentDefinition{
 			{
@@ -384,7 +384,7 @@ func TestAttachKnowledgeCapabilities(t *testing.T) {
 	req := capabilityRequestFixture()
 	token := "0123456789abcdef0123456789abcdef"
 
-	require.NoError(t, s.attachKnowledgeCapabilities(req, "tenant-a", "tenant-a-root", token))
+	require.NoError(t, s.attachKnowledgeCapabilities(req, "tenant-a", "tenant-a--root", token))
 
 	rootKnowledge := req.Agents[0].McpServers["knowledge"]
 	childKnowledge := req.Agents[1].McpServers["knowledge"]
@@ -411,10 +411,10 @@ func TestAttachKnowledgeCapabilities(t *testing.T) {
 
 	// The issued values carry the full binding triple.
 	allowed := map[string]struct{}{"root": {}, "child-a": {}}
-	name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
+	name, err := verifyKnowledgeCapability([]byte(testCapabilitySecret), rootCap, "tenant-a", "tenant-a--root", tokenFingerprint(token), allowed)
 	require.NoError(t, err)
 	require.Equal(t, "root", name)
-	name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a-root", tokenFingerprint(token), allowed)
+	name, err = verifyKnowledgeCapability([]byte(testCapabilitySecret), childCap, "tenant-a", "tenant-a--root", tokenFingerprint(token), allowed)
 	require.NoError(t, err)
 	require.Equal(t, "child-a", name)
 }
@@ -429,18 +429,18 @@ func TestAttachKnowledgeCapabilities(t *testing.T) {
 func TestAttachKnowledgeCapabilities_EmptySecretFailsClosed(t *testing.T) {
 	s := &AgentDeployerService{}
 	req := capabilityRequestFixture()
-	err := s.attachKnowledgeCapabilities(req, "tenant-a", "tenant-a-root", "token")
+	err := s.attachKnowledgeCapabilities(req, "tenant-a", "tenant-a--root", "token")
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "encryption_key")
 
 	// Without any knowledge MCP the empty secret is irrelevant (nothing to sign).
 	noKnowledge := &deployer.CreateAgentRequest{
-		DeploymentKey: "tenant-a-root",
+		DeploymentKey: "tenant-a--root",
 		Agents: []deployer.AgentDefinition{
 			{Name: "root", McpServers: map[string]deployer.McpServerConfig{
 				"weather": {Type: "http", URL: "https://mcp.example.com/weather"},
 			}},
 		},
 	}
-	require.NoError(t, s.attachKnowledgeCapabilities(noKnowledge, "tenant-a", "tenant-a-root", "token"))
+	require.NoError(t, s.attachKnowledgeCapabilities(noKnowledge, "tenant-a", "tenant-a--root", "token"))
 }

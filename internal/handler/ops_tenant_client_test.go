@@ -144,9 +144,14 @@ func TestOpsTenantClient_UpsertValidatesRequiredFields(t *testing.T) {
 func TestOpsTenantClient_OrgNameFormatValidation(t *testing.T) {
 	r := setupOpsTenantClientRouter(t)
 
-	// 合法：小写字母开头，仅小写字母数字，≤63 字符。
+	// 合法：小写字母开头，小写字母/数字/连字符（kebab-case，#235），≤63 字符。
 	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
 		gin.H{"org": "tenanta", "clientId": "cid-a", "clientSecret": "sec-a"}).Code)
+	// #235：连字符 org 合法（部署键歧义由 DeployKey 的 org 段编码消除）。
+	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
+		gin.H{"org": "ai-games", "clientId": "cid-ai", "clientSecret": "sec-ai"}).Code)
+	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
+		gin.H{"org": "a-b-c", "clientId": "cid-abc", "clientSecret": "sec-abc"}).Code)
 
 	// 空串被 binding/必填校验先拦（走"org、clientId、clientSecret 必填"分支），只断言 400。
 	require.Equal(t, http.StatusBadRequest, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
@@ -154,7 +159,9 @@ func TestOpsTenantClient_OrgNameFormatValidation(t *testing.T) {
 
 	// 非空非法 org → 400，错误信息说明约束。
 	for _, org := range []string{
-		"org-a",                 // 连字符
+		"-orga",                 // 连字符开头
+		"orga-",                 // 连字符结尾
+		"org--a",                // 连续连字符
 		"OrgA",                  // 大写
 		"1orga",                 // 数字开头
 		strings.Repeat("a", 64), // 超长（>63）
@@ -167,9 +174,11 @@ func TestOpsTenantClient_OrgNameFormatValidation(t *testing.T) {
 		require.Contains(t, w.Body.String(), "小写字母")
 	}
 
-	// 63 字符边界仍合法。
+	// 63 字符边界仍合法（含连字符的 63 字符同样合法）。
 	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
 		gin.H{"org": strings.Repeat("b", 63), "clientId": "cid-b", "clientSecret": "sec-b"}).Code)
+	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodPost, "/ops/tenant-clients",
+		gin.H{"org": strings.Repeat("b", 31) + "-" + strings.Repeat("b", 31), "clientId": "cid-bb", "clientSecret": "sec-bb"}).Code)
 
 	// GET/DELETE 不受影响（连字符 org 也能按路径删除，幂等）。
 	require.Equal(t, http.StatusOK, opsDo(t, r, http.MethodGet, "/ops/tenant-clients", nil).Code)

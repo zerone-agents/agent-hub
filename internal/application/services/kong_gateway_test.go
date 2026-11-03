@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"control-panel/internal/domain/agent"
@@ -644,13 +645,59 @@ func TestDeployKey(t *testing.T) {
 	}{
 		{"zerone", "assistant", "zerone-assistant"},
 		{"ayu", "assistant", "ayu-assistant"},
-		// Defensive normalization: uppercase and special chars folded.
-		{"Zero_Corp!", "Assistant X", "zero-corp-assistant-x"},
+		// Defensive normalization: orgSlug folds uppercase/special chars to
+		// "-", yielding a hyphenated org segment → "--" separator (#235).
+		{"Zero_Corp!", "Assistant X", "zero-corp--assistant-x"},
 		{"--ayu--", "assistant", "ayu-assistant"},
+		// #235: hyphenated orgs use a "--" separator — the key's first "--"
+		// (or, when absent, its first "-") is the org/agent boundary.
+		{"ai-games", "quiz", "ai-games--quiz"},
+		{"a", "b-c", "a-b-c"},
+		{"a-b", "c", "a-b--c"},
 	}
 	for _, c := range cases {
 		if got := DeployKey(c.tenant, c.name); got != c.want {
 			t.Fatalf("DeployKey(%q,%q) = %q, want %q", c.tenant, c.name, got, c.want)
+		}
+	}
+}
+
+// TestDeployKey_HyphenOrgNoAmbiguity proves the #235 mixed-separator scheme
+// keeps keys collision-free AND uniquely decodable: "--" occurs in a key
+// ONLY as the org/agent separator — ops validation rejects consecutive
+// hyphens in org names, and NormalizeAgentName folds runs of invalid chars
+// to a single "-" so agent segments never contain "--". Decoding: the first
+// "--" splits; when absent, the first "-" does (that org has no hyphen).
+// Includes the historical collision pair — (org "a", agent "b-c") vs
+// (org "a-b", agent "c") — which produced the SAME key before #235.
+func TestDeployKey_HyphenOrgNoAmbiguity(t *testing.T) {
+	decode := func(key string) (org, agent string) {
+		if i := strings.Index(key, "--"); i >= 0 {
+			return key[:i], key[i+2:]
+		}
+		if i := strings.Index(key, "-"); i >= 0 {
+			return key[:i], key[i+1:]
+		}
+		return key, ""
+	}
+	cases := []struct{ tenant, name string }{
+		{"a", "b-c"},
+		{"a-b", "c"},
+		{"ai-games", "quiz"},
+		{"a-b-c", "x-y-z"},
+		{"zerone", "va-parent"},
+	}
+	seen := map[string]bool{}
+	for _, c := range cases {
+		key := DeployKey(c.tenant, c.name)
+		if seen[key] {
+			t.Fatalf("deploy key collision: %q", key)
+		}
+		seen[key] = true
+		org, agent := decode(key)
+		wantAgent := NormalizeAgentName(c.name)
+		if org != c.tenant || agent != wantAgent {
+			t.Fatalf("decode(%q) = org %q agent %q, want org %q agent %q", key, org, agent, c.tenant, wantAgent)
 		}
 	}
 }

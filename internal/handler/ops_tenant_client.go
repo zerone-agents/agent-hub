@@ -12,12 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// opsOrgNameRe 限定租户 org 名格式：小写字母开头，仅小写字母数字，≤63 字符。
-// 动机：部署层用 `<org>-<agentName>` 拼接部署键（deployer 容器键 + Kong 实体名），
-// agentName 本身允许连字符；若 org 也允许连字符，则 (org "a", agent "b-c") 与
-// (org "a-b", agent "c") 会拼出同一个键，产生跨租户覆盖/误删。禁止 org 含连字符
-// 从登记入口消除这一歧义。存量行（zerone/ayu/zhengxin）天然合规。
-var opsOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]{0,62}$`)
+// opsOrgNameRe 限定租户 org 名格式（#235）：小写字母开头，小写字母/数字/连字符，
+// 不以连字符开头/结尾、不含连续连字符（kebab-case 是常见组织命名习惯）。
+// 长度 ≤63 由调用方显式判断（正则不嵌重复组，避免失控匹配）。
+// 连字符歧义——(org "a", agent "b-c") 与 (org "a-b", agent "c") 曾拼出同一部署键
+// （deployer 容器键 + Kong 实体名），产生跨租户覆盖风险——不再靠禁连字符回避：
+// DeployKey 的 org 段可逆编码（单 "-" → "__"）使键中第一个单连字符必为
+// org/agent 边界，歧义在键层消除。存量行（zerone/ayu/zhengxin/aigames）天然合规。
+var opsOrgNameRe = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 
 // OpsTenantClientHandler 管理组织 → Casdoor Application 凭证映射（多组织登录）。
 // 端点由 RequireOpsKey 保护（X-Ops-Key），不走 JWT 链。secret/cert 在此层加密，
@@ -55,8 +57,8 @@ func (h *OpsTenantClientHandler) Upsert(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "org、clientId、clientSecret 必填"})
 		return
 	}
-	if !opsOrgNameRe.MatchString(req.Org) {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "组织名只能包含小写字母和数字，以字母开头，不超过 63 字符——组织名用于生成部署键与 URL 路径段，不允许连字符等特殊字符"})
+	if !opsOrgNameRe.MatchString(req.Org) || len(req.Org) > 63 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "组织名须以小写字母开头，仅含小写字母/数字/连字符，不以连字符开头或结尾、不含连续连字符，不超过 63 字符——组织名用于 URL 路径段与部署键生成"})
 		return
 	}
 
