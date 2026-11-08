@@ -4,6 +4,10 @@ import { ownedRequestConfig, type RequestOwner } from './requestOwnership'
 export type MultiRAGModelType = 'embedding' | 'ocr' | 'image2text' | 'rerank'
 
 export interface MultiRAGModel {
+	/** Canonical model identity. Keep it as text, including beyond 2^53. */
+	reference?: string
+	instanceName?: string
+	modelTypes?: string[]
   name: string
   factory: string
   type: string

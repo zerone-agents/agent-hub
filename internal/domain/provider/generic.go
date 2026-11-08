@@ -13,6 +13,15 @@ type GenericOpenAIProvider struct{ BaseProvider }
 type GenericMinerUProvider struct{ BaseProvider }
 type GenericPaddleOCRProvider struct{ BaseProvider }
 
+func (p *GenericMinerUProvider) MultiRAGFactoryName() string { return "MinerU" }
+func (p *GenericMinerUProvider) SyncToMultiRAG(ctx context.Context, client MultiRAGClient, opts SyncOptions) (*SyncResult, error) {
+	return (&MinerU{BaseProvider: p.BaseProvider}).SyncToMultiRAG(ctx, client, opts)
+}
+func (p *GenericPaddleOCRProvider) MultiRAGFactoryName() string { return "PaddleOCR" }
+func (p *GenericPaddleOCRProvider) SyncToMultiRAG(ctx context.Context, client MultiRAGClient, opts SyncOptions) (*SyncResult, error) {
+	return (&PaddleOCR{BaseProvider: p.BaseProvider}).SyncToMultiRAG(ctx, client, opts)
+}
+
 func (p *GenericAnthropicProvider) SyncToMultiRAG(ctx context.Context, client MultiRAGClient, opts SyncOptions) (*SyncResult, error) {
 	return p.syncAsAddLLM(ctx, client, opts, "Anthropic")
 }

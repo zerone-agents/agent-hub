@@ -49,6 +49,8 @@ import { parseApiError } from "@/api/client";
 import { copyOrManual } from "@/utils/clipboard";
 import {
   knowledgeApi,
+  knowledgeMutationDetails,
+  knowledgeWriteUnconfirmed,
   type ChunkFormInput,
   type KnowledgeChunk,
   type KnowledgeDocument,
@@ -594,6 +596,7 @@ interface ChunkEditorProps {
   onClose: () => void;
   document?: KnowledgeDocument | null;
   onSaved: (chunk: KnowledgeChunk) => void;
+  onReadback: () => void;
 }
 
 function ChunkEditor({
@@ -604,6 +607,7 @@ function ChunkEditor({
   onClose,
   document,
   onSaved,
+  onReadback,
 }: ChunkEditorProps) {
   const { t } = useTranslation();
   const reviewText = useChunkReviewText();
@@ -616,9 +620,13 @@ function ChunkEditor({
   const savingRef = useRef(false);
   const draftKey = useRef<string | null>(null);
   const [pendingReadback, setPendingReadback] = useState<{
-    chunkId: string;
+    chunkId?: string;
     input: ChunkFormInput;
+    imageId?: string;
+    unsafe?: boolean;
   } | null>(null);
+  const [observedRecovery, setObservedRecovery] = useState<KnowledgeChunk | null>(null);
+  const [readbackChecked, setReadbackChecked] = useState(false);
   const [saveError, setSaveError] = useState("");
   const readbackController = useRef<AbortController | null>(null);
   const imageReadVersion = useRef(0);
@@ -650,6 +658,8 @@ function ChunkEditor({
     setImageReading(false);
     setSaveError("");
     setPendingReadback(null);
+    setObservedRecovery(null);
+    setReadbackChecked(false);
 
     setImagePreviewUrl("");
 
@@ -727,12 +737,16 @@ function ChunkEditor({
     setConfirming(true);
     const requestSession = sessionVersion.current;
     try {
-      const result = await knowledgeApi.chunks.list(datasetId, documentId, {
-        id: pendingReadback.chunkId,
-        page_size: 1,
-      });
+      const result = await knowledgeApi.chunks.list(datasetId, documentId, pendingReadback.chunkId
+        ? { id: pendingReadback.chunkId, page_size: 1 }
+        : { page: 1, page_size: 100 });
+      if (requestSession !== sessionVersion.current) return;
+      setReadbackChecked(true);
+      onReadback();
       const saved = result.chunks.find(
-        (chunk) => chunk.id === pendingReadback.chunkId,
+        (chunk) => chunk.document_id === documentId && (pendingReadback.chunkId
+          ? chunk.id === pendingReadback.chunkId
+          : !!pendingReadback.imageId && chunk.image_id === pendingReadback.imageId),
       );
       const confirmed = saved
         ? await confirmSaved(
@@ -743,7 +757,8 @@ function ChunkEditor({
         : false;
       if (requestSession !== sessionVersion.current) return;
       if (!confirmed || !saved) {
-        setSaveError(reviewText("readbackFailed"));
+        setObservedRecovery(saved ?? null);
+        setSaveError(i18next.t("retrievalWorkbench:chunkReadbackMissing"));
         return;
       }
       draftKey.current = null;
@@ -838,7 +853,7 @@ function ChunkEditor({
       if (requestSession !== sessionVersion.current) return;
       if (!confirmed) {
         if (editing?.id || saved.id)
-          setPendingReadback({ chunkId: editing?.id ?? saved.id, input });
+          setPendingReadback({ chunkId: editing?.id ?? saved.id, input, unsafe: true });
         setSaveError(reviewText("readbackFailed"));
         return;
       }
@@ -848,8 +863,16 @@ function ChunkEditor({
       onClose();
     } catch (error) {
       if (requestSession === sessionVersion.current) {
-        if (editing) setPendingReadback({ chunkId: editing.id, input });
-        setSaveError(`${reviewText("saveFailed")} · ${parseApiError(error)}`);
+        const details = knowledgeMutationDetails(error);
+        const unsafe = knowledgeWriteUnconfirmed(error);
+        const imageId = typeof details?.image_id === "string" ? details.image_id : undefined;
+        const prefix = `${datasetId}-`;
+        const receiptId = imageId?.startsWith(prefix) ? imageId.slice(prefix.length) : undefined;
+        if (unsafe) setPendingReadback({
+          chunkId: editing?.id ?? (receiptId && /^[A-Za-z0-9_-]{1,64}$/.test(receiptId) ? receiptId : undefined),
+          imageId, input, unsafe,
+        });
+        setSaveError(`${unsafe ? i18next.t("retrievalWorkbench:chunkUnconfirmed") : reviewText("saveFailed")} · ${parseApiError(error)}`);
       }
     } finally {
       savingRef.current = false;
@@ -942,7 +965,7 @@ function ChunkEditor({
                       >
                         {reviewText("recheck")}
                       </Button>
-                      <Button
+                      {!pendingReadback.unsafe && <Button
                         disabled={submitting}
                         onClick={() => {
                           setPendingReadback(null);
@@ -950,7 +973,16 @@ function ChunkEditor({
                         }}
                       >
                         {reviewText("continueEditing")}
-                      </Button>
+                      </Button>}
+                      {observedRecovery && <Button disabled={submitting} onClick={() => {
+                        draftKey.current = null;
+                        onSaved(observedRecovery);
+                        onClose();
+                      }}>{i18next.t("retrievalWorkbench:chunkViewObserved")}</Button>}
+                      {readbackChecked && !observedRecovery && <Button disabled={submitting} onClick={() => {
+                        draftKey.current = null;
+                        onClose();
+                      }}>{i18next.t("retrievalWorkbench:chunkDiscardDraft")}</Button>}
                     </Space>
                   ) : undefined
                 }
@@ -1789,6 +1821,7 @@ function KnowledgeChunksWorkbench() {
           setImageVersion((current) => current + 1);
           void query.refetch();
         }}
+        onReadback={() => { void query.refetch(); }}
         onClose={() => {
           setEditorOpen(false);
         }}

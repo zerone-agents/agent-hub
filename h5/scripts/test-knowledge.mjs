@@ -246,6 +246,84 @@ test("parse failure resume never duplicates uploaded files", async () => {
   assert.equal(refreshed, true);
 });
 
+test("confirmed partial uploads retain IDs and retry only failed files", async () => {
+  const files = [new File(["one"], "one.txt"), new File(["two"], "two.txt")];
+  const uploads = [];
+  const parses = [];
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith("/parse")) {
+      parses.push(JSON.parse(init.body).document_ids);
+      return response({ success: true, data: null });
+    }
+    uploads.push(init.body.getAll("files").map(file => file.name));
+    return uploads.length === 1
+      ? response({ success: false, code: "knowledge_upload_partial", error: "Partial", data: { uploaded: [{ id: "d1", name: "one.txt", dataset_id: "kb1" }] } }, 502)
+      : response({ success: true, data: [{ id: "d2", name: "two.txt" }] });
+  };
+  let resume;
+  const visible = [];
+  let refreshes = 0;
+  const refresh = async () => { refreshes++; };
+  await assert.rejects(api.completeUpload("kb1", "L", files, true, docs => visible.push(...docs), refresh), error => {
+    assert.ok(error instanceof api.KnowledgeUploadPendingError);
+    resume = error.resume;
+    assert.equal(resume.stage, "upload");
+    assert.deepEqual(resume.pendingFiles, [files[1]]);
+    return true;
+  });
+  await api.completeUpload("kb1", "L", files, true, docs => visible.push(...docs), refresh, resume);
+  assert.deepEqual(uploads, [["one.txt", "two.txt"], ["two.txt"]]);
+  assert.deepEqual(parses, [["d1"], ["d2"]]);
+  assert.deepEqual(visible.map(doc => doc.id), ["d1", "d2"]);
+  assert.equal(refreshes, 2);
+});
+
+test("unknown upload outcomes require read-only refresh before any explicit retry", async () => {
+  const files = [new File(["one"], "one.txt")];
+  let writes = 0;
+  globalThis.fetch = async () => { writes++; throw new Error("Connection lost"); };
+  let resume;
+  const onPending = error => {
+    assert.ok(error instanceof api.KnowledgeUploadPendingError);
+    resume = error.resume;
+    return true;
+  };
+  await assert.rejects(api.completeUpload("kb1", "L", files, false, () => {}, async () => {}), onPending);
+  assert.equal(resume.stage, "verify");
+  let refreshed = false;
+  await assert.rejects(api.completeUpload("kb1", "L", files, false, () => {}, async () => { refreshed = true; }, resume), onPending);
+  assert.equal(refreshed, true);
+  assert.equal(resume.stage, "upload");
+  assert.equal(writes, 1);
+});
+
+test("foreign upload receipts cannot confirm a file or trigger parsing", async () => {
+  const files = [new File(["one"], "one.txt"), new File(["two"], "two.txt")];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return response({ success: false, code: "knowledge_upload_partial", error: "Partial", data: {
+      uploaded: [{ id: "foreign", name: "one.txt", dataset_id: "other" }],
+    } }, 502);
+  };
+  const visible = [];
+  await assert.rejects(api.completeUpload("kb1", "L", files, true, docs => visible.push(...docs), async () => {}), error => {
+    assert.equal(error.resume.stage, "verify");
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(visible, []);
+});
+
+test("mobile does not replace an explicit null score with an alias or fabricated zero", async () => {
+  globalThis.fetch = async () => response({ success: true, data: { total: 2, chunks: [
+    { id: "c1", similarity: null, score: 0.8 }, { id: "c2", similarity: 2.5 },
+  ] } });
+  const result = await api.searchKnowledge("kb1", "q");
+  assert.equal(result.chunks[0].similarity, undefined);
+  assert.equal(result.chunks[1].similarity, 2.5);
+});
+
 test("readback failure resumes only readback after parsing was accepted", async () => {
   let requests = 0;
   globalThis.fetch = async (url) => {

@@ -141,6 +141,7 @@ func AutoMigrate(backfillTenant string) error {
 		&aigc.Config{},
 		&provider.ProviderSummary{},
 		&provider.ProviderAttribute{},
+		&provider.MultiRAGSyncBinding{},
 		&authdomain.CLIToken{},
 		&authdomain.User{},
 		&authdomain.Invite{},

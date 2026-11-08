@@ -93,8 +93,8 @@ export function useKnowledgeList(params: DatasetListParams = {}, options: { owne
   return { ...query, origin: query.data ? datasetListOrigins.get(query.data) : undefined };
 }
 
-const KNOWLEDGE_LIST_ALL_PAGE_SIZE = 1000
-const KNOWLEDGE_LIST_ALL_MAX_PAGES = 20
+const KNOWLEDGE_LIST_ALL_PAGE_SIZE = 100
+const KNOWLEDGE_LIST_ALL_MAX_PAGES = 200
 
 // useKnowledgeListAll 分页取全目录（issue #122 review P2）：ghost 判定依赖
 // 完整目录，单页缺失不能证明知识库已删除。逐页取满 total；页数上限作
@@ -108,6 +108,8 @@ export function useKnowledgeListAll() {
         page: 1,
         page_size: KNOWLEDGE_LIST_ALL_PAGE_SIZE
       })
+      const seen = new Set(first.datasets.map(dataset => dataset.id))
+      if (seen.size !== first.datasets.length) throw new Error(i18next.t('retrievalWorkbench:catalogChanged'))
       if (first.datasets.length >= first.total || first.datasets.length === 0) {
         return first
       }
@@ -121,6 +123,10 @@ export function useKnowledgeListAll() {
           page,
           page_size: KNOWLEDGE_LIST_ALL_PAGE_SIZE
         })
+        if (next.total !== first.total || new Set(next.datasets.map(dataset => dataset.id)).size !== next.datasets.length
+          || next.datasets.some(dataset => seen.has(dataset.id)))
+          throw new Error(i18next.t('retrievalWorkbench:catalogChanged'))
+        next.datasets.forEach(dataset => seen.add(dataset.id))
         if (next.datasets.length === 0) break
         datasets.push(...next.datasets)
         if (datasets.length >= first.total) break
@@ -280,7 +286,8 @@ export function useUploadDocuments(datasetId: string) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (files: File[]) => knowledgeApi.documents.upload(datasetId, files),
+    mutationFn: (input: File[] | { files: File[]; parserConfig?: Parameters<typeof knowledgeApi.documents.upload>[2] }) =>
+      Array.isArray(input) ? knowledgeApi.documents.upload(datasetId, input) : knowledgeApi.documents.upload(datasetId, input.files, input.parserConfig),
     onSuccess: (docs) => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
       void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
@@ -352,7 +359,9 @@ export function useStopParsingDocuments(datasetId: string) {
     mutationFn: (documentIds: string[]) => knowledgeApi.documents.stopParse(datasetId, documentIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: knowledgeKeys.documents(datasetId) })
-      message.success(t('knowledge.toast.parseStopped'))
+      void qc.invalidateQueries({ queryKey: knowledgeKeys.datasets() })
+      void qc.invalidateQueries({ queryKey: [...knowledgeKeys.all, 'chunks', datasetId] })
+      message.success(t('retrievalWorkbench:stopAccepted'))
     },
     onError: (err) => message.error(parseApiError(err))
   })

@@ -56,6 +56,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
     }),
   );
   const { autoParse, queue, targetFolderId, resume } = draft;
+  const canEditQueue = !resume || resume.stage === "upload";
   const setAutoParse = (autoParse: boolean) =>
     setDraft((previous) => ({ ...previous, autoParse }));
   const setQueue = (
@@ -126,12 +127,16 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
   };
 
   const handleRemoveFromQueue = (id: string) => {
-    if (isSubmitting || resume) return;
+    if (isSubmitting || !canEditQueue) return;
+    if (resume?.stage === "upload") {
+      const removed = queue.find(item => item.id === id)?.file;
+      setResume({ ...resume, pendingFiles: resume.pendingFiles?.filter(file => file !== removed) });
+    }
     setQueue((prev) => prev.filter((item) => item.id !== id));
   };
 
   const handleStartUpload = async () => {
-    if (queue.length === 0 || !targetFolderId || isSubmitting) return;
+    if ((!queue.length && !resume) || !targetFolderId || isSubmitting) return;
     setError("");
     setIsSubmitting(true);
     try {
@@ -145,7 +150,13 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
       setError("");
       onClose();
     } catch (err) {
-      if (err instanceof KnowledgeUploadPendingError) setResume(err.resume);
+      if (err instanceof KnowledgeUploadPendingError) {
+        setResume(err.resume);
+        if (err.resume.pendingFiles) {
+          const pending = new Set(err.resume.pendingFiles);
+          setQueue(current => current.filter(item => pending.has(item.file)));
+        }
+      }
       setError(err instanceof Error ? err.message : "上传失败，请重试");
     } finally {
       setIsSubmitting(false);
@@ -166,7 +177,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
         )}
         {resume && (
           <p className="text-xs text-amber-700">
-            文件已上传。重试只会继续解析或刷新状态，不会再次上传。关闭后重新打开上传入口仍可继续。
+            {resume.stage === "verify" ? "上传结果未确认，先刷新并核对资料列表，避免重复上传。" : resume.stage === "upload" ? "已确认文件不会重传。请从队列移除核对成功的文件，再上传剩余文件。" : "文件已上传。重试只继续解析或刷新，不会再次上传。"}关闭后重新打开仍可继续。
           </p>
         )}
         {/* Dashed Drag & Drop Box matching Image 4 */}
@@ -285,7 +296,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
                     </span>
                   </div>
                   <button
-                    disabled={isSubmitting || Boolean(resume)}
+                    disabled={isSubmitting || !canEditQueue}
                     aria-label={`移除 ${item.name}`}
                     onClick={() => handleRemoveFromQueue(item.id)}
                     className="w-5 h-5 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
@@ -311,7 +322,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
         </button>
         <button
           type="button"
-          disabled={queue.length === 0 || isSubmitting}
+          disabled={(!queue.length && !resume) || isSubmitting}
           onClick={handleStartUpload}
           className="px-5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 text-xs font-semibold text-white shadow-xs cursor-pointer flex items-center gap-1.5 transition-all active:scale-98"
         >
@@ -321,7 +332,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
               <span>正在处理…</span>
             </>
           ) : (
-            <span>{resume ? "继续处理已上传文件" : "开始上传"}</span>
+            <span>{resume?.stage === "verify" ? "先刷新核对上传结果" : resume?.stage === "upload" ? queue.length ? "已核对，上传剩余文件" : "完成核对" : resume ? "继续处理已上传文件" : "开始上传"}</span>
           )}
         </button>
       </div>

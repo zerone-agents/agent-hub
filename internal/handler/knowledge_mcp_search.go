@@ -459,22 +459,14 @@ func (h *KnowledgeMcpHandler) availableMcpRerankModels(ctx context.Context) ([]s
 	if err != nil {
 		return nil, err
 	}
-	var groups map[string]struct {
-		LLM []struct {
-			Type   string `json:"type"`
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"llm"`
-	}
-	if err := json.Unmarshal(raw, &groups); err != nil {
+	rows, err := projectMultiRAGModels(raw, "rerank")
+	if err != nil {
 		return nil, err
 	}
 	models := make([]string, 0)
-	for factory, group := range groups {
-		for _, model := range group.LLM {
-			if strings.EqualFold(model.Type, "rerank") && model.Status == "1" && model.Name != "" {
-				models = append(models, model.Name+"@"+factory)
-			}
+	for _, model := range rows {
+		if model.Status == "1" {
+			models = append(models, model.FullID)
 		}
 	}
 	sort.Strings(models)

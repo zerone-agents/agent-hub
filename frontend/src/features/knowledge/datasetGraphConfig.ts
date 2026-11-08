@@ -1,4 +1,5 @@
 import i18next from "@/i18n";
+import { graphBudgetRules } from "./datasetParserValidation";
 
 export interface DatasetGraphFields {
   graphrag_compatible: boolean;
@@ -8,6 +9,7 @@ export interface DatasetGraphFields {
   graphrag_method: string;
   graphrag_community: boolean;
   graphrag_resolution: boolean;
+  graphrag_execution?: Record<string, number>;
 }
 const mapping = {
   graphrag_enabled: "use_graphrag",
@@ -37,7 +39,18 @@ function supported(value: unknown): boolean {
         Array.isArray(entry) &&
         (entry as unknown[]).every((item) => typeof item === "string")
       );
-    if (key === "method") return entry === "light" || entry === "general";
+    if (Object.hasOwn(graphBudgetRules, key)) {
+      const [min, max, integer = true] = graphBudgetRules[key];
+      return (
+        typeof entry === "number" &&
+        Number.isFinite(entry) &&
+        entry >= min &&
+        entry <= max &&
+        (!integer || Number.isInteger(entry))
+      );
+    }
+    if (key === "method")
+      return entry === "light" || entry === "general" || entry === "ner";
     return true;
   });
 }
@@ -59,6 +72,11 @@ export function datasetGraphFields(value: unknown): DatasetGraphFields {
     graphrag_method: config.method,
     graphrag_community: config.community,
     graphrag_resolution: config.resolution,
+    graphrag_execution: Object.fromEntries(
+      Object.entries(original ?? {}).filter(([key]) =>
+        Object.hasOwn(graphBudgetRules, key),
+      ),
+    ) as Record<string, number>,
   };
 }
 // Keep advanced JSON authoritative for untouched controls. Only a user-changed
@@ -69,7 +87,10 @@ export function mergeDatasetGraphFields(
 ): Record<string, unknown> {
   if (!values.graphrag_compatible) return extra;
   const initial = initialConfig(values.graphrag_initial);
-  const graph = record(extra.graphrag) ? { ...extra.graphrag } : {};
+  const extension = record(extra.ext) ? extra.ext : {};
+  const inExtension = Object.hasOwn(extension, "graphrag");
+  const existing = inExtension ? extension.graphrag : extra.graphrag;
+  const graph = record(existing) ? { ...existing } : {};
   let changed = false;
   for (const [field, key] of Object.entries(mapping)) {
     const value = values[field as keyof typeof mapping];
@@ -85,14 +106,32 @@ export function mergeDatasetGraphFields(
     graph[key] = value;
     changed = true;
   }
+  for (const [key, value] of Object.entries(values.graphrag_execution ?? {})) {
+    if (
+      !Object.hasOwn(graphBudgetRules, key) ||
+      value === values.graphrag_initial?.[key]
+    )
+      continue;
+    if (
+      Object.hasOwn(graph, key) &&
+      graph[key] !== values.graphrag_initial?.[key] &&
+      graph[key] !== value
+    )
+      throw new Error(i18next.t("knowledge.form.graphConflict"));
+    graph[key] = value;
+    changed = true;
+  }
   if (
     !changed &&
-    (extra.graphrag !== undefined || values.graphrag_initial !== undefined)
+    (existing !== undefined || values.graphrag_initial !== undefined)
   )
     return extra;
-  if (changed && extra.graphrag !== undefined && !record(extra.graphrag))
+  if (changed && existing !== undefined && !record(existing))
     throw new Error(i18next.t("knowledge.form.graphConflict"));
-  return { ...extra, graphrag: changed ? graph : { ...defaults } };
+  const next = changed ? graph : { ...defaults };
+  return inExtension
+    ? { ...extra, ext: { ...extension, graphrag: next } }
+    : { ...extra, graphrag: next };
 }
 
 // REST update deeply merges parser_config. Omitting untouched nested keys also
@@ -104,6 +143,9 @@ export function datasetGraphDelta(
   return Object.fromEntries(
     Object.entries(next).flatMap(([key, value]) => {
       if (JSON.stringify(value) === JSON.stringify(before[key])) return [];
+      // Dataset table roles replace the entire map, including {} for clearing.
+      // The same contract applies after legacy ext is flattened by the service.
+      if (key === "table_column_roles") return [[key, value]];
       if (record(value) && record(before[key])) {
         const delta = datasetGraphDelta(value, before[key]);
         return Object.keys(delta).length ? [[key, delta]] : [];

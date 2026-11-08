@@ -253,6 +253,8 @@ export function documentMetadataValues(doc: KnowledgeDocument): ObjectValue {
     ),
   );
 }
+// The document parser patch contract intentionally excludes dataset table
+// roles/names/mode, NER, GraphRAG budgets and RAPTOR tree-builder extensions.
 // Historical snapshots may contain fields rejected by the write DTO. Expose only
 // editable fields; the server merges the submitted patch into the stored config.
 export function editableDocumentConfig(config: ObjectValue): ObjectValue {

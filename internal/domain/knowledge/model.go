@@ -484,7 +484,15 @@ func normalizeDatasetUpdateParserConfig(value any) map[string]any {
 		return nil
 	}
 	dst := CloneObject(config)
-	if parentChild := parentChildParserConfig(config); len(parentChild) > 0 {
+	// Match the dataset service's effective config before translating legacy
+	// aliases. Otherwise aliases inside ext survive the gateway untranslated.
+	if extension, ok := dst["ext"].(map[string]any); ok {
+		delete(dst, "ext")
+		for key, value := range extension {
+			dst[key] = value
+		}
+	}
+	if parentChild := parentChildParserConfig(dst); len(parentChild) > 0 {
 		dst["parent_child"] = parentChild
 		delete(dst, "enable_children")
 		delete(dst, "children_delimiter")

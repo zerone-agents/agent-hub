@@ -802,14 +802,14 @@ function RetrievalWorkbench({ id }: { id: string }) {
                     </Tag>
                     <Tag color="blue">
                       {t("knowledge.retrieval.similarity", {
-                        v: chunk.similarity.toFixed(3),
+                        v: chunk.similarity === null ? rw("scoreUnavailable") : chunk.similarity.toFixed(3),
                       })}
                     </Tag>
                     <Tooltip title={t("knowledge.retrieval.simTooltip")}>
                       <Tag>
                         {t("knowledge.retrieval.vectorTerm", {
-                          v: chunk.vector_similarity.toFixed(2),
-                          t: chunk.term_similarity.toFixed(2),
+                          v: chunk.vector_similarity === null ? rw("scoreUnavailable") : chunk.vector_similarity.toFixed(2),
+                          t: chunk.term_similarity === null ? rw("scoreUnavailable") : chunk.term_similarity.toFixed(2),
                         })}
                       </Tag>
                     </Tooltip>

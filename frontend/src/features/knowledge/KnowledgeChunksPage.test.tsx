@@ -311,6 +311,32 @@ describe("KnowledgeChunksPage", () => {
     );
   }, 15000);
 
+  it("keeps readback available after an unsafe create and never reposts the write", async () => {
+    const user = userEvent.setup();
+    const id = "0123456789abcdef";
+    h.createMock.mockRejectedValueOnce({ response: { data: { success: false, error: "Unconfirmed", data: {
+      outcome: "partial", stage: "index_write", retry_safe: false, image_id: `kb1-${id}`,
+    } } } });
+    h.readbackMock.mockResolvedValue({ chunks: [{ ...sampleChunks[0], id, content: "new draft", image_id: `kb1-${id}` }], total: 1 });
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "新增切片" }));
+    await user.type(await screen.findByPlaceholderText("切片文本内容"), "new draft");
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement,
+      new File(["image"], "draft.png", { type: "image/png" }));
+    await screen.findByRole("img", { name: "preview image" });
+    await user.click(screen.getByRole("button", { name: "创建切片" }));
+    expect(await screen.findByText(/写入结果未确认/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建切片" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "继续编辑" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重新核对" }));
+    await waitFor(() => { expect(h.refetchMock).toHaveBeenCalled(); });
+    await user.click(await screen.findByRole("button", { name: "查看已存结果后再编辑" }));
+    await waitFor(() => { expect(screen.queryByRole("button", { name: "创建切片" })).not.toBeInTheDocument(); });
+    expect(h.readbackMock).toHaveBeenCalledWith("kb1", "d1", { id, page_size: 1 });
+    expect(h.createMock).toHaveBeenCalledTimes(1);
+    expect(h.updateMock).not.toHaveBeenCalled();
+  }, 15000);
+
   it("updates an existing image with explicit replacement and verifies its protected bytes", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -449,9 +475,10 @@ describe("KnowledgeChunksPage", () => {
     // The index can already match while storage still returns the old bytes.
     await user.click(screen.getByRole("button", { name: "重新核对" }));
     expect(
-      await screen.findByText(/写入已返回，但回读内容未确认/),
+      await screen.findByText(/尚未确认已保存结果/),
     ).toBeInTheDocument();
-    expect(h.refetchMock).not.toHaveBeenCalled();
+    expect(h.refetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "保存切片" })).toBeDisabled();
     expect(h.updateMock).toHaveBeenCalledTimes(1);
     expect(
       screen.getByRole("img", { name: "preview image" }),

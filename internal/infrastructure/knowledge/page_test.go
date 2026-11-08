@@ -82,7 +82,7 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 		{"ingestions-summary", "GET", "/datasets/kb/ingestions/summary", false}, {"ingestions-list", "GET", "/datasets/kb/ingestions", false}, {"ingestions-detail", "GET", "/datasets/kb/ingestions/log1", false},
 		{"index-get", "GET", "/datasets/kb/index", true}, {"index-run", "POST", "/datasets/kb/index", true}, {"index-delete", "DELETE", "/datasets/kb/index", true}, {"graph-search", "GET", "/datasets/kb/graph/search", false},
 		{"connectors-linked", "GET", "/datasets/kb/connectors", false}, {"connectors-list", "GET", "/connectors", false}, {"connectors-create", "POST", "/connectors", false},
-		{"connector-get", "GET", "/connectors/c1", false}, {"connector-update", "PATCH", "/connectors/c1", false}, {"connector-delete", "DELETE", "/connectors/c1", false}, {"connector-logs", "GET", "/connectors/c1/logs", false}, {"connector-resume", "PATCH", "/connectors/c1", false}, {"connector-rebuild", "POST", "/connectors/c1/rebuild", false}, {"connector-link", "PUT", "/datasets/kb/connectors/c1", false}, {"connector-unlink", "DELETE", "/datasets/kb/connectors/c1", false},
+		{"connector-get", "GET", "/connectors/c1", false}, {"connector-update", "PATCH", "/connectors/c1", false}, {"connector-delete", "DELETE", "/connectors/c1", false}, {"connector-logs", "GET", "/connectors/c1/logs", false}, {"connector-resume", "POST", "/connectors/c1/resume", false}, {"connector-rebuild", "POST", "/connectors/c1/rebuild", false}, {"connector-link", "PUT", "/datasets/kb/connectors/c1", false}, {"connector-unlink", "DELETE", "/datasets/kb/connectors/c1", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.op, func(t *testing.T) {
@@ -103,6 +103,8 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 				}
 				var data any = map[string]any{"kb_id": "foreign"}
 				switch tc.op {
+				case "connector-resume":
+					data = true
 				case "index-get":
 					data = map[string]any{"id": "current", "progress": .5}
 				case "index-run":

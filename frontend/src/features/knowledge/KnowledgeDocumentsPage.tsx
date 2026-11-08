@@ -64,6 +64,7 @@ import { parseApiError } from "@/api/client";
 import { knowledgeApi, type KnowledgeDocument } from "@/api/knowledge";
 import {
   useDocuments,
+  useKnowledgeDetail,
   useDocumentFilters,
   useUploadDocuments,
   useIngestDocuments,
@@ -368,6 +369,7 @@ export default function KnowledgeDocumentsPage() {
     orderby: "create_time",
     desc: true,
   });
+  const { data: dataset } = useKnowledgeDetail(id);
   const filtersQuery = useDocumentFilters(id, {
     keywords,
     run: runFilter,
@@ -412,8 +414,8 @@ export default function KnowledgeDocumentsPage() {
     setRenaming(null);
   };
 
-  const handleUpload = async (file: File) => {
-    const docs = await uploadDocuments.mutateAsync([file]);
+  const handleUpload = async (file: File, parserConfig?: Parameters<typeof knowledgeApi.documents.upload>[2]) => {
+    const docs = await uploadDocuments.mutateAsync(parserConfig ? { files: [file], parserConfig } : [file]);
     const doc = docs.find((item) => item.id);
     if (!doc) throw new Error(text("missing"));
     return doc;
@@ -488,12 +490,21 @@ export default function KnowledgeDocumentsPage() {
     setIngestIds(selectedIds);
   };
 
-  const bulkStop = () => {
-    stopParsing.mutate(selectedIds, {
-      onSuccess: () => {
-        setSelectedRowKeys([]);
+  const requestStop = (ids: string[], clearSelection = false) => {
+    modal.confirm({
+      title: t("retrievalWorkbench:stopTitle"),
+      content: t("retrievalWorkbench:stopHint"),
+      okText: t("retrievalWorkbench:stopConfirm"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { className: primaryStyle.root },
+      onOk: async () => {
+        await stopParsing.mutateAsync(ids);
+        if (clearSelection) setSelectedRowKeys([]);
       },
     });
+  };
+  const bulkStop = () => {
+    requestStop(selectedIds, true);
   };
 
   const bulkDelete = () => {
@@ -668,7 +679,7 @@ export default function KnowledgeDocumentsPage() {
                 })}
                 icon={<StopIcon size={14} />}
                 onClick={() => {
-                  stopParsing.mutate([record.id]);
+                  requestStop([record.id]);
                 }}
               >
                 {t("knowledge.docs.stop")}
@@ -1208,6 +1219,7 @@ export default function KnowledgeDocumentsPage() {
 
       {uploadOpen && (
         <KnowledgeDocumentUpload
+          datasetParserId={dataset?.parser_id}
           onClose={() => {
             setUploadOpen(false);
           }}

@@ -406,6 +406,16 @@ func (h *KnowledgeHandler) Retrieval(c *gin.Context) {
 // respondKnowledgeError 映射知识域错误：删除保护（issue #122）→ 409 +
 // data.datasets 名单；其余沿用 knowledge.StatusCode 桶。
 func respondKnowledgeError(c *gin.Context, err error) {
+	var uploadErr *knowledge.UploadPartialError
+	if errors.As(err, &uploadErr) {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "code": "knowledge_upload_partial", "error": uploadErr.Error(), "data": gin.H{"uploaded": uploadErr.Uploaded, "outcome": "partial", "retry_safe": false}})
+		return
+	}
+	var imageErr *knowledge.ChunkImageWriteError
+	if errors.As(err, &imageErr) {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "code": "knowledge_chunk_image_unconfirmed", "error": imageErr.Error(), "data": imageErr.Recovery})
+		return
+	}
 	var incompatible *knowledge.EmbeddingIncompatibleError
 	if errors.As(err, &incompatible) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "knowledge_embedding_incompatible", "error": incompatible.Error(), "data": incompatible.Result})

@@ -1,5 +1,5 @@
 import KnowledgeSourceOAuth from "./KnowledgeSourceOAuth";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -33,60 +33,17 @@ import PrimaryButton, {
   usePrimaryButtonStyle,
 } from "@/components/PrimaryButton";
 
-const SOURCES = [
-  "rss",
-  "s3",
-  "notion",
-  "r2",
-  "google_cloud_storage",
-  "oci_storage",
-  "slack",
-  "confluence",
-  "jira",
-  "google_drive",
-  "gmail",
-  "discord",
-  "webdav",
-  "moodle",
-  "s3_compatible",
-  "dropbox",
-  "box",
-  "airtable",
-  "asana",
-  "github",
-  "gitlab",
-  "imap",
-  "bitbucket",
-  "zendesk",
-  "seafile",
-  "mysql",
-  "postgresql",
-  "dingtalk_ai_table",
-];
-// Keep the sources already integrated by Hub. Newly available upstream
-// deletion capabilities remain gated until their integration is requested.
-const DELETION_SYNC_SOURCES = new Set([
-  "rss",
-  "webdav",
-  "airtable",
-  "google_drive",
-  "gmail",
-  "bitbucket",
-  "s3",
-  "r2",
-  "oci_storage",
-  "google_cloud_storage",
-  "confluence",
-  "notion",
-  "jira",
-  "box",
-  "github",
-  "gitlab",
-  "dropbox",
-  "seafile",
-  "asana",
-  "zendesk",
-]);
+import {
+  CONNECTOR_SOURCES,
+  CONNECTOR_REQUIRED_FIELDS,
+  CONNECTOR_EXAMPLES,
+  connectorConfigIssue,
+  isConnectorSchedule,
+  mergeConnectorConfig,
+  supportsDeletionSync,
+  writableConnectorConfig,
+} from "./connectorConfig";
+import { useConnectorTranslation } from "./useConnectorTranslation";
 const BLOB_SYNC_SOURCES = new Set([
   "s3",
   "r2",
@@ -113,7 +70,7 @@ function blobSyncScope(config: KnowledgeObject, source: string) {
 }
 function DeletionSyncStatus({ id, row }: { id: string; row: ConnectorRow }) {
   const { t } = useTranslation();
-  const supported = DELETION_SYNC_SOURCES.has(row.source);
+  const supported = supportsDeletionSync(row.source);
   const query = useKnowledgeResource<KnowledgeObject>(
     supported ? id : "",
     `sources/${encodeURIComponent(row.id)}`,
@@ -140,6 +97,8 @@ function DeletionSyncStatus({ id, row }: { id: string; row: ConnectorRow }) {
     Array.isArray(config)
   )
     return <Tag color="warning">{t("knowledge.manage.configUnconfirmed")}</Tag>;
+  if (!supportsDeletionSync(row.source, config as KnowledgeObject))
+    return <Tag>{t("knowledge.manage.deletionSyncUnsupported")}</Tag>;
   const value = (config as KnowledgeObject).sync_deleted_files;
   if (value !== undefined && typeof value !== "boolean")
     return <Tag color="warning">{t("knowledge.manage.configUnconfirmed")}</Tag>;
@@ -164,6 +123,7 @@ interface ConnectorRow extends KnowledgeObject {
 }
 export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
   const { t } = useTranslation();
+  const { t: tc } = useConnectorTranslation();
   const linked = useKnowledgeResource<ConnectorRow[]>(id, "connectors");
   const sources = useKnowledgeResource<ConnectorRow[]>(id, "sources");
   const action = useKnowledgeAction(id);
@@ -242,7 +202,11 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
         columns={[
           { title: t("knowledge.manage.name"), dataIndex: "name" },
           { title: t("knowledge.manage.source"), dataIndex: "source" },
-          { title: t("knowledge.docs.statusCol"), dataIndex: "status" },
+          {
+            title: tc("connectorStatus"),
+            render: (_, row) =>
+              tc(`status.${row.status}`, { defaultValue: text(row.status) }),
+          },
           {
             title: t("knowledge.manage.deletionSync"),
             render: (_, row) => <DeletionSyncStatus id={id} row={row} />,
@@ -341,6 +305,7 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
       />
       {editor !== null && (
         <ConnectorEditor
+          key={`${id}/${editor}`}
           id={id}
           connectorID={editor}
           onClose={() => {
@@ -361,7 +326,7 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          title={t("knowledge.manage.connectorSyncLogsHint")}
+          title={tc("logsHint")}
         />
         {logs.error && <Alert type="error" title={parseApiError(logs.error)} />}
         <Table
@@ -377,16 +342,10 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
             onChange: setLogPage,
           }}
           columns={[
-            "id",
-            "status",
-            "new_docs_indexed",
-            "error_count",
-            "update_date",
-          ].map((key) => ({
-            key,
-            title: key,
-            render: (_, row: KnowledgeObject) =>
-              key === "id" ? (
+            {
+              key: "id",
+              title: "ID",
+              render: (_, row: KnowledgeObject) => (
                 <Button
                   type="link"
                   onClick={() => {
@@ -395,10 +354,62 @@ export default function KnowledgeConnectorsPanel({ id }: { id: string }) {
                 >
                   {text(row.id)}
                 </Button>
-              ) : (
-                text(row[key])
               ),
-          }))}
+            },
+            {
+              key: "task_type",
+              title: tc("logTask"),
+              render: (_, row: KnowledgeObject) => (
+                <Tag
+                  color={
+                    row.task_type === "prune"
+                      ? "orange"
+                      : row.task_type === "sync"
+                        ? "blue"
+                        : "default"
+                  }
+                >
+                  {row.task_type === "prune"
+                    ? tc("prune")
+                    : row.task_type === "sync"
+                      ? tc("sync")
+                      : tc("unknownTask", { value: text(row.task_type) })}
+                </Tag>
+              ),
+            },
+            {
+              key: "status",
+              title: tc("taskStatus"),
+              render: (_, row: KnowledgeObject) =>
+                tc(`status.${text(row.status)}`, {
+                  defaultValue: text(row.status),
+                }),
+            },
+            {
+              key: "new_docs_indexed",
+              title: tc("logAdded"),
+              render: (_, row: KnowledgeObject) =>
+                row.task_type === "sync" ? text(row.new_docs_indexed) : "-",
+            },
+            {
+              key: "docs_removed_from_index",
+              title: tc("logRemoved"),
+              render: (_, row: KnowledgeObject) =>
+                row.task_type === "prune"
+                  ? text(row.docs_removed_from_index)
+                  : "-",
+            },
+            {
+              key: "error_count",
+              title: tc("logErrors"),
+              render: (_, row: KnowledgeObject) => text(row.error_count),
+            },
+            {
+              key: "update_date",
+              title: "update_date",
+              render: (_, row: KnowledgeObject) => text(row.update_date),
+            },
+          ]}
         />
       </Modal>
       <Modal
@@ -436,6 +447,7 @@ interface ConnectorValues {
   refresh_freq: number;
   prune_freq: number;
   timeout_secs: number;
+  reschedule: boolean;
 }
 function ConnectorEditor({
   id,
@@ -447,13 +459,51 @@ function ConnectorEditor({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const { t: tc } = useConnectorTranslation();
   const styles = usePrimaryButtonStyle();
-  const existing = useKnowledgeResource<KnowledgeObject>(
-    connectorID ? id : "",
-    `sources/${encodeURIComponent(connectorID)}`,
-  );
+  const [initialRead, setInitialRead] = useState<{
+    snapshot?: KnowledgeObject;
+    error?: unknown;
+    unconfirmed?: boolean;
+    loading: boolean;
+  }>({ loading: Boolean(connectorID) });
+  const [readAttempt, setReadAttempt] = useState(0);
+  const initialData = initialRead.snapshot;
   const action = useKnowledgeAction(id);
   const [form] = Form.useForm<ConnectorValues>();
+  useEffect(() => {
+    if (!connectorID) return;
+    let current = true;
+    // Every opening starts from a direct read, never the shared query cache.
+    // Mount the form only after this succeeds, then freeze this exact snapshot
+    // for both initialValues and the three-way merge baseline.
+    void knowledgeRequest<KnowledgeObject>(
+      "get",
+      id,
+      `sources/${encodeURIComponent(connectorID)}`,
+    )
+      .then((snapshot) => {
+        if (!current) return;
+        const config = snapshot.config;
+        if (
+          snapshot.id !== connectorID ||
+          typeof snapshot.source !== "string" ||
+          !config ||
+          typeof config !== "object" ||
+          Array.isArray(config)
+        ) {
+          setInitialRead({ loading: false, unconfirmed: true });
+          return;
+        }
+        setInitialRead({ snapshot, loading: false });
+      })
+      .catch((error: unknown) => {
+        if (current) setInitialRead({ error, loading: false });
+      });
+    return () => {
+      current = false;
+    };
+  }, [connectorID, id, readAttempt]);
   const source = Form.useWatch("source", form) as string | undefined;
   const configDraft = Form.useWatch("config", form) as string | undefined;
   let draft: KnowledgeObject | undefined;
@@ -462,7 +512,7 @@ function ConnectorEditor({
   } catch {
     /* retain invalid JSON for correction */
   }
-  const deletionSupported = DELETION_SYNC_SOURCES.has(source ?? "");
+  const deletionSupported = supportsDeletionSync(source ?? "", draft);
   const sourceHint = BLOB_SYNC_SOURCES.has(source ?? "")
     ? "knowledge.manage.connectorBlobSync"
     : undefined;
@@ -471,29 +521,63 @@ function ConnectorEditor({
   const [saving, setSaving] = useState(false);
   const save = async () => {
     try {
+      setError("");
       const values = await form.validateFields();
       setSaving(true);
-      setError("");
-      const config = parseObjectJSON(values.config);
-      // These checkpoints belong to the worker and may advance while this
-      // editor is open. Omit them from both PATCH and its readback comparison.
-      if (values.source === "imap") delete config.imap_sync_scopes;
-      if (values.source === "mysql" || values.source === "postgresql")
-        delete config.rdbms_sync_scopes;
-      if (DELETION_SYNC_SOURCES.has(values.source)) {
+      let config = writableConnectorConfig(parseObjectJSON(values.config));
+      if (connectorID) {
+        const fresh = await knowledgeRequest<KnowledgeObject>(
+          "get",
+          id,
+          `sources/${encodeURIComponent(connectorID)}`,
+        );
         if (
-          config.sync_deleted_files !== undefined &&
-          typeof config.sync_deleted_files !== "boolean"
+          fresh.id !== connectorID ||
+          fresh.source !== values.source ||
+          !fresh.config ||
+          typeof fresh.config !== "object" ||
+          Array.isArray(fresh.config)
         )
-          throw new Error(t("knowledge.manage.deletionSyncBoolean"));
+          throw new Error(t("knowledge.manage.readbackFailed"));
+        const merged = mergeConnectorConfig(
+          writableConnectorConfig(
+            (initialData?.config ?? {}) as KnowledgeObject,
+          ),
+          config,
+          writableConnectorConfig(fresh.config as KnowledgeObject),
+        );
+        if (!merged) throw new Error(tc("configConflict"));
+        config = merged;
+      }
+      for (const [key, minimum] of [
+        ["refresh_freq", 0],
+        ["prune_freq", 0],
+        ["timeout_secs", 1],
+      ] as const) {
+        if (!isConnectorSchedule(values[key], minimum))
+          throw new Error(tc("scheduleInteger", { minimum }));
+      }
+      if (
+        typeof config.sync_deleted_files !== "undefined" &&
+        typeof config.sync_deleted_files !== "boolean"
+      )
+        throw new Error(t("knowledge.manage.deletionSyncBoolean"));
+      if (
+        !supportsDeletionSync(values.source, config) &&
+        config.sync_deleted_files === true
+      )
+        throw new Error(tc("unsupportedDeletion"));
+      const issue = connectorConfigIssue(values.source, config);
+      if (issue) throw new Error(tc("configIssue", { field: issue }));
+      if (supportsDeletionSync(values.source, config)) {
         config.sync_deleted_files = config.sync_deleted_files ?? false;
       }
       if (
         BLOB_SYNC_SOURCES.has(values.source) &&
         config.sync_deleted_files === true &&
-        existing.data
+        initialData
       ) {
-        const previous = existing.data.config;
+        const previous = initialData.config;
         if (
           !previous ||
           typeof previous !== "object" ||
@@ -512,13 +596,15 @@ function ConnectorEditor({
         timeout_secs: values.timeout_secs,
       };
       let target = connectorID || createdID;
-      if (target)
-        await action.mutateAsync({
+      if (target) {
+        const result = await action.mutateAsync({
           method: "patch",
           resource: `sources/${encodeURIComponent(target)}`,
-          data: body,
+          data: { ...body, ...(values.reschedule ? { reschedule: true } : {}) },
         });
-      else {
+        if (result === false || result === null)
+          throw new Error(t("knowledge.manage.readbackFailed"));
+      } else {
         const result = await action.mutateAsync({
           method: "post",
           resource: "sources",
@@ -536,15 +622,19 @@ function ConnectorEditor({
       );
       if (persisted.id !== target || !containsKnowledgeFields(persisted, body))
         throw new Error(t("knowledge.manage.readbackFailed"));
-      if (!connectorID)
-        await action.mutateAsync({
+      if (!connectorID) {
+        const result = await action.mutateAsync({
           method: "put",
           resource: `connectors/${encodeURIComponent(target)}`,
           data: { auto_parse: true },
         });
+        if (result === false || result === null)
+          throw new Error(t("knowledge.manage.readbackFailed"));
+      }
       onClose();
     } catch (err) {
-      setError(parseApiError(err));
+      if (!(err !== null && typeof err === "object" && "errorFields" in err))
+        setError(parseApiError(err));
     } finally {
       setSaving(false);
     }
@@ -566,10 +656,35 @@ function ConnectorEditor({
       okText={t("knowledge.docs.saveBtn")}
       cancelText={t("common.cancel")}
       confirmLoading={saving || action.isPending}
-      okButtonProps={{ className: styles.root }}
+      okButtonProps={{
+        className: styles.root,
+        disabled: Boolean(connectorID && !initialData),
+      }}
     >
-      {existing.error && (
-        <Alert type="error" title={parseApiError(existing.error)} />
+      {initialRead.loading && (
+        <Typography.Text type="secondary">
+          {t("knowledge.manage.readingConfig")}
+        </Typography.Text>
+      )}
+      {(Boolean(initialRead.error) || initialRead.unconfirmed) && (
+        <Alert
+          type="error"
+          title={
+            initialRead.unconfirmed
+              ? t("knowledge.manage.readbackFailed")
+              : parseApiError(initialRead.error)
+          }
+          action={
+            <Button
+              onClick={() => {
+                setInitialRead({ loading: true });
+                setReadAttempt((value) => value + 1);
+              }}
+            >
+              {t("knowledge.docs.refresh")}
+            </Button>
+          }
+        />
       )}
       {createdID && (
         <Alert
@@ -585,19 +700,26 @@ function ConnectorEditor({
           title={t("knowledge.manage.connectorSharedSettings")}
         />
       )}
-      {(!connectorID || existing.data) && (
+      {(!connectorID || initialData) && (
         <Form
           form={form}
           key={connectorID}
           layout="vertical"
           disabled={saving}
           initialValues={{
-            name: existing.data?.name ?? "",
-            source: existing.data?.source ?? "s3",
-            config: JSON.stringify(existing.data?.config ?? {}, null, 2),
-            refresh_freq: existing.data?.refresh_freq ?? 60,
-            prune_freq: existing.data?.prune_freq ?? 0,
-            timeout_secs: existing.data?.timeout_secs ?? 3600,
+            name: initialData?.name ?? "",
+            source: initialData?.source ?? "s3",
+            config: JSON.stringify(
+              writableConnectorConfig(
+                (initialData?.config ?? {}) as KnowledgeObject,
+              ),
+              null,
+              2,
+            ),
+            refresh_freq: initialData?.refresh_freq ?? 60,
+            prune_freq: initialData?.prune_freq ?? 0,
+            timeout_secs: initialData?.timeout_secs ?? 3600,
+            reschedule: false,
           }}
         >
           <Form.Item
@@ -607,23 +729,75 @@ function ConnectorEditor({
           >
             <Input disabled={Boolean(connectorID || createdID)} />
           </Form.Item>
-          <Form.Item name="source" label={t("knowledge.manage.source")}>
+          <Form.Item
+            name="source"
+            label={t("knowledge.manage.source")}
+            rules={[
+              {
+                validator: (_, value: unknown) =>
+                  typeof value === "string" &&
+                  (CONNECTOR_SOURCES.includes(value) || Boolean(connectorID))
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(tc("sourceRequired"))),
+              },
+            ]}
+          >
             <Select
               disabled={Boolean(connectorID || createdID)}
-              options={SOURCES.map((value) => ({ value, label: value }))}
+              showSearch={{ optionFilterProp: "label" }}
+              options={CONNECTOR_SOURCES.map((value) => ({
+                value,
+                label: value,
+              }))}
             />
           </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            title={tc("requiredFields")}
+            description={
+              <Space orientation="vertical" style={{ width: "100%" }}>
+                <Typography.Text>{tc("configGuide")}</Typography.Text>
+                <Typography.Text code style={{ overflowWrap: "anywhere" }}>
+                  {CONNECTOR_REQUIRED_FIELDS[source ?? ""] ?? source}
+                </Typography.Text>
+                <Typography.Text>
+                  {tc(`guide.${source}`, { defaultValue: "" })}
+                </Typography.Text>
+                {CONNECTOR_EXAMPLES[source ?? ""] && (
+                  <details>
+                    <summary style={{ cursor: "pointer" }}>
+                      {tc("example")}
+                    </summary>
+                    <pre
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {JSON.stringify(
+                        CONNECTOR_EXAMPLES[source ?? ""],
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                )}
+              </Space>
+            }
+          />
           {deletionSupported ? (
             <Form.Item
               label={t("knowledge.manage.deletionSync")}
-              extra={t("knowledge.manage.deletionSyncHint")}
+              extra={tc("deletionHint")}
             >
               <Space orientation="vertical">
                 <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-                  {t("knowledge.manage.deletionSyncLifecycle")}
+                  {tc("deletionLifecycle")}
                 </Typography.Paragraph>
                 <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-                  {t("knowledge.manage.deletionSyncScope")}
+                  {tc("deletionScope")}
                 </Typography.Paragraph>
                 <Switch
                   aria-label={t("knowledge.manage.deletionSync")}
@@ -642,10 +816,10 @@ function ConnectorEditor({
                   }}
                 />
                 <Typography.Text type="secondary">
-                  {t(
+                  {tc(
                     draft?.sync_deleted_files === true
-                      ? "knowledge.manage.deletionSyncOn"
-                      : "knowledge.manage.deletionSyncOff",
+                      ? "deletionOn"
+                      : "deletionOff",
                   )}
                 </Typography.Text>
               </Space>
@@ -655,7 +829,7 @@ function ConnectorEditor({
               style={{ marginBottom: 16 }}
               type="info"
               showIcon
-              title={t("knowledge.manage.deletionSyncUnsupportedHint")}
+              title={tc("unsupportedDeletion")}
             />
           )}
           {sourceHint && (
@@ -713,21 +887,72 @@ function ConnectorEditor({
           <Form.Item
             name="refresh_freq"
             label={t("knowledge.manage.refreshMinutes")}
+            extra={tc("refreshHint")}
+            rules={[
+              {
+                validator: (_, value: unknown) =>
+                  isConnectorSchedule(value, 0)
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error(tc("scheduleInteger", { minimum: 0 })),
+                      ),
+              },
+            ]}
           >
-            <InputNumber min={1} />
+            <InputNumber min={0} step={1} changeOnBlur={false} />
           </Form.Item>
           <Form.Item
             name="prune_freq"
             label={t("knowledge.manage.pruneMinutes")}
+            extra={tc("pruneHint")}
+            rules={[
+              {
+                validator: (_, value: unknown) =>
+                  isConnectorSchedule(value, 0)
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error(tc("scheduleInteger", { minimum: 0 })),
+                      ),
+              },
+            ]}
           >
-            <InputNumber min={0} />
+            <InputNumber
+              min={0}
+              step={1}
+              changeOnBlur={false}
+              disabled={
+                !deletionSupported ||
+                draft?.sync_deleted_files !== true ||
+                saving
+              }
+            />
           </Form.Item>
           <Form.Item
             name="timeout_secs"
-            label={t("knowledge.manage.timeoutSeconds")}
+            label={tc("timeoutSeconds")}
+            rules={[
+              {
+                validator: (_, value: unknown) =>
+                  isConnectorSchedule(value, 1)
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error(tc("scheduleInteger", { minimum: 1 })),
+                      ),
+              },
+            ]}
           >
-            <InputNumber min={1} />
+            <InputNumber min={1} step={1} changeOnBlur={false} />
           </Form.Item>
+          {(connectorID || createdID) && (
+            <Form.Item
+              name="reschedule"
+              label={tc("reschedule")}
+              extra={tc("rescheduleHint")}
+              valuePropName="checked"
+            >
+              <Switch aria-label={tc("reschedule")} />
+            </Form.Item>
+          )}
           {error && (
             <Alert type="error" title={error} style={{ marginBottom: 16 }} />
           )}

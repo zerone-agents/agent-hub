@@ -38,14 +38,27 @@ describe('buildEmbeddingCandidates', () => {
     expect(localGroup.options[0].value).toBe('local:42:bge-large-zh')
   })
 
-  it('excludes disabled, duplicate local instances and already synced canonical OpenAI registrations', () => {
+  it('keeps separate local instances and excludes disabled or legacy synced registrations', () => {
     const model = { modelId: 'embed', displayName: 'Embed', modelType: 'embedding' as const }
     const p = { id: 1, name: 'One', protocol: 'openai', defaultModels: [model] } as Provider
-    expect(buildEmbeddingCandidates([], [p, { ...p, id: 2 }])).toEqual([])
+    expect(buildEmbeddingCandidates([], [p, { ...p, id: 2 }]).flatMap(group => group.options).map(option => option.value)).toEqual(['local:1:embed', 'local:2:embed'])
     expect(buildEmbeddingCandidates([], [{ ...p, defaultModels: [{ ...model, status: '0' }] }])).toEqual([])
     const upstream = { name: 'embed___OpenAI-API', factory: 'OpenAI-API-Compatible', type: 'embedding', status: '1', fullId: 'embed___OpenAI-API@OpenAI-API-Compatible' }
     expect(buildEmbeddingCandidates([upstream], [p]).flatMap(group => group.options).map(option => option.source)).toEqual(['multirag'])
     expect(buildEmbeddingCandidates([{ ...upstream, status: '0' }], [])).toEqual([])
+  })
+
+  it('keeps canonical references verbatim for embedding and OCR', () => {
+    const reference = '9007199254740993'
+    const embedding = { name: 'same@first', factory: 'OpenAI-API-Compatible', type: 'embedding', status: '1', reference, fullId: reference, instanceName: 'first' }
+    const choices = buildEmbeddingCandidates([embedding], []).flatMap(group => group.options)
+    expect(choices[0].rawValue).toBe(reference)
+    const ocr = { ...embedding, factory: 'MinerU', type: 'ocr' }
+    const parsers = buildLayoutCandidates([ocr]).flatMap(group => group.options).filter(option => option.source === 'multirag')
+    expect(parsers).toHaveLength(1)
+    expect(parsers[0].rawValue).toBe(reference)
+    expect(parsers[0].value).toBe(`multirag:${reference}`)
+    expect(buildEmbeddingCandidates([{ ...embedding, fullId: '9007199254740992' }], [])).toEqual([])
   })
 
   it('returns empty array when both sources are empty', () => {

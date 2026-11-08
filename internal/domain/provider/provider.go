@@ -248,6 +248,8 @@ func (b *BaseProvider) SetSummary(s *ProviderSummary) error {
 // SetDefaultModels injects models loaded from the provider_models table.
 func (b *BaseProvider) SetDefaultModels(models []CatalogModel) { b.defaultModels = models }
 
+func (b *BaseProvider) SetAttributes(attrs map[string]AttrValue) { b.attributes = attrs }
+
 // SetLockedAPIKey replaces the stored LockedAPIKey value. The service layer
 // uses this to inject the decrypted plaintext key before calling
 // SyncToMultiRAG, so concrete providers can read it via LockedAPIKey().

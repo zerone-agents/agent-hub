@@ -2,9 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
+
+	"control-panel/internal/domain/provider"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,12 +18,15 @@ import (
 // struct so the frontend can render a single list without second-level
 // grouping.
 type MultiRAGModel struct {
-	Name    string `json:"name"`
-	Factory string `json:"factory"`
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	FullID  string `json:"fullId"`
-	IsTools *bool  `json:"isTools,omitempty"`
+	Reference    string   `json:"reference,omitempty"`
+	InstanceName string   `json:"instanceName,omitempty"`
+	ModelTypes   []string `json:"modelTypes,omitempty"`
+	Name         string   `json:"name"`
+	Factory      string   `json:"factory"`
+	Type         string   `json:"type"`
+	Status       string   `json:"status"`
+	FullID       string   `json:"fullId"`
+	IsTools      *bool    `json:"isTools,omitempty"`
 }
 
 // ListMultiRAGModels flattens MultiRAG's my_llms response, filters by `type`,
@@ -56,42 +63,96 @@ func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 		return
 	}
 
-	// MultiRAG shape: { "<Factory>": { "llm": [ {type, name, status, ...} ] } }
-	var perFactory map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &perFactory); err != nil || perFactory == nil {
+	out, err := projectMultiRAGModels(raw, typeFilter)
+	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
 		return
 	}
+	respondSuccess(c, out)
+}
+
+// All consumers (including MCP rerank) use this projection. A model may support
+// several capabilities while the legacy `type` carries only the first one.
+func projectMultiRAGModels(raw json.RawMessage, typeFilter string) ([]MultiRAGModel, error) {
+	var perFactory map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &perFactory); err != nil || perFactory == nil {
+		return nil, fmt.Errorf("invalid MultiRAG inventory")
+	}
 
 	out := make([]MultiRAGModel, 0, 32)
+	seen := map[string]bool{}
 	for factory, rawGroup := range perFactory {
 		var group struct {
 			LLM []struct {
-				Type    string `json:"type"`
-				Name    string `json:"name"`
-				Status  string `json:"status"`
-				IsTools *bool  `json:"is_tools"`
+				ID           json.RawMessage `json:"id"`
+				Reference    json.RawMessage `json:"reference"`
+				InstanceName string          `json:"instance_name"`
+				ModelTypes   json.RawMessage `json:"model_types"`
+				Type         string          `json:"type"`
+				Name         string          `json:"name"`
+				Status       string          `json:"status"`
+				IsTools      *bool           `json:"is_tools"`
 			} `json:"llm"`
 		}
 		if strings.TrimSpace(factory) == "" || json.Unmarshal(rawGroup, &group) != nil || group.LLM == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
-			return
+			return nil, fmt.Errorf("invalid MultiRAG inventory group")
 		}
 		for _, m := range group.LLM {
 			if strings.TrimSpace(m.Type) == "" || strings.TrimSpace(m.Name) == "" {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "MultiRAG 模型列表响应无效，请重试"})
-				return
+				return nil, fmt.Errorf("invalid MultiRAG model")
 			}
-			if !strings.EqualFold(m.Type, typeFilter) {
+			fullID := m.Name + "@" + factory
+			reference := ""
+			if len(m.Reference) > 0 {
+				if json.Unmarshal(m.Reference, &reference) != nil {
+					return nil, fmt.Errorf("invalid MultiRAG reference")
+				}
+				var id json.Number
+				if !provider.ValidModelReference(reference) || json.Unmarshal(m.ID, &id) != nil || id.String() != reference {
+					return nil, fmt.Errorf("invalid MultiRAG reference")
+				}
+				fullID = reference
+			}
+			capabilities := []string{strings.ToLower(m.Type)}
+			if len(m.ModelTypes) > 0 {
+				if json.Unmarshal(m.ModelTypes, &capabilities) != nil {
+					return nil, fmt.Errorf("invalid MultiRAG capabilities")
+				}
+				if len(capabilities) == 0 || len(capabilities) > 7 {
+					return nil, fmt.Errorf("invalid MultiRAG capabilities")
+				}
+				checked := map[string]bool{}
+				for _, capability := range capabilities {
+					if !slices.Contains([]string{"chat", "embedding", "rerank", "image2text", "ocr", "tts", "speech2text"}, capability) || checked[capability] {
+						return nil, fmt.Errorf("invalid MultiRAG capabilities")
+					}
+					checked[capability] = true
+				}
+			}
+			if !slices.Contains(capabilities, strings.ToLower(typeFilter)) {
 				continue
 			}
+			identity := fullID + "\x00" + strings.ToLower(typeFilter)
+			if seen[identity] {
+				return nil, fmt.Errorf("duplicate MultiRAG model identity")
+			}
+			seen[identity] = true
+			projectedType := m.Type
+			var modelTypes []string
+			if len(m.ModelTypes) > 0 {
+				projectedType = strings.ToLower(typeFilter)
+				modelTypes = capabilities
+			}
 			out = append(out, MultiRAGModel{
-				Name:    m.Name,
-				Factory: factory,
-				Type:    m.Type,
-				Status:  m.Status,
-				FullID:  m.Name + "@" + factory,
-				IsTools: m.IsTools,
+				Reference:    reference,
+				InstanceName: m.InstanceName,
+				ModelTypes:   modelTypes,
+				Name:         m.Name,
+				Factory:      factory,
+				Type:         projectedType,
+				Status:       m.Status,
+				FullID:       fullID,
+				IsTools:      m.IsTools,
 			})
 		}
 	}
@@ -100,8 +161,11 @@ func (h *KnowledgeHandler) ListMultiRAGModels(c *gin.Context) {
 		if out[i].Factory != out[j].Factory {
 			return out[i].Factory < out[j].Factory
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].FullID < out[j].FullID
 	})
 
-	respondSuccess(c, out)
+	return out, nil
 }

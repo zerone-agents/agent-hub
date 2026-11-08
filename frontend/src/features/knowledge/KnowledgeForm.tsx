@@ -38,10 +38,15 @@ import {
   retainLayoutCandidates,
   type CandidateGroup,
 } from "./candidates";
+import GraphExecutionSettings from "./GraphExecutionSettings";
+import { DatasetTableSettings } from "./TableColumnSettings";
+import { datasetTableFields, mergeDatasetTableFields, validateDatasetTableConfig, type DatasetTableFields } from "./tableParserConfig";
+import { validateDatasetParserConfig } from "./datasetParserValidation";
+import { useParserTranslation } from "./useParserTranslation";
 import LayoutModelHint from './LayoutModelHint';
 import { datasetGraphFields, mergeDatasetGraphFields, datasetGraphDelta, type DatasetGraphFields } from './datasetGraphConfig';
 
-export interface DatasetFormValues extends DatasetGraphFields {
+export interface DatasetFormValues extends DatasetGraphFields, DatasetTableFields {
   name: string;
   description: string;
   permission: string;
@@ -62,6 +67,8 @@ export interface DatasetFormValues extends DatasetGraphFields {
   mineru_formula_enable: boolean;
   mineru_table_enable: boolean;
   parser_config_extra: string;
+  parser_initial?: Record<string, unknown>;
+  chunk_token_initial?: number;
 }
 
 const LAYOUT_OPTIONS = [
@@ -259,7 +266,10 @@ export function datasetToFormValues(
   );
   const savedLayout = stringValue(config.layout_recognize, "DeepDOC");
   return {
-    ...datasetGraphFields(config.graphrag),
+    ...datasetGraphFields((isRecord(config.ext) && Object.hasOwn(config.ext, "graphrag")) ? config.ext.graphrag : config.graphrag),
+    ...datasetTableFields(config),
+    parser_initial: ds ? config : undefined,
+    chunk_token_initial: ds ? numberValue(config.chunk_token_num, 512) : undefined,
     name: ds?.name ?? "",
     description: ds?.description ?? "",
     permission: ds?.permission ?? "me",
@@ -295,11 +305,11 @@ export function datasetToFormValues(
 
 export function formValuesToInput(
   values: DatasetFormValues,
-  { includeEmbeddingModel = true, original }: { includeEmbeddingModel?: boolean; original?: KnowledgeDataset } = {},
+  { includeEmbeddingModel = true, original, skipValidation = false }: { includeEmbeddingModel?: boolean; original?: KnowledgeDataset; skipValidation?: boolean } = {},
 ): DatasetFormInput {
   const contextWindow = numberValue(values.image_table_context_window, 0);
   const parserConfig: Record<string, unknown> = {
-    ...mergeDatasetGraphFields(parseExtraParserConfig(values.parser_config_extra), values),
+    ...mergeDatasetTableFields(mergeDatasetGraphFields(parseExtraParserConfig(values.parser_config_extra), values), values),
     layout_recognize: decodeRefValue(values.layout_recognize) || "DeepDOC",
     chunk_token_num: numberValue(values.chunk_token_num, 512),
     delimiter: values.delimiter,
@@ -339,21 +349,30 @@ export function formValuesToInput(
   if (original) {
     // Compare against the same hydration defaults; an unrelated edit must not
     // install defaults, change parser mode, or normalize legacy extension data.
-    const baseline = formValuesToInput(datasetToFormValues(original));
+    const baseline = formValuesToInput(datasetToFormValues(original), { skipValidation: true });
     const changes: DatasetFormInput = {};
     for (const key of ["name", "description", "permission", "parser_id", "embd_id"] as const) {
       if (input[key] !== undefined && input[key] !== baseline[key]) changes[key] = input[key];
     }
-    const configChanges = Object.fromEntries(Object.entries(parserConfig).filter(
+    let configChanges = Object.fromEntries(Object.entries(parserConfig).filter(
       ([key, value]) => JSON.stringify(value) !== JSON.stringify(baseline.parser_config?.[key]),
     ));
-    if (isRecord(configChanges.graphrag) && isRecord(baseline.parser_config?.graphrag)) {
-      const delta = datasetGraphDelta(configChanges.graphrag, baseline.parser_config.graphrag);
-      if (Object.keys(delta).length) configChanges.graphrag = delta;
-      else delete configChanges.graphrag;
+    for (const key of ["graphrag", "raptor", "ext"]) {
+      if (isRecord(configChanges[key]) && isRecord(baseline.parser_config?.[key])) {
+        const delta = datasetGraphDelta(configChanges[key], baseline.parser_config[key]);
+        if (Object.keys(delta).length) configChanges[key] = delta;
+        else configChanges = Object.fromEntries(Object.entries(configChanges).filter(([name]) => name !== key));
+      }
     }
-    if (Object.keys(configChanges).length) changes.parser_config = configChanges;
+    if (Object.keys(configChanges).length) {
+      validateDatasetParserConfig(configChanges);
+      changes.parser_config = validateDatasetTableConfig(configChanges, original.parser_config);
+    }
     return changes;
+  }
+  if (!skipValidation) {
+    validateDatasetParserConfig(datasetGraphDelta(parserConfig, values.parser_initial ?? {}));
+    input.parser_config = validateDatasetTableConfig(parserConfig, values.parser_initial);
   }
   return input;
 }
@@ -362,7 +381,7 @@ function ParserConfigFields({
   layoutOptions,
   layoutLoading,
   layoutGroups,
-  chunkTokenMax = 8192,
+  chunkTokenMax = 2048,
 }: {
   layoutOptions?: SelectOptionGroup[];
   layoutLoading?: boolean;
@@ -370,6 +389,8 @@ function ParserConfigFields({
   chunkTokenMax?: number;
 }) {
   const { t } = useTranslation()
+  const { t: parserText } = useParserTranslation();
+  const parserId: unknown = Form.useWatch("parser_id");
   const watchedLayout: unknown = Form.useWatch('layout_recognize');
   const selectedLayout = typeof watchedLayout === 'string' ? watchedLayout : undefined;
   const layoutKind = layoutGroups?.flatMap(group => group.options).find(option => option.value === selectedLayout || option.rawValue === selectedLayout)?.kind;
@@ -401,7 +422,7 @@ function ParserConfigFields({
           </Form.Item>
         </Col>
         <Col xs={24} md={12}>
-          <Form.Item label={t('knowledge.form.chunkToken')} name="chunk_token_num" rules={[{ type: "number", min: 1, max: chunkTokenMax }]} >
+          <Form.Item label={t('knowledge.form.chunkToken')} name="chunk_token_num" rules={[({ getFieldValue }) => ({ validator: (_, value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 1 && (value <= chunkTokenMax || value === getFieldValue("chunk_token_initial")) ? Promise.resolve() : Promise.reject(new Error(parserText("parserInvalid", { field: "chunk_token_num" }))) })]} >
             <InputNumber min={1} max={chunkTokenMax} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
@@ -450,12 +471,12 @@ function ParserConfigFields({
         </Col>
         <Col xs={24} md={8}>
           <Form.Item label={t('knowledge.form.autoKeywords')} name="auto_keywords">
-            <InputNumber min={0} max={30} style={{ width: "100%" }} />
+            <InputNumber min={0} max={32} precision={0} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
         <Col xs={24} md={8}>
           <Form.Item label={t('knowledge.form.autoQuestions')} name="auto_questions">
-            <InputNumber min={0} max={30} style={{ width: "100%" }} />
+            <InputNumber min={0} max={10} precision={0} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
       </Row>
@@ -539,7 +560,7 @@ function ParserConfigFields({
             <Form.Item name="graphrag_enabled" label={t('knowledge.form.graphEnabled')} valuePropName="checked"><Switch /></Form.Item>
             <Row gutter={12}>
               <Col xs={24} md={12}><Form.Item name="graphrag_method" label={t('knowledge.form.graphMethod')}>
-                <Select options={[{ value: 'light', label: t('knowledge.form.graphLight') }, { value: 'general', label: t('knowledge.form.graphGeneral') }]} />
+                <Select options={[{ value: 'light', label: t('knowledge.form.graphLight') }, { value: 'general', label: t('knowledge.form.graphGeneral') }, { value: 'ner', label: parserText('ner') }]} />
               </Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="graphrag_entity_types" label={t('knowledge.form.graphEntityTypes')} extra={t('knowledge.form.graphEntityHint')}>
                 <Select mode="tags" allowClear tokenSeparators={[',']} options={['organization', 'person', 'geo', 'event', 'category'].map((value) => ({ label: value, value }))} />
@@ -549,10 +570,18 @@ function ParserConfigFields({
               <Col xs={24} md={12}><Form.Item name="graphrag_community" label={t('knowledge.form.graphCommunity')} valuePropName="checked"><Switch /></Form.Item></Col>
               <Col xs={24} md={12}><Form.Item name="graphrag_resolution" label={t('knowledge.form.graphResolution')} valuePropName="checked"><Switch /></Form.Item></Col>
             </Row>
+            <Collapse ghost items={[{ key: "graph-execution", label: parserText("graphExecution"), forceRender: true,
+              children: <Form.Item name="graphrag_execution"><GraphExecutionSettings /></Form.Item>,
+            }]} />
           </> : <Alert type="info" showIcon title={t('knowledge.form.graphAdvancedOnly')} />}
         </Form.Item>,
       }]} />
 
+      {parserId === "table" && <>
+        <Divider titlePlacement="left" plain>{parserText("tableTitle")}</Divider>
+        <Form.Item name="table_config"><DatasetTableSettings /></Form.Item>
+      </>}
+      <Typography.Paragraph type="secondary">{parserText("raptorHint")}</Typography.Paragraph>
       <Collapse
         ghost
         items={[
@@ -591,7 +620,7 @@ export function DatasetFields({
   layoutOptions,
   layoutLoading,
   layoutGroups,
-  chunkTokenMax = 8192,
+  chunkTokenMax = 2048,
   savedParser,
   preserveParserMode = false,
   compact = false,
@@ -994,7 +1023,7 @@ export default function KnowledgeForm({
           compact
           savedParser={editing?.parser_id}
           preserveParserMode={typeof editing?.pipeline_id === "string" && Boolean(editing.pipeline_id)}
-          chunkTokenMax={editing || createdDatasetId ? 8192 : 2048}
+          chunkTokenMax={2048}
           embeddingOptions={embeddingOptions}
           embeddingLoading={embeddingLoading}
           embeddingLocked={embeddingLocked}

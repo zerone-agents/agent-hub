@@ -100,22 +100,15 @@ func (c *RemoteMultiragEngine) Health(ctx context.Context) (*domain.HealthStatus
 }
 
 func (c *RemoteMultiragEngine) ListDatasets(ctx context.Context, req domain.DatasetListRequest) (*domain.DatasetListResult, error) {
-	localNameFilter := req.Name != "" || req.Keywords != ""
+	if req.Name != "" || req.Keywords != "" {
+		return c.listDatasetsByDisplayName(ctx, req)
+	}
 	query := url.Values{}
 	addString(query, "id", req.ID)
-	if localNameFilter {
-		addInt(query, "page", 1)
-		addInt(query, "page_size", datasetFilterFetchSize(req.Page, req.PageSize))
-	} else {
-		addString(query, "name", req.Name)
-		addInt(query, "page", req.Page)
-		addInt(query, "page_size", req.PageSize)
-	}
+	addInt(query, "page", req.Page)
+	addInt(query, "page_size", min(req.PageSize, 100))
 	addString(query, "orderby", req.OrderBy)
 	addBoolPtr(query, "desc", req.Desc)
-	if !localNameFilter {
-		addString(query, "keywords", req.Keywords)
-	}
 	addString(query, "parser_id", req.ParserID)
 	addBool(query, "include_parsing_status", req.IncludeParsingStatus)
 	for _, ownerID := range req.OwnerIDs {
@@ -132,13 +125,6 @@ func (c *RemoteMultiragEngine) ListDatasets(ctx context.Context, req domain.Data
 	datasets := make([]domain.Dataset, 0, len(raw))
 	for _, item := range raw {
 		datasets = append(datasets, domain.NormalizeDataset(item))
-	}
-	if localNameFilter {
-		datasets = filterDatasetsByDisplayName(datasets, req.Name, req.Keywords)
-		return &domain.DatasetListResult{
-			Total:    len(datasets),
-			Datasets: paginateDatasets(datasets, req.Page, req.PageSize),
-		}, nil
 	}
 	return &domain.DatasetListResult{Total: total, Datasets: datasets}, nil
 }
@@ -183,17 +169,10 @@ func datasetContainsExpected(raw, expected map[string]any) bool {
 			actualKey = "embd_id"
 		}
 		if key == "parser_config" {
-			value = domain.DatasetUpdateToRemote(domain.DatasetMutationRequest{"parser_config": value})[key]
-			if config, ok := value.(map[string]any); ok {
-				if parentChild, ok := config["parent_child"].(map[string]any); ok && parentChild["use_parent_child"] == false {
-					// MultiRAG flattens a disabled parent-child mode to an empty object.
-					// Compare against that stored form while keeping all other requested
-					// parser fields in the readback check.
-					normalized := domain.CloneObject(config)
-					normalized["parent_child"] = map[string]any{}
-					value = normalized
-				}
+			if !datasetParserConfigContains(raw[actualKey], value) {
+				return false
 			}
+			continue
 		}
 		if !jsonContains(raw[actualKey], value) {
 			return false
@@ -318,6 +297,11 @@ func (c *RemoteMultiragEngine) ListDocuments(ctx context.Context, datasetID stri
 func (c *RemoteMultiragEngine) UploadDocuments(ctx context.Context, datasetID string, upload domain.UploadRequest) ([]domain.Document, error) {
 	var raw []map[string]any
 	if _, err := c.doMultipart(ctx, "/api/v1/datasets/"+url.PathEscape(datasetID)+"/documents", upload, &raw); err != nil {
+		if partial := partialUploadFailure(err, datasetID); partial != nil {
+			if c.confirmPartialUpload(ctx, datasetID, partial) {
+				return nil, partial
+			}
+		}
 		return nil, err
 	}
 	documents := make([]domain.Document, 0, len(raw))
@@ -446,6 +430,9 @@ func (c *RemoteMultiragEngine) CreateChunk(ctx context.Context, datasetID string
 	}
 	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks"
 	if _, err := c.doJSON(ctx, http.MethodPost, path, nil, body, &raw); err != nil {
+		if failure := chunkImageFailure(err, datasetID, ""); failure != nil {
+			return nil, failure
+		}
 		return nil, err
 	}
 	chunk := domain.NormalizeChunk(raw.Chunk)
@@ -457,6 +444,9 @@ func (c *RemoteMultiragEngine) UpdateChunk(ctx context.Context, datasetID string
 	path := "/api/v1/datasets/" + url.PathEscape(datasetID) + "/documents/" + url.PathEscape(documentID) + "/chunks/" + url.PathEscape(chunkID)
 	var acknowledgement map[string]any
 	if _, err := c.doJSON(ctx, http.MethodPatch, path, nil, body, &acknowledgement); err != nil {
+		if failure := chunkImageFailure(err, datasetID, chunkID); failure != nil {
+			return nil, failure
+		}
 		if domain.StatusCode(err) != http.StatusBadGateway {
 			return nil, err
 		}
@@ -729,7 +719,7 @@ func decodeEnvelopeResponse(resp *http.Response, out any) (int, error) {
 		return 0, safeKnowledgeUpstreamError("知识库服务响应的业务状态不一致，请稍后重试", nil)
 	}
 	if code != 0 {
-		return 0, &knowledgeUpstreamFailure{businessCode: code, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败（业务码 %d），请刷新后核对", code), errors.New(env.message()))}
+		return 0, &knowledgeUpstreamFailure{httpStatus: resp.StatusCode, businessCode: code, data: env.Data, cause: domain.NewUpstreamError(fmt.Sprintf("知识库服务请求失败（业务码 %d），请刷新后核对", code), errors.New(env.message()))}
 	}
 	if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
 		if err := json.Unmarshal(env.Data, out); err != nil {
@@ -745,6 +735,7 @@ type knowledgeUpstreamFailure struct {
 	cause        *domain.Error
 	httpStatus   int
 	businessCode int
+	data         json.RawMessage
 }
 
 func (e *knowledgeUpstreamFailure) Error() string { return e.cause.Message }
@@ -799,30 +790,6 @@ func addBoolPtr(values url.Values, key string, value *bool) {
 	if value != nil {
 		values.Set(key, strconv.FormatBool(*value))
 	}
-}
-
-// maxDatasetFilterFetchSize 是「按名称/关键词本地过滤」单次向 multirag 拉取的行数上限。
-// datasetFilterFetchSize 按 page*pageSize 放大（下限 1000）；page/page_size 即使已被
-// handler 钳到 1e6/100，乘积仍可达 1e8——不封顶时 ?keywords=x&page=1e6&page_size=100
-// 会让 hub 试图拉 1e8 条并在本地物化。20_000 对齐控制台自身取全量目录的上限
-// （useKnowledgeListAll：20 页 × 1000 条），合法的既有用法不受影响。
-const maxDatasetFilterFetchSize = 20000
-
-func datasetFilterFetchSize(page int, pageSize int) int {
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 30
-	}
-	size := page * pageSize
-	if size < 1000 {
-		return 1000
-	}
-	if size > maxDatasetFilterFetchSize {
-		return maxDatasetFilterFetchSize
-	}
-	return size
 }
 
 func filterDatasetsByDisplayName(datasets []domain.Dataset, name string, keywords string) []domain.Dataset {

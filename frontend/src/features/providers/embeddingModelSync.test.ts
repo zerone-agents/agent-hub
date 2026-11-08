@@ -21,6 +21,20 @@ describe('embedding sync', () => {
     expect(h.sync).toHaveBeenCalledExactlyOnceWith(42, { verifyOnly: false, modelIds: ['embed'] }, guard)
     expect(h.inventory).toHaveBeenCalledExactlyOnceWith('embedding', guard)
   })
+  it('reads the exact atomic instance reference without rounding or constructing a suffix', async () => {
+    const reference = '9007199254740993'
+    const model = { ...stored, name: 'embed@hub-owned', instanceName: 'hub-owned', reference, fullId: reference }
+    h.sync.mockResolvedValue(wrap({ success: true, endpoint: 'instances', instanceName: 'hub-owned', factoryName: stored.factory, callCount: 1, perCall: [{ ok: true, modelName: 'embed', reference }] }))
+    h.inventory.mockResolvedValue(wrap([{ ...model, reference: '9007199254740994', fullId: '9007199254740994', instanceName: 'other' }, model]))
+    await expect(syncEmbeddingModel(provider, 'embed', owner())).resolves.toEqual(model)
+    expect(h.sync).toHaveBeenCalledTimes(1)
+  })
+  it('rejects a canonical receipt with a different instance readback', async () => {
+    const reference = '17'
+    h.sync.mockResolvedValue(wrap({ success: true, endpoint: 'instances', instanceName: 'owned', factoryName: stored.factory, callCount: 1, perCall: [{ ok: true, modelName: 'embed', reference }] }))
+    h.inventory.mockResolvedValue(wrap([{ ...stored, reference, fullId: reference, instanceName: 'foreign' }]))
+    await expect(syncEmbeddingModel(provider, 'embed', owner())).rejects.toThrow('readback')
+  })
   it.each([{ rows: [] }, { rows: [{ ...stored, factory: 'Anthropic' }] }, { rows: [{ ...stored, status: '0' }] }])('rejects missing, wrong-factory or disabled readback %j', async ({ rows }) => {
     h.inventory.mockResolvedValue(wrap(rows))
     await expect(syncEmbeddingModel(provider, 'embed', owner())).rejects.toThrow('readback')

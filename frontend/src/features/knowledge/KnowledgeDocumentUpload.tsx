@@ -1,3 +1,5 @@
+import { FileTableSettings } from "./TableColumnSettings";
+import type { TableUploadConfig } from "./tableParserConfig";
 import axios from "axios";
 import { useRef, useState } from "react";
 import {
@@ -32,16 +34,22 @@ interface Entry {
   state: UploadState;
   document?: KnowledgeDocument;
   error?: string;
+  parserConfig?: TableUploadConfig;
 }
 const keyFor = (file: File) =>
   `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`;
 export default function KnowledgeDocumentUpload({
   onClose,
+  datasetParserId,
   onUpload,
   onParse,
 }: {
   onClose: () => void;
-  onUpload: (file: File) => Promise<KnowledgeDocument>;
+  datasetParserId?: string;
+  onUpload: (
+    file: File,
+    parserConfig?: TableUploadConfig,
+  ) => Promise<KnowledgeDocument>;
   onParse: (document: KnowledgeDocument) => Promise<unknown>;
 }) {
   const { t } = useTranslation();
@@ -93,7 +101,9 @@ export default function KnowledgeDocumentUpload({
         if (!doc) {
           change(entry.key, { state: "uploading", error: undefined });
           try {
-            doc = await onUpload(entry.file);
+            doc = entry.parserConfig
+              ? await onUpload(entry.file, entry.parserConfig)
+              : await onUpload(entry.file);
             if (!doc.id) throw new Error(text("missing"));
             change(entry.key, { state: "uploaded", document: doc });
           } catch (err) {
@@ -236,6 +246,20 @@ export default function KnowledgeDocumentUpload({
                     {Math.ceil(entry.file.size / 1024)} KB
                   </Typography.Text>
                 </div>
+                {datasetParserId === "table" && (
+                  <FileTableSettings
+                    file={entry.file}
+                    value={entry.parserConfig}
+                    disabled={
+                      busy ||
+                      !!entry.document ||
+                      entry.state === "upload_unknown"
+                    }
+                    onChange={(parserConfig) => {
+                      change(entry.key, { parserConfig });
+                    }}
+                  />
+                )}
                 {entry.state === "upload_unknown" && (
                   <Typography.Paragraph type="warning">
                     {text("verifyUpload")}
