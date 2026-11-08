@@ -57,6 +57,7 @@ jobs:
     env:
       TEST_MYSQL_DSN: root:test@tcp(127.0.0.1:3306)/hub?parseTime=true
       MEMORY_TEST_MYSQL_DSN: root:test@tcp(127.0.0.1:3306)/hub_memory_test_00000000?parseTime=true
+      MEMORY_APPLICATION_TEST_MYSQL_DSN: root:test@tcp(127.0.0.1:3306)/hub_memory_app_test_00000000?parseTime=true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -71,14 +72,14 @@ jobs:
         run: go build ./...
 
       - name: Prepare isolated memory test schema
-        run: docker exec '${{ job.services.mysql.id }}' mysql -uroot -ptest -e 'CREATE DATABASE hub_memory_test_00000000'
+        run: docker exec '${{ job.services.mysql.id }}' mysql -uroot -ptest -e 'CREATE DATABASE hub_memory_test_00000000; CREATE DATABASE hub_memory_app_test_00000000'
 
       - name: Run tests
         run: go test -v ./...
 
       - name: Remove isolated memory test schema
         if: always()
-        run: docker exec '${{ job.services.mysql.id }}' mysql -uroot -ptest -e 'DROP DATABASE IF EXISTS hub_memory_test_00000000'
+        run: docker exec '${{ job.services.mysql.id }}' mysql -uroot -ptest -e 'DROP DATABASE IF EXISTS hub_memory_test_00000000; DROP DATABASE IF EXISTS hub_memory_app_test_00000000'
 
   frontend-test:
     runs-on: ubuntu-latest

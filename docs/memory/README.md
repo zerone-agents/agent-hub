@@ -24,6 +24,8 @@
 
 ## 配置
 
+需要由业务服务自行开通多个应用时，使用 [应用与记忆库管理 API](applications.md)：一次配置租户管理令牌，之后通过接口创建应用、原生记忆库及独立应用令牌，无需逐个修改环境变量。以下为继续兼容的静态应用配置。
+
 为每个自动记忆应用配置独立原生 Memory bank：`permissions=me`，`memory_type=[raw,semantic,episodic,procedural]`，有效的真实聊天模型与 embedding 模型，以及已运行的原生抽取 worker。不要修改已有数据的 bank 类型，也不要将不同应用的 bank 混用。
 
 ```text

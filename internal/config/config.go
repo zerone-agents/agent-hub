@@ -213,6 +213,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("ops.api_key", "OPS_API_KEY")
 	viper.BindEnv("memory.enabled", "MEMORY_ENABLED")
 	viper.BindEnv("memory.clients_json", "MEMORY_CLIENTS_JSON")
+	viper.BindEnv("memory.managers_json", "MEMORY_MANAGERS_JSON")
 	viper.BindEnv("memory.wrapping_key", "MEMORY_WRAPPING_KEY")
 	viper.BindEnv("memory.multirag_url", "MEMORY_MULTIRAG_URL")
 	viper.BindEnv("memory.multirag_key", "MEMORY_MULTIRAG_KEY")
@@ -274,6 +275,9 @@ func LoadConfig() (*Config, error) {
 	// explicit config, no PublicHost fallback (spec 3.5).
 	cfg.Deployer.DeployerURLHost = deriveDeployerURLHost(cfg.Deployer.URL)
 	if _, err := cfg.Memory.Clients(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Memory.Managers(); err != nil {
 		return nil, err
 	}
 
