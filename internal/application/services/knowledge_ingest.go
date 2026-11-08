@@ -6,6 +6,15 @@ import (
 )
 
 func (s *KnowledgeService) IngestDocuments(ctx context.Context, req knowledge.DocumentIngestRequest) error {
+	if s.datasetGuard != nil {
+		reserved, err := s.datasetGuard.IDs(ctx)
+		if err != nil {
+			return err
+		}
+		if len(reserved) > 0 {
+			return knowledge.NewBadRequestError("记忆库隔离期间请通过指定知识库的解析入口操作文档")
+		}
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err

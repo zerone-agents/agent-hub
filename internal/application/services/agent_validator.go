@@ -86,6 +86,11 @@ func ValidateConfig(config map[string]interface{}) error {
 	if config == nil {
 		return agent.NewCodedValidationErrorf(agent.CodeConfigRequired, nil, "config 不能为空")
 	}
+	if value, present := config["zeroTools"]; present {
+		if _, ok := value.(bool); !ok {
+			return agent.NewValidationErrorf("zeroTools 必须是布尔值")
+		}
+	}
 
 	if pm, ok := config["permissionMode"].(string); ok && pm != "" {
 		if !validPermissionModes[pm] {

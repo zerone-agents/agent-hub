@@ -105,6 +105,7 @@ interface FormValues {
   /** 推理强度（issue #226）：恒为 string——'' = 未设置/清除（显式下发，避免 absent key 让清除静默失效） */
   effort?: string
   disallowedTools?: string[]
+  zeroTools?: boolean
   systemPrompt: string
   desktopEnabled: boolean
   mobileEnabled: boolean
@@ -179,6 +180,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
           maxSessionQueries: editingAgent.config.maxSessionQueries,
           effort: editingAgent.config.effort ?? '',
           disallowedTools: editingAgent.config.disallowedTools ?? [],
+          zeroTools: editingAgent.config.zeroTools ?? false,
           systemPrompt: editingAgent.config.systemPrompt ?? '',
           desktopEnabled: editingAgent.desktopEnabled ?? false,
           mobileEnabled: editingAgent.mobileEnabled ?? false,
@@ -190,7 +192,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         form.resetFields()
         form.setFieldsValue({
         permissionMode: 'auto', maxTurns: 50, desktopEnabled: false, mobileEnabled: false, guestEnabled: false, isDefault: false,
-        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, effort: '', disallowedTools: undefined
+        iconName: '', iconColor: '', iconBgColor: '', group: '', maxSessionQueries: undefined, effort: '', disallowedTools: undefined, zeroTools: false
         })
       }
     }
@@ -225,6 +227,7 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
       // undefined（新建未触碰）→ 不下发 key（hub 视为未配置）；编辑态清空后 antd Select 值为 []，
       // 必须显式发空数组——hub applyUpdateConfig 对 absent key 不变更，丢 key 会让清空静默失效
       disallowedTools: v.disallowedTools ?? undefined,
+      zeroTools: v.zeroTools ?? false,
       title: v.titleZh ? { zh: v.titleZh, ...(v.titleEn ? { en: v.titleEn } : {}) } : undefined,
       description: v.descriptionZh
         ? { zh: v.descriptionZh, ...(v.descriptionEn ? { en: v.descriptionEn } : {}) }
@@ -401,6 +404,10 @@ export default function AgentForm({ open, editingAgent, onClose }: AgentFormProp
         </Form.Item>
         <Form.Item label={t('agents.form.disallowedTools')} name="disallowedTools" tooltip={t('agents.form.disallowedToolsTip')}>
           <Select mode="tags" open={false} tokenSeparators={[',']} placeholder={t('agents.form.disallowedToolsPh')} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item name="zeroTools" valuePropName="checked">
+          <ToggleItem title={t('agents.form.zeroTools')} desc={t('agents.form.zeroToolsTip')} />
         </Form.Item>
 
         {/* 系统提示词 */}

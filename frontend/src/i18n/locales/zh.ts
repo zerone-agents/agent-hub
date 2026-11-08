@@ -1,5 +1,7 @@
 import { knowledgeDiagnosticsMessages } from '@/features/knowledge/knowledgeDiagnostics.messages'
+import { memoryZh, memoryErrorsZh } from './memory'
 const zh = {
+  memory: memoryZh,
   language: {
     zh: '中文',
     en: 'English',
@@ -22,6 +24,7 @@ const zh = {
     }
   },
   apiErrors: {
+    ...memoryErrorsZh,
     knowledgeServiceName: '知识库服务',
     requestFailed: '请求失败',
     // effort（issue #226）：zh 值与后端原文逐字一致（P5 双写契约，单形态码）
@@ -120,6 +123,7 @@ const zh = {
     skills: '技能管理',
     providers: '模型管理',
     knowledge: '知识库管理',
+    memory: '记忆管理',
     scenes: '场景管理',
     chat: '聊天记录'
   },
@@ -496,6 +500,8 @@ const zh = {
       effortPh: '如 high，或自定义值',
       noLimit: '无限制',
       disallowedTools: '禁用工具',
+      zeroTools: '明确禁用全部工具',
+      zeroToolsTip: '用于纯对话 Agent；部署前需解除所有工具、技能、MCP、子 Agent 和知识库挂载。需要支持此能力的 runtime。',
       disallowedToolsTip: '在允许范围基础上剔除的工具名黑名单；可填内置工具名或 mcp__服务器__工具 形式的 MCP 工具名',
       disallowedToolsPh: '输入要禁用的工具名，回车添加',
       promptSection: '系统提示词',

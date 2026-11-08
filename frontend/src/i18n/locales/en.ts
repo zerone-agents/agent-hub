@@ -1,7 +1,9 @@
 import { knowledgeDiagnosticsMessages } from '@/features/knowledge/knowledgeDiagnostics.messages'
+import { memoryEn, memoryErrorsEn } from './memory'
 import type zh from './zh'
 
 const en = {
+  memory: memoryEn,
   language: {
     zh: '中文',
     en: 'English',
@@ -24,6 +26,7 @@ const en = {
     }
   },
   apiErrors: {
+    ...memoryErrorsEn,
     knowledgeServiceName: 'knowledge service',
     requestFailed: 'Request failed',
     // effort (issue #226): en translations for the stable codes (zh mode passes the backend's Chinese original through)
@@ -119,6 +122,7 @@ const en = {
     skills: 'Skills',
     providers: 'Models',
     knowledge: 'Knowledge Bases',
+    memory: 'Memory',
     scenes: 'Scenes',
     chat: 'Chat History'
   },
@@ -495,6 +499,8 @@ const en = {
       effortPh: 'e.g. high, or a custom value',
       noLimit: 'Unlimited',
       disallowedTools: 'Disallowed Tools',
+      zeroTools: 'Disable all tools',
+      zeroToolsTip: 'For conversation-only agents. Remove tool, skill, MCP, subagent and dataset mounts before deployment. Requires a runtime supporting this capability.',
       disallowedToolsTip: 'Blocklist of tool names excluded from the allowed set; built-in names or MCP names in mcp__server__tool form',
       disallowedToolsPh: 'Enter a tool name to disallow, press Enter to add',
       promptSection: 'System Prompt',

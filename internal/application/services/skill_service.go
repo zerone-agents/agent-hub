@@ -462,6 +462,9 @@ func (s *SkillService) UpdateAgentSkills(tenantID, agentName string, skillNames 
 		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
+	if agentCfg.ZeroTools && len(skillNames) > 0 {
+		return skill.NewValidationErrorf("零工具 Agent 不能挂载技能")
+	}
 	skillIDs := make([]uint64, 0, len(skillNames))
 	for _, name := range skillNames {
 		sk, err := s.repo.GetByName(tenantID, name)

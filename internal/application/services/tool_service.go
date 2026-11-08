@@ -409,6 +409,15 @@ func (s *ToolService) UpdateAgentTools(tenantID, agentName string, toolNames []s
 	if err != nil {
 		return nil, err
 	}
+	if agentCfg.ZeroTools {
+		if len(toolNames) > 0 {
+			return nil, agent.NewValidationErrorf("零工具 Agent 不能挂载工具")
+		}
+		if err := s.repo.ReplaceAgentTools(agentCfg.ID, nil); err != nil {
+			return nil, err
+		}
+		return []string{}, nil
+	}
 
 	defaultToolNames, err := s.repo.GetDefaultToolNames(tenantID)
 	if err != nil {

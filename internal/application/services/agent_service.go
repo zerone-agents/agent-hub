@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 
 // AgentService provides business logic for managing agent configurations.
 type AgentService struct {
+	datasetGuard  *DatasetGuard
 	repo          *repository.AgentRepository
 	toolRepo      *repository.ToolRepository
 	skillRepo     *repository.SkillRepository
@@ -445,8 +447,10 @@ func (s *AgentService) CreateAgent(tenantID string, input *CreateAgentInput) (*A
 		return nil, fmt.Errorf("create agent failed: %w", err)
 	}
 
-	if err := s.toolRepo.BindDefaultToolsToAgent(tenantID, cfg.ID); err != nil {
-		return nil, fmt.Errorf("bind default tool failed: %w", err)
+	if !cfg.ZeroTools {
+		if err := s.toolRepo.BindDefaultToolsToAgent(tenantID, cfg.ID); err != nil {
+			return nil, fmt.Errorf("bind default tool failed: %w", err)
+		}
 	}
 
 	return s.GetAgent(tenantID, input.Name)
@@ -618,6 +622,9 @@ func (s *AgentService) UpdateSubagents(tenantID, agentName string, subagentNames
 		return agent.NewCodedValidationErrorf(agent.CodeAgentReferenceNotFound,
 			map[string]string{"name": agentName}, "Agent '%s' 不存在", agentName)
 	}
+	if cfg.ZeroTools && len(subagentNames) > 0 {
+		return agent.NewValidationErrorf("零工具 Agent 不能挂载子 Agent")
+	}
 
 	subagentIDs := make([]uint64, 0, len(subagentNames))
 	for _, subName := range subagentNames {
@@ -719,6 +726,9 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 	}
 
 	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
+	if v, ok := config["zeroTools"].(bool); ok {
+		cfg.ZeroTools = v
+	}
 	// trimming and boundary rules all live in parseDisallowedTools — the
 	// single source shared with ValidateConfig — so the stored/deployed
 	// value always matches the validator's semantics. Absent key leaves
@@ -806,6 +816,7 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 
 	// effort（issue #226）：无条件携带，空串 = 未设置（前端按空串显示未配置）。
 	m["effort"] = cfg.Effort
+	m["zeroTools"] = cfg.ZeroTools
 
 	if cfg.DisallowedTools != nil {
 		m["disallowedTools"] = cfg.DisallowedTools
@@ -1111,6 +1122,11 @@ func (s *AgentService) GetAgentKnowledgeDatasetsForRequest(tenantID, tokenAgentN
 // UpdateAgentKnowledgeDatasets replaces the dataset bindings for an agent and
 // automatically enables/disables the built-in 'knowledge' MCP binding.
 func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, datasetIDs []string) error {
+	if s.datasetGuard != nil {
+		if err := s.datasetGuard.Check(context.Background(), datasetIDs...); err != nil {
+			return err
+		}
+	}
 	agentCfg, err := s.repo.GetByName(tenantID, agentName)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1120,6 +1136,9 @@ func (s *AgentService) UpdateAgentKnowledgeDatasets(tenantID, agentName string, 
 	}
 
 	cleaned := make([]string, 0, len(datasetIDs))
+	if agentCfg.ZeroTools && len(datasetIDs) > 0 {
+		return agent.NewValidationErrorf("零工具 Agent 不能挂载知识库")
+	}
 	for _, id := range datasetIDs {
 		id = strings.TrimSpace(id)
 		if id != "" {
@@ -1176,3 +1195,5 @@ func syncSubagentToolBindings(
 	}
 	return nil
 }
+
+func (s *AgentService) SetDatasetGuard(g *DatasetGuard) { s.datasetGuard = g }

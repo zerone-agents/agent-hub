@@ -1,0 +1,4192 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AgentHub synthetic memory integration",
+    "version": "memory-v1-synthetic",
+    "description": "AgentHub合成数据原生自动记忆接入。真实聊天完成后提交完整实际userInput/agentResponse，复用MultiRAG raw/semantic/episodic/procedural异步提取。派生内容与逐字核验Fact分开；自动应用须automaticExtraction=true。未知写入只读恢复不重放。原生遗忘、物理删除、授权撤回、注销清理本期返回501，不产生成功清理回执。 Business-service routes only; delegated administration routes are documented in management.md."
+  },
+  "servers": [
+    {
+      "url": "/api/v1/memory"
+    }
+  ],
+  "security": [
+    {
+      "javaService": []
+    }
+  ],
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "summary": "Get actual application backend and supported actions",
+        "operationId": "get_capabilities",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Capabilities"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "The service selects this policy from the authenticated client, never from request headers or a supplied memoryId/datasetId. Native advertises the seven flags shown in the example; legacy retains its own capabilities."
+      }
+    },
+    "/lifecycle/activate": {
+      "post": {
+        "summary": "Register lifecycle",
+        "operationId": "post_lifecycle_activate",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Operation"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lifecycle/deactivate": {
+      "post": {
+        "summary": "Legacy lifecycle cleanup; native unsupported",
+        "operationId": "post_lifecycle_deactivate",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Legacy multirag-knowledge only. Accepted/pending is not physical completion. Never returned for this action by the current native backend.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Operation"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Current multirag-memory backend only: valid authenticated request rejected before any ledger, consent, lifecycle or outbox mutation. No cleanup receipt is created. Legacy behavior remains separately supported.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "code": 501,
+                  "error": {
+                    "reason": "MEMORY_OPERATION_UNSUPPORTED",
+                    "message": "当前记忆后端本期不支持遗忘、物理删除、撤权或注销清理"
+                  },
+                  "traceId": "request-trace-id"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationInput"
+              }
+            }
+          }
+        },
+        "description": "For backend=multirag-memory this action is not exposed in the current scope. After authentication and input validation it always returns HTTP 501 with error.reason=MEMORY_OPERATION_UNSUPPORTED; it does not stop supply, mutate the ledger, enqueue work, invoke native DELETE, or return physical-cleanup success. The 200 response and Operation schema are retained for existing backend=multirag-knowledge clients only.",
+        "x-backend-support": {
+          "multirag-memory": "unsupported",
+          "multirag-knowledge": "supported"
+        }
+      }
+    },
+    "/candidates": {
+      "post": {
+        "summary": "Submit exact quoted candidate",
+        "operationId": "post_candidates",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Candidate"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Manual ledger operations are unavailable for automatic-extraction applications. No side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateInput"
+              }
+            }
+          }
+        },
+        "description": "Native backend: publish only approved original quotes as new RAW records. Version correction invalidates the old Hub fact/context and logically disables the prior native message with status:false; old text and vectors remain. No native DELETE or physical erasure is performed. Automatic-extraction applications reject this manual ledger operation with 501/MEMORY_OPERATION_UNSUPPORTED before any persistence or provider call."
+      }
+    },
+    "/tasks/claim": {
+      "post": {
+        "summary": "Claim current candidate snapshot",
+        "operationId": "post_tasks_claim",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Task"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Manual ledger operations are unavailable for automatic-extraction applications. No side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationInput"
+              }
+            }
+          }
+        },
+        "description": " Automatic-extraction applications reject this manual ledger operation with 501/MEMORY_OPERATION_UNSUPPORTED before any persistence or provider call."
+      }
+    },
+    "/tasks/publish": {
+      "post": {
+        "summary": "Publish verified verbatim items atomically",
+        "operationId": "post_tasks_publish",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Fact"
+                      }
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Manual ledger operations are unavailable for automatic-extraction applications. No side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishInput"
+              }
+            }
+          }
+        },
+        "description": "Native backend: publish only approved original quotes as new RAW records. Version correction invalidates the old Hub fact/context and logically disables the prior native message with status:false; old text and vectors remain. No native DELETE or physical erasure is performed. Automatic-extraction applications reject this manual ledger operation with 501/MEMORY_OPERATION_UNSUPPORTED before any persistence or provider call."
+      }
+    },
+    "/facts": {
+      "get": {
+        "summary": "List active facts (bounded lifecycle)",
+        "operationId": "get_facts",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Fact"
+                      }
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/facts/{factId}": {
+      "get": {
+        "summary": "Read an active fact",
+        "operationId": "get_facts_factId",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "factId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Fact"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Apply actual user edit with version CAS",
+        "operationId": "patch_facts_factId",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "factId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Fact"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Manual ledger operations are unavailable for automatic-extraction applications. No side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInput"
+              }
+            }
+          }
+        },
+        "description": "Native backend: publish only approved original quotes as new RAW records. Version correction invalidates the old Hub fact/context and logically disables the prior native message with status:false; old text and vectors remain. No native DELETE or physical erasure is performed. Automatic-extraction applications reject this manual ledger operation with 501/MEMORY_OPERATION_UNSUPPORTED before any persistence or provider call."
+      },
+      "delete": {
+        "summary": "Legacy delete; native unsupported",
+        "operationId": "delete_facts_factId",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "factId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Legacy multirag-knowledge only. Accepted/pending is not physical completion. Never returned for this action by the current native backend.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Operation"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Current multirag-memory backend only: valid authenticated request rejected before any ledger, consent, lifecycle or outbox mutation. No cleanup receipt is created. Legacy behavior remains separately supported.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "code": 501,
+                  "error": {
+                    "reason": "MEMORY_OPERATION_UNSUPPORTED",
+                    "message": "当前记忆后端本期不支持遗忘、物理删除、撤权或注销清理"
+                  },
+                  "traceId": "request-trace-id"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteInput"
+              }
+            }
+          }
+        },
+        "description": "For backend=multirag-memory this action is not exposed in the current scope. After authentication and input validation it always returns HTTP 501 with error.reason=MEMORY_OPERATION_UNSUPPORTED; it does not stop supply, mutate the ledger, enqueue work, invoke native DELETE, or return physical-cleanup success. The 200 response and Operation schema are retained for existing backend=multirag-knowledge clients only.",
+        "x-backend-support": {
+          "multirag-memory": "unsupported",
+          "multirag-knowledge": "supported"
+        }
+      }
+    },
+    "/consents/revoke": {
+      "post": {
+        "summary": "Legacy consent revoke; native unsupported",
+        "operationId": "post_consents_revoke",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Legacy multirag-knowledge only. Accepted/pending is not physical completion. Never returned for this action by the current native backend.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Operation"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Current multirag-memory backend only: valid authenticated request rejected before any ledger, consent, lifecycle or outbox mutation. No cleanup receipt is created. Legacy behavior remains separately supported.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "code": 501,
+                  "error": {
+                    "reason": "MEMORY_OPERATION_UNSUPPORTED",
+                    "message": "当前记忆后端本期不支持遗忘、物理删除、撤权或注销清理"
+                  },
+                  "traceId": "request-trace-id"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeInput"
+              }
+            }
+          }
+        },
+        "description": "For backend=multirag-memory this action is not exposed in the current scope. After authentication and input validation it always returns HTTP 501 with error.reason=MEMORY_OPERATION_UNSUPPORTED; it does not stop supply, mutate the ledger, enqueue work, invoke native DELETE, or return physical-cleanup success. The 200 response and Operation schema are retained for existing backend=multirag-knowledge clients only.",
+        "x-backend-support": {
+          "multirag-memory": "unsupported",
+          "multirag-knowledge": "supported"
+        }
+      }
+    },
+    "/context": {
+      "post": {
+        "summary": "Recall current lifecycle facts",
+        "operationId": "post_context",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Context"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextInput"
+              }
+            }
+          }
+        },
+        "description": "Search the fixed native bank and trusted derived user/agent/session scope, then verify raw content/status against the current Hub ledger. Empty or mismatched scope never broadens retrieval. Native message IDs and bank identifiers remain server-side."
+      }
+    },
+    "/context/validate": {
+      "post": {
+        "summary": "Validate context revision before use",
+        "operationId": "post_context_validate",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "valid": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "valid"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/{operationId}": {
+      "get": {
+        "summary": "Query operation progress",
+        "operationId": "get_operations_operationId",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Operation"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Query an accepted operation in the exact business lifecycle. Unsupported native delete/revoke/deactivate requests do not create operation IDs; do not infer cleanup from a missing receipt."
+      }
+    },
+    "/candidates/{candidateId}/reject": {
+      "post": {
+        "summary": "Reject a candidate and retire stale task snapshots",
+        "operationId": "post_candidates_candidateId_reject",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "candidateId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Candidate"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations": {
+      "post": {
+        "summary": "Submit actual completed conversation for native asynchronous extraction",
+        "operationId": "ingest_conversation",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ConversationReceipt"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{operationId}": {
+      "get": {
+        "summary": "Read-only reconciliation; never repeat native POST",
+        "operationId": "conversation_status",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ConversationReceipt"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native-messages": {
+      "get": {
+        "summary": "List typed native memories with original provenance and extraction status",
+        "operationId": "native_messages",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NativeMessage"
+                      }
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/native-context": {
+      "post": {
+        "summary": "Retrieve scoped native memories with recent original sources and bounded content",
+        "operationId": "native_context",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-User-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Memory-Lifecycle-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Business success. Accepted/pending is not physical completion.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/NativeContext"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stable error; never contains original text or backend credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeContextInput"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "javaService": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Per-application trusted Java service credential. Never expose to App."
+      }
+    },
+    "schemas": {
+      "OperationInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "operationId"
+        ],
+        "additionalProperties": false
+      },
+      "CandidateInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "trustedJava"
+            ]
+          },
+          "dataClass": {
+            "type": "string",
+            "enum": [
+              "synthetic"
+            ]
+          },
+          "turnId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sourceMessageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "userText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The complete actual synthetic user message; must exactly equal quote."
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "subject": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "temporal": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "event",
+              "person",
+              "preference",
+              "situation"
+            ]
+          },
+          "risk": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "sensitive": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "consentRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "replaceFactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "operationId",
+          "source",
+          "dataClass",
+          "turnId",
+          "sourceMessageId",
+          "userText",
+          "quote",
+          "subject",
+          "temporal",
+          "category",
+          "consentRef",
+          "policyVersion"
+        ],
+        "additionalProperties": false
+      },
+      "PublishItem": {
+        "type": "object",
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "candidateId",
+          "expectedVersion",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "PublishInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublishItem"
+            },
+            "maxItems": 100
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Exact newline join of the active facts named by profileFactIds; no generated summary."
+          },
+          "profileFactIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "maxItems": 100,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "operationId",
+          "taskId",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Actual user edit relayed by trusted Java."
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "DeleteInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "RevokeInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "consentRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "operationId",
+          "consentRef"
+        ],
+        "additionalProperties": false
+      },
+      "ContextInput": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "event",
+                "person",
+                "preference",
+                "situation"
+              ]
+            },
+            "maxItems": 4
+          },
+          "deadlineMs": {
+            "type": "integer",
+            "minimum": 50,
+            "maximum": 2000,
+            "default": 500
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "ValidateInput": {
+        "type": "object",
+        "properties": {
+          "contextVersion": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "contextVersion"
+        ],
+        "additionalProperties": false
+      },
+      "Fact": {
+        "type": "object",
+        "properties": {
+          "factId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "temporal": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "event",
+              "person",
+              "preference",
+              "situation"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "syncStatus": {
+            "type": "string"
+          },
+          "consentRef": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "factId",
+          "version",
+          "content",
+          "subject",
+          "temporal",
+          "category",
+          "status",
+          "syncStatus",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Candidate": {
+        "type": "object",
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "integer"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "temporal": {
+            "type": "string",
+            "enum": [
+              "asQuoted"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "event",
+              "person",
+              "preference",
+              "situation"
+            ]
+          },
+          "sourceMessageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "turnId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string"
+          },
+          "replaceFactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer"
+          },
+          "rejectionReason": {
+            "type": "string",
+            "enum": [
+              "notDurable",
+              "duplicate",
+              "policy",
+              "unsupported"
+            ]
+          }
+        },
+        "required": [
+          "candidateId",
+          "version",
+          "quote",
+          "subject",
+          "temporal",
+          "category",
+          "sourceMessageId",
+          "turnId",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Empty when no pending candidates; an empty task is not persisted."
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            }
+          }
+        },
+        "required": [
+          "taskId",
+          "candidates"
+        ],
+        "additionalProperties": false
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string"
+          },
+          "stoppedSupply": {
+            "type": "boolean"
+          },
+          "physicalCleanup": {
+            "type": "boolean",
+            "description": "Meaningful only within cleanupScope for a supported legacy cleanup action; current native integration never claims physical erase."
+          },
+          "cleanupScope": {
+            "type": "string",
+            "enum": [
+              "",
+              "retrievalReplica",
+              "hubAndRetrievalReplica"
+            ],
+            "description": "Legacy cleanup scope; empty for an operation without a cleanup contract. Not returned for native unsupported actions."
+          },
+          "ledgerRetained": {
+            "type": "boolean",
+            "description": "True while Hub ciphertext evidence remains. Logical native correction retains old raw text and is not a physical-cleanup operation."
+          }
+        },
+        "required": [
+          "operationId",
+          "status",
+          "stoppedSupply",
+          "physicalCleanup",
+          "cleanupScope",
+          "ledgerRetained"
+        ],
+        "additionalProperties": false,
+        "description": "Business operation receipt. Cleanup fields are retained for legacy KB schema compatibility. Native unsupported delete/revoke/deactivate actions return Error/501 and never create or return this receipt. Native activation and other accepted non-cleanup operations do not imply erasure."
+      },
+      "Context": {
+        "type": "object",
+        "properties": {
+          "contextVersion": {
+            "type": "integer"
+          },
+          "facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fact"
+            },
+            "maxItems": 5
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "degraded",
+              "stale"
+            ]
+          }
+        },
+        "required": [
+          "contextVersion",
+          "facts",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "traceId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "Stable domain reason. MEMORY_OPERATION_UNSUPPORTED accompanies HTTP 501 for native delete/revoke/deactivate."
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "code",
+          "traceId",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "RejectInput": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "notDurable",
+              "duplicate",
+              "policy",
+              "unsupported"
+            ]
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedVersion",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "BackendCapabilities": {
+        "type": "object",
+        "description": "Per-application feature policy shared by Java service capabilities and flattened Hub admin application metadata.",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": [
+              "multirag-memory",
+              "multirag-knowledge"
+            ],
+            "description": "Authenticated application backend; not selected by an API request."
+          },
+          "rawOnly": {
+            "type": "boolean",
+            "description": "True for the native RAW-only Memory adapter."
+          },
+          "correctionSupported": {
+            "type": "boolean",
+            "description": "Manual Hub ledger CAS editing. False for automatic-extraction applications; submit a new actual corrective conversation instead."
+          },
+          "forgetSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration."
+          },
+          "physicalDeleteSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration."
+          },
+          "consentRevokeSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration; a rejected request makes no ledger changes."
+          },
+          "deactivateSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration; no lifecycle freeze or erasure is performed."
+          },
+          "automaticExtractionSupported": {
+            "type": "boolean",
+            "description": "Configured native conversation extraction interface; verify provider and worker separately."
+          },
+          "memoryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "semantic",
+                "episodic",
+                "procedural"
+              ]
+            }
+          },
+          "conversationCorrectionsSupported": {
+            "type": "boolean",
+            "description": "Natural-language correction may be ingested as a new actual conversation; does not guarantee disabling contradictory historical derived messages."
+          },
+          "nativeMaxContextChars": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              4000
+            ]
+          },
+          "nativeDefaultMessages": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              5
+            ]
+          },
+          "nativeMaxMessages": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              20
+            ]
+          }
+        },
+        "required": [
+          "backend",
+          "rawOnly",
+          "correctionSupported",
+          "forgetSupported",
+          "physicalDeleteSupported",
+          "consentRevokeSupported",
+          "deactivateSupported",
+          "automaticExtractionSupported",
+          "memoryTypes",
+          "conversationCorrectionsSupported"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "backend": "multirag-memory",
+          "rawOnly": true,
+          "correctionSupported": true,
+          "forgetSupported": false,
+          "physicalDeleteSupported": false,
+          "consentRevokeSupported": false,
+          "deactivateSupported": false
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "description": "Query this before choosing actions. Native capabilities are policy declarations; they do not replace live storage/provider acceptance.",
+        "properties": {
+          "contractVersion": {
+            "type": "string",
+            "enum": [
+              "memory-v1-synthetic"
+            ]
+          },
+          "dataClass": {
+            "type": "string",
+            "enum": [
+              "synthetic"
+            ]
+          },
+          "sensitiveData": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "kms": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "maxFactsPerContext": {
+            "type": "integer",
+            "enum": [
+              5
+            ],
+            "description": "Legacy quote-verified ledger context limit; use native budget fields for /native-context."
+          },
+          "maxContextChars": {
+            "type": "integer",
+            "enum": [
+              200
+            ],
+            "description": "Legacy quote-verified ledger context limit; use native budget fields for /native-context."
+          },
+          "maxProfileChars": {
+            "type": "integer",
+            "enum": [
+              300
+            ]
+          },
+          "characterCounting": {
+            "type": "string",
+            "enum": [
+              "unicode-code-points"
+            ]
+          },
+          "runtimeHistory": {
+            "type": "string",
+            "enum": [
+              "separate-runtime-contract"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "credential-bound-application-and-registered-lifecycle"
+            ]
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "multirag-memory",
+              "multirag-knowledge"
+            ],
+            "description": "Authenticated application backend; not selected by an API request."
+          },
+          "rawOnly": {
+            "type": "boolean",
+            "description": "True for the native RAW-only Memory adapter."
+          },
+          "correctionSupported": {
+            "type": "boolean",
+            "description": "Manual Hub ledger CAS editing. False for automatic-extraction applications; submit a new actual corrective conversation instead."
+          },
+          "forgetSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration."
+          },
+          "physicalDeleteSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration."
+          },
+          "consentRevokeSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration; a rejected request makes no ledger changes."
+          },
+          "deactivateSupported": {
+            "type": "boolean",
+            "description": "False for the current native integration; no lifecycle freeze or erasure is performed."
+          },
+          "automaticExtractionSupported": {
+            "type": "boolean",
+            "description": "Configured native conversation extraction interface; verify provider and worker separately."
+          },
+          "memoryTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "semantic",
+                "episodic",
+                "procedural"
+              ]
+            }
+          },
+          "conversationCorrectionsSupported": {
+            "type": "boolean",
+            "description": "Natural-language correction may be ingested as a new actual conversation; does not guarantee disabling contradictory historical derived messages."
+          },
+          "nativeMaxContextChars": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              4000
+            ]
+          },
+          "nativeDefaultMessages": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              5
+            ]
+          },
+          "nativeMaxMessages": {
+            "type": "integer",
+            "description": "Native automatic-context budget. Positive for automatic-extraction applications; separate from legacy ledger context limits.",
+            "enum": [
+              0,
+              20
+            ]
+          },
+          "nativeConfigurationSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeStatusSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeDiagnosticsSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          }
+        },
+        "required": [
+          "contractVersion",
+          "dataClass",
+          "sensitiveData",
+          "kms",
+          "maxFactsPerContext",
+          "maxContextChars",
+          "maxProfileChars",
+          "characterCounting",
+          "runtimeHistory",
+          "scope",
+          "backend",
+          "rawOnly",
+          "correctionSupported",
+          "forgetSupported",
+          "physicalDeleteSupported",
+          "consentRevokeSupported",
+          "deactivateSupported",
+          "automaticExtractionSupported",
+          "memoryTypes",
+          "conversationCorrectionsSupported",
+          "nativeConfigurationSupported",
+          "nativeStatusSupported",
+          "nativeDiagnosticsSupported"
+        ],
+        "additionalProperties": false,
+        "example": {
+          "contractVersion": "memory-v1-synthetic",
+          "dataClass": "synthetic",
+          "sensitiveData": false,
+          "kms": false,
+          "maxFactsPerContext": 5,
+          "maxContextChars": 200,
+          "maxProfileChars": 300,
+          "characterCounting": "unicode-code-points",
+          "runtimeHistory": "separate-runtime-contract",
+          "scope": "credential-bound-application-and-registered-lifecycle",
+          "backend": "multirag-memory",
+          "rawOnly": false,
+          "correctionSupported": false,
+          "forgetSupported": false,
+          "physicalDeleteSupported": false,
+          "consentRevokeSupported": false,
+          "deactivateSupported": false,
+          "automaticExtractionSupported": true,
+          "memoryTypes": [
+            "raw",
+            "semantic",
+            "episodic",
+            "procedural"
+          ],
+          "conversationCorrectionsSupported": true,
+          "nativeConfigurationSupported": true,
+          "nativeStatusSupported": true,
+          "nativeDiagnosticsSupported": true,
+          "nativeMaxContextChars": 4000,
+          "nativeDefaultMessages": 5,
+          "nativeMaxMessages": 20
+        }
+      },
+      "ConversationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "turnId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "consentRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "userInput": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 6000
+          },
+          "agentResponse": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 6000
+          },
+          "dataClass": {
+            "type": "string",
+            "enum": [
+              "synthetic"
+            ]
+          }
+        },
+        "required": [
+          "operationId",
+          "sessionId",
+          "turnId",
+          "userInput",
+          "agentResponse",
+          "consentRef",
+          "policyVersion",
+          "dataClass"
+        ]
+      },
+      "NativeMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "sourceSessionId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "validAt": {
+            "type": "string",
+            "description": "Native associated/event start time, preserved as data; not a universal access-validity predicate."
+          },
+          "invalidAt": {
+            "type": "string",
+            "description": "Native associated/event end time, preserved as data; ended events remain retrievable."
+          },
+          "extractionError": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "semantic",
+              "episodic",
+              "procedural"
+            ]
+          },
+          "status": {
+            "type": "boolean",
+            "description": "Effective Hub supply state, including parent and forget checks."
+          },
+          "extractionStatus": {
+            "type": "string",
+            "enum": [
+              "received",
+              "pending",
+              "extracting",
+              "completed",
+              "failed",
+              "unknown",
+              "derivedAvailable"
+            ]
+          },
+          "extractionProgress": {
+            "type": "number"
+          },
+          "nativeStatus": {
+            "type": "boolean",
+            "description": "Record's own native enable switch, distinct from effective Hub supply state."
+          },
+          "parentStatus": {
+            "type": "boolean",
+            "description": "Effective RAW parent state; omitted for RAW records."
+          },
+          "statusChangeAllowed": {
+            "type": "boolean",
+            "description": "Whether native status management is allowed; false for forgotten targets or parents."
+          }
+        },
+        "required": [
+          "id",
+          "sourceId",
+          "sourceSessionId",
+          "type",
+          "content",
+          "createdAt",
+          "status",
+          "nativeStatus",
+          "statusChangeAllowed"
+        ]
+      },
+      "ConversationReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "turnId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitting",
+              "received",
+              "pending",
+              "extracting",
+              "completed",
+              "failed",
+              "unknown",
+              "derivedAvailable"
+            ]
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "sourceSessionId": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeMessage"
+            }
+          }
+        },
+        "required": [
+          "operationId",
+          "sessionId",
+          "turnId",
+          "status",
+          "messages"
+        ]
+      },
+      "NativeContextInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "NativeContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "empty"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeMessage"
+            }
+          },
+          "budgetLimited": {
+            "type": "boolean"
+          },
+          "recentSourceIncluded": {
+            "type": "boolean"
+          },
+          "currentnessNote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "messages",
+          "budgetLimited",
+          "recentSourceIncluded",
+          "currentnessNote"
+        ],
+        "description": "Most recent two valid raw sources are prioritized, followed by retrieval hits. Whole-record content budget 4000 Unicode code points. Historical derived conflicts may remain."
+      }
+    }
+  }
+}

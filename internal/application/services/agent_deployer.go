@@ -441,6 +441,19 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	if err != nil {
 		return nil, fmt.Errorf("build create request failed: %w", err)
 	}
+	for _, definition := range req.Agents {
+		if !definition.ZeroTools {
+			continue
+		}
+		supported, probeErr := s.client.SupportsZeroTools(ctx)
+		if probeErr != nil {
+			return nil, fmt.Errorf("%w: zero-tools capability unavailable", ErrDeployerCapabilityProbe)
+		}
+		if !supported {
+			return nil, agent.NewValidationErrorf("部署服务尚不支持明确零工具及镜像能力检查，请先升级部署服务和 runtime")
+		}
+		break
+	}
 
 	req.RuntimeToken = token
 	s.resolveMcpHeaders(req, token)
@@ -991,6 +1004,7 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 	// each node carries exactly its own user-configured disallowedTools on top
 	// of its allow-list; nil/empty omits the key via DTO omitempty.
 	def.DisallowedTools = cfg.DisallowedTools
+	def.ZeroTools = cfg.ZeroTools
 
 	// Custom tool artifacts (issue #88): Tools stays the complete allow-list;
 	// CustomTools only carries source=custom && ready rows, sorted by name so
@@ -1111,6 +1125,9 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		return nil, nil, fmt.Errorf("load subagents failed: %w", err)
 	}
 	def.Subagents = subagentNames
+	if cfg.ZeroTools && (len(def.Tools) > 0 || len(def.CustomTools) > 0 || len(def.Skills) > 0 || len(def.McpServers) > 0 || len(def.Datasets) > 0 || len(def.Subagents) > 0) {
+		return nil, nil, agent.NewValidationErrorf("零工具 Agent 不能挂载工具、技能、MCP、子 Agent 或知识库，请解除挂载后部署")
+	}
 
 	return def, subagentNames, nil
 }

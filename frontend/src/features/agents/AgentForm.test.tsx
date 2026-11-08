@@ -42,6 +42,20 @@ describe('AgentForm disallowedTools', { timeout: 15000 }, () => {
     updateAgent.mockReset()
   })
 
+  it('submits explicit zero tools and preserves clearing on edit', async () => {
+    const user = userEvent.setup()
+    const editingAgent: Agent = { id: 1, name: 'deer', config: { systemPrompt: 'test', zeroTools: true } }
+    renderForm(editingAgent)
+    const zeroRow = screen.getByText('明确禁用全部工具').closest<HTMLElement>('.ant-form-item')!
+    const toggle = within(zeroRow).getByRole('switch')
+    expect(toggle).toBeChecked()
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: '保存更新' }))
+    await waitFor(() => { expect(updateAgent).toHaveBeenCalledTimes(1) })
+    const payload = updateAgent.mock.calls[0][0] as { data: { config: AgentConfig } }
+    expect(payload.data.config.zeroTools).toBe(false)
+  })
+
   it('submits disallowedTools tags in create config', async () => {
     const user = userEvent.setup()
     renderForm(null)

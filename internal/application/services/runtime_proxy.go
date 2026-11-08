@@ -55,6 +55,11 @@ var proxyAllowlist = []proxyRoute{
 	{methods: []string{http.MethodGet}, pattern: "/v1/sessions", timeout: 120 * time.Second},
 	{methods: []string{http.MethodGet}, pattern: "/v1/sessions/:sessionId", timeout: 120 * time.Second},
 	{methods: []string{http.MethodDelete}, pattern: "/v1/sessions/:sessionId", timeout: 120 * time.Second},
+	{methods: []string{http.MethodGet}, pattern: "/v1/sessions/:sessionId/history", timeout: 120 * time.Second},
+	{methods: []string{http.MethodGet}, pattern: "/v1/sessions/:sessionId/operations/:operationId", timeout: 120 * time.Second},
+	{methods: []string{http.MethodPost}, pattern: "/v1/sessions/:sessionId/messages", timeout: 120 * time.Second},
+	{methods: []string{http.MethodPost}, pattern: "/v1/sessions/:sessionId/rollback", timeout: 120 * time.Second},
+	{methods: []string{http.MethodPost}, pattern: "/v1/sessions/:sessionId/revert", timeout: 120 * time.Second},
 	{methods: []string{http.MethodGet}, pattern: "/v1/files", timeout: 120 * time.Second},
 	{methods: []string{http.MethodGet, http.MethodHead}, pattern: "/v1/files/content", timeout: 10 * time.Minute},
 }

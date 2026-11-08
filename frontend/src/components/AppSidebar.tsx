@@ -2,7 +2,8 @@ import { Tooltip } from 'antd'
 import { useNavigate, useLocation } from 'react-router'
 import { createStyles } from 'antd-style'
 import { useTranslation } from 'react-i18next'
-import { NAV_ITEMS } from '@/lib/nav'
+import { visibleNavItems } from '@/lib/nav'
+import { useAuthStore } from '@/stores/auth'
 import { tokens as tk } from '@/styles/tokens'
 import BrandMark from '@/components/BrandMark'
 
@@ -99,6 +100,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
+  const role = useAuthStore((state) => state.user?.role)
 
   return (
     <aside className={cx(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
@@ -108,7 +110,7 @@ export default function AppSidebar({ collapsed }: AppSidebarProps) {
       </div>
 
       <nav className={styles.nav}>
-        {NAV_ITEMS.map((item) => {
+        {visibleNavItems(role).map((item) => {
           const active = location.pathname.startsWith(item.path)
           const IconComp = item.icon
           const button = (

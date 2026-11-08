@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { ConfigProvider } from 'antd'
@@ -74,5 +74,15 @@ describe('AppHeader 用户菜单', () => {
     expect(screen.queryByText('用户管理')).not.toBeInTheDocument()
     expect(screen.queryByText('审计日志')).not.toBeInTheDocument()
     expect(screen.getByText('退出登录')).toBeInTheDocument()
+  })
+})
+
+describe('AppHeader mobile memory navigation', () => {
+  it.each(['admin', 'maintainer', 'member'])('uses manager permissions for %s', (role) => {
+    setAuthRole(role)
+    renderHeader()
+    fireEvent.click(screen.getByLabelText('菜单'))
+    if (role === 'member') expect(screen.queryByText('记忆管理', { selector: 'button' })).not.toBeInTheDocument()
+    else expect(screen.getByText('记忆管理', { selector: 'button' })).toBeInTheDocument()
   })
 })

@@ -35,8 +35,9 @@ type AgentDefinition struct {
 	// (agent-deployer#23), which rejects blank values and child declarations.
 	// Root-only; declaring it raises the runtime image floor to >= v2.9.0
 	// (runtime #77 — older runtimes silently strip the key).
-	Effort string   `json:"effort,omitempty"`
-	Tools  []string `json:"tools,omitempty"`
+	Effort    string   `json:"effort,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
+	ZeroTools bool     `json:"zeroTools,omitempty"`
 	// DisallowedTools is the agent-local deny list (issue #111): a
 	// user-configured tool-name blacklist (built-in names like "Bash" or
 	// MCP-qualified names, no referential integrity) applied on top of the
