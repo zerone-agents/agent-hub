@@ -201,7 +201,9 @@ describe("KnowledgeSettingsPage embedding model guard", () => {
     h.multiragVision = [];
     view.rerender(pageTree());
     expect(await screen.findByText(/vision-b@Anthropic.*当前未提供/)).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: '描述' }), 'After confirmed save');
+    // One edit keeps this preservation check independent of per-key render timing.
+    await user.click(screen.getByRole('textbox', { name: '描述' }));
+    await user.paste('After confirmed save');
     await user.click(screen.getByRole('button', { name: '保存设置' }));
     await waitFor(() => { expect(h.updateMock).toHaveBeenCalledTimes(2); });
     expect(h.updateMock.mock.calls[1][0]).toEqual({ id: 'kb-1', data: { description: 'After confirmed save' } });
