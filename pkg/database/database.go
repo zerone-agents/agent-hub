@@ -21,6 +21,7 @@ import (
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/systemsetting"
 	"control-panel/internal/memory"
+	"control-panel/internal/memoryapp"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -156,6 +157,9 @@ func AutoMigrate(backfillTenant string) error {
 	}
 	if err := memory.Migrate(DB); err != nil {
 		return fmt.Errorf("failed to migrate memory: %w", err)
+	}
+	if err := memoryapp.Migrate(DB); err != nil {
+		return fmt.Errorf("failed to migrate memory applications: %w", err)
 	}
 
 	if err := migrateBindingFKRESTRICT(); err != nil {

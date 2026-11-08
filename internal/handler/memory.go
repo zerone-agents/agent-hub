@@ -17,6 +17,7 @@ import (
 	"control-panel/internal/config"
 	"control-panel/internal/domain/audit"
 	"control-panel/internal/memory"
+	"control-panel/internal/memoryapp"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,10 +28,14 @@ import (
 type MemoryBinding struct {
 	Client  config.MemoryClient
 	Service *memory.Service
+	Name    string
+	Status  string
+	Origin  string
 }
 
 type MemoryHandler struct {
 	bindings []MemoryBinding
+	source   MemoryBindingSource
 	audit    *services.AuditRecorder
 }
 
@@ -74,12 +79,28 @@ func (h *MemoryHandler) authenticate(c *gin.Context) {
 			}
 		}
 	}
+	var b MemoryBinding
+	if h.source != nil && len(parts) == 2 && parts[0] == "Bearer" {
+		var err error
+		b, err = h.source.Authenticate(c.Request.Context(), parts[1])
+		if errors.Is(err, memoryapp.ErrUnavailable) {
+			memoryFailure(c, 503, "MEMORY_UNAVAILABLE", "记忆应用配置暂不可用")
+			c.Abort()
+			return
+		}
+		if err != nil {
+			selected = -1
+		} else {
+			selected = 0
+		}
+	} else if selected >= 0 {
+		b = h.bindings[selected]
+	}
 	if selected < 0 {
 		memoryFailure(c, http.StatusUnauthorized, "MEMORY_UNAUTHORIZED", "服务鉴权失败")
 		c.Abort()
 		return
 	}
-	b := h.bindings[selected]
 	trace := c.GetHeader("X-Trace-Id")
 	if !memoryHeaderID(trace) {
 		memoryFailure(c, 400, "MEMORY_INVALID_REQUEST", "需要有效的 X-Trace-Id")

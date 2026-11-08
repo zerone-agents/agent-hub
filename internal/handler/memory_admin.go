@@ -23,6 +23,7 @@ import (
 
 type MemoryAdminHandler struct {
 	bindings []MemoryBinding
+	source   MemoryBindingSource
 	audit    *services.AuditRecorder
 }
 
@@ -56,6 +57,9 @@ type memoryAdminApplication struct {
 	ApplicationID string `json:"applicationId"`
 	PolicyVersion string `json:"policyVersion"`
 	DataClass     string `json:"dataClass"`
+	Name          string `json:"name,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Origin        string `json:"origin,omitempty"`
 }
 
 func delegatedHubTenant(binding MemoryBinding) string {
@@ -109,7 +113,11 @@ func (h *MemoryAdminHandler) selectService(c *gin.Context, scope memory.Scope) (
 		respondError(c, 400, "memory_invalid_request", "需要有效的业务租户和应用标识")
 		return nil, false
 	}
-	for _, binding := range h.bindings {
+	bindings, ok := h.currentBindings(c, hubTenant)
+	if !ok {
+		return nil, false
+	}
+	for _, binding := range bindings {
 		if delegatedHubTenant(binding) != hubTenant || binding.Client.TenantID != scope.TenantID || binding.Client.ApplicationID != scope.ApplicationID {
 			continue
 		}
@@ -204,7 +212,11 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 	}
 	out := []memoryAdminApplication{}
 	seen := map[string]bool{}
-	for _, binding := range h.bindings {
+	bindings, ok := h.currentBindings(c, hubTenant)
+	if !ok {
+		return
+	}
+	for _, binding := range bindings {
 		if delegatedHubTenant(binding) != hubTenant {
 			continue
 		}
@@ -217,7 +229,7 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 		if binding.Service != nil {
 			capabilities = binding.Service.Capabilities()
 		}
-		out = append(out, memoryAdminApplication{BackendCapabilities: capabilities, TenantID: binding.Client.TenantID, ApplicationID: binding.Client.ApplicationID, PolicyVersion: binding.Client.PolicyVersion, DataClass: "synthetic"})
+		out = append(out, memoryAdminApplication{BackendCapabilities: capabilities, TenantID: binding.Client.TenantID, ApplicationID: binding.Client.ApplicationID, PolicyVersion: binding.Client.PolicyVersion, DataClass: "synthetic", Name: binding.Name, Status: binding.Status, Origin: binding.Origin})
 	}
 	respondSuccess(c, out)
 }

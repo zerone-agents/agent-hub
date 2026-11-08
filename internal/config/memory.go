@@ -8,17 +8,20 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Memory is an opt-in, synthetic-data integration service. Production admission
 // (including KMS and protection of the retrieval replica) is deliberately not a
 // configurable bypass in this release.
 type MemoryConfig struct {
-	Enabled     bool   `mapstructure:"enabled"`
-	ClientsJSON string `mapstructure:"clients_json"`
-	WrappingKey string `mapstructure:"wrapping_key"`
-	MultiragURL string `mapstructure:"multirag_url"`
-	MultiragKey string `mapstructure:"multirag_key"`
+	Enabled      bool   `mapstructure:"enabled"`
+	ClientsJSON  string `mapstructure:"clients_json"`
+	ManagersJSON string `mapstructure:"managers_json"`
+	WrappingKey  string `mapstructure:"wrapping_key"`
+	MultiragURL  string `mapstructure:"multirag_url"`
+	MultiragKey  string `mapstructure:"multirag_key"`
 }
 
 type MemoryClient struct {
@@ -35,6 +38,17 @@ type MemoryClient struct {
 	HubTenantID string `json:"hubTenantId,omitempty"`
 }
 
+// MemoryManager is a separate tenant-scoped machine credential. Its models and
+// application quota are server configuration, never authority from an app token.
+type MemoryManager struct {
+	Token           string `json:"token"`
+	TenantID        string `json:"tenantId"`
+	HubTenantID     string `json:"hubTenantId,omitempty"`
+	ChatModel       string `json:"chatModel"`
+	EmbeddingModel  string `json:"embeddingModel"`
+	MaxApplications int    `json:"maxApplications,omitempty"`
+}
+
 func (m MemoryConfig) Clients() ([]MemoryClient, error) {
 	if !m.Enabled {
 		return nil, nil
@@ -47,11 +61,15 @@ func (m MemoryConfig) Clients() ([]MemoryClient, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || m.MultiragKey == "" {
 		return nil, fmt.Errorf("memory requires a valid MULTIRAG URL and service credential")
 	}
+	raw := strings.TrimSpace(m.ClientsJSON)
+	if raw == "" {
+		return []MemoryClient{}, nil
+	}
 	var clients []MemoryClient
-	dec := json.NewDecoder(strings.NewReader(m.ClientsJSON))
+	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&clients); err != nil || len(clients) == 0 || len(clients) > 32 {
-		return nil, fmt.Errorf("MEMORY_CLIENTS_JSON must contain 1 to 32 service clients")
+	if err := dec.Decode(&clients); err != nil || clients == nil || len(clients) > 32 {
+		return nil, fmt.Errorf("MEMORY_CLIENTS_JSON must contain an array of 0 to 32 service clients")
 	}
 	var trailing any
 	if dec.Decode(&trailing) != io.EOF {
@@ -78,6 +96,80 @@ func (m MemoryConfig) Clients() ([]MemoryClient, error) {
 		apps[app], datasets[containerKey], tokens[token] = true, true, true
 	}
 	return clients, nil
+}
+
+// Managers validates its own credential namespace against static clients as
+// well as other managers. Enabled registry-only deployments may have no static
+// clients; backend credentials and the wrapping key remain mandatory.
+func (m MemoryConfig) Managers() ([]MemoryManager, error) {
+	if !m.Enabled {
+		return nil, nil
+	}
+	clients, err := m.Clients()
+	if err != nil {
+		return nil, err
+	}
+	raw := strings.TrimSpace(m.ManagersJSON)
+	if raw == "" {
+		return []MemoryManager{}, nil
+	}
+	var values []struct {
+		Token           string          `json:"token"`
+		TenantID        string          `json:"tenantId"`
+		HubTenantID     string          `json:"hubTenantId"`
+		ChatModel       string          `json:"chatModel"`
+		EmbeddingModel  string          `json:"embeddingModel"`
+		MaxApplications json.RawMessage `json:"maxApplications"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if !utf8.ValidString(raw) {
+		return nil, fmt.Errorf("MEMORY_MANAGERS_JSON must contain a valid manager array")
+	}
+	if err := decoder.Decode(&values); err != nil || values == nil {
+		return nil, fmt.Errorf("MEMORY_MANAGERS_JSON must contain a valid manager array")
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
+		return nil, fmt.Errorf("MEMORY_MANAGERS_JSON must contain one JSON value")
+	}
+	tenants, tokens := map[string]bool{}, map[[32]byte]bool{}
+	for _, client := range clients {
+		tokens[sha256.Sum256([]byte(client.Token))] = true
+	}
+	managers := make([]MemoryManager, 0, len(values))
+	for _, value := range values {
+		maximum := 32
+		if len(value.MaxApplications) > 0 {
+			maximum = 0
+			if json.Unmarshal(value.MaxApplications, &maximum) != nil || maximum < 1 || maximum > 1000 {
+				return nil, fmt.Errorf("memory managers require maxApplications between 1 and 1000")
+			}
+		}
+		hubTenant := value.HubTenantID
+		if hubTenant == "" {
+			hubTenant = value.TenantID
+		}
+		token := sha256.Sum256([]byte(value.Token))
+		if !memoryToken(value.Token) || len(value.TenantID) > 64 || !memoryIdentifier(value.TenantID) || len(hubTenant) > 64 || !memoryIdentifier(hubTenant) || !memoryManagerModel(value.ChatModel) || !memoryManagerModel(value.EmbeddingModel) || tenants[value.TenantID] || tokens[token] {
+			return nil, fmt.Errorf("memory managers require unique tenant and credentials, valid tenant identifiers, required model references and tokens of at least 32 bytes")
+		}
+		managers = append(managers, MemoryManager{Token: value.Token, TenantID: value.TenantID, HubTenantID: hubTenant, ChatModel: value.ChatModel, EmbeddingModel: value.EmbeddingModel, MaxApplications: maximum})
+		tenants[value.TenantID], tokens[token] = true, true
+	}
+	return managers, nil
+}
+
+func memoryManagerModel(model string) bool {
+	if !utf8.ValidString(model) || model == "" || model != strings.TrimSpace(model) || utf8.RuneCountInString(model) > 128 {
+		return false
+	}
+	for _, r := range model {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func memoryToken(s string) bool {

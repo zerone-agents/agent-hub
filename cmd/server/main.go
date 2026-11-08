@@ -240,8 +240,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize memory service: %v", err)
 	}
-	if len(memoryBindings) > 0 {
-		handler.RegisterMemoryRoutes(r, handler.NewMemoryHandler(memoryBindings, auditRecorder))
+	memorySource, memoryManagers, err := configureMemoryApplications(cfg.Memory, memoryBindings)
+	if err != nil {
+		log.Fatalf("Failed to initialize memory application management: %v", err)
+	}
+	if cfg.Memory.Enabled {
+		memoryHandler := handler.NewMemoryHandler(memoryBindings, auditRecorder)
+		memoryHandler.SetBindingSource(memorySource)
+		handler.RegisterMemoryRoutes(r, memoryHandler)
+		handler.RegisterMemoryApplicationRoutes(r, handler.NewMemoryApplicationHandler(memorySource.registry, memoryManagers, auditRecorder))
 		workerCtx, stopMemoryWorker := context.WithCancel(context.Background())
 		defer stopMemoryWorker()
 		go runMemoryWorker(workerCtx, memoryBindings)
@@ -455,8 +462,10 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
-	if len(memoryBindings) > 0 {
-		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, handler.NewMemoryAdminHandler(memoryBindings, auditRecorder))
+	if cfg.Memory.Enabled {
+		memoryAdmin := handler.NewMemoryAdminHandler(memoryBindings, auditRecorder)
+		memoryAdmin.SetBindingSource(memorySource)
+		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, memoryAdmin)
 	}
 
 	// ---------- Audit 领域 ----------

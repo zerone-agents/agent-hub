@@ -3005,6 +3005,455 @@
           }
         }
       }
+    },
+    "/applications": {
+      "post": {
+        "operationId": "create_memory_application",
+        "summary": "Create an isolated application and native four-type private memory bank",
+        "tags": [
+          "Memory applications"
+        ],
+        "security": [
+          {
+            "tenantMemoryManager": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreatedMemoryApplication"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MEMORY_APPLICATION_INVALID or MEMORY_INVALID_REQUEST"
+          },
+          "401": {
+            "description": "MEMORY_MANAGER_UNAUTHORIZED"
+          },
+          "404": {
+            "description": "MEMORY_APPLICATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MEMORY_APPLICATION_CONFLICT or MEMORY_APPLICATION_QUOTA"
+          },
+          "503": {
+            "description": "MEMORY_APPLICATION_UNAVAILABLE; never replay native POST"
+          },
+          "202": {
+            "description": "Outcome unknown; original operation only reconciles through reads. Token is unusable until active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreatedMemoryApplication"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMemoryApplication"
+              }
+            }
+          }
+        },
+        "description": "Persist the operation before one native POST. Same tenant/application/operation/input replays the original receipt and token. Conflicting operation/input is rejected. Never accept tenant, model, bank or credential overrides. See applications.md."
+      },
+      "get": {
+        "operationId": "list_memory_applications",
+        "summary": "List API-created applications in the credential-bound tenant",
+        "tags": [
+          "Memory applications"
+        ],
+        "security": [
+          {
+            "tenantMemoryManager": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemoryApplication"
+                      }
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MEMORY_APPLICATION_INVALID or MEMORY_INVALID_REQUEST"
+          },
+          "401": {
+            "description": "MEMORY_MANAGER_UNAUTHORIZED"
+          },
+          "404": {
+            "description": "MEMORY_APPLICATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MEMORY_APPLICATION_CONFLICT or MEMORY_APPLICATION_QUOTA"
+          },
+          "503": {
+            "description": "MEMORY_APPLICATION_UNAVAILABLE; never replay native POST"
+          }
+        }
+      }
+    },
+    "/applications/{applicationId}": {
+      "get": {
+        "operationId": "get_memory_application",
+        "summary": "Read application metadata without a secret or native mutation",
+        "tags": [
+          "Memory applications"
+        ],
+        "security": [
+          {
+            "tenantMemoryManager": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MemoryApplication"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MEMORY_APPLICATION_INVALID or MEMORY_INVALID_REQUEST"
+          },
+          "401": {
+            "description": "MEMORY_MANAGER_UNAUTHORIZED"
+          },
+          "404": {
+            "description": "MEMORY_APPLICATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MEMORY_APPLICATION_CONFLICT or MEMORY_APPLICATION_QUOTA"
+          },
+          "503": {
+            "description": "MEMORY_APPLICATION_UNAVAILABLE; never replay native POST"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "update_memory_application",
+        "summary": "CAS update application metadata or enable/disable admission",
+        "tags": [
+          "Memory applications"
+        ],
+        "security": [
+          {
+            "tenantMemoryManager": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MemoryApplication"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MEMORY_APPLICATION_INVALID or MEMORY_INVALID_REQUEST"
+          },
+          "401": {
+            "description": "MEMORY_MANAGER_UNAUTHORIZED"
+          },
+          "404": {
+            "description": "MEMORY_APPLICATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MEMORY_APPLICATION_CONFLICT or MEMORY_APPLICATION_QUOTA"
+          },
+          "503": {
+            "description": "MEMORY_APPLICATION_UNAVAILABLE; never replay native POST"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryApplication"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/applications/{applicationId}/provisioning": {
+      "get": {
+        "operationId": "reconcile_memory_application",
+        "summary": "Read-only native lookup and verified Hub binding; never recreate",
+        "tags": [
+          "Memory applications"
+        ],
+        "security": [
+          {
+            "tenantMemoryManager": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Trace-Id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "in": "path",
+            "name": "applicationId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "data",
+                    "traceId"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MemoryApplication"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MEMORY_APPLICATION_INVALID or MEMORY_INVALID_REQUEST"
+          },
+          "401": {
+            "description": "MEMORY_MANAGER_UNAUTHORIZED"
+          },
+          "404": {
+            "description": "MEMORY_APPLICATION_NOT_FOUND"
+          },
+          "409": {
+            "description": "MEMORY_APPLICATION_CONFLICT or MEMORY_APPLICATION_QUOTA"
+          },
+          "503": {
+            "description": "MEMORY_APPLICATION_UNAVAILABLE; never replay native POST"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3013,6 +3462,11 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Per-application trusted Java service credential. Never expose to App."
+      },
+      "tenantMemoryManager": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "独立租户级服务端管理令牌。固定tenant与Hub委托；应用令牌不能调用这些端点。"
       }
     },
     "schemas": {
@@ -4186,6 +4640,168 @@
           "currentnessNote"
         ],
         "description": "Most recent two valid raw sources are prioritized, followed by retrieval hits. Whole-record content budget 4000 Unicode code points. Historical derived conflicts may remain."
+      },
+      "MemoryApplication": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "applicationId",
+          "name",
+          "description",
+          "hubTenantId",
+          "policyVersion",
+          "status",
+          "memoryName",
+          "chatModel",
+          "embeddingModel",
+          "origin",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string"
+          },
+          "applicationId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "hubTenantId": {
+            "type": "string"
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "memoryId": {
+            "type": "string"
+          },
+          "memoryName": {
+            "type": "string"
+          },
+          "chatModel": {
+            "type": "string"
+          },
+          "embeddingModel": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "provisioning",
+              "unknown",
+              "active",
+              "disabled"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "managed"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateMemoryApplication": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "applicationId",
+          "name",
+          "policyVersion"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          },
+          "applicationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          }
+        }
+      },
+      "CreatedMemoryApplication": {
+        "type": "object",
+        "required": [
+          "application",
+          "applicationToken"
+        ],
+        "properties": {
+          "application": {
+            "$ref": "#/components/schemas/MemoryApplication"
+          },
+          "applicationToken": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "原创建操作及精确重放可返回相同令牌，其他查询不返回凭据。"
+          }
+        }
+      },
+      "UpdateMemoryApplication": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "minProperties": 2,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }
