@@ -27,6 +27,11 @@ func NewToolHandler(service *services.ToolService, audit *services.AuditRecorder
 // 存储未配置 → 503（可行动的配置提示）；基础设施故障（OSS/DB）→ 500 中性
 // 文案，完整错误链只在服务端日志（英文诊断包装已由 service 层保证）。
 func respondToolError(c *gin.Context, err error) {
+	var validation *agent.ValidationError
+	if errors.As(err, &validation) {
+		respondError(c, http.StatusBadRequest, ErrCodeInvalidParameter, validation.Error())
+		return
+	}
 	var inUse *agent.ToolInUseError
 	if errors.As(err, &inUse) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "error": inUse.Error(), "data": gin.H{"agents": inUse.Agents, "foreign": inUse.Foreign}})

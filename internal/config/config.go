@@ -35,6 +35,7 @@ type Config struct {
 	Kong      KongConfig      `mapstructure:"kong"`
 	Ops       OpsConfig       `mapstructure:"ops"`
 	ChatPush  ChatPushConfig  `mapstructure:"chat_push"`
+	Memory    MemoryConfig    `mapstructure:"memory"`
 	// TenantSync 是 casdoor 租户周期同步配置（#238 part 2）；Enabled 默认
 	// true（#246 合并后的放行决策）——hub 自动把 casdoor 组织+hub 应用注册进
 	// tenant_oauth_clients（default 行仍必须由 ops 显式注册）。env
@@ -210,6 +211,11 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("tenant_sync.enabled", "TENANT_SYNC_ENABLED")
 	viper.BindEnv("tenant_sync.reconcile_sec", "TENANT_SYNC_RECONCILE_SEC")
 	viper.BindEnv("ops.api_key", "OPS_API_KEY")
+	viper.BindEnv("memory.enabled", "MEMORY_ENABLED")
+	viper.BindEnv("memory.clients_json", "MEMORY_CLIENTS_JSON")
+	viper.BindEnv("memory.wrapping_key", "MEMORY_WRAPPING_KEY")
+	viper.BindEnv("memory.multirag_url", "MEMORY_MULTIRAG_URL")
+	viper.BindEnv("memory.multirag_key", "MEMORY_MULTIRAG_KEY")
 	viper.BindEnv("chat_push.api_key", "CHAT_PUSH_API_KEY")
 	viper.BindEnv("chat_push.public_url", "CHAT_PUSH_PUBLIC_URL")
 
@@ -267,6 +273,9 @@ func LoadConfig() (*Config, error) {
 	// internal probes: only ever derived from a valid deployer URL. No
 	// explicit config, no PublicHost fallback (spec 3.5).
 	cfg.Deployer.DeployerURLHost = deriveDeployerURLHost(cfg.Deployer.URL)
+	if _, err := cfg.Memory.Clients(); err != nil {
+		return nil, err
+	}
 
 	SetGlobalConfig(&cfg)
 	return &cfg, nil

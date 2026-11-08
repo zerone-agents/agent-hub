@@ -14,11 +14,13 @@ import (
 	"control-panel/internal/domain/audit"
 	authdomain "control-panel/internal/domain/auth"
 	"control-panel/internal/domain/chat"
+	"control-panel/internal/domain/knowledge"
 	"control-panel/internal/domain/mcp"
 	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/scene"
 	"control-panel/internal/domain/skill"
 	"control-panel/internal/domain/systemsetting"
+	"control-panel/internal/memory"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -120,6 +122,7 @@ func AutoMigrate(backfillTenant string) error {
 	}
 
 	err := DB.AutoMigrate(
+		&knowledge.ReservedDataset{},
 		&agent.AgentConfig{},
 		&agent.AgentSubagent{},
 		&agent.AgentKnowledgeDataset{},
@@ -149,6 +152,9 @@ func AutoMigrate(backfillTenant string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
+	}
+	if err := memory.Migrate(DB); err != nil {
+		return fmt.Errorf("failed to migrate memory: %w", err)
 	}
 
 	if err := migrateBindingFKRESTRICT(); err != nil {

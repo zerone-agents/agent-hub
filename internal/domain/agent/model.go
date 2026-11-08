@@ -36,6 +36,7 @@ type AgentConfig struct {
 	// root-only（deployer 拒 child 声明），声明 effort 要求 runtime >= v2.9.0。
 	Effort           string     `gorm:"column:effort;type:varchar(32);default:''"`
 	DisallowedTools  []string   `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
+	ZeroTools        bool       `gorm:"column:zero_tools;not null;default:false"`
 	RuntimePort      int        `gorm:"column:runtime_port;default:0"`
 	DeploymentStatus string     `gorm:"column:deployment_status;type:varchar(32);default:''"`
 	DeployedAt       *time.Time `gorm:"column:deployed_at"`

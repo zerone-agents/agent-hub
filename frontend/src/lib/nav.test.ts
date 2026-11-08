@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getBreadcrumbs } from './nav'
+import { getBreadcrumbs, visibleNavItems } from './nav'
 
 describe('getBreadcrumbs', () => {
   it('returns just 首页 for the dashboard route', () => {
@@ -44,5 +44,19 @@ describe('getBreadcrumbs', () => {
 
   it('falls back to 首页 for unknown routes', () => {
     expect(getBreadcrumbs('/nonexistent')).toEqual([{ label: '首页' }])
+  })
+
+  it('has a dedicated memory breadcrumb', () => {
+    expect(getBreadcrumbs('/memory')).toEqual([{ label: '首页', path: '/dashboard' }, { label: '记忆管理' }])
+  })
+})
+
+describe('visibleNavItems', () => {
+  it.each(['admin', 'maintainer'])('includes the memory entry for %s', (role) => {
+    expect(visibleNavItems(role).some((item) => item.id === 'memory')).toBe(true)
+  })
+
+  it.each(['member', 'guest', undefined])('excludes the memory entry for %s', (role) => {
+    expect(visibleNavItems(role).some((item) => item.id === 'memory')).toBe(false)
   })
 })

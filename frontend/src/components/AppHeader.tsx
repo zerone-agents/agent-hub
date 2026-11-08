@@ -7,7 +7,7 @@ import { createStyles } from 'antd-style'
 import type { MenuProps } from 'antd'
 import { useAuthStore } from '@/stores/auth'
 import { useCanWrite } from '@/hooks/useCanWrite'
-import { NAV_ITEMS, getBreadcrumbs } from '@/lib/nav'
+import { visibleNavItems, getBreadcrumbs } from '@/lib/nav'
 import { useKnowledgeDetail } from '@/queries/useKnowledge'
 import { tokens as t } from '@/styles/tokens'
 import ThemeControls from '@/components/ThemeControls'
@@ -256,7 +256,7 @@ export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
       {/* 移动端下拉菜单 */}
       {mobileMenuOpen && (
         <div className={styles.mobileMenu}>
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems(user?.role).map((item) => {
             const active = location.pathname.startsWith(item.path)
             const IconComp = item.icon
             return (

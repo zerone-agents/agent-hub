@@ -88,6 +88,8 @@ For full architecture diagrams, deployment topology, and project structure, see 
 - 🔐 [Security Notes](docs/security.md)
 - 🗄️ [Data Model](docs/data-model.md)
 
+- 🧠 [Native Memory Integration (experimental, synthetic data only)](docs/memory/README.md)
+
 ---
 
 ## Contributing

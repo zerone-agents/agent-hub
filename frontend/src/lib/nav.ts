@@ -10,7 +10,8 @@ import {
   CubeIcon,
   FilmSlateIcon,
   BooksIcon,
-  ChatsIcon
+  ChatsIcon,
+  BrainIcon
 } from '@phosphor-icons/react'
 
 export interface NavItem {
@@ -18,6 +19,7 @@ export interface NavItem {
   label: string
   path: string
   icon: Icon
+  managerOnly?: boolean
 }
 
 /**
@@ -31,9 +33,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'skills', label: 'nav.skills', path: '/skills', icon: SparkleIcon },
   { id: 'providers', label: 'nav.providers', path: '/providers', icon: CubeIcon },
   { id: 'knowledge', label: 'nav.knowledge', path: '/knowledge', icon: BooksIcon },
+  { id: 'memory', label: 'nav.memory', path: '/memory', icon: BrainIcon, managerOnly: true },
   { id: 'scenes', label: 'nav.scenes', path: '/scenes', icon: FilmSlateIcon },
   { id: 'chat', label: 'nav.chat', path: '/chat', icon: ChatsIcon }
 ] as const
+
+export function visibleNavItems(role?: string): readonly NavItem[] {
+  const manager = role === 'admin' || role === 'maintainer'
+  return NAV_ITEMS.filter((item) => !item.managerOnly || manager)
+}
 
 // settings 子页面包屑标签。值统一过 i18next.t()（cli-tokens 为英文品牌词，
 // 无对应资源 key，t() 按 missing-key 透传原样输出）。

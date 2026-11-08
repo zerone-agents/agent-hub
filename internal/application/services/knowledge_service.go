@@ -14,9 +14,10 @@ import (
 const knowledgeUnavailableMessage = "知识库模块未配置：请设置 MULTIRAG_BASE_URL 和 MULTIRAG_API_KEY"
 
 type KnowledgeService struct {
-	engine      knowledge.KnowledgeEngine
-	providerSvc *ProviderService
-	agentRepo   *repository.AgentRepository
+	engine       knowledge.KnowledgeEngine
+	datasetGuard *DatasetGuard
+	providerSvc  *ProviderService
+	agentRepo    *repository.AgentRepository
 }
 
 // NewKnowledgeService wires the MultiRAG knowledge engine and an optional
@@ -46,10 +47,16 @@ func (s *KnowledgeService) ListDatasets(ctx context.Context, req knowledge.Datas
 	if err != nil {
 		return nil, err
 	}
+	if s.datasetGuard != nil {
+		return s.guardedDatasetList(ctx, req)
+	}
 	return engine.ListDatasets(ctx, req)
 }
 
 func (s *KnowledgeService) CreateDataset(ctx context.Context, tenantID string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
+	if err := s.guardDatasetReferences(ctx, req); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -59,6 +66,9 @@ func (s *KnowledgeService) CreateDataset(ctx context.Context, tenantID string, r
 }
 
 func (s *KnowledgeService) GetDataset(ctx context.Context, id string) (*knowledge.Dataset, error) {
+	if err := s.guardDatasets(ctx, id); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -71,6 +81,12 @@ func (s *KnowledgeService) GetDataset(ctx context.Context, id string) (*knowledg
 }
 
 func (s *KnowledgeService) UpdateDataset(ctx context.Context, tenantID string, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
+	if err := s.guardDatasetReferences(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.guardDatasets(ctx, id); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -95,6 +111,9 @@ func (s *KnowledgeService) UpdateDataset(ctx context.Context, tenantID string, i
 }
 
 func (s *KnowledgeService) CheckEmbedding(ctx context.Context, tenantID, datasetID string, req knowledge.EmbeddingCheckRequest) (*knowledge.EmbeddingCheckResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -111,6 +130,9 @@ func (s *KnowledgeService) CheckEmbedding(ctx context.Context, tenantID, dataset
 }
 
 func (s *KnowledgeService) PreviewDocument(ctx context.Context, datasetID, documentID string) (*knowledge.StreamResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -129,6 +151,18 @@ func (s *KnowledgeService) PreviewDocument(ctx context.Context, datasetID, docum
 }
 
 func (s *KnowledgeService) DeleteDatasets(ctx context.Context, tenantID string, req knowledge.DeleteRequest) error {
+	if err := s.guardDatasets(ctx, req.IDs...); err != nil {
+		return err
+	}
+	if req.DeleteAll && s.datasetGuard != nil {
+		reserved, err := s.datasetGuard.IDs(ctx)
+		if err != nil {
+			return err
+		}
+		if len(reserved) > 0 {
+			return knowledge.NewBadRequestError("存在记忆专用库，请逐项指定要删除的普通知识库")
+		}
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -188,6 +222,9 @@ func (s *KnowledgeService) guardDatasetInUse(tenantID string, req knowledge.Dele
 }
 
 func (s *KnowledgeService) ListDocuments(ctx context.Context, datasetID string, req knowledge.DocumentListRequest) (*knowledge.DocumentListResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -203,6 +240,9 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, datasetID string, 
 }
 
 func (s *KnowledgeService) UploadDocuments(ctx context.Context, datasetID string, upload knowledge.UploadRequest) ([]knowledge.Document, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -218,6 +258,9 @@ func (s *KnowledgeService) UploadDocuments(ctx context.Context, datasetID string
 }
 
 func (s *KnowledgeService) DownloadDocument(ctx context.Context, datasetID string, documentID string) (*knowledge.StreamResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -234,6 +277,9 @@ func (s *KnowledgeService) DownloadDocument(ctx context.Context, datasetID strin
 }
 
 func (s *KnowledgeService) GetImage(ctx context.Context, datasetID string, imageID string) (*knowledge.StreamResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -255,6 +301,9 @@ func (s *KnowledgeService) GetImage(ctx context.Context, datasetID string, image
 }
 
 func (s *KnowledgeService) UpdateDocument(ctx context.Context, datasetID string, documentID string, req knowledge.DocumentUpdateRequest) (*knowledge.Document, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	if _, err := knowledge.PrepareDocumentPatch(req); err != nil {
 		return nil, err
 	}
@@ -274,6 +323,9 @@ func (s *KnowledgeService) UpdateDocument(ctx context.Context, datasetID string,
 }
 
 func (s *KnowledgeService) DeleteDocuments(ctx context.Context, datasetID string, req knowledge.DeleteRequest) error {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -287,6 +339,9 @@ func (s *KnowledgeService) DeleteDocuments(ctx context.Context, datasetID string
 }
 
 func (s *KnowledgeService) ParseDocuments(ctx context.Context, datasetID string, ids []string) error {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -303,6 +358,9 @@ func (s *KnowledgeService) ParseDocuments(ctx context.Context, datasetID string,
 }
 
 func (s *KnowledgeService) StopParsingDocuments(ctx context.Context, datasetID string, ids []string) error {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -319,6 +377,9 @@ func (s *KnowledgeService) StopParsingDocuments(ctx context.Context, datasetID s
 }
 
 func (s *KnowledgeService) ListChunks(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkListRequest) (*knowledge.ChunkListResult, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -335,6 +396,9 @@ func (s *KnowledgeService) ListChunks(ctx context.Context, datasetID string, doc
 }
 
 func (s *KnowledgeService) CreateChunk(ctx context.Context, datasetID string, documentID string, req knowledge.ChunkMutationRequest) (*knowledge.Chunk, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -351,6 +415,9 @@ func (s *KnowledgeService) CreateChunk(ctx context.Context, datasetID string, do
 }
 
 func (s *KnowledgeService) UpdateChunk(ctx context.Context, datasetID string, documentID string, chunkID string, req knowledge.ChunkMutationRequest) (*knowledge.Chunk, error) {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return nil, err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
@@ -371,6 +438,9 @@ func (s *KnowledgeService) UpdateChunk(ctx context.Context, datasetID string, do
 }
 
 func (s *KnowledgeService) DeleteChunks(ctx context.Context, datasetID string, documentID string, req knowledge.DeleteChunksRequest) error {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -388,6 +458,9 @@ func (s *KnowledgeService) DeleteChunks(ctx context.Context, datasetID string, d
 }
 
 func (s *KnowledgeService) SwitchChunks(ctx context.Context, datasetID string, documentID string, ids []string, available bool) error {
+	if err := s.guardDatasets(ctx, datasetID); err != nil {
+		return err
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return err
@@ -418,6 +491,21 @@ func (s *KnowledgeService) Retrieval(ctx context.Context, req knowledge.Retrieva
 	}
 	if knowledge.EmptyRetrievalScope(normalized) {
 		return knowledge.EmptyRetrievalResult(), nil
+	}
+	if s.datasetGuard != nil {
+		reserved, err := s.datasetGuard.IDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(reserved) > 0 {
+			if saved, present := normalized["search_id"]; present && saved != nil && saved != "" {
+				return nil, knowledge.NewBadRequestError("记忆库隔离期间请使用显式知识库范围检索")
+			}
+			ids, _ := normalized["dataset_ids"].([]string)
+			if err := s.guardDatasets(ctx, ids...); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return engine.Retrieval(ctx, normalized)
 }

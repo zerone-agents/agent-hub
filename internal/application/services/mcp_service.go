@@ -636,6 +636,9 @@ func (s *McpService) UpdateAgentMcps(tenantID, agentName string, mcpNames []stri
 		return fmt.Errorf("get agent %s failed: %w", agentName, err)
 	}
 
+	if agentCfg.ZeroTools && len(mcpNames) > 0 {
+		return mcp.NewValidationErrorf("零工具 Agent 不能挂载 MCP")
+	}
 	mcpIDs := make([]uint64, 0, len(mcpNames))
 	for _, mcpName := range mcpNames {
 		m, err := s.repo.GetByName(tenantID, mcpName)

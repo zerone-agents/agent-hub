@@ -78,6 +78,11 @@ export const router = createBrowserRouter(
             import('@/features/scenes/SceneListPage').then((m) => ({ Component: m.default }))
         },
         {
+          path: 'memory',
+          lazy: () =>
+            import('@/features/memory/MemoryManagementPage').then((m) => ({ Component: m.default }))
+        },
+        {
           path: 'knowledge',
           lazy: () =>
             import('@/features/knowledge/KnowledgeListPage').then((m) => ({ Component: m.default }))

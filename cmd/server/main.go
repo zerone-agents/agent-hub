@@ -232,6 +232,21 @@ func main() {
 	// full-ID format ("bge-large-zh@ZHIPU-AI") before forwarding.
 	providerService := services.NewProviderService(cfg.Provider.EncryptionKey)
 	knowledgeService := services.NewKnowledgeService(knowledgeEngine, providerService)
+	datasetGuard := services.NewDatasetGuard(database.GetDB())
+	knowledgeService.SetDatasetGuard(datasetGuard)
+	// Reservations are durable even when the memory HTTP service is disabled.
+	// They cover the shared KnowledgeService used by API, MCP and deployment.
+	memoryBindings, err := configureMemory(cfg.Memory, datasetGuard)
+	if err != nil {
+		log.Fatalf("Failed to initialize memory service: %v", err)
+	}
+	if len(memoryBindings) > 0 {
+		handler.RegisterMemoryRoutes(r, handler.NewMemoryHandler(memoryBindings, auditRecorder))
+		workerCtx, stopMemoryWorker := context.WithCancel(context.Background())
+		defer stopMemoryWorker()
+		go runMemoryWorker(workerCtx, memoryBindings)
+		log.Println("Memory: synthetic integration service enabled; production data admission is unavailable")
+	}
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
@@ -252,6 +267,7 @@ func main() {
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
+	agentService.SetDatasetGuard(datasetGuard)
 	agentHandler := handler.NewAgentHandler(agentService, deployerService, auditRecorder)
 
 	// Agent chat: sessions + messages + SSE streaming proxy to runtime
@@ -439,6 +455,9 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
+	if len(memoryBindings) > 0 {
+		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, handler.NewMemoryAdminHandler(memoryBindings, auditRecorder))
+	}
 
 	// ---------- Audit 领域 ----------
 	// 审计日志查询：admin-only（spec §5.3）；builtin/casdoor 两模式公共区注册。

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/tenant"
+	runtimeclient "control-panel/internal/infrastructure/runtime"
 
 	"github.com/gin-gonic/gin"
 )
@@ -88,6 +90,32 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 		respondError(c, perr.Code, ErrCodeRuntimeProxyError, perr.Reason)
 		auditRuntimeProxy(c, org, agentName, perr.Code, start, "")
 		return
+	}
+	if c.Request.Method == http.MethodPost && strings.HasPrefix(decision.CanonicalPath, "/v1/agents/") && strings.HasSuffix(decision.CanonicalPath, "/runs") {
+		usesContext, cleanup, err := inspectProxyContextWithDeadline(c.Request, c.Writer, proxyBodyReadTimeout)
+		defer cleanup()
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, errProxyContextLarge) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			if errors.Is(err, errProxyBodyTimeout) {
+				status = http.StatusRequestTimeout
+			}
+			respondError(c, status, "invalid_runtime_request", "运行请求正文无效、超时或超过限制")
+			auditRuntimeProxy(c, org, agentName, status, start, "")
+			return
+		}
+		if usesContext {
+			probeCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+			caps, err := runtimeclient.NewClient().ProbeMemoryCapabilities(probeCtx, decision.UpstreamBase, c.GetHeader("x-api-key"))
+			cancel()
+			if err != nil || !caps.TurnContext {
+				respondError(c, http.StatusServiceUnavailable, "turn_context_unsupported", "当前 Runtime 未声明临时上下文能力")
+				auditRuntimeProxy(c, org, agentName, http.StatusServiceUnavailable, start, "")
+				return
+			}
+		}
 	}
 	upstream, err := url.Parse(decision.UpstreamBase)
 	if err != nil { // unreachable: base is JoinHostPort-built from validated parts

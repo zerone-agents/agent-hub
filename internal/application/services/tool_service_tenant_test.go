@@ -48,6 +48,7 @@ func setupToolTenantServiceTestDB(t *testing.T) *gorm.DB {
 			max_session_queries INTEGER,
 			effort TEXT DEFAULT '',
 			disallowed_tools TEXT,
+            zero_tools BOOLEAN NOT NULL DEFAULT false,
 			runtime_port INTEGER DEFAULT 0,
 			deployment_status VARCHAR(32) DEFAULT '',
 			deployed_at DATETIME,

@@ -3,9 +3,18 @@ package services
 import (
 	"context"
 	"control-panel/internal/domain/knowledge"
+	"strings"
 )
 
 func (s *KnowledgeService) KnowledgePage(ctx context.Context, req knowledge.PageRequest) (any, error) {
+	if err := s.guardDatasets(ctx, req.DatasetID); err != nil {
+		return nil, err
+	}
+	for _, raw := range req.Query["dataset_ids"] {
+		if err := s.guardDatasets(ctx, strings.Split(raw, ",")...); err != nil {
+			return nil, err
+		}
+	}
 	engine, err := s.requireEngine()
 	if err != nil {
 		return nil, err
