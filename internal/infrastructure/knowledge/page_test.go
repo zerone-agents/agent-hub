@@ -82,7 +82,7 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 		{"ingestions-summary", "GET", "/datasets/kb/ingestions/summary", false}, {"ingestions-list", "GET", "/datasets/kb/ingestions", false}, {"ingestions-detail", "GET", "/datasets/kb/ingestions/log1", false},
 		{"index-get", "GET", "/datasets/kb/index", true}, {"index-run", "POST", "/datasets/kb/index", true}, {"index-delete", "DELETE", "/datasets/kb/index", true}, {"graph-search", "GET", "/datasets/kb/graph/search", false},
 		{"connectors-linked", "GET", "/datasets/kb/connectors", false}, {"connectors-list", "GET", "/connectors", false}, {"connectors-create", "POST", "/connectors", false},
-		{"connector-get", "GET", "/connectors/c1", false}, {"connector-update", "PATCH", "/connectors/c1", false}, {"connector-delete", "DELETE", "/connectors/c1", false}, {"connector-logs", "GET", "/connectors/c1/logs", false}, {"connector-resume", "POST", "/connectors/c1/resume", false}, {"connector-rebuild", "POST", "/connectors/c1/rebuild", false}, {"connector-link", "PUT", "/datasets/kb/connectors/c1", false}, {"connector-unlink", "DELETE", "/datasets/kb/connectors/c1", false},
+		{"connector-get", "GET", "/connectors/c1", false}, {"connector-update", "PATCH", "/connectors/c1", false}, {"connector-delete", "DELETE", "/connectors/c1", false}, {"connector-logs", "GET", "/connectors/c1/logs", false}, {"connector-resume", "PATCH", "/connectors/c1", false}, {"connector-rebuild", "POST", "/connectors/c1/rebuild", false}, {"connector-link", "PUT", "/datasets/kb/connectors/c1", false}, {"connector-unlink", "DELETE", "/datasets/kb/connectors/c1", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.op, func(t *testing.T) {
@@ -121,7 +121,11 @@ func TestKnowledgeManagementPinnedRoutes(t *testing.T) {
 			}))
 			defer server.Close()
 			c := NewRemoteMultiragEngine(server.URL, "key", time.Second, time.Hour)
-			_, err := c.KnowledgePage(context.Background(), domain.PageRequest{Operation: tc.op, DatasetID: "kb", ConnectorID: "c1", LogID: "log1", Query: url.Values{"type": []string{"graph"}, "task_id": []string{"current"}}, Body: domain.Object{"kb_id": "foreign"}})
+			body := domain.Object{"kb_id": "foreign"}
+			if tc.op == "connector-resume" {
+				body = domain.Object{"resume": true}
+			}
+			_, err := c.KnowledgePage(context.Background(), domain.PageRequest{Operation: tc.op, DatasetID: "kb", ConnectorID: "c1", LogID: "log1", Query: url.Values{"type": []string{"graph"}, "task_id": []string{"current"}}, Body: body})
 			if err != nil {
 				t.Fatal(err)
 			}
