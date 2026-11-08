@@ -1,4 +1,5 @@
 import type { MultiRAGModel } from '@/api/multirag'
+import { modelReference } from '@/api/modelIdentity'
 import type { Provider } from '@/api/providers'
 
 // Build constants — locked per spec.
@@ -50,32 +51,22 @@ export function buildEmbeddingCandidates(
   multirag: MultiRAGModel[],
   localProviders: Provider[],
 ): CandidateGroup[] {
-  const enabled = multirag.filter(m => m.type === 'embedding' && m.status === '1' && m.name && m.factory && m.fullId === `${m.name}@${m.factory}`)
+  const enabled = multirag.filter(m => m.type === 'embedding' && m.status === '1' && m.name && m.factory && modelReference(m))
   const multiragFullIDs = new Set(enabled.map(m => m.fullId))
   const multiragOptions: CandidateOption[] = enabled.map(m => ({
     label: `${m.name} (${m.factory})`, value: `multirag:${m.fullId}`,
     source: 'multirag', rawValue: m.fullId,
   }))
 
-  // Python stores tenant+factory+name, not Hub provider instance IDs. Never
-  // offer two local instances which would overwrite the same registration.
-  const counts = new Map<string, number>()
-  for (const p of localProviders) {
-    const factory = providerToFactory(p)
-    for (const m of p.defaultModels) {
-      if (factory && m.modelType === 'embedding') {
-        const key = `${factory}:${m.modelId}`
-        counts.set(key, (counts.get(key) ?? 0) + 1)
-      }
-    }
-  }
+  // Local providers bind to distinct model-service instances. Same-name declarations
+  // on different Hub providers are separate choices, never implicit adoption.
   const localOptions: CandidateOption[] = []
   for (const p of localProviders) {
     const factory = providerToFactory(p)
     if (!factory || !['OpenAI-API-Compatible', 'Anthropic'].includes(factory)) continue
     for (const m of p.defaultModels) {
       if (m.modelType !== 'embedding' || !m.modelId.trim() || (m.status !== undefined && m.status !== '1')) continue
-      if (counts.get(`${factory}:${m.modelId}`) !== 1) continue
+      if (p.defaultModels.filter(row => row.modelId === m.modelId).length !== 1) continue
       const name = factory === 'OpenAI-API-Compatible' ? `${m.modelId}___OpenAI-API` : m.modelId
       if (multiragFullIDs.has(`${name}@${factory}`) || multiragFullIDs.has(`${m.modelId}@${factory}`)) continue
       localOptions.push({ label: `${m.displayName} (${p.name})`, value: `local:${p.id}:${m.modelId}`,
@@ -112,7 +103,9 @@ export function buildLayoutCandidates(
     if (kind === 'ocr' && !ocrFactories.includes(model.factory)) continue
     // Reserved OCR suffixes dispatch to OCR, regardless of the model's type.
     if (kind === 'image2text' && ocrFactories.includes(model.factory)) continue
-    const fullId = kind === 'ocr' ? `${model.name}@${model.factory}@${model.factory}` : `${model.name}@${model.factory}`
+    const reference = modelReference(model)
+    if (!reference) continue
+    const fullId = model.reference ? reference : kind === 'ocr' ? `${reference}@${model.factory}` : reference
     if (seen.has(fullId)) continue
     seen.add(fullId)
     external.push({ label: `${model.name} (${model.factory})`, value: `multirag:${fullId}`, source: 'multirag', rawValue: fullId, kind })

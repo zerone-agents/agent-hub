@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1103,17 +1104,32 @@ func (s *ProviderService) SyncProviderToMultiRAG(ctx context.Context, tenantID s
 		}
 		p.Base().SetLockedAPIKey(plaintext)
 	}
+	instances, useInstances := client.(provider.MultiRAGInstances)
 	if len(modelIds) > 0 {
 		// modelIds address registrations, not provider_models selection IDs.
 		// Reject absent/disabled/ambiguous rows before any paid upstream call.
 		for _, id := range modelIds {
 			matches := filterModels(p.DefaultModels(), []string{id})
-			if len(matches) != 1 || matches[0].Status == "0" {
+			if len(matches) == 0 || (!useInstances && len(matches) != 1) {
 				return nil, provider.NewValidationErrorf("模型不存在、已禁用或同名配置不唯一")
+			}
+			for _, model := range matches {
+				if model.Status == "0" {
+					return nil, provider.NewValidationErrorf("模型已禁用")
+				}
 			}
 		}
 		filtered := filterModels(p.DefaultModels(), modelIds)
 		p.Base().SetDefaultModels(filtered)
+	}
+	if useInstances {
+		result, err := s.syncProviderInstance(ctx, tenantID, p, instances, verifyOnly, modelIds)
+		if !errors.Is(err, provider.ErrInstanceAPIUnavailable) {
+			return result, err
+		}
+		if err = s.validateLegacySyncIdentity(tenantID, p); err != nil {
+			return nil, err
+		}
 	}
 	return p.SyncToMultiRAG(ctx, client, provider.SyncOptions{VerifyOnly: verifyOnly})
 }

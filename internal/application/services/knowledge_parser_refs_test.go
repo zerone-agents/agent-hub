@@ -54,3 +54,31 @@ func TestKnowledgeService_LocalEmbeddingNameWithRevisionGetsItsFactory(t *testin
 	require.Equal(t, "embed@revision@Anthropic", captured["embd_id"])
 	require.Equal(t, "vision@revision@OpenAI", captured["parser_config"].(map[string]any)["layout_recognize"])
 }
+
+func TestKnowledgeServiceCanonicalNumericRefsWinOverLocalModelNames(t *testing.T) {
+	providerSvc := setupKnowledgeProviderSvc(t)
+	var existing provider.ProviderModel
+	require.NoError(t, database.GetDB().Where("model_id = ?", "bge-large-zh").First(&existing).Error)
+	var captured knowledge.DatasetMutationRequest
+	engine := &fakeKnowledgeEngine{updateDatasetFunc: func(ctx context.Context, id string, req knowledge.DatasetMutationRequest) (*knowledge.Dataset, error) {
+		captured = req
+		dataset := knowledge.Dataset(req)
+		return &dataset, nil
+	}}
+	svc := NewKnowledgeService(engine, providerSvc)
+	for _, reference := range []string{"42", "9007199254740993", "9223372036854775807"} {
+		t.Run(reference, func(t *testing.T) {
+			require.NoError(t, database.GetDB().Create(&provider.ProviderModel{
+				ProviderID: existing.ProviderID, SelectionID: "local-" + reference, ModelID: reference,
+				DisplayName: "Numeric local name", ModelType: string(provider.TypeEmbedding), Status: "1",
+			}).Error)
+			_, err := svc.UpdateDataset(context.Background(), "default", "kb1", knowledge.DatasetMutationRequest{
+				"embedding_model": reference,
+				"parser_config":   map[string]any{"layout_recognize": reference},
+			})
+			require.NoError(t, err)
+			require.Equal(t, reference, captured["embd_id"])
+			require.Equal(t, reference, captured["parser_config"].(map[string]any)["layout_recognize"])
+		})
+	}
+}

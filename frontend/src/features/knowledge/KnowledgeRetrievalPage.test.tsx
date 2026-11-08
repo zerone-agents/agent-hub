@@ -158,6 +158,13 @@ describe("KnowledgeRetrievalPage", () => {
     expect(screen.getByText(/相似度 0.873/)).toBeInTheDocument();
   });
 
+  it("shows unavailable components separately from real zero without clamping ranking scores", () => {
+    h.data = { ...sampleResult, chunks: [{ ...sampleResult.chunks[0], similarity: 2.5, vector_similarity: null, term_similarity: 0 }] };
+    renderPage();
+    expect(screen.getByText("相似度 2.500")).toBeInTheDocument();
+    expect(screen.getByText(/向量 未计算/)).toHaveTextContent("词 0.00");
+  });
+
   it("member: hides the retrieval test submit button but keeps results visible", () => {
     setAuthRole("member");
     h.data = sampleResult;

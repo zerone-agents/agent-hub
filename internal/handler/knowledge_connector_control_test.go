@@ -17,12 +17,15 @@ func TestConnectorResumeKeepsWriteAuthorizationAndBooleanContract(t *testing.T) 
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/connectors/c1" || r.Header.Get("Authorization") != "Bearer owned-key" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/connectors/c1/resume" || r.Header.Get("Authorization") != "Bearer owned-key" {
 			t.Errorf("unexpected connector request: %s %s", r.Method, r.URL.Path)
 		}
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 || body["status"] != "2" && body["status"] != "5" {
-			t.Errorf("unexpected status patch: %v %v", body, err)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 {
+			t.Errorf("unexpected resume payload: %v %v", body, err)
+		}
+		if _, ok := body["resume"].(bool); !ok {
+			t.Errorf("resume must be a boolean: %v", body)
 		}
 		_, _ = w.Write([]byte(`{"code":0,"data":true}`))
 	}))

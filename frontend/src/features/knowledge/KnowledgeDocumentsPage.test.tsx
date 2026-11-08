@@ -34,6 +34,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/queries/useKnowledge", () => ({
+  useKnowledgeDetail: () => ({ data: { id: "kb1", parser_id: "naive" } }),
   useDocuments: (_id: string, params: unknown) => {
     h.paramsMock(params);
     return {
@@ -57,7 +58,7 @@ vi.mock("@/queries/useKnowledge", () => ({
   useUploadDocuments: () => ({ mutateAsync: h.uploadMock, isPending: false }),
   useIngestDocuments: () => ({ mutateAsync: h.ingestMock }),
   useParseDocuments: () => ({ mutate: h.parseMock }),
-  useStopParsingDocuments: () => ({ mutate: h.stopMock }),
+  useStopParsingDocuments: () => ({ mutate: h.stopMock, mutateAsync: h.stopMock }),
   useUpdateDocument: () => ({
     mutate: h.updateMock,
     mutateAsync: h.updateMock,
@@ -251,6 +252,9 @@ describe("KnowledgeDocumentsPage", () => {
     await user.click(
       screen.getByRole("button", { name: "停止解析 running.docx" }),
     );
+    expect(h.stopMock).not.toHaveBeenCalled();
+    expect(await screen.findByText(/清理部分解析切片及计数/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "请求停止并清理" }));
     expect(h.stopMock).toHaveBeenCalledWith(["d2"]);
   });
 

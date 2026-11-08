@@ -38,7 +38,8 @@ export class KnowledgeConfigurationPendingError extends Error {
 
 export interface UploadResume {
   ids: string[];
-  stage: "parse" | "refresh";
+  stage: "parse" | "refresh" | "upload" | "verify";
+  pendingFiles?: File[];
 }
 export class KnowledgeUploadPendingError extends Error {
   constructor(
@@ -46,6 +47,18 @@ export class KnowledgeUploadPendingError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+class KnowledgeRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly details?: unknown) {
+    super(message);
+  }
+}
+
+class PartialUploadError extends Error {
+  constructor(readonly documents: KnowledgeDocument[], readonly pendingFiles: File[]) {
+    super("部分文件已上传，请仅重试剩余文件");
   }
 }
 
@@ -74,7 +87,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           env.error || "知识库已创建，配置待保存；重试将使用已有知识库",
         );
     }
-    throw new Error(env.error || `知识库接口错误 ${res.status}`);
+    throw new KnowledgeRequestError(env.error || `知识库接口错误 ${res.status}`, res.status, env.code, env.data);
   }
   return env.data;
 }
@@ -361,10 +374,33 @@ export async function uploadDocuments(
 ): Promise<KnowledgeDocument[]> {
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
-  const data = await request<RemoteDocument[]>(
-    `/datasets/${encodeURIComponent(datasetId)}/documents`,
-    { method: "POST", body: form },
-  );
+  let data: RemoteDocument[];
+  try {
+    data = await request<RemoteDocument[]>(
+      `/datasets/${encodeURIComponent(datasetId)}/documents`,
+      { method: "POST", body: form },
+    );
+  } catch (error) {
+    const details = error instanceof KnowledgeRequestError ? error.details : undefined;
+    const uploaded = details && typeof details === "object" && "uploaded" in details ? details.uploaded : undefined;
+    const names = new Set(files.map(file => file.name));
+    const ids = new Set<string>();
+    const confirmedNames = new Set<string>();
+    if (error instanceof KnowledgeRequestError && error.status === 502 && error.code === "knowledge_upload_partial"
+      && Array.isArray(uploaded) && uploaded.length > 0 && uploaded.length < files.length && names.size === files.length
+      && uploaded.every((row: unknown) => {
+        if (!row || typeof row !== "object" || !("id" in row) || !("name" in row)) return false;
+        const doc = row as Record<string, unknown>;
+        const scope = doc.dataset_id ?? doc.kb_id;
+        if (typeof doc.id !== "string" || !doc.id || ids.has(doc.id) || typeof doc.name !== "string"
+          || !names.has(doc.name) || confirmedNames.has(doc.name) || scope !== datasetId
+          || (doc.dataset_id !== undefined && doc.kb_id !== undefined && doc.dataset_id !== doc.kb_id)) return false;
+        ids.add(doc.id); confirmedNames.add(doc.name); return true;
+      })) {
+      throw new PartialUploadError(uploaded.map(doc => remoteDocToKnowledgeDoc(doc as RemoteDocument, datasetId, datasetName)), files.filter(file => !confirmedNames.has(file.name)));
+    }
+    throw error;
+  }
   return (data || []).map((d) =>
     remoteDocToKnowledgeDoc(d, datasetId, datasetName),
   );
@@ -381,11 +417,35 @@ export async function completeUpload(
   resume?: UploadResume,
 ): Promise<void> {
   const token = getStoredAuth()?.token;
-  let ids = resume?.ids;
+  if (resume?.stage === "verify") {
+    await refresh();
+    throw new KnowledgeUploadPendingError({ ids: [], stage: "upload", pendingFiles: resume.pendingFiles ?? files }, "已刷新资料列表。请核对成功文件并从队列移除，再确认上传剩余文件。");
+  }
+  let pendingFiles = resume?.pendingFiles;
+  let ids = resume?.stage === "upload" ? undefined : resume?.ids;
   if (!ids) {
-    const created = await uploadDocuments(datasetId, datasetName, files);
-    if (!created.length)
-      throw new Error("上传未返回文档，请先刷新确认上传结果");
+    let created: KnowledgeDocument[];
+    const requested = resume?.stage === "upload" ? pendingFiles ?? files : files;
+    if (!requested.length) { await refresh(); return; }
+    try {
+      created = await uploadDocuments(datasetId, datasetName, requested);
+      pendingFiles = undefined;
+    } catch (error) {
+      if (error instanceof PartialUploadError) {
+        created = error.documents;
+        pendingFiles = error.pendingFiles;
+      } else {
+        if (token !== getStoredAuth()?.token) throw error;
+        // An upload can commit before its response is lost. Require a list
+        // refresh before allowing an explicit retry of unconfirmed files.
+        if (!(error instanceof KnowledgeRequestError) || error.status >= 500 || error.status === 200) {
+          throw new KnowledgeUploadPendingError({ ids: [], stage: "verify", pendingFiles: requested }, "上传结果未确认，请先刷新资料列表核对，避免重复上传。");
+        }
+        throw error;
+      }
+    }
+    if (!created.length || created.some(doc => !doc.id))
+      throw new KnowledgeUploadPendingError({ ids: [], stage: "verify", pendingFiles: requested }, "上传未返回完整文档确认，请先刷新核对上传结果。");
     ids = created.map((doc) => doc.id);
     onUploaded(created);
   }
@@ -396,7 +456,7 @@ export async function completeUpload(
       await parseDocuments(datasetId, ids);
     } catch (err) {
       throw new KnowledgeUploadPendingError(
-        { ids, stage: "parse" },
+        { ids, stage: "parse", pendingFiles },
         `文件已上传，解析请求失败：${err instanceof Error ? err.message : "请重试"}`,
       );
     }
@@ -405,9 +465,12 @@ export async function completeUpload(
     await refresh();
   } catch (err) {
     throw new KnowledgeUploadPendingError(
-      { ids, stage: "refresh" },
+      { ids, stage: "refresh", pendingFiles },
       `文件已上传，状态刷新失败：${err instanceof Error ? err.message : "请重试"}`,
     );
+  }
+  if (pendingFiles?.length) {
+    throw new KnowledgeUploadPendingError({ ids: [], stage: "upload", pendingFiles }, "部分文件已上传并刷新，已确认文件不会重传。请上传队列中的剩余文件。");
   }
 }
 
@@ -509,9 +572,9 @@ function normalizeMobileChunk(raw: Record<string, unknown>): MobileChunk {
       Number(raw.available ?? raw.available_int ?? 1) !== 0,
     positions: Array.isArray(positions) ? positions : [],
     similarity:
-      typeof raw.similarity === "number"
+      typeof raw.similarity === "number" && Number.isFinite(raw.similarity)
         ? raw.similarity
-        : typeof raw.score === "number"
+        : raw.similarity === undefined && typeof raw.score === "number" && Number.isFinite(raw.score)
           ? raw.score
           : undefined,
   };

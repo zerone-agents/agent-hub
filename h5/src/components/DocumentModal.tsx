@@ -41,6 +41,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmParse, setConfirmParse] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
   const [deleteChunks, setDeleteChunks] = useState(false);
   const [applyKB, setApplyKB] = useState(false);
   const [notice, setNotice] = useState("");
@@ -51,6 +52,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setEditing(mode === "edit");
     setConfirmDelete(false);
     setConfirmParse(false);
+    setConfirmStop(false);
     setDeleteChunks(false);
     setApplyKB(false);
     setNotice("");
@@ -102,6 +104,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             {notice}
           </p>
         )}
+        {confirmStop && <p role="alert" className="text-amber-700">
+          停止会请求取消解析，并清理部分解析切片及计数。文档保留，可重新解析。请确认后提交，再刷新核对实际状态。
+          <button className="ml-2 underline" disabled={busy} onClick={() => setConfirmStop(false)}>取消停止</button>
+        </p>}
         {document ? (
           <>
             {editing && canWrite ? (
@@ -232,12 +238,21 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             <button
               disabled={busy}
               onClick={() => {
+                if (document.run === "1" && !confirmStop) {
+                  setConfirmStop(true);
+                  return;
+                }
                 if (document.run !== "1" && !confirmParse) {
                   setConfirmParse(true);
                   return;
                 }
                 void perform(async () => {
-                  if (document.run === "1" && onStop) await onStop(document.id);
+                  if (document.run === "1") {
+                    if (!onStop) throw new Error("停止入口不可用");
+                    await onStop(document.id);
+                    setConfirmStop(false);
+                    setNotice("停止及清理请求已受理，请刷新核对文档状态、切片和计数；这不代表后台任务已终止。");
+                  }
                   else if (onParse) {
                     await onParse(document.id, {
                       delete: deleteChunks,
@@ -246,12 +261,12 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                     setConfirmParse(false);
                     setNotice("解析请求已受理，请查看解析状态和分块数。");
                   } else throw new Error("解析入口不可用");
-                }, document.run === "1");
+                }, false);
               }}
               className="text-emerald-700 disabled:opacity-40"
             >
               {document.run === "1"
-                ? "请求停止解析"
+                ? confirmStop ? "确认停止并清理部分结果" : "请求停止解析"
                 : confirmParse
                   ? "提交解析请求"
                   : "解析选项"}

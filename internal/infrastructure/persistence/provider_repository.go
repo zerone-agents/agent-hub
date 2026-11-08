@@ -97,6 +97,13 @@ func (r *ProviderRepository) Delete(tenantID string, id uint64) error {
 		if err := tx.Where("provider_id = ?", id).Delete(&provider.ProviderModel{}).Error; err != nil {
 			return err
 		}
+		// Bindings are local receipts, never a request to delete service models.
+		// Older test/upgrade schemas may predate this additive migration.
+		if tx.Migrator().HasTable(&provider.MultiRAGSyncBinding{}) {
+			if err := tx.Where("provider_id = ?", id).Delete(&provider.MultiRAGSyncBinding{}).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Where("id = ?", id).Delete(&provider.ProviderSummary{}).Error
 	})
 }

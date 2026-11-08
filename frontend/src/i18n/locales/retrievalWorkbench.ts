@@ -2,6 +2,18 @@ import i18next from "@/i18n";
 
 // A retrieval-owned namespace keeps this delivery independent of shared locale edits.
 const en = {
+  catalogChanged: "The knowledge base directory changed while loading. Retry to confirm the complete list.",
+  stopTitle: "Stop parsing and clear partial results?",
+  stopHint: "Stopping requests cancellation and clears partial parsing chunks and counts. The document will remain available for reparsing. Refresh to check the actual state.",
+  stopConfirm: "Request stop and cleanup",
+  stopAccepted: "Stop and cleanup request accepted. Refreshing document and chunk state.",
+  scoreUnavailable: "Not computed",
+  uploadPartial: "Some files were uploaded. Confirmed files are kept; retry only the remaining files.",
+  chunkUnconfirmed: "The write outcome is unconfirmed. Check the saved chunk and image before making another write.",
+  chunkReadbackOnly: "Refresh and check the saved chunk",
+  chunkViewObserved: "View the stored result before editing",
+  chunkDiscardDraft: "Discard this draft and inspect the chunk list",
+  chunkReadbackMissing: "The saved chunk could not be confirmed. Your draft is kept. Refresh the document's chunks and image before deciding on another write.",
   datasets: "Knowledge bases",
   datasetsHint: "Joint search uses every selected knowledge base and requires the same embedding model instance. The service rejects incompatible selections. Changing knowledge bases clears document selections.",
   datasetsEmpty: "Select at least one knowledge base.",
@@ -132,6 +144,18 @@ const en = {
   resultsError: "Retrieval failed. Your question and filters are kept.",
 };
 const zh: typeof en = {
+  catalogChanged: "知识库目录在加载中发生变化，请重试以确认完整列表。",
+  stopTitle: "请求停止解析并清理部分结果？",
+  stopHint: "停止会请求取消解析，并清理部分解析切片及计数。文档保留，可重新解析；请刷新核对实际状态。",
+  stopConfirm: "请求停止并清理",
+  stopAccepted: "停止及清理请求已受理，正在刷新文档和切片状态。",
+  scoreUnavailable: "未计算",
+  uploadPartial: "部分文件已上传，已确认文件已保留；请仅重试剩余文件。",
+  chunkUnconfirmed: "写入结果未确认，请先核对已保存的切片和图片，再决定后续写入。",
+  chunkReadbackOnly: "刷新核对已保存切片",
+  chunkViewObserved: "查看已存结果后再编辑",
+  chunkDiscardDraft: "放弃此草稿并核对切片列表",
+  chunkReadbackMissing: "尚未确认已保存结果，草稿已保留。请刷新文档切片和图片核对后，再决定后续写入。",
   datasets: "知识库范围",
   datasetsHint: "联合检索覆盖全部已选知识库，要求使用同一嵌入模型实例；不兼容时服务会报错。修改知识库范围会清空文档选择。",
   datasetsEmpty: "请至少选择一个知识库。",

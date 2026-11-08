@@ -101,12 +101,13 @@ type SyncOptions struct {
 
 // SyncResult reports the outcome of one provider's sync.
 type SyncResult struct {
+	InstanceName string `json:"instanceName,omitempty"`
 	// FactoryName is the MultiRAG factory the provider synced to.
 	FactoryName string `json:"factoryName"`
-	// Endpoint is "add_llm".
+	// Endpoint is "add_llm" for legacy services, "instances" for scoped sync.
 	Endpoint string `json:"endpoint"`
-	// CallCount is the number of MultiRAG calls made (1 for C 类,
-	// N for per-model sync where N = len(DefaultModels)).
+	// CallCount is the number of per-model receipts. Legacy receipts correspond
+	// to add_llm calls; atomic instance creation can register several at once.
 	CallCount int `json:"callCount"`
 	// Success is true iff every call succeeded.
 	Success bool `json:"success"`
@@ -116,6 +117,7 @@ type SyncResult struct {
 
 // SyncCallResult reports the outcome of a single MultiRAG call.
 type SyncCallResult struct {
+	Reference string `json:"reference,omitempty"`
 	// ModelName is the model involved in this call. Empty when the call
 	// failed before a model could be associated with it.
 	ModelName string `json:"modelName"`

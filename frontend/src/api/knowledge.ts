@@ -2,6 +2,7 @@ import apiClient from "./client";
 import type { AxiosResponse } from "axios";
 import { ownedRequestConfig, type RequestOwner } from "./requestOwnership";
 import i18next from "@/i18n";
+import "@/i18n/locales/retrievalWorkbench";
 
 /**
  * Knowledge base API client + field anti-corruption layer.
@@ -26,6 +27,7 @@ interface Envelope<T> {
   data: T;
   message?: string;
   error?: string;
+  code?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,9 +119,9 @@ export interface RetrievalChunk {
   content: string;
   document_id: string;
   document_name: string;
-  similarity: number;
-  vector_similarity: number;
-  term_similarity: number;
+  similarity: number | null;
+  vector_similarity: number | null;
+  term_similarity: number | null;
   highlight?: string;
 }
 
@@ -440,14 +442,76 @@ export function normalizeRetrievalChunk(raw: RawObject): RetrievalChunk {
     document_name: str(
       pick(raw, "document_name", "docnm_kwd", "document_keyword"),
     ),
-    similarity: num(pick(raw, "similarity", "score")),
-    vector_similarity: num(pick(raw, "vector_similarity")),
-    term_similarity: num(pick(raw, "term_similarity")),
+    similarity: retrievalScore(raw.similarity === undefined ? raw.score : raw.similarity),
+    vector_similarity: retrievalScore(raw.vector_similarity),
+    term_similarity: retrievalScore(raw.term_similarity),
     highlight: optionalStr(raw.highlight),
     image_id: optionalStr(pick(raw, "image_id", "img_id")),
     dataset_id: optionalStr(pick(raw, "dataset_id", "kb_id")),
     positions: unknownArray(pick(raw, "positions", "position_int")),
   };
+}
+
+// These are ranking scores, not probabilities. A finite value above 1 is valid;
+// null means the retrieval path did not compute that score, not a real zero.
+export function retrievalScore(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export class KnowledgeMutationError extends Error {
+  constructor(message: string, readonly details?: RawObject, readonly code?: string) {
+    super(message);
+    this.name = "KnowledgeMutationError";
+  }
+}
+
+export function knowledgeMutationDetails(error: unknown): RawObject | undefined {
+  if (error instanceof KnowledgeMutationError) return error.details;
+  if (!isRecord(error) || !isRecord(error.response)) return undefined;
+  const envelope = error.response.data;
+  return isRecord(envelope) && envelope.success === false && isRecord(envelope.data)
+    ? envelope.data : undefined;
+}
+
+export function knowledgeWriteUnconfirmed(error: unknown): boolean {
+  const details = knowledgeMutationDetails(error);
+  if (details) return details.retry_safe !== true || details.outcome !== "unchanged";
+  if (isRecord(error) && isRecord(error.response)) {
+    const status = error.response.status;
+    // The gateway rejects these requests before a service mutation; partial
+    // and unknown write receipts instead use 502 and must stay unconfirmed.
+    if (typeof status === "number" && status >= 400 && status < 500) return false;
+  }
+  return true;
+}
+
+export class KnowledgeUploadPartialError extends Error {
+  constructor(readonly documents: KnowledgeDocument[], readonly pendingFiles: File[]) {
+    super(i18next.t("retrievalWorkbench:uploadPartial"));
+    this.name = "KnowledgeUploadPartialError";
+  }
+}
+
+export function confirmedUploadDocuments(error: unknown, datasetId: string, files: File[]): KnowledgeDocument[] | undefined {
+  const envelope = isRecord(error) && isRecord(error.response) && isRecord(error.response.data) ? error.response.data : undefined;
+  const code = error instanceof KnowledgeMutationError ? error.code : envelope?.code;
+  if (code !== "knowledge_upload_partial") return undefined;
+  const rows = knowledgeMutationDetails(error)?.uploaded;
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length >= files.length) return undefined;
+  const names = new Set(files.map(file => file.name));
+  // A duplicate name cannot be reconciled to an individual request file.
+  if (names.size !== files.length) return undefined;
+  const ids = new Set<string>();
+  const confirmedNames = new Set<string>();
+  if (rows.some((row: unknown) => {
+    if (!isRecord(row) || typeof row.id !== "string" || !row.id || typeof row.name !== "string"
+      || !names.has(row.name) || confirmedNames.has(row.name) || ids.has(row.id)) return true;
+    const scope = row.dataset_id ?? row.kb_id;
+    if (scope !== datasetId || (row.dataset_id !== undefined && row.kb_id !== undefined && row.dataset_id !== row.kb_id)) return true;
+    ids.add(row.id); confirmedNames.add(row.name);
+    return false;
+  })) return undefined;
+  return (rows as RawObject[]).map(normalizeDocument);
 }
 
 export function normalizeRetrievalResult(raw: RawObject): RetrievalResult {
@@ -523,6 +587,29 @@ function includesRequestedFields(actual: unknown, expected: unknown): boolean {
   return actual === expected;
 }
 
+function canonicalParserConfig(config: RawObject): RawObject {
+  // Dataset writes consume one legacy ext object before deep-merging storage.
+  // ext overrides entire same-named top-level values; it is not a second patch.
+  const { ext, ...fields } = config;
+  return { ...fields, ...(isRecord(ext) ? ext : {}) };
+}
+
+function confirmsDatasetMutation(saved: KnowledgeDataset, expected: RawObject): boolean {
+  const actualConfig = canonicalParserConfig(saved.parser_config);
+  if (!includesRequestedFields({ ...saved, parser_config: actualConfig }, expected)) return false;
+  const expectedConfig = expected.parser_config;
+  if (!isRecord(expectedConfig) || !Object.hasOwn(expectedConfig, "table_column_roles")) return true;
+  const actualRoles = actualConfig.table_column_roles;
+  const expectedRoles = expectedConfig.table_column_roles;
+  // Most parser objects are sparse deep-merge patches. Column roles instead
+  // replace the entire map, including {}: extra stale keys mean the write did
+  // not apply, even when all requested entries are present.
+  return isRecord(expectedRoles)
+    ? isRecord(actualRoles) && Object.keys(actualRoles).length === Object.keys(expectedRoles).length
+      && includesRequestedFields(actualRoles, expectedRoles)
+    : actualRoles === expectedRoles;
+}
+
 // Keep legacy local IDs compatible with the gateway's protocol mapping.
 // A PUT response may only normalize the reference's shape, not choose a model.
 const LOCAL_MODEL_FACTORIES = ['Anthropic', 'OpenAI-API-Compatible', 'MinerU', 'PaddleOCR'];
@@ -537,11 +624,15 @@ function isKnownFullModelRef(ref: string): boolean {
 
 function expectedDatasetMutation(input: DatasetFormInput, written: RawObject): RawObject {
   const expected = toDatasetBody(input);
-  if (input.embd_id && !isKnownFullModelRef(input.embd_id) && LOCAL_MODEL_FACTORIES.some((factory) => written.embd_id === `${input.embd_id}@${factory}`)) {
+  if (input.embd_id && !/^[1-9][0-9]*$/.test(input.embd_id) && !isKnownFullModelRef(input.embd_id) && LOCAL_MODEL_FACTORIES.some((factory) => written.embd_id === `${input.embd_id}@${factory}`)) {
     expected.embd_id = written.embd_id;
   }
   if (input.parser_config) {
-    const config = { ...input.parser_config };
+    const config = canonicalParserConfig(input.parser_config);
+    if (isRecord(config.table_column_roles)) {
+      config.table_column_roles = Object.fromEntries(Object.entries(config.table_column_roles)
+        .map(([column, role]) => [column, role === "vectorize" ? "indexing" : role]));
+    }
     const parentChild = isRecord(config.parent_child) ? { ...config.parent_child } : {};
     if (config.enable_children !== undefined) parentChild.use_parent_child = config.enable_children;
     if (config.children_delimiter !== undefined) parentChild.children_delimiter = config.children_delimiter;
@@ -560,7 +651,7 @@ function expectedDatasetMutation(input: DatasetFormInput, written: RawObject): R
         config[key] = normalized;
       }
     }
-    if (typeof config.layout_recognize === "string" && config.layout_recognize.length > 0 && !config.layout_recognize.includes("@") && !STRICT_LAYOUT_VALUES.has(config.layout_recognize) && isRecord(written.parser_config) && typeof written.parser_config.layout_recognize === "string" && LEGACY_LAYOUT_FACTORIES.has(written.parser_config.layout_recognize)) {
+    if (typeof config.layout_recognize === "string" && config.layout_recognize.length > 0 && !/^[1-9][0-9]*$/.test(config.layout_recognize) && !config.layout_recognize.includes("@") && !STRICT_LAYOUT_VALUES.has(config.layout_recognize) && isRecord(written.parser_config) && typeof written.parser_config.layout_recognize === "string" && LEGACY_LAYOUT_FACTORIES.has(written.parser_config.layout_recognize)) {
       config.layout_recognize = written.parser_config.layout_recognize;
     }
     expected.parser_config = config;
@@ -575,7 +666,7 @@ async function unwrap<T>(
   const body = res.data;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- axios res.data typed as Envelope<T> but runtime may be undefined for empty/error responses
   if (body && !body.success) {
-    throw new Error(body.error ?? body.message ?? i18next.t("apiErrors.requestFailed"));
+    throw new KnowledgeMutationError(body.error ?? body.message ?? i18next.t("apiErrors.requestFailed"), isRecord(body.data) ? body.data : undefined, body.code);
   }
   return body.data;
 }
@@ -720,7 +811,7 @@ export const knowledgeApi = {
         const data = await unwrap<RawObject>(apiClient.get(`${BASE}/datasets/${encodeURIComponent(datasetId)}`, ...(owner ? [ownedRequestConfig(owner)] as const : [] as const)));
         owner?.assertCurrent();
         const saved = normalizeDataset(data);
-        if (saved.id !== datasetId || !includesRequestedFields(saved, expectedDatasetMutation(input, isRecord(written) ? written : {}))) {
+        if (saved.id !== datasetId || !confirmsDatasetMutation(saved, expectedDatasetMutation(input, isRecord(written) ? written : {}))) {
           throw new Error("readback mismatch");
         }
         return saved;
@@ -786,10 +877,17 @@ export const knowledgeApi = {
     upload: async (
       datasetId: string,
       files: File[],
+      parserConfig?: { table_column_mode?: "auto" | "manual"; table_column_roles?: Record<string, "indexing" | "metadata" | "both"> },
     ): Promise<KnowledgeDocument[]> => {
       const formData = new FormData();
       for (const file of files) formData.append("files", file);
-      const data = await unwrap<RawObject[]>(
+      if (parserConfig !== undefined) formData.append("parser_config", JSON.stringify({
+        table_column_mode: parserConfig.table_column_mode,
+        table_column_roles: parserConfig.table_column_roles,
+      }));
+      let data: RawObject[];
+      try {
+        data = await unwrap<RawObject[]>(
         apiClient.post(
           `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents`,
           formData,
@@ -798,7 +896,15 @@ export const knowledgeApi = {
             timeout: DOCUMENT_UPLOAD_TIMEOUT_MS,
           },
         ),
-      );
+        );
+      } catch (error) {
+        const documents = confirmedUploadDocuments(error, datasetId, files);
+        if (documents) {
+          const names = new Set(documents.map(doc => doc.name));
+          throw new KnowledgeUploadPartialError(documents, files.filter(file => !names.has(file.name)));
+        }
+        throw error;
+      }
       return (data).map(normalizeDocument);
     },
 
@@ -826,18 +932,18 @@ export const knowledgeApi = {
       ),
 
     parse: (datasetId: string, documentIds: string[]): Promise<unknown> =>
-      apiClient.post(
+      unwrap(apiClient.post(
         `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/parse`,
         { document_ids: documentIds },
-      ),
+      )),
 
     stopParse: (datasetId: string, documentIds: string[]): Promise<unknown> =>
-      apiClient.delete(
+      unwrap(apiClient.delete(
         `${BASE}/datasets/${encodeURIComponent(datasetId)}/documents/parse`,
         {
           data: { document_ids: documentIds },
         },
-      ),
+      )),
 
     ingest: async (input: DocumentIngestInput): Promise<true> => {
       const accepted = await unwrap<unknown>(apiClient.post(`${BASE}/documents/ingest`, input));

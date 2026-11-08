@@ -1,191 +1,157 @@
 # Native Memory adapter
 
 `New(Config{BaseURL, APIKey, BankID})` binds an application to one dedicated,
-private MultiRAG Memory bank. It implements `memory.NativeConversations` for
-actual dialogue ingestion and typed retrieval, alongside the older `memory.Index`
-quote-ledger interface. No knowledge-base fallback is used.
+private MultiRAG Memory bank. The adapter implements `memory.NativeConversations`,
+`memory.NativeManagement`, `memory.NativeDiagnostics`, and the quote-ledger
+`memory.Index` interface. It does not use a knowledge-base fallback.
 
-## Automatic dialogue extraction
+Application configuration and business API usage are described in
+[Native Memory integration](../../../docs/memory/README.md).
 
-`AddConversation` submits the original `user_input` and actual `agent_response`,
-without a synthetic quote wrapper or a second extraction model. The configured
-bank must enable all four native types: `raw`, `semantic`, `episodic`, and
-`procedural`. Native embedding, extraction, storage and ranking remain the
-provider's implementation. Typed records preserve their original type, source
-message ID, source session, validity fields and active state. Model output is
-not represented as a quote-verified Hub ledger fact.
+## Configuration and identity
 
-Every Hub tenant/application/user/account-lifecycle hash yields nonempty native
-user and agent filters. Each operation gets native session
-`hub-life-<scope hash>-<sha256(operationId)>`. This keeps repeated utterances in
-different turns distinct, supports cross-runtime-session retrieval within the
-same lifecycle, and permits read-only recovery after an uncertain POST. The
-native session is an ingestion-operation identity, not the Runtime SDK session.
-The actual SDK session and turn are retained by Hub's receipt.
+Use a MultiRAG SDK API token with `SDK_API_TOKEN` authentication. External
+`user_id` attribution must remain unchanged; a platform Web session or JWT
+cannot replace this credential. Every read checks the configured bank and the
+expected user, agent, session, and source identity. Credentials remain on the
+server, and redirects cannot forward them to another URL.
 
-The native POST API has no idempotency key. Hub must persist `submitting` before
-calling the adapter, and persist an unknown outcome across restarts.
-`FindConversation` only reads: an empty scan never authorizes a second POST.
-The adapter also blocks an uncertain dispatch within its own lifetime. A lost
-response can be resolved through the operation-specific session and exact
-original input/response. Reusing an operation with different text fails closed.
+Automatic extraction requires a bank with all four types: `raw`, `semantic`,
+`episodic`, and `procedural`, with private permissions and configured extraction
+and embedding models. Bank validation fails closed when its type, permissions,
+or identity do not match the application.
 
-List traverses bounded RAW pages through a final empty page and individually
-reads parent and extracted child content. Current Milvus uses per-page totals;
-a coherent global total is also accepted. Duplicate IDs, inconsistent totals,
-nonterminal partial pages, foreign scope, mismatched parent provenance or the
-native endpoint's saturated 512-child limit fail closed. Search always sends
-bank/user/agent filters; every returned record and its RAW source are read back.
-Inactive or forgotten content is not supplied. Native validity timestamps
-remain typed data, not a universal TTL: episodic valid_at / invalid_at describe
-an event beginning / ending, so past events and future plans remain recallable.
-An inactive source suppresses its derived records even if the native backend
-leaves those children active. Native scores are unavailable;
-ranking order is preserved without fabricated similarity metrics.
+The tenant, application, business user, and account lifecycle determine
+nonempty native user and agent filters. The logical scope token is
+`memory-<scope hash>`. Each ingestion operation uses native session
+`hub-life-<scope hash>-<sha256(operationId)>`; the actual Runtime SDK session and
+turn remain in the Hub receipt. This separates repeated utterances in different
+turns while allowing retrieval across runtime sessions within one lifecycle.
+A native session is an operation identity, not a runtime chat session.
 
-Extraction state is separate from RAW existence. Native task progress can report
-`received`, `extracting`, `completed`, or `failed`. If derived records exist but
-the task has not completed, the adapter returns `derivedAvailable`. No task and
-only RAW means `unknown`. `derivedAvailable` is evidence of extracted records,
-not successful queue acknowledgement or task completion. Current local real
-acceptance separately confirmed completed task receipts, SQL progress, queue
-acknowledgement and independently read message/vector storage; it used synthetic
-profiles and does not establish production acceptance.
+## Conversation ingestion and recovery
 
-Native extraction does not establish automatic invalidation of older conflicting
-memories. Dialogue corrections remain newer source statements; clients must not
-claim the old records were deleted or automatically superseded. No method in
-this interface invokes native Forget or DELETE.
+`AddConversation` submits the original `user_input` and actual `agent_response`.
+It does not wrap a quote or fabricate an assistant response to trigger
+extraction. Native storage, embedding, extraction, and ranking are performed by
+the configured memory service.
 
-## Existing quote-ledger compatibility
+Hub persists an encrypted `submitting` receipt before dispatch. The native
+message POST has no idempotency key, so a lost response remains unknown across
+restarts. `FindConversation` performs read-only recovery using the
+operation-specific session and exact original input and response. An empty read
+does not authorize a second POST. Reusing an operation with different text is
+rejected, and the adapter also blocks uncertain redispatch within its lifetime.
 
-The older `Index` interface uses the exact native session
-`hub-life-<scope hash>`, so automatic dialogue sessions do not enter that ledger.
-Its logical `DocumentID` remains `memory-<scope hash>`; no document is created.
-Only canonical JSON `{"schema":"hub-memory-fact-v1","quote":"..."}` with an
-empty native agent response is decoded as a quote. Derived messages are never
-converted into quote-ledger facts.
+RAW existence and extraction completion are separate:
 
-Quote writes are confirmed through independent content reads and two stable
-bounded snapshots. `Remove` is only logical correction: native `PUT status:false`
-plus independent confirmation, with unchanged original content. It cannot back
-user deletion, consent withdrawal or account cleanup. `DropDocument` returns
+| State | Meaning |
+| --- | --- |
+| `received` | Original content is confirmed; extraction has not completed. |
+| `extracting` | The native task reports work in progress. |
+| `derivedAvailable` | Derived records are readable, but task completion is not confirmed. |
+| `completed` | The task reports completion. |
+| `failed` | The task reports failure; the original conversation is not automatically reposted. |
+| `unknown` | The operation or extraction state cannot be established from the available records and task. |
+
+A derived record does not override a task's reported failure or prove queue
+acknowledgement. Natural-language corrections are newer source statements;
+the adapter does not automatically invalidate all older conflicting memories.
+
+## Verified reads and provenance
+
+List reads use bounded RAW pages through a final empty page, then independently
+read each parent and derived record's content. The default page size is 100 and
+the default maximum is 101 pages, including the final empty page. The adapter
+accepts coherent page-local totals or coherent global totals. Duplicate IDs,
+inconsistent totals, incomplete pages, foreign scope, mismatched provenance,
+or a saturated 512-child page produce an error rather than a partial directory.
+
+Typed records preserve memory type, source message ID, source session,
+creation time, validity fields, and native status. Decimal message identities
+remain strings, including values beyond JavaScript's safe integer range.
+Derived records are never converted into quote-verified Hub ledger facts.
+
+Search sends bank, user, and agent filters. Each hit is independently read, and
+each derived hit's RAW parent is checked within the same source session.
+Inactive or forgotten content is excluded. An inactive or forgotten RAW source
+also suppresses its derived content without rewriting the children.
+
+`valid_at` and `invalid_at` describe native event or information times, not a
+universal access TTL. Past experiences and future plans can remain recallable.
+Supply eligibility depends on scope, native status, forget markers, and the RAW
+parent. Native search does not provide scores in this adapter's DTO; returned
+order is preserved without fabricated similarity values.
+
+## Bank metadata and message status
+
+`BankInfo` returns an allowlisted, typed view of the configured private bank:
+name, description, memory types, storage type, model references, permissions,
+configured capacity, capacity policy, temperature, and UTC creation time.
+Optional missing values remain missing, and a real zero temperature is
+preserved. It does not return prompts, credentials, owner or tenant identity,
+avatar, raw vectors, or unknown fields.
+
+`memory_size` is a configured byte limit, not measured usage, a message count,
+or vector size. Capacity and policy metadata do not establish a usage
+percentage or guarantee that every storage engine applies an eviction policy
+in the same way. A configured capacity policy may evict native content
+independently of Hub supply controls. Bank-wide provisioning and settings are outside this adapter's
+per-user management operations.
+
+`SetMessageStatus` changes one native boolean switch using an expected observed
+status, then independently reads back unchanged content, type, source, session,
+and the desired status. A stale expected value fails before writing; a lost
+response stays unknown unless readback confirms its effect. This is an
+observed-state precondition, not an atomic transaction with other service
+clients.
+
+The DTO distinguishes `nativeStatus` from effective Hub supply `status`.
+Derived records also expose `parentStatus` and `statusChangeAllowed`:
+
+- Disabling a RAW parent suppresses its derived records in Hub without changing
+  each child's native switch.
+- Re-enabling a parent can restore children whose own switches remain enabled.
+- Disabling a child does not disable its siblings or parent. A child cannot be
+  enabled while its parent is disabled.
+- Forgotten targets or parents cannot be enabled through this operation.
+- A status change neither edits content nor cancels queued extraction; later
+  derived records can have their own enabled native switches.
+
+## Recall diagnostics
+
+`SearchDiagnostic` uses the same scoped search and provenance checks as
+`SearchMemories`. It accepts a result limit of 1–20, a similarity threshold of
+0–1, and a keyword weight of 0–1. Zero is preserved. Invalid ranges, non-finite
+numbers, and invalid or overlong queries fail before a service request.
+
+Diagnostics return only verified service hits in their original order. Reading
+a RAW parent for validation does not add it to the results. Recent-RAW
+supplementation belongs to the domain's normal conversation context, not this
+diagnostic operation. Normal search keeps its threshold 0.2 and keyword weight
+0.7.
+
+Threshold and hybrid-weight support depend on the memory storage engine. On a
+dense-only retrieval path these parameters do not create a hybrid filter; the
+adapter does not invent unavailable scores or apply an unsupported additional
+filter. A diagnostic call does not write a conversation, trigger extraction,
+change bank settings, or alter ordinary chat defaults.
+
+## Quote-ledger interface and deletion boundary
+
+The `Index` interface uses the exact native session `hub-life-<scope hash>`,
+keeping automatic dialogue operation sessions separate. Its `DocumentID` is
+the logical `memory-<scope hash>` token; no document is created. Only canonical
+JSON `{"schema":"hub-memory-fact-v1","quote":"..."}` with an empty native agent
+response is decoded as a quote.
+
+Quote writes require independent content reads and two stable bounded
+snapshots. `Remove` is a logical correction using `PUT status:false` and
+independent confirmation with unchanged content. It does not implement user
+deletion, consent withdrawal, or account erasure. `DropDocument` returns
 `memory.ErrUnsupported`.
 
-Native Memory stores searchable plaintext. These local checks use synthetic
-profiles, real Qwen extraction and real embedding; they do not establish
-production, sensitive-data protection or cross-engine acceptance.
-
-
-## Native management capability audit (2026-11-08)
-
-This audit follows the active Python REST API and actual Web memory consumer,
-not API names alone. Bank-wide settings affect every business user sharing that
-application bank; Hub does not turn a per-user management screen into a global
-configuration editor.
-
-| Capability | Native REST and Web consumer | Current Hub use / boundary |
-| --- | --- | --- |
-| Bank identity/configuration | `GET /memories/{id}/config`; Web detail/settings show name, description, models, types, storage, permissions, capacity and extraction settings | Adapter validates the configured private bank and provides `BankInfo` through an explicit allowlist. No credentials, prompts, owner/tenant identity, avatar or arbitrary bank identifier passthrough. |
-| Bank creation/settings | `POST /memories`, `PUT /memories/{id}`; Web supports name/avatar/description, permissions, capacity, policy, temperature and prompts | Application provisioning selects the dedicated bank; Hub does not yet expose global editing. Changing type or embedding is rejected by Python when a nonempty bank would be changed; the Web additionally disables chat model edits after messages exist. |
-| Capacity | `memory_size` is the configured maximum in bytes (default 5 MiB), returned in bank config | It is not used bytes, message count or vector size. This endpoint has no current-usage measurement. Hub must not invent a usage percentage. |
-| Capacity policy | API/config accept `FIFO` / `LRU`; current writer implements FIFO overflow eviction, while another policy reports failure at capacity | Configuration can be reported as configuration only. FIFO may physically evict old records when full, independently of the user-facing Forget feature. LRU is not proven implemented by the enum or selector. |
-| Models/temperature | Config returns `llm_id`, `embd_id`, `temperature`; settings select models and temperature | Chat extraction and real embedding are already consumed. Model refs can be numeric strings, not human-readable names. Bank metadata must not resolve or return provider credentials. |
-| Prompts | Settings save `system_prompt` / `user_prompt` | Current async extraction caller does not pass these saved fields to `extract_by_llm`; default assembler is used. Do not promise that editing these settings changes the active chat extraction path. Prompt bodies are omitted from Hub's proposed safe metadata. |
-| RAW pagination/filtering | `GET /memories/{id}` accepts page/page_size and agent_id; `keywords` is actually an exact native session filter | Hub currently performs a bounded complete scan and returns typed records. Frontend filtering/grouping can improve management, but a text box must not be falsely described as upstream full-text list search. Current Milvus totals are page-local. |
-| Parent and derived provenance | Native list returns RAW parents plus `extract` children, source IDs and optional task; Web expands derived content and opens a content drawer | Hub already preserves native types, source IDs and per-message independent content verification; management UI can group by RAW and trace a selected derived record. |
-| Raw content/vector diagnostic | `GET /messages/{bank}:{id}/content`; Web drawer separates conversation/raw/vector | Hub already reads content for verification. It deliberately does not expose raw embeddings or full model configuration to the normal management screen. |
-| Single-message enable/disable | `PUT /messages/{bank}:{id}` with JSON `{status: boolean}`; Web has a message switch | Adapter now supports scoped `SetMessageStatus` with expected native status and independent readback. It changes one record only, with no parent/child cascade or native compare-and-swap version. |
-| Recall diagnostic | `GET /messages/search` accepts query, top_n, similarity_threshold and keywords_similarity_weight, plus native scope fields | Ordinary chat uses real search with strict bank/user/agent filters and fixed threshold 0.2 / keyword weight 0.7. Separate management diagnostics pass a per-request threshold/keyword weight and limit directly to the same verified search; engine-level application differs (see below). The native DTO has no scores, so no score is manufactured. |
-| Extraction task status | RAW list attaches the latest task by source digest; Web DTO receives task | Hub already distinguishes received, extracting, derivedAvailable, completed, failed and unknown. There is no dedicated memory-task retry/cancel endpoint in this REST surface. Unknown POSTs remain read-only recovery. |
-| Recent messages | `GET /messages` offers limited recent records by bank/agent/session | Hub uses verified bounded list reads instead, allowing parent validation and recent RAW supply without losing lifecycle scope. |
-| Forget / bank deletion | Native `DELETE /messages/{bank}:{id}` sets forget_at; `DELETE /memories/{id}` exists and Web exposes both | Explicitly not integrated as Hub business deletion, consent cleanup or physical account erasure. This iteration must not call them or report successful cleanup. |
-
-Important consumer findings: `web/src/pages/memory/MemoryListPage.tsx` currently
-labels hard-coded sample values as summary statistics (1280 messages, 45.6 MB,
-and 80% active). `MemoryCard` renders `memory_size` next to a message icon. These
-are not sources of real capacity usage or message counts and must not be copied
-into Hub. Bank usage requires a separately defined trustworthy data source.
-
-### Status and source semantics
-
-Native `status` is the record's own boolean switch; `forget_at` is a separate
-soft-forget marker. The typed DTO preserves `nativeStatus` as this original
-switch and `status` as Hub's effective supply state. Derived `parentStatus`
-records the RAW source's effective state; `statusChangeAllowed` is false for
-forgotten targets or forgotten parents. Native `PUT status` changes neither content nor source ID,
-does not cascade to derived records, and does not cancel an already queued
-extraction. Derived messages can arrive later with their own native status true.
-Hub's supply rule additionally requires an active, non-forgotten RAW parent.
-Therefore disabling a RAW source suppresses all of its derived content in Hub
-without rewriting every child; enabling that RAW can restore any child whose own
-native status remains enabled. Disabling one child should not disable its
-siblings or parent. A UI must distinguish a child's own switch from its effective
-supply state, rather than silently persisting the parent's state as the child's.
-
-`SetMessageStatus` fixes the configured bank, enforces the complete
-business scope and source/session provenance, rejects forgotten records, checks the expected
-native switch, issues only the standard PUT, and reads back the same content/type/source/session with
-the desired native status. A stale expected switch fails before PUT. A currently disabled child cannot
-be enabled while its RAW parent is disabled; independently disabling it remains
-allowed. A lost response is unknown until readback confirms its effect. Native
-PUT has no atomic version precondition across external Web writers; do not
-describe this as a cross-system CAS transaction.
-
-Audit source paths:
-`api/apps/restful_apis/memory_api.py`,
-`api/apps/services/memory_api_service.py`,
-`api/db/joint_services/memory_message_service.py`,
-`api/utils/memory_utils.py`, `memory/services/messages.py`,
-`web/src/api/memory.ts`, `web/src/pages/memory/MemorySettingsPage.tsx`,
-`web/src/pages/memory/MemoryMessagesPage.tsx`,
-`web/src/components/memory/MemoryMessageTable.tsx`.
-
-
-`BankInfo` returns only name, description, normalized memory type strings,
-storage type, chat/embedding model references, permissions, configured capacity,
-capacity policy, temperature and UTC creation time (from native epoch millis).
-Missing optional capacity/temperature stays missing; a real zero temperature is
-preserved. It neither returns provider config nor invents measured usage.
-
-Targeted adapter coverage includes bank allowlist/unknown-field secrecy, zero
-preservation, rejected bank/permissions/config, decimal IDs above 2^53, native
-versus effective child state, parent suppression, independent child control,
-forgotten/foreign targets, stale expected state, lost PUT response, false-success
-readback, and unexpected content/source mutation. Real status-control acceptance
-uses a previously registered synthetic validation scope, restores every switch,
-and independently confirms unchanged content, type, provenance and row count.
-It does not add messages, trigger an extraction, call Forget/DELETE or restart a
-service. Management route authorization and browser interaction have separate
-consumer verification.
-
-
-### Native recall diagnostics
-
-`SearchDiagnostic` implements optional `memory.NativeDiagnostics` using the same
-strict search helper as normal `SearchMemories`. It accepts an explicit result
-limit from 1 to 20, similarity threshold from 0 to 1, and keyword weight from 0
-to 1. Both endpoints are inclusive; valid zero values are forwarded as zero,
-not replaced by defaults. NaN, infinities, invalid ranges and invalid/overlong
-queries are rejected before any native request.
-
-The diagnostic result contains only the provider's actual returned hits, in its
-original order, after full scoped content and RAW parent validation. Reading a
-parent for validation does not add that parent to the diagnostic results. The
-recent-two-RAW supplementation belongs only to the domain's normal conversation
-context and is not part of this diagnostic call. This operation performs real
-embedding retrieval but does not write a conversation, invoke extraction, change
-bank-wide settings, or alter ordinary chat's defaults (0.2 / 0.7).
-
-
-Current local engine limitation: `memory/utils/milvus_conn.py` handles the dense
-vector expression but does not apply its similarity option, the text expression
-or fusion weights. Thus the REST parameters are forwarded correctly, while this
-Milvus implementation does not implement their advertised threshold/hybrid
-semantics. A real read-only diagnostic probe using the registered synthetic
-scope returned the same five IDs for (threshold, keyword weight)=(0,0) and
-(1,1); static inspection confirms why. Other engines have distinct consumers.
-Do not describe successful parameter transport or a diagnostic result as proof
-that every native engine applied the threshold and keyword weighting. The Hub
-adapter deliberately does not invent an extra filter without native scores or
-change the provider's standard behavior.
+No interface here calls native Forget, message DELETE, or bank DELETE.
+Disabling supply is not physical deletion. Native searchable content and its
+vectors, logs, and backups require their own storage protection; Hub receipt
+encryption does not encrypt those stores.

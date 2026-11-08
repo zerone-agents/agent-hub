@@ -10,9 +10,52 @@ import {
   toChunkBody,
   buildQuery,
   knowledgeApi,
+  KnowledgeMutationError,
+  KnowledgeUploadPartialError,
+  confirmedUploadDocuments,
+  knowledgeMutationDetails,
 } from "./knowledge";
 
+afterEach(() => { vi.restoreAllMocks(); });
+
 describe("knowledge adapter — field anti-corruption layer", () => {
+  it("keeps absent scores distinct from real zero and finite ranking values above one", () => {
+    const result = normalizeRetrievalResult({ chunks: [
+      { similarity: 2.5, vector_similarity: null, term_similarity: 0 },
+      { similarity: null, score: 0.8, vector_similarity: Infinity, term_similarity: NaN },
+      {},
+    ] });
+    expect(result.chunks.map(c => [c.similarity, c.vector_similarity, c.term_similarity])).toEqual([
+      [2.5, null, 0], [null, null, null], [null, null, null],
+    ]);
+  });
+
+  it("preserves image recovery metadata on business errors", async () => {
+    const data = { outcome: "partial", stage: "image_write", retry_safe: false, image_id: "kb1-c1" };
+    vi.spyOn(apiClient, "post").mockResolvedValueOnce({ data: { success: false, error: "Unconfirmed", data } });
+    await expect(knowledgeApi.chunks.create("kb1", "d1", { content: "draft" })).rejects.toSatisfy((error: unknown) => {
+      expect(knowledgeMutationDetails(error)).toEqual(data);
+      return error instanceof KnowledgeMutationError;
+    });
+  });
+
+  it("retains only validated partial upload receipts and sends per-file table form data", async () => {
+    const files = [new File(["one"], "one.csv"), new File(["two"], "two.csv")];
+    const error = { response: { status: 502, data: { success: false, code: "knowledge_upload_partial", data: { uploaded: [{ id: "d1", name: "one.csv", dataset_id: "kb1" }] } } } };
+    const post = vi.spyOn(apiClient, "post").mockRejectedValueOnce(error);
+    const config = { table_column_mode: "manual" as const, table_column_roles: { title: "indexing" as const } };
+    await expect(knowledgeApi.documents.upload("kb1", files, config)).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(KnowledgeUploadPartialError);
+      const partial = error as KnowledgeUploadPartialError;
+      expect(partial.documents.map(d => d.id)).toEqual(["d1"]);
+      expect(partial.pendingFiles).toEqual([files[1]]);
+      return true;
+    });
+    expect((post.mock.calls[0][1] as FormData).get("parser_config")).toBe(JSON.stringify(config));
+    expect(confirmedUploadDocuments(error, "other", files)).toBeUndefined();
+    expect(confirmedUploadDocuments(error, "kb1", [files[0], files[0]])).toBeUndefined();
+    expect(confirmedUploadDocuments(error, "kb1", [files[0]])).toBeUndefined();
+  });
   describe("normalizeDataset", () => {
     it("reads gateway-stable field names", () => {
       const ds = normalizeDataset({
@@ -396,6 +439,82 @@ it('sends precise document filters and keeps an explicit false flag', async () =
 
 describe("dataset write readback and scoped candidates", () => {
   afterEach(() => { vi.restoreAllMocks(); });
+  it.each(["42", "9007199254740993"])("never accepts rewriting canonical numeric model reference %s as a local alias", async (reference) => {
+    const written = { id: "kb1", embd_id: `${reference}@Anthropic`, parser_config: { layout_recognize: "MinerU" } };
+    const put = vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: written } });
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: written } });
+    await expect(knowledgeApi.datasets.update("kb1", { embd_id: reference })).rejects.toThrow("配置读回未确认");
+    await expect(knowledgeApi.datasets.update("kb1", { parser_config: { layout_recognize: reference } })).rejects.toThrow("配置读回未确认");
+    const exact = { id: "kb1", embd_id: reference, parser_config: { layout_recognize: reference } };
+    put.mockResolvedValue({ data: { success: true, data: exact } });
+    get.mockResolvedValue({ data: { success: true, data: exact } });
+    await expect(knowledgeApi.datasets.update("kb1", { embd_id: reference, parser_config: { layout_recognize: reference } })).resolves.toMatchObject(exact);
+  });
+  it("confirms flattened ext table and graph values with ext taking precedence", async () => {
+    const input = { parser_config: {
+      chunk_token_num: 64,
+      table_column_mode: "auto",
+      table_column_roles: { obsolete: "both" },
+      graphrag: { method: "light", community: false },
+      ext: {
+        chunk_token_num: 256,
+        table_column_mode: "manual",
+        table_column_roles: { "title.with.dot": "vectorize", region: "metadata" },
+        graphrag: { enabled: true, method: "ner", retry_attempts: 3 },
+      },
+    } };
+    const snapshot = structuredClone(input);
+    const saved = { id: "kb1", parser_config: {
+      chunk_token_num: 256,
+      table_column_mode: "manual",
+      table_column_roles: { region: "metadata", "title.with.dot": "indexing" },
+      graphrag: { use_graphrag: true, method: "ner", retry_attempts: 3, community: true, entity_types: ["person"] },
+      unrelated: true,
+    } };
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: saved } });
+    await expect(knowledgeApi.datasets.update("kb1", input)).resolves.toMatchObject(saved);
+    expect(input).toEqual(snapshot);
+  });
+
+  it.each(["top-level", "ext"])("rejects stale role entries after removal or clearing through %s", async (location) => {
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    const get = vi.spyOn(apiClient, "get");
+    for (const requestedRoles of [{ kept: "indexing" }, {}]) {
+      const fields = { table_column_roles: requestedRoles };
+      const parser_config = location === "ext" ? { table_column_roles: { ignored: "both" }, ext: fields } : fields;
+      get.mockResolvedValue({ data: { success: true, data: { id: "kb1", parser_config: {
+        table_column_roles: { ...requestedRoles, stale: "metadata" },
+      } } } });
+      await expect(knowledgeApi.datasets.update("kb1", { parser_config })).rejects.toThrow("配置读回未确认");
+    }
+  });
+
+  it.each([{ kept: "indexing" }, {}])("accepts an exact role replacement while other parser objects remain deep-merge patches: %j", async (roles) => {
+    const saved = { id: "kb1", parser_config: {
+      table_column_roles: roles,
+      graphrag: { method: "ner", community: true },
+      raptor: { use_raptor: true, max_cluster: 64 },
+    } };
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: saved } });
+    await expect(knowledgeApi.datasets.update("kb1", { parser_config: { ext: {
+      table_column_roles: roles, graphrag: { method: "ner" }, raptor: { use_raptor: true },
+    } } })).resolves.toMatchObject(saved);
+  });
+
+  it("canonicalizes legacy readback ext without changing the returned stored representation", async () => {
+    const saved = { id: "kb1", parser_config: {
+      table_column_roles: { stale: "both" },
+      ext: { table_column_roles: {}, graphrag: { method: "ner", community: true } },
+    } };
+    vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: saved } });
+    await expect(knowledgeApi.datasets.update("kb1", { parser_config: {
+      table_column_roles: {}, graphrag: { method: "ner" },
+    } })).resolves.toMatchObject(saved);
+  });
+
   it("confirms only requested dataset fields with an independent GET", async () => {
     vi.spyOn(apiClient, "put").mockResolvedValue({ data: { success: true, data: null } });
     const get = vi.spyOn(apiClient, "get").mockResolvedValue({ data: { success: true, data: { id: "kb/1", name: "Updated", parser_config: { custom: true, auto_keywords: 2 } } } });

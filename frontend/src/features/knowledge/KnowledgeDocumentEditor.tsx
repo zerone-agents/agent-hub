@@ -1,3 +1,4 @@
+import { useParserTranslation } from "./useParserTranslation";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -107,6 +108,7 @@ function DocumentEditorForm({
   onReparse,
 }: EditorProps) {
   const { t } = useTranslation();
+  const { t: parserText } = useParserTranslation();
   const style = usePrimaryButtonStyle();
   const [form] = Form.useForm<DocumentEditorValues>();
   const [busy, setBusy] = useState(false);
@@ -336,6 +338,14 @@ function DocumentEditorForm({
               forceRender: true,
               children: (
                 <>
+                  {parser === "table" && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      title={parserText("documentTableHint")}
+                      style={{ marginBottom: 12 }}
+                    />
+                  )}
                   {!!doc.pipeline_id && (
                     <Alert
                       type={

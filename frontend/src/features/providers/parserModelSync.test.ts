@@ -82,7 +82,17 @@ describe('parser models eligible for precise sync', () => {
   })
 })
 
-describe('verify, persist and independently read a single parser model', () => {
+describe('persist a verified parser model and independently read its identity', () => {
+  it('returns canonical OCR identity from the selected instance after one atomic creation', async () => {
+    const ocr = model('ocr-one')
+    const reference = '9007199254740993'
+    const expected = { ...stored('ocr-one@hub-owned'), reference, fullId: reference, instanceName: 'hub-owned' }
+    const sync = vi.spyOn(providerApi, 'syncMultiRAG').mockResolvedValue(response({ success: true, endpoint: 'instances', instanceName: 'hub-owned', factoryName: 'MinerU', callCount: 1, perCall: [{ modelName: 'ocr-one', reference, ok: true }] }))
+    vi.spyOn(multiragApi, 'getModels').mockResolvedValue(response([expected]))
+    await expect(syncParserModel(provider([ocr]), ocr, ownerState().owner)).resolves.toEqual(expected)
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect(sync.mock.calls[0][1]?.verifyOnly).toBe(false)
+  })
   it('syncs two same-factory OCR models separately without including embedding', async () => {
     const models = [model('ocr-one'), model('ocr-two'), model('embedding', 'embedding')]
     const p = provider(models)
@@ -91,8 +101,8 @@ describe('verify, persist and independently read a single parser model', () => {
     const read = vi.spyOn(multiragApi, 'getModels').mockResolvedValue(response([stored('ocr-one'), stored('ocr-two')]))
     for (const candidate of getParserSyncModels(p)) await expect(syncParserModel(p, candidate, owner)).resolves.toEqual(stored(candidate.modelId))
     expect(sync.mock.calls).toEqual([
-      [7, { verifyOnly: true, modelIds: ['ocr-one'] }, owner], [7, { verifyOnly: false, modelIds: ['ocr-one'] }, owner],
-      [7, { verifyOnly: true, modelIds: ['ocr-two'] }, owner], [7, { verifyOnly: false, modelIds: ['ocr-two'] }, owner],
+      [7, { verifyOnly: false, modelIds: ['ocr-one'] }, owner],
+      [7, { verifyOnly: false, modelIds: ['ocr-two'] }, owner],
     ])
     expect(read.mock.calls).toEqual([['ocr', owner], ['ocr', owner]])
     expect(owner.assertCurrent).toHaveBeenCalled()
@@ -109,7 +119,7 @@ describe('verify, persist and independently read a single parser model', () => {
     const expected = stored(name, factory, 'image2text')
     const read = vi.spyOn(multiragApi, 'getModels').mockResolvedValue(response([stored('other-vision', factory, 'image2text'), expected]))
     await expect(syncParserModel(p, vision, owner)).resolves.toEqual(expected)
-    expect(sync.mock.calls).toEqual([[7, { verifyOnly: true, modelIds: ['vision@preview'] }, owner], [7, { verifyOnly: false, modelIds: ['vision@preview'] }, owner]])
+    expect(sync.mock.calls).toEqual([[7, { verifyOnly: false, modelIds: ['vision@preview'] }, owner]])
     expect(read).toHaveBeenCalledWith('image2text', owner)
   })
 
@@ -128,21 +138,21 @@ describe('verify, persist and independently read a single parser model', () => {
     { success: true, factoryName: 'MinerU', callCount: 1, perCall: [{ modelName: 'other-ocr', ok: true }] },
     { success: true, factoryName: 'PaddleOCR', callCount: 1, perCall: [{ modelName: 'ocr-one', ok: true }] },
     { success: true, factoryName: 'MinerU', callCount: 1 },
-  ])('stops after an unconfirmed verification result %#', async (result) => {
+  ])('stops after an unconfirmed persistence result %#', async (result) => {
     const ocr = model('ocr-one')
     const sync = vi.spyOn(providerApi, 'syncMultiRAG').mockResolvedValue(response(result))
     const read = vi.spyOn(multiragApi, 'getModels')
-    await expect(syncParserModel(provider([ocr]), ocr, ownerState().owner)).rejects.toMatchObject({ code: 'verify-failed' })
+    await expect(syncParserModel(provider([ocr]), ocr, ownerState().owner)).rejects.toMatchObject({ code: 'sync-failed' })
     expect(sync).toHaveBeenCalledTimes(1)
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('does not report a successful verify-only response as successful persistence', async () => {
+  it('does not read inventory after persistence failure', async () => {
     const ocr = model('ocr-one')
-    const sync = vi.spyOn(providerApi, 'syncMultiRAG').mockResolvedValueOnce(confirmed(ocr.modelId)).mockResolvedValueOnce(response({ success: false, callCount: 1, perCall: [{ ok: false, error: 'fixture-secret' }] }))
+    const sync = vi.spyOn(providerApi, 'syncMultiRAG').mockResolvedValueOnce(response({ success: false, callCount: 1, perCall: [{ ok: false, error: 'fixture-secret' }] }))
     const read = vi.spyOn(multiragApi, 'getModels')
     await expect(syncParserModel(provider([ocr]), ocr, ownerState().owner)).rejects.toMatchObject({ code: 'sync-failed' })
-    expect(sync).toHaveBeenCalledTimes(2)
+    expect(sync).toHaveBeenCalledTimes(1)
     expect(read).not.toHaveBeenCalled()
   })
 
@@ -162,16 +172,16 @@ describe('verify, persist and independently read a single parser model', () => {
     vi.spyOn(providerApi, 'syncMultiRAG').mockRejectedValue(new Error('fixture-secret in upstream payload'))
     const error = await syncParserModel(provider([ocr]), ocr, ownerState().owner).catch((failure: unknown) => failure)
     expect(error).toBeInstanceOf(ParserModelSyncError)
-    expect(error).toMatchObject({ code: 'verify-failed' })
+    expect(error).toMatchObject({ code: 'sync-failed' })
     expect(String(error)).not.toContain('fixture-secret')
     expect(error).not.toHaveProperty('cause')
   })
 
-  it.each(['verify', 'persist', 'readback'] as const)('stops when ownership changes after %s', async (stage) => {
+  it.each(['persist', 'readback'] as const)('stops when ownership changes after %s', async (stage) => {
     const ocr = model('ocr-one')
     const state = ownerState()
     const sync = vi.spyOn(providerApi, 'syncMultiRAG').mockImplementation(async (_id, body) => {
-      if ((stage === 'verify' && body?.verifyOnly) || (stage === 'persist' && body?.verifyOnly === false)) state.loseAccess()
+      if ((stage === 'persist' && body?.verifyOnly === false)) state.loseAccess()
       return confirmed(ocr.modelId)
     })
     const read = vi.spyOn(multiragApi, 'getModels').mockImplementation(async () => {
@@ -179,7 +189,7 @@ describe('verify, persist and independently read a single parser model', () => {
       return response([stored(ocr.modelId)])
     })
     await expect(syncParserModel(provider([ocr]), ocr, state.owner)).rejects.toMatchObject({ code: 'owner-changed' })
-    expect(sync).toHaveBeenCalledTimes(stage === 'verify' ? 1 : 2)
+    expect(sync).toHaveBeenCalledTimes(1)
     expect(read).toHaveBeenCalledTimes(stage === 'readback' ? 1 : 0)
   })
 })

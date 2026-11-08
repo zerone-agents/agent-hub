@@ -1,5 +1,6 @@
 import { unwrapResponse } from '@/api/client'
 import { multiragApi, type MultiRAGModel } from '@/api/multirag'
+import { modelReference } from '@/api/modelIdentity'
 import { providerApi, type CatalogModel, type Provider } from '@/api/providers'
 import type { RequestOwner } from '@/api/requestOwnership'
 
@@ -66,26 +67,33 @@ export async function syncParserModel(provider: Provider, model: CatalogModel, o
     }
     if (model.modelType === 'ocr' && !provider.baseUrl.trim()) throw new ParserModelSyncError('needs-config')
 
-    for (const verifyOnly of [true, false]) {
-      phase = verifyOnly ? 'verify-failed' : 'sync-failed'
-      assertOwner(owner)
-      const response = await providerApi.syncMultiRAG(provider.id, { verifyOnly, modelIds: [model.modelId] }, owner)
-      assertOwner(owner)
-      if (!confirmedSync(unwrapResponse<unknown>(response), factory, model.modelId)) throw new ParserModelSyncError(phase)
-    }
+    // Both legacy add_llm and atomic instance creation already probe. Sending a
+    // separate verify first would repeat a paid inference without improving ack.
+    phase = 'sync-failed'
+    assertOwner(owner)
+    const response = await providerApi.syncMultiRAG(provider.id, { verifyOnly: false, modelIds: [model.modelId] }, owner)
+    assertOwner(owner)
+    const receipt = unwrapResponse<unknown>(response)
+    if (!confirmedSync(receipt, factory, model.modelId) || !isRecord(receipt)) throw new ParserModelSyncError(phase)
+    const calls = receipt.perCall as Record<string, unknown>[]
+    const reference = calls[0].reference
+    if (receipt.endpoint === 'instances' && (typeof reference !== 'string' || typeof receipt.instanceName !== 'string' || !receipt.instanceName)) throw new ParserModelSyncError(phase)
 
     phase = 'readback-failed'
     const type = model.modelType === 'ocr' ? 'ocr' : 'image2text'
     // MultiRAG persists the OpenAI-compatible factory's legacy name suffix.
     const name = factory === 'OpenAI-API-Compatible' ? `${model.modelId}___OpenAI-API` : model.modelId
     assertOwner(owner)
-    const response = await multiragApi.getModels(type, owner)
+    const inventory = await multiragApi.getModels(type, owner)
     assertOwner(owner)
-    const models = unwrapResponse<unknown>(response)
+    const models = unwrapResponse<unknown>(inventory)
     if (!Array.isArray(models)) throw new ParserModelSyncError('readback-failed')
-    const stored = models.find((candidate: unknown) => isRecord(candidate)
-      && candidate.name === name && candidate.factory === factory && candidate.type === type
-      && candidate.status === '1' && candidate.fullId === `${name}@${factory}`) as MultiRAGModel | undefined
+    const matches = models.filter((candidate: unknown) => isRecord(candidate)
+      && candidate.factory === factory && candidate.type === type && candidate.status === '1'
+      && modelReference(candidate as unknown as MultiRAGModel)
+      && (receipt.endpoint === 'instances' ? candidate.reference === reference && candidate.instanceName === receipt.instanceName
+        : candidate.name === name && candidate.fullId === `${name}@${factory}`)) as MultiRAGModel[]
+    const stored = matches.length === 1 ? matches[0] : undefined
     if (!stored) throw new ParserModelSyncError('readback-failed')
     assertOwner(owner)
     return stored

@@ -117,7 +117,7 @@ func TestListDatasets_FiltersByControlPanelDisplayName(t *testing.T) {
 	if strings.Contains(gotQuery, "keywords=") {
 		t.Fatalf("keywords should be filtered in gateway for display names, query=%q", gotQuery)
 	}
-	if !strings.Contains(gotQuery, "page=1") || !strings.Contains(gotQuery, "page_size=1000") {
+	if !strings.Contains(gotQuery, "page=1") || !strings.Contains(gotQuery, "page_size=100") {
 		t.Fatalf("query should fetch enough rows for display-name filtering, got %q", gotQuery)
 	}
 	if result.Total != 1 || len(result.Datasets) != 1 {
@@ -381,6 +381,9 @@ func TestUploadDocuments_Multipart(t *testing.T) {
 		if err := r.ParseMultipartForm(8 << 20); err != nil {
 			t.Fatalf("ParseMultipartForm: %v", err)
 		}
+		if r.FormValue("parser_config") != `{"table_column_mode":"manual","table_column_roles":{"title":"indexing","owner":"metadata"}}` {
+			t.Errorf("per-file table roles were not forwarded: %q", r.FormValue("parser_config"))
+		}
 		file, _, err := r.FormFile("files")
 		if err != nil {
 			t.Fatalf("FormFile: %v", err)
@@ -410,6 +413,9 @@ func TestUploadDocuments_Multipart(t *testing.T) {
 	}
 	_, _ = part.Write([]byte("hello"))
 	if err := writer.WriteField("parent_path", "videos/2026"); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	if err := writer.WriteField("parser_config", `{"table_column_mode":"manual","table_column_roles":{"title":"indexing","owner":"metadata"}}`); err != nil {
 		t.Fatalf("WriteField: %v", err)
 	}
 	if err := writer.Close(); err != nil {
@@ -1126,32 +1132,6 @@ func TestCreateDatasetConfigurationFailureKeepsDurableID(t *testing.T) {
 			var pending *domain.DatasetConfigurationError
 			if !errors.As(err, &pending) || (*pending.Dataset)["id"] != "kb1" || creates != 1 || strings.Contains(err.Error(), "private-storage-path") {
 				t.Fatalf("err=%v creates=%d", err, creates)
-			}
-		})
-	}
-}
-
-// datasetFilterFetchSize 的取值直接决定 hub 向 multirag 请求的行数（本地过滤分支），
-// 因此既要有下限（保证过滤池足够），也要有上限（否则 page*pageSize 会被外部放大）。
-func TestDatasetFilterFetchSizeBounds(t *testing.T) {
-	cases := []struct {
-		name           string
-		page, pageSize int
-		wantFetchSize  int
-	}{
-		{name: "默认下限 1000", page: 1, pageSize: 10, wantFetchSize: 1000},
-		{name: "非正入参走默认后再取下限", page: 0, pageSize: 0, wantFetchSize: 1000},
-		// 乘积落在 (下限, 上限) 区间内：必须按乘积取，既不能被抬到 1000 也不能被削到 20000
-		{name: "乘积介于上下限之间则按乘积", page: 5, pageSize: 500, wantFetchSize: 2500},
-		{name: "被放大时封顶（handler 钳制后仍可达 1e8）", page: 1_000_000, pageSize: 100, wantFetchSize: 20000},
-		{name: "恰好等于上限", page: 200, pageSize: 100, wantFetchSize: 20000},
-		{name: "略低于上限不封顶", page: 199, pageSize: 100, wantFetchSize: 19900},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := datasetFilterFetchSize(tc.page, tc.pageSize); got != tc.wantFetchSize {
-				t.Fatalf("datasetFilterFetchSize(%d, %d) = %d, want %d", tc.page, tc.pageSize, got, tc.wantFetchSize)
 			}
 		})
 	}

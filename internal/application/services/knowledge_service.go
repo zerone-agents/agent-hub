@@ -8,6 +8,7 @@ import (
 
 	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/knowledge"
+	"control-panel/internal/domain/provider"
 	repository "control-panel/internal/infrastructure/persistence"
 )
 
@@ -552,7 +553,10 @@ func (s *KnowledgeService) translateModelRefs(ctx context.Context, tenantID stri
 // ProviderService, providers without a MultiRAG factory mapping, and
 // unknown model_ids all pass through unchanged.
 func (s *KnowledgeService) translateLocalModelRef(ctx context.Context, tenantID, ref, mode string) string {
-	if ref == "" || (mode == "layout" && strings.Contains(ref, "@")) || s == nil || s.providerSvc == nil {
+	// A canonical tenant-model identity takes precedence over a coincidentally
+	// equal local model name. Keep the decimal string intact, including int64 IDs
+	// larger than JavaScript's safe integer range.
+	if provider.ValidModelReference(ref) || ref == "" || (mode == "layout" && strings.Contains(ref, "@")) || s == nil || s.providerSvc == nil {
 		return ref
 	}
 	p, err := s.providerSvc.FindProviderByModelID(tenantID, ref)
