@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"control-panel/internal/domain/agent"
@@ -22,6 +23,12 @@ var wolfchaResidents = []struct {
 	{"jie", "阿杰", "程序员", "话少，记仇，开口就是逻辑链"},
 }
 
+func residentAvatar(name, color string) string {
+	initial := string([]rune(name)[0])
+	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="48" fill="#%s"/><text x="48" y="64" fill="white" font-size="43" text-anchor="middle">%s</text></svg>`, color, initial)
+	return "data:image/svg+xml," + url.PathEscape(svg)
+}
+
 // SeedWolfchaResidents creates or updates six stable Agents and their game
 // roster bindings. Voice is intentionally blank until the voice task.
 func (s *GameSeatService) SeedWolfchaResidents() error {
@@ -29,7 +36,8 @@ func (s *GameSeatService) SeedWolfchaResidents() error {
 	if err := s.db.Where("tenant_id = ? AND LOWER(model_id) LIKE ? AND provider_id IS NOT NULL", s.tenantID, "%deepseek%").Order("id").First(&template).Error; err != nil {
 		return fmt.Errorf("configure a DeepSeek Agent before seeding residents: %w", err)
 	}
-	for _, resident := range wolfchaResidents {
+	colors := []string{"725945", "884c5d", "4f7391", "626b4b", "a26778", "596574"}
+	for i, resident := range wolfchaResidents {
 		name := "wolfcha-" + resident.Key
 		prompt := fmt.Sprintf("你是%s，%s。你的说话方式：%s。你是游戏中的固定居民，记得和同一玩家相处的经历。", resident.Name, resident.Role, resident.Bio)
 		var residentAgent agent.AgentConfig
@@ -52,7 +60,7 @@ func (s *GameSeatService) SeedWolfchaResidents() error {
 			return err
 		}
 		row := gameseat.Character{TenantID: s.tenantID, GameKey: "wolfcha", Key: resident.Key, AgentID: residentAgent.ID,
-			Name: resident.Name, AvatarURL: "https://api.dicebear.com/9.x/initials/svg?seed=" + resident.Key,
+			Name: resident.Name, AvatarURL: residentAvatar(resident.Name, colors[i]),
 			Bio: strings.TrimSpace(resident.Role + "，" + resident.Bio), Voice: ""}
 		if err := s.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "game_key"}, {Name: "key"}},
 			DoUpdates: clause.AssignmentColumns([]string{"agent_id", "name", "avatar_url", "bio"})}).Create(&row).Error; err != nil {
