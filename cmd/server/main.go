@@ -236,6 +236,13 @@ func main() {
 	knowledgeService.SetDatasetGuard(datasetGuard)
 	// Reservations are durable even when the memory HTTP service is disabled.
 	// They cover the shared KnowledgeService used by API, MCP and deployment.
+	if cfg.Memory.RuntimeEnabled() {
+		key, err := systemsetting.EnsureMemoryWrappingKey(database.GetDB(), cfg.Memory.WrappingKey)
+		if err != nil {
+			log.Fatalf("Failed to provision memory wrapping key: %v", err)
+		}
+		cfg.Memory.WrappingKey = key
+	}
 	memoryBindings, err := configureMemory(cfg.Memory, datasetGuard)
 	if err != nil {
 		log.Fatalf("Failed to initialize memory service: %v", err)
@@ -244,7 +251,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize memory application management: %v", err)
 	}
-	if cfg.Memory.Enabled {
+	if cfg.Memory.RuntimeEnabled() {
 		memoryHandler := handler.NewMemoryHandler(memoryBindings, auditRecorder)
 		memoryHandler.SetBindingSource(memorySource)
 		handler.RegisterMemoryRoutes(r, memoryHandler)
@@ -462,10 +469,14 @@ func main() {
 	adminWrite := v1group.Group("/admin", middleware.RequireManager())
 	// 非敏感只读：admin | maintainer | member（逐条显式授予，见 spec 端点表）
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
-	if cfg.Memory.Enabled {
+	if cfg.Memory.RuntimeEnabled() {
 		memoryAdmin := handler.NewMemoryAdminHandler(memoryBindings, auditRecorder)
 		memoryAdmin.SetBindingSource(memorySource)
 		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, memoryAdmin)
+	} else if cfg.Memory.Enabled {
+		handler.RegisterUnconfiguredMemoryAdminRoutes(adminRead)
+	} else {
+		handler.RegisterDisabledMemoryAdminRoutes(adminRead)
 	}
 
 	// ---------- Audit 领域 ----------

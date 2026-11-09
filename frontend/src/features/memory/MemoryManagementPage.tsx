@@ -177,6 +177,13 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
   const applications = useQuery({
     queryKey: [...queryPrefix, 'applications'],
     queryFn: ({ signal }) => memoryApi.applications(signal),
+    retry: (failureCount, error) =>
+      !(
+        isAxiosError<{ code?: string } | undefined>(error) &&
+        ['memory_disabled', 'memory_not_configured'].includes(
+          error.response?.data?.code ?? ''
+        )
+      ) && failureCount < 1,
     gcTime: 0
   })
   const application =

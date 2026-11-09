@@ -24,6 +24,12 @@ type NativeManagement interface {
 	SetMessageStatus(context.Context, string, string, bool, bool) (NativeMessage, error)
 }
 
+// NativeForget excludes one provider record from future retrieval. It does
+// not erase content, cascade to siblings or recall in-flight context.
+type NativeForget interface {
+	ForgetMessage(context.Context, string, string) (NativeMessage, error)
+}
+
 type NativeSearchOptions struct {
 	Limit               int     `json:"limit"`
 	SimilarityThreshold float64 `json:"similarityThreshold"`

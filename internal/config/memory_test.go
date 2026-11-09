@@ -57,7 +57,7 @@ func TestMemoryConfigurationIsOptInAndFailClosed(t *testing.T) {
 			b, _ := json.Marshal([]MemoryClient{bad})
 			m.ClientsJSON = string(b)
 		},
-		"missing key":                func(m *MemoryConfig) { m.WrappingKey = "" },
+		"invalid key":                func(m *MemoryConfig) { m.WrappingKey = "invalid" },
 		"missing backend credential": func(m *MemoryConfig) { m.MultiragKey = "" },
 		"credential in url":          func(m *MemoryConfig) { m.MultiragURL = "https://secret@example.com" },
 		"unknown client property":    func(m *MemoryConfig) { m.ClientsJSON = `[{"realData":true}]` },

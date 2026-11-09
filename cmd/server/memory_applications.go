@@ -23,7 +23,7 @@ type memoryApplicationSource struct {
 }
 
 func configureMemoryApplications(cfg config.MemoryConfig, static []handler.MemoryBinding) (*memoryApplicationSource, []config.MemoryManager, error) {
-	if !cfg.Enabled {
+	if !cfg.RuntimeEnabled() {
 		return nil, nil, nil
 	}
 	managers, err := cfg.Managers()

@@ -9,6 +9,24 @@ import (
 	"gorm.io/gorm"
 )
 
+func (s *Service) ForgetNativeMessage(ctx context.Context, sc Scope, id string) (NativeMessage, error) {
+	if _, err := s.native(); err != nil {
+		return NativeMessage{}, err
+	}
+	forgetter, ok := s.cfg.Native.(NativeForget)
+	if !ok {
+		return NativeMessage{}, ErrUnsupported
+	}
+	parsed, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || parsed < 1 || strconv.FormatInt(parsed, 10) != id {
+		return NativeMessage{}, ErrInvalid
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { _, e := s.life(tx, sc, true); return e }); err != nil {
+		return NativeMessage{}, err
+	}
+	return forgetter.ForgetMessage(ctx, "memory-"+scopeKey(sc), id)
+}
+
 func (s *Service) nativeManagement() (NativeManagement, error) {
 	if s.cfg.Backend != BackendNative {
 		return nil, ErrUnsupported

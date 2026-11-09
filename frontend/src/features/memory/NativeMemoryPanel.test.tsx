@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -18,7 +19,8 @@ vi.mock('@/api/memory', async (original) => ({
     nativeMessages: vi.fn(),
     nativeContext: vi.fn(),
     nativeSearch: vi.fn(),
-    setNativeStatus: vi.fn()
+    setNativeStatus: vi.fn(),
+    forgetNativeMessage: vi.fn()
   }
 }))
 const subject = {
@@ -65,6 +67,7 @@ function mount(state = 'active', management = false) {
                   policyVersion: 'synthetic-v1',
                   dataClass: 'synthetic',
                   nativeStatusSupported: true,
+                  nativeForgetSupported: true,
                   nativeDiagnosticsSupported: true
                 }
               : undefined
@@ -93,6 +96,97 @@ afterEach(() => {
   clients.length = 0
 })
 describe('native memory provenance', () => {
+  it('confirms forgetting, preserves the enable flag and distinguishes forgotten source from child records', async () => {
+    const forgotten = rows.map((item, index) => ({
+      ...item,
+      status: false,
+      statusChangeAllowed: false,
+      forgottenAt: index === 0 ? '2026-11-09 12:00:00' : undefined,
+      parentForgottenAt: index > 0 ? '2026-11-09 12:00:00' : undefined,
+      parentStatus: index > 0 ? false : undefined
+    }))
+    vi.mocked(memoryApi.forgetNativeMessage).mockImplementation(async () => {
+      vi.mocked(memoryApi.nativeMessages).mockResolvedValue(forgotten)
+      return forgotten[0]
+    })
+    mount('active', true)
+    fireEvent.click(
+      await screen.findByRole('button', { name: '查看记忆 1 详情' })
+    )
+    const drawer = await screen.findByRole('dialog', { name: '记忆详情' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '遗忘此条' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: '遗忘这条记忆？'
+    })
+    expect(within(dialog).getByText(/后续正常检索排除/)).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/不会逐条将派生记忆标记/)
+    ).toBeInTheDocument()
+    expect(memoryApi.forgetNativeMessage).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '遗忘此条' }))
+    await waitFor(() => {
+      expect(memoryApi.forgetNativeMessage).toHaveBeenCalledWith(
+        '1',
+        subject.scope
+      )
+    })
+    await within(drawer).findByText('2026-11-09 12:00:00')
+    expect(
+      within(drawer).getByRole('button', { name: '遗忘此条' })
+    ).toBeDisabled()
+    expect(within(drawer).getByRole('switch')).toBeDisabled()
+    expect(screen.getAllByText('来源已遗忘').length).toBeGreaterThan(0)
+    expect(memoryApi.setNativeStatus).not.toHaveBeenCalled()
+  })
+
+  it('clears recall while forgetting and ignores a late response from before the change', async () => {
+    let resolve!: (
+      value: Awaited<ReturnType<typeof memoryApi.nativeContext>>
+    ) => void
+    vi.mocked(memoryApi.nativeContext).mockReturnValue(
+      new Promise((done) => {
+        resolve = done
+      })
+    )
+    vi.mocked(memoryApi.forgetNativeMessage).mockRejectedValue(
+      new Error('unconfirmed')
+    )
+    mount('active', true)
+    await screen.findByText('semantic actual source content')
+    fireEvent.click(screen.getByRole('tab', { name: '召回诊断' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '检索原生记忆' }), {
+      target: { value: 'test' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: '检索记忆' }))
+    fireEvent.click(screen.getByRole('tab', { name: /记忆记录/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '查看记忆 2 详情' })
+    )
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: '记忆详情' })).getByRole(
+        'button',
+        { name: '遗忘此条' }
+      )
+    )
+    const dialog = screen.getByRole('dialog', { name: '遗忘这条记忆？' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '遗忘此条' }))
+    await within(dialog).findByText(/遗忘结果尚未确认/)
+    expect(
+      within(dialog).getByRole('button', { name: '遗忘此条' })
+    ).toBeDisabled()
+    await act(async () => {
+      resolve({
+        messages: [{ ...rows[1], content: 'STALE_RECALL' }],
+        status: 'ready',
+        budgetLimited: false,
+        recentSourceIncluded: false,
+        currentnessNote: ''
+      })
+    })
+    expect(screen.queryByText('STALE_RECALL')).not.toBeInTheDocument()
+    expect(memoryApi.forgetNativeMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('shows all actual memory types and source status without manual entry or delete controls', async () => {
     mount()
     await screen.findByText('semantic actual source content')
@@ -195,7 +289,9 @@ describe('memory management interactions', () => {
     ).toBeInTheDocument()
     fireEvent.click(within(drawer).getByRole('button', { name: '追溯原文 #1' }))
     expect(
-      within(drawer).getByText('raw actual source content', { selector: 'pre' })
+      within(drawer).getByText('raw actual source content', {
+        selector: 'pre'
+      })
     ).toBeInTheDocument()
     fireEvent.click(
       within(drawer).getByRole('button', { name: '查看关联记忆 3' })
@@ -345,6 +441,8 @@ describe('native retrieval diagnostic honesty', () => {
     fireEvent.click(
       screen.getByText('原生检索', { selector: '.ant-segmented-item-label' })
     )
+    expect(screen.getByText(/经来源校验的原生检索命中/)).toBeInTheDocument()
+    expect(screen.queryByText(/最近原文优先补入/)).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('spinbutton', { name: '返回条数' }), {
       target: { value: '3' }
     })
