@@ -46,13 +46,19 @@ func TestGameSeatVotePersistsAcrossSessionsAndIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.Attitude, second.Attitude)
 	require.Equal(t, first.Recent, second.Recent)
+	aiSeat := 2
+	require.NoError(t, service.Event(session.ID, GameSeatEventInput{Seq: 2, Type: "vote", Day: 1, ActorSeat: &aiSeat, TargetSeat: &seat, Detail: "另一位 AI 投票给老周"}))
+	afterAI, err := service.Memory("wolfcha", "player-one", "zhou")
+	require.NoError(t, err)
+	require.Equal(t, first.Attitude, afterAI.Attitude)
+	require.Len(t, afterAI.Recent, 2)
 
 	// A later game for the same player resolves the same long-lived Run.
 	later := gameseat.Session{ID: "22222222-2222-4222-8222-222222222222", TenantID: "t1", GameKey: "wolfcha", PlayerID: "player-one", PlayerName: "玩家", RunID: gameRun.ID, GameNumber: 2}
 	require.NoError(t, db.Create(&later).Error)
 	view, err := service.Memory(later.GameKey, later.PlayerID, "zhou")
 	require.NoError(t, err)
-	require.Contains(t, view.Recent[0], "玩家投票给老周")
+	require.Contains(t, strings.Join(view.Recent, "；"), "玩家投票给老周")
 	require.NoError(t, db.Create(&gameseat.SessionSeat{SessionID: later.ID, Seat: 2, CharacterID: character.ID}).Error)
 	service.budget = 2
 	original := json.RawMessage(`{"role":"user","content":"原始提示"}`)

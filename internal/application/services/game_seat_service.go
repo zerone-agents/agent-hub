@@ -293,6 +293,16 @@ func (s *GameSeatService) Event(sessionID string, input GameSeatEventInput) erro
 	if err := s.db.Preload("Seats").Where("tenant_id = ? AND id = ?", s.tenantID, sessionID).First(&session).Error; err != nil {
 		return err
 	}
+	// Votes, rescues and accusations by another AI are game facts, but they do
+	// not change a resident's attitude toward the human player.
+	affectsPlayer := true
+	if input.ActorSeat != nil && (input.Type == "vote" || input.Type == "saved" || input.Type == "accused") {
+		for _, seat := range session.Seats {
+			if seat.Seat == *input.ActorSeat {
+				affectsPlayer = false
+			}
+		}
+	}
 	var prior gameseat.Event
 	if err := s.db.Where("session_id = ? AND seq = ?", sessionID, input.Seq).First(&prior).Error; err == nil {
 		return nil
@@ -316,11 +326,13 @@ func (s *GameSeatService) Event(sessionID string, input GameSeatEventInput) erro
 			relationEvent = "trusted"
 		}
 		key := fmt.Sprintf("game-seat:%s:%d:%d", sessionID, input.Seq, character.AgentID)
-		if err := s.emotion.OnEvent(s.tenantID, session.RunID, character.AgentID, eventType, 1, time.Now().UTC(), key+":emotion"); err != nil {
-			return err
-		}
-		if err := s.relation.OnEvent(s.tenantID, session.RunID, character.AgentID, 0, relationEvent, 1, time.Now().UTC(), key+":relation"); err != nil {
-			return err
+		if affectsPlayer {
+			if err := s.emotion.OnEvent(s.tenantID, session.RunID, character.AgentID, eventType, 1, time.Now().UTC(), key+":emotion"); err != nil {
+				return err
+			}
+			if err := s.relation.OnEvent(s.tenantID, session.RunID, character.AgentID, 0, relationEvent, 1, time.Now().UTC(), key+":relation"); err != nil {
+				return err
+			}
 		}
 		story := fmt.Sprintf("第 %d 局第 %d 天，%s", session.GameNumber, input.Day, input.Detail)
 		if strings.TrimSpace(input.Detail) == "" {
