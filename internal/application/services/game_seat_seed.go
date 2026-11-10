@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"control-panel/internal/domain/agent"
@@ -21,6 +22,9 @@ var wolfchaResidents = []struct {
 	{"chen", "陈伯", "退休警察", "爱推理，讲证据，偶尔倚老卖老"},
 	{"meimei", "美美", "主播", "爱演，情绪外放，喜欢带节奏"},
 	{"jie", "阿杰", "程序员", "话少，记仇，开口就是逻辑链"},
+	{"xiaoyu", "小雨", "咖啡师", "善于观察表情，说话温和但立场坚定"},
+	{"laowu", "老吴", "出租车司机", "见多识广，喜欢从生活经验判断人"},
+	{"tang", "唐姐", "社区医生", "冷静细致，习惯核对时间和细节"},
 }
 
 func residentAvatar(name, color string) string {
@@ -33,10 +37,15 @@ func residentAvatar(name, color string) string {
 // roster bindings. Voice is intentionally blank until the voice task.
 func (s *GameSeatService) SeedWolfchaResidents() error {
 	var template agent.AgentConfig
-	if err := s.db.Where("tenant_id = ? AND LOWER(model_id) LIKE ? AND provider_id IS NOT NULL", s.tenantID, "%deepseek%").Order("id").First(&template).Error; err != nil {
-		return fmt.Errorf("configure a DeepSeek Agent before seeding residents: %w", err)
+	selectedName := strings.TrimSpace(os.Getenv("WOLFCHA_TEMPLATE_AGENT_NAME"))
+	query := s.db.Where("tenant_id = ? AND provider_id IS NOT NULL AND model_id <> ''", s.tenantID)
+	if selectedName != "" {
+		query = query.Where("name = ?", selectedName)
 	}
-	colors := []string{"725945", "884c5d", "4f7391", "626b4b", "a26778", "596574"}
+	if err := query.Order("id").First(&template).Error; err != nil {
+		return fmt.Errorf("configure a model-backed Agent or set WOLFCHA_TEMPLATE_AGENT_NAME: %w", err)
+	}
+	colors := []string{"725945", "884c5d", "4f7391", "626b4b", "a26778", "596574", "547b84", "81725d", "6f698c"}
 	for i, resident := range wolfchaResidents {
 		name := "wolfcha-" + resident.Key
 		prompt := fmt.Sprintf("你是%s，%s。你的说话方式：%s。你是游戏中的固定居民，记得和同一玩家相处的经历。", resident.Name, resident.Role, resident.Bio)
@@ -49,7 +58,7 @@ func (s *GameSeatService) SeedWolfchaResidents() error {
 				return err
 			}
 		} else if err == nil {
-			config := map[string]interface{}{"systemPrompt": prompt}
+			config := map[string]interface{}{"systemPrompt": prompt, "providerId": float64(*template.ProviderID), "modelId": template.ModelID}
 			if _, err = s.agents.UpdateAgent(s.tenantID, name, &UpdateAgentInput{Config: &config}); err != nil {
 				return err
 			}

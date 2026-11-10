@@ -295,7 +295,7 @@ func (s *GameSeatService) Event(sessionID string, input GameSeatEventInput) erro
 	}
 	// Votes, rescues and accusations by another AI are game facts, but they do
 	// not change a resident's attitude toward the human player.
-	affectsPlayer := true
+	affectsPlayer := input.Type != "eliminated" && input.Type != "killed" && input.Type != "checked"
 	if input.ActorSeat != nil && (input.Type == "vote" || input.Type == "saved" || input.Type == "accused") {
 		for _, seat := range session.Seats {
 			if seat.Seat == *input.ActorSeat {

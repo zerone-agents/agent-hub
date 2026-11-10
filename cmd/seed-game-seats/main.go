@@ -35,5 +35,5 @@ func main() {
 	if err := seats.SeedWolfchaResidents(); err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Seeded six Wolfcha residents")
+	log.Println("Seeded nine Wolfcha residents")
 }

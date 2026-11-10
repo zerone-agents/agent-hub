@@ -1,12 +1,13 @@
 # AI 座位服务：本地启动
 
-服务在 Agent Hub 中启用，接口前缀为 `/api/v1/game-seats`。现阶段文字模型使用已在 Hub 后台配置的 OpenAI 协议 DeepSeek Provider；先建立一个绑定该 Provider 和模型的 Agent，再执行种子命令。种子命令会复制该模型配置给 6 个居民 Agent，并可重复执行。
+服务在 Agent Hub 中启用，接口前缀为 `/api/v1/game-seats`。先在 Hub 后台配置一个有 Provider 和模型的 Agent，再执行种子命令。设置 `WOLFCHA_TEMPLATE_AGENT_NAME` 可指定现有 Agent；不设置时使用第一个有模型配置的 Agent。种子命令会复制其模型配置给 9 个居民 Agent，并可重复执行。
 
 ```bash
 export DATABASE_URL='sqlite:./game-seats-demo.db' # 或使用现有 Hub 数据库
 export GAME_SEATS_SERVICE_KEY="$(openssl rand -hex 32)"
 export GAME_SEATS_CALL_BUDGET=120
-# 按 Agent Hub 的现有方式配置并启动服务，后台先配置 DeepSeek Provider/Agent
+export WOLFCHA_TEMPLATE_AGENT_NAME='你已有的 Agent 名称' # 可选
+# 按 Agent Hub 的现有方式配置并启动服务，后台先配置 Provider/Agent
 
 go run ./cmd/seed-game-seats
 go run ./cmd/server
