@@ -6,8 +6,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -269,6 +271,14 @@ func main() {
 		cfg.Deployer.UpstreamHost,
 	)
 	runService := services.NewRunService(database.GetDB())
+	gameSeatBudget, _ := strconv.Atoi(os.Getenv("GAME_SEATS_CALL_BUDGET"))
+	gameSeatService := services.NewGameSeatService(database.GetDB(), "default", runService, agentService, providerService, gameSeatBudget)
+	if err := gameSeatService.Migrate(); err != nil {
+		log.Fatalf("Failed to migrate game seats: %v", err)
+	}
+	if key := os.Getenv("GAME_SEATS_SERVICE_KEY"); key != "" {
+		handler.NewGameSeatHandler(gameSeatService, key).Register(r)
+	}
 	extensionLifecycleService := services.NewExtensionLifecycleService(database.GetDB())
 	// H7.4 授权服务必须在种子之前就位：EnsureBuiltinPersonaPacks 会把
 	// manifest 声明的权限同步成 grants 行（syncGrantsWithTx），而该方法在
