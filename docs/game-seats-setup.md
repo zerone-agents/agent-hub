@@ -13,7 +13,7 @@ go run ./cmd/seed-game-seats
 go run ./cmd/server
 ```
 
-服务密钥只设置在服务器环境变量，Wolfcha 的 `ZERONE_SERVICE_KEY` 使用同一值。`GAME_SEATS_SERVICE_KEY` 未设置时，服务路由不会挂载。`GAME_SEATS_CALL_BUDGET` 默认每局 120 次。种子数据的 `voice` 暂留空，任务 3 再配置阿里云音色。
+服务密钥只设置在服务器环境变量，Wolfcha 的 `ZERONE_SERVICE_KEY` 使用同一值。`GAME_SEATS_SERVICE_KEY` 未设置时，服务路由不会挂载。`GAME_SEATS_CALL_BUDGET` 默认每局 120 次。种子数据为九名居民配置了不同的百炼 `qwen-audio-3.1-tts-flash` 音色；Wolfcha 服务端负责语音合成和播放，Hub 只返回音色 ID。
 
 ```bash
 curl -H "Authorization: Bearer $GAME_SEATS_SERVICE_KEY" 'http://localhost:8081/api/v1/game-seats/roster?gameKey=wolfcha'

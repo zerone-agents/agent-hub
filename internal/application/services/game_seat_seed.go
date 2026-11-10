@@ -14,17 +14,17 @@ import (
 )
 
 var wolfchaResidents = []struct {
-	Key, Name, Role, Bio string
+	Key, Name, Role, Bio, Voice string
 }{
-	{"zhou", "老周", "茶馆老板", "稳重，爱和稀泥，口头禅‘大家先别急’"},
-	{"zhen", "阿珍", "本地记者", "犀利多疑，爱追问细节"},
-	{"lin", "小林", "大学生", "冲动，爱跟风，被怀疑时会急"},
-	{"chen", "陈伯", "退休警察", "爱推理，讲证据，偶尔倚老卖老"},
-	{"meimei", "美美", "主播", "爱演，情绪外放，喜欢带节奏"},
-	{"jie", "阿杰", "程序员", "话少，记仇，开口就是逻辑链"},
-	{"xiaoyu", "小雨", "咖啡师", "善于观察表情，说话温和但立场坚定"},
-	{"laowu", "老吴", "出租车司机", "见多识广，喜欢从生活经验判断人"},
-	{"tang", "唐姐", "社区医生", "冷静细致，习惯核对时间和细节"},
+	{"zhou", "老周", "茶馆老板", "稳重，爱和稀泥，口头禅‘大家先别急’", "longshu_v3.1"},
+	{"zhen", "阿珍", "本地记者", "犀利多疑，爱追问细节", "longjing_v3.1"},
+	{"lin", "小林", "大学生", "冲动，爱跟风，被怀疑时会急", "longshao_v3.1"},
+	{"chen", "陈伯", "退休警察", "爱推理，讲证据，偶尔倚老卖老", "longnan_v3.1"},
+	{"meimei", "美美", "主播", "爱演，情绪外放，喜欢带节奏", "longanhuan_v3.1"},
+	{"jie", "阿杰", "程序员", "话少，记仇，开口就是逻辑链", "longtian_v3.1"},
+	{"xiaoyu", "小雨", "咖啡师", "善于观察表情，说话温和但立场坚定", "longanlingxin_v3.1"},
+	{"laowu", "老吴", "出租车司机", "见多识广，喜欢从生活经验判断人", "longlaotie_v3.1"},
+	{"tang", "唐姐", "社区医生", "冷静细致，习惯核对时间和细节", "guyunshu_v3.1"},
 }
 
 func residentAvatar(name, color string) string {
@@ -33,8 +33,7 @@ func residentAvatar(name, color string) string {
 	return "data:image/svg+xml," + url.PathEscape(svg)
 }
 
-// SeedWolfchaResidents creates or updates six stable Agents and their game
-// roster bindings. Voice is intentionally blank until the voice task.
+// SeedWolfchaResidents creates or updates nine stable Agents and their game roster bindings.
 func (s *GameSeatService) SeedWolfchaResidents() error {
 	var template agent.AgentConfig
 	selectedName := strings.TrimSpace(os.Getenv("WOLFCHA_TEMPLATE_AGENT_NAME"))
@@ -70,9 +69,9 @@ func (s *GameSeatService) SeedWolfchaResidents() error {
 		}
 		row := gameseat.Character{TenantID: s.tenantID, GameKey: "wolfcha", Key: resident.Key, AgentID: residentAgent.ID,
 			Name: resident.Name, AvatarURL: residentAvatar(resident.Name, colors[i]),
-			Bio: strings.TrimSpace(resident.Role + "，" + resident.Bio), Voice: ""}
+			Bio: strings.TrimSpace(resident.Role + "，" + resident.Bio), Voice: resident.Voice}
 		if err := s.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "game_key"}, {Name: "key"}},
-			DoUpdates: clause.AssignmentColumns([]string{"agent_id", "name", "avatar_url", "bio"})}).Create(&row).Error; err != nil {
+			DoUpdates: clause.AssignmentColumns([]string{"agent_id", "name", "avatar_url", "bio", "voice"})}).Create(&row).Error; err != nil {
 			return err
 		}
 	}
