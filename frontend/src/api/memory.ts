@@ -5,6 +5,10 @@ export interface MemoryApplication {
   applicationId: string
   policyVersion: string
   dataClass: string
+  name?: string
+  description?: string
+  status?: string
+  origin?: string
   backend?: 'multirag-memory' | 'multirag-knowledge'
   nativeConfigurationSupported?: boolean
   nativeStatusSupported?: boolean
@@ -133,7 +137,48 @@ export interface MemoryFactMutation {
 
 const base = '/api/v1/admin/memory'
 
+export interface MemoryApplicationModel {
+  fullId: string
+  name: string
+  factory: string
+  instanceName?: string
+}
+
+export interface CreateMemoryApplication {
+  operationId: string
+  applicationId: string
+  name: string
+  description?: string
+  chatModel: string
+  embeddingModel: string
+}
+
+export interface MemoryApplicationReceipt {
+  application: MemoryApplication
+  applicationToken: string
+}
+
 export const memoryApi = {
+  applicationModels: (signal?: AbortSignal) =>
+    apiClient.get(base + '/application-models', { signal }).then((res) =>
+      unwrapResponse<{
+        chat: MemoryApplicationModel[]
+        embedding: MemoryApplicationModel[]
+      }>(res)
+    ),
+  createApplication: (request: CreateMemoryApplication) =>
+    apiClient
+      .post(base + '/applications', request)
+      .then((res) => unwrapResponse<MemoryApplicationReceipt>(res)),
+  applicationProvisioning: (applicationId: string) =>
+    apiClient
+      .get(
+        base +
+          '/applications/' +
+          encodeURIComponent(applicationId) +
+          '/provisioning'
+      )
+      .then((res) => unwrapResponse<MemoryApplication>(res)),
   applications: (signal?: AbortSignal) =>
     apiClient
       .get(base + '/applications', { signal })
