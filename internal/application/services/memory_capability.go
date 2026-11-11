@@ -94,6 +94,13 @@ func (s *MemoryCapabilityService) Sign(p MemoryCapabilityPayload) (string, error
 		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
+// VerifyWithToken 由 bearer 原文计算 token 指纹后执行 Verify——指纹公式
+// （sha256hex[:16]，与 knowledge capability 的 tokenFingerprint 同式）的
+// 唯一来源保持在 services 包内，调用方不自行复制。
+func (s *MemoryCapabilityService) VerifyWithToken(raw, agentName, bearerToken string) (MemoryCapabilityPayload, error) {
+	return s.Verify(raw, agentName, tokenFingerprint(bearerToken))
+}
+
 // Verify runs the full chain for one presented capability: format (three
 // dot-separated segments, v1 prefix), HMAC over the payload bytes, and the
 // agent-name / token-fingerprint bindings. Tenant / scopeMode / tools are
