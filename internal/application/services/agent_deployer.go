@@ -123,16 +123,27 @@ type AgentDeployerService struct {
 	// via systemsetting.EnsureKnowledgeCapabilitySecret at startup and
 	// never empty in production.
 	capabilitySecret string
-	runtimeAPIKey    string
-	agentRepo        agentRepository
-	toolRepo         toolRepository
-	skillRepo        skillRepository
-	snapshotRepo     snapshotRepository
-	providerSvc      providerService
-	mcpSvc           mcpService
-	knowledgeSvc     knowledgeService
-	kongSvc          *KongGatewayService
-	aigcSvc          aigcConfigProvider
+	// memoryCapabilitySecret signs the per-agent memory MCP capabilities
+	// (spec 2026-11-11-memory-mcp-design §4). Independent from
+	// capabilitySecret (knowledge) and encryptionKey: provisioned via
+	// systemsetting.EnsureMemoryCapabilitySecret at startup.
+	memoryCapabilitySecret string
+	// memoryMcpURL is the runtime-reachable hub memory MCP endpoint
+	// (MEMORY_MCP_URL, full path incl. /api/v1/memory/mcp). Empty fails the
+	// deploy of memory-enabled agents with a config hint — the hub's own
+	// listen address is not container-reachable (same rationale as
+	// KNOWLEDGE_MCP_URL).
+	memoryMcpURL  string
+	runtimeAPIKey string
+	agentRepo     agentRepository
+	toolRepo      toolRepository
+	skillRepo     skillRepository
+	snapshotRepo  snapshotRepository
+	providerSvc   providerService
+	mcpSvc        mcpService
+	knowledgeSvc  knowledgeService
+	kongSvc       *KongGatewayService
+	aigcSvc       aigcConfigProvider
 	// chatPushAPIKey / chatPushPublicURL 同时非空时，部署请求注入 hub 段
 	// （runtime 聊天记录回传配置）；任一为空则不注入 = 回传关闭。
 	chatPushAPIKey    string
@@ -285,43 +296,50 @@ func defaultHealthProbe(ctx context.Context, publicHost string, port int) bool {
 // dedicated knowledge-capability signing secret (Ensure pattern, decoupled
 // from encryptionKey).
 type AgentDeployerConfig struct {
-	Client            *deployer.Client
-	PublicHost        string
-	UpstreamHost      string
-	CDNHost           string
-	EncryptionKey     string
-	RuntimeAPIKey     string
-	CapabilitySecret  string
-	KnowledgeSvc      *KnowledgeService
-	KongSvc           *KongGatewayService
-	AigcSvc           *AigcConfigService
-	ChatPushAPIKey    string
-	ChatPushPublicURL string
-	AuthMode          AuthMode
+	Client           *deployer.Client
+	PublicHost       string
+	UpstreamHost     string
+	CDNHost          string
+	EncryptionKey    string
+	RuntimeAPIKey    string
+	CapabilitySecret string
+	// MemoryMcpURL / MemoryCapabilitySecret serve the built-in memory MCP
+	// (spec 2026-11-11): the runtime-reachable endpoint (MEMORY_MCP_URL)
+	// and the capability signing secret (EnsureMemoryCapabilitySecret).
+	MemoryMcpURL           string
+	MemoryCapabilitySecret string
+	KnowledgeSvc           *KnowledgeService
+	KongSvc                *KongGatewayService
+	AigcSvc                *AigcConfigService
+	ChatPushAPIKey         string
+	ChatPushPublicURL      string
+	AuthMode               AuthMode
 }
 
 func NewAgentDeployerService(cfg AgentDeployerConfig) *AgentDeployerService {
 	s := &AgentDeployerService{
-		client:            cfg.Client,
-		publicHost:        cfg.PublicHost,
-		upstreamHost:      cfg.UpstreamHost,
-		cdnHost:           cfg.CDNHost,
-		encryptionKey:     cfg.EncryptionKey,
-		capabilitySecret:  cfg.CapabilitySecret,
-		runtimeAPIKey:     cfg.RuntimeAPIKey,
-		agentRepo:         repository.NewAgentRepository(),
-		toolRepo:          repository.NewToolRepository(),
-		skillRepo:         repository.NewSkillRepository(),
-		snapshotRepo:      repository.NewDeploymentSnapshotRepository(),
-		providerSvc:       NewProviderService(cfg.EncryptionKey),
-		mcpSvc:            NewMcpService(cfg.EncryptionKey),
-		knowledgeSvc:      cfg.KnowledgeSvc,
-		kongSvc:           cfg.KongSvc,
-		authMode:          cfg.AuthMode,
-		chatPushAPIKey:    cfg.ChatPushAPIKey,
-		chatPushPublicURL: cfg.ChatPushPublicURL,
-		healthProbe:       defaultHealthProbe,
-		gatewayHealth:     &sync.Map{},
+		client:                 cfg.Client,
+		publicHost:             cfg.PublicHost,
+		upstreamHost:           cfg.UpstreamHost,
+		cdnHost:                cfg.CDNHost,
+		encryptionKey:          cfg.EncryptionKey,
+		capabilitySecret:       cfg.CapabilitySecret,
+		memoryCapabilitySecret: cfg.MemoryCapabilitySecret,
+		memoryMcpURL:           cfg.MemoryMcpURL,
+		runtimeAPIKey:          cfg.RuntimeAPIKey,
+		agentRepo:              repository.NewAgentRepository(),
+		toolRepo:               repository.NewToolRepository(),
+		skillRepo:              repository.NewSkillRepository(),
+		snapshotRepo:           repository.NewDeploymentSnapshotRepository(),
+		providerSvc:            NewProviderService(cfg.EncryptionKey),
+		mcpSvc:                 NewMcpService(cfg.EncryptionKey),
+		knowledgeSvc:           cfg.KnowledgeSvc,
+		kongSvc:                cfg.KongSvc,
+		authMode:               cfg.AuthMode,
+		chatPushAPIKey:         cfg.ChatPushAPIKey,
+		chatPushPublicURL:      cfg.ChatPushPublicURL,
+		healthProbe:            defaultHealthProbe,
+		gatewayHealth:          &sync.Map{},
 	}
 	if cfg.AigcSvc != nil {
 		s.aigcSvc = cfg.AigcSvc
@@ -458,6 +476,9 @@ func (s *AgentDeployerService) Deploy(tenantID, name string, force bool, rotateK
 	req.RuntimeToken = token
 	s.resolveMcpHeaders(req, token)
 	if err := s.attachKnowledgeCapabilities(req, tenantID, key, token); err != nil {
+		return nil, err
+	}
+	if err := s.attachMemoryCapabilities(req, tenantID, token); err != nil {
 		return nil, err
 	}
 
@@ -625,6 +646,75 @@ func (s *AgentDeployerService) attachKnowledgeCapabilities(req *deployer.CreateA
 		})
 		mcp.Headers = headers
 		a.McpServers["knowledge"] = mcp
+	}
+	return nil
+}
+
+// memoryMcpServerEntry builds the built-in memory MCP connection entry for a
+// memory-enabled agent. Authorization carries the runtime-token placeholder —
+// resolveMcpHeaders (which runs before capability attach in Deploy)
+// substitutes the real token. Type "http" mirrors the knowledge builtin
+// (mcp.TransportHTTP; literal here because local `mcp` variables shadow the
+// domain package throughout this file).
+func memoryMcpServerEntry(agentName, url string) (deployer.McpServerConfig, error) {
+	if strings.TrimSpace(url) == "" {
+		return deployer.McpServerConfig{}, fmt.Errorf("Agent %s 已开启记忆，但内置 memory MCP 未配置可达地址，请设置 MEMORY_MCP_URL（完整路径需包含 /api/v1/memory/mcp），重启 Hub 后重新部署 Agent", agentName)
+	}
+	return deployer.McpServerConfig{
+		Type:    "http",
+		URL:     url,
+		Headers: map[string]string{"Authorization": "Bearer " + agentRuntimeTokenPlaceholder},
+	}, nil
+}
+
+// attachMemoryCapabilities issues the per-agent memory capability (spec
+// 2026-11-11-memory-mcp-design §4) on every node's built-in memory MCP
+// entry, mirroring attachKnowledgeCapabilities: header maps are rebuilt
+// rather than mutated, and the capability binds tenant ID, the node's DB
+// bare name, agent scope mode, the four tool names, and the runtime token's
+// fingerprint (rotation invalidates). Phase 1 pins ScopeMode to "agent" —
+// "user" is rejected at save time and can never reach deployment. Empty
+// secret refuses to issue (defense in depth — startup provisioning fails
+// the boot first). Capabilities are credentials: never persist, never log.
+func (s *AgentDeployerService) attachMemoryCapabilities(req *deployer.CreateAgentRequest, tenantID, token string) error {
+	hasMemory := false
+	for i := range req.Agents {
+		if _, ok := req.Agents[i].McpServers["memory"]; ok {
+			hasMemory = true
+			break
+		}
+	}
+	if !hasMemory {
+		return nil
+	}
+	if s.memoryCapabilitySecret == "" {
+		return fmt.Errorf("memory capability secret 未注入（AgentDeployerService 构造遗漏），拒绝签发 per-agent capability")
+	}
+	svc := NewMemoryCapabilityService(s.memoryCapabilitySecret)
+	fp := tokenFingerprint(token)
+	for i := range req.Agents {
+		a := &req.Agents[i]
+		mcp, ok := a.McpServers["memory"]
+		if !ok {
+			continue
+		}
+		raw, err := svc.Sign(MemoryCapabilityPayload{
+			TenantID:         tenantID,
+			AgentName:        a.Name,
+			ScopeMode:        "agent",
+			Tools:            []string{"memory_remember", "memory_recall", "memory_list", "memory_update"},
+			TokenFingerprint: fp,
+		})
+		if err != nil {
+			return fmt.Errorf("sign memory capability for %s: %w", a.Name, err)
+		}
+		headers := make(map[string]string, len(mcp.Headers)+1)
+		for k, v := range mcp.Headers {
+			headers[k] = v
+		}
+		headers[memoryCapabilityHeader] = raw
+		mcp.Headers = headers
+		a.McpServers["memory"] = mcp
 	}
 	return nil
 }
@@ -1095,6 +1185,18 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 			// token is known (attachKnowledgeCapabilities in Deploy).
 			Headers: mcp.Headers,
 		}
+	}
+	// 记忆 MCP（spec 2026-11-11）：开启记忆的 Agent 注入内置连接；capability
+	// 头在 Deploy 侧 token 已知后追加（attachMemoryCapabilities）。URL 须为
+	// runtime 容器可达地址（MEMORY_MCP_URL）——hub 自身监听地址不可达，同
+	// KNOWLEDGE_MCP_URL 的理由。scopeMode 无需检查：user 在保存期已被拒
+	// （validateMemoryScopeMode），可达此处仅 agent/空。
+	if cfg.MemoryEnabled {
+		entry, err := memoryMcpServerEntry(cfg.Name, s.memoryMcpURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		mcpServerConfigs["memory"] = entry
 	}
 	def.McpServers = mcpServerConfigs
 

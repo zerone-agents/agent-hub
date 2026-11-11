@@ -241,19 +241,21 @@ func main() {
 	// They cover the shared KnowledgeService used by API, MCP and deployment.
 
 	// ── 记忆 MCP（Agent 自主记忆，spec docs/superpowers/specs/2026-11-11-
-	// memory-mcp-design.md）──依赖知识模块连接：检索副本落在知识 MultiRAG
-	// 的按租户保留 dataset（hub-agent-memory-<tenant>）。未配置时不注册
-	// 端点（部署注入亦以 Agent 开启记忆 + 连接可用为前提）。
+	// memory-mcp-design.md）──secrets 启动供给（与上方 knowledge capability
+	// secret 同模式）：capability 签发 + 账本 wrapping key，均独立成键。
+	// 端点依赖知识模块连接：检索副本落在知识 MultiRAG 的按租户保留
+	// dataset（hub-agent-memory-<tenant>）；未配置时不注册端点（部署注入
+	// 以 Agent 开启记忆 + MEMORY_MCP_URL 为前提）。
+	memoryCapSecret, err := systemsetting.EnsureMemoryCapabilitySecret(database.GetDB(), os.Getenv("MEMORY_CAPABILITY_SECRET"))
+	if err != nil {
+		log.Fatalf("Failed to provision memory capability secret: %v", err)
+	}
+	agentMemoryWrapSecret, err := systemsetting.EnsureAgentMemoryWrappingKey(database.GetDB(), os.Getenv("AGENT_MEMORY_WRAPPING_KEY"))
+	if err != nil {
+		log.Fatalf("Failed to provision agent memory wrapping key: %v", err)
+	}
 	var memoryMcpHandler *handler.MemoryMcpHandler
 	if cfg.Knowledge.MultiragBaseURL != "" && cfg.Knowledge.MultiragAPIKey != "" {
-		memoryCapSecret, err := systemsetting.EnsureMemoryCapabilitySecret(database.GetDB(), os.Getenv("MEMORY_CAPABILITY_SECRET"))
-		if err != nil {
-			log.Fatalf("Failed to provision memory capability secret: %v", err)
-		}
-		agentMemoryWrapSecret, err := systemsetting.EnsureAgentMemoryWrappingKey(database.GetDB(), os.Getenv("AGENT_MEMORY_WRAPPING_KEY"))
-		if err != nil {
-			log.Fatalf("Failed to provision agent memory wrapping key: %v", err)
-		}
 		agentMemoryWrapper, err := memory.NewSyntheticKeyWrapper(agentMemoryWrapSecret)
 		if err != nil {
 			log.Fatalf("Invalid agent memory wrapping key: %v", err)
@@ -291,19 +293,21 @@ func main() {
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
-		Client:            deployerClient,
-		PublicHost:        cfg.Deployer.PublicHost,
-		UpstreamHost:      cfg.Deployer.DeployerURLHost,
-		CDNHost:           cfg.OSS.CDNHost,
-		EncryptionKey:     cfg.Provider.EncryptionKey,
-		RuntimeAPIKey:     cfg.Deployer.RuntimeAPIKey,
-		CapabilitySecret:  capabilitySecret, // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
-		KnowledgeSvc:      knowledgeService,
-		KongSvc:           kongService,
-		AigcSvc:           aigcConfigSvc,
-		ChatPushAPIKey:    cfg.ChatPush.APIKey,
-		ChatPushPublicURL: cfg.ChatPush.PublicURL,
-		AuthMode:          services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
+		Client:                 deployerClient,
+		PublicHost:             cfg.Deployer.PublicHost,
+		UpstreamHost:           cfg.Deployer.DeployerURLHost,
+		CDNHost:                cfg.OSS.CDNHost,
+		EncryptionKey:          cfg.Provider.EncryptionKey,
+		RuntimeAPIKey:          cfg.Deployer.RuntimeAPIKey,
+		CapabilitySecret:       capabilitySecret,            // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
+		MemoryMcpURL:           os.Getenv("MEMORY_MCP_URL"), // runtime 可达的 memory MCP 地址（含 /api/v1/memory/mcp）；空则开启记忆的 Agent 部署时报错指路
+		MemoryCapabilitySecret: memoryCapSecret,             // 记忆 MCP capability 签发 secret（与 knowledge 侧解耦，同源自 systemsetting）
+		KnowledgeSvc:           knowledgeService,
+		KongSvc:                kongService,
+		AigcSvc:                aigcConfigSvc,
+		ChatPushAPIKey:         cfg.ChatPush.APIKey,
+		ChatPushPublicURL:      cfg.ChatPush.PublicURL,
+		AuthMode:               services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)

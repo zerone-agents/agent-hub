@@ -32,6 +32,13 @@ import (
 var ErrMemoryCapabilityDenied = errors.New("memory capability denied")
 
 const (
+	// memoryCapabilityHeader mirrors the handler-side constant of the same
+	// name (internal/handler memory_mcp.go): the signed per-agent capability
+	// carried on the built-in memory MCP's connection headers. Both packages
+	// hold their own copy — changes must stay in sync (same convention as
+	// the knowledge capability header).
+	memoryCapabilityHeader = "X-Agent-Capability"
+
 	memoryCapabilityPrefix = "v1"
 
 	// memoryCapabilityInfo is the HKDF info string: domain separation from
