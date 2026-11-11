@@ -1,19 +1,19 @@
 # 应用与记忆库管理 API（实验性）
 
-业务服务可自行创建多个应用。每个应用由 Hub 创建并绑定独立的 MultiRAG 原生记忆库，并获得独立应用令牌；用户及账户生命周期继续在应用内部隔离。全部接口仍限隔离环境的合成数据，沿用 [原生聊天接入合同](README.md)。遗忘、物理删除、撤权和注销清理仍未开放。
+业务服务可自行创建多个应用。每个应用由 Hub 创建并绑定独立的底层记忆模块原生记忆库，并获得独立应用令牌；用户及账户生命周期继续在应用内部隔离。全部接口仍限隔离环境的合成数据，沿用 [原生聊天接入合同](README.md)。后台可逐条遗忘原生记录；物理删除、撤权和注销清理仍未开放。
 
 ## 一次性配置
 
 ```text
-MEMORY_ENABLED=true
-MEMORY_MULTIRAG_URL=http://isolated-multirag:9380
-MEMORY_MULTIRAG_KEY=<MultiRAG SDK API token，不能使用网页登录 JWT>
-MEMORY_WRAPPING_KEY=<32随机字节的64位十六进制包装密钥>
+MULTIRAG_BASE_URL=http://isolated-knowledge:9380
+MULTIRAG_API_KEY=<底层记忆模块 SDK API token，不能使用网页登录 JWT>
 MEMORY_CLIENTS_JSON=[]
-MEMORY_MANAGERS_JSON=[{"token":"<至少32字节的随机租户管理令牌>","tenantId":"example-tenant","hubTenantId":"example-hub-tenant","chatModel":"<本MultiRAG账户的聊天模型引用>","embeddingModel":"<本MultiRAG账户的embedding模型引用>","maxApplications":32}]
+MEMORY_MANAGERS_JSON=[{"token":"<至少32字节的随机租户管理令牌>","tenantId":"example-tenant","hubTenantId":"example-hub-tenant","chatModel":"<对应服务账号的聊天模型引用>","embeddingModel":"<对应服务账号的embedding模型引用>","maxApplications":32}]
 ```
 
-租户管理令牌仅交给可信业务服务端，不能交给浏览器或移动端。每个管理令牌固定绑定一个业务租户，`hubTenantId` 固定委托管理后台租户，省略时与业务租户相同。模型来自该 MultiRAG SDK 账号可用的配置，推荐使用数值模型 ID；Hub 不替调用方创建模型或启动抽取 worker。`maxApplications` 默认为 32，可配置 1～1000，包括该租户保留的静态应用占位。
+已配置 Hub 的底层知识服务连接时，只需配置租户管理凭据；记忆默认开启，无需额外设置启用开关。连接默认复用；独立服务/账号需要同时配置 `MEMORY_MULTIRAG_URL` 和 `MEMORY_MULTIRAG_KEY`。新部署包装密钥默认自动生成并持久化，旧部署保留原显式密钥；详细规则见[接入配置](README.md#配置)。动态应用、记忆库绑定及 Hub 生成的应用令牌继续存入数据库，无需逐个增加环境变量；管理令牌仍作为租户级服务端启动授权配置。
+
+租户管理令牌仅交给可信业务服务端，不能交给浏览器或移动端。每个管理令牌固定绑定一个业务租户，`hubTenantId` 固定委托管理后台租户，省略时与业务租户相同。模型来自该底层记忆模块 SDK 账号可用的配置，推荐使用数值模型 ID；Hub 不替调用方创建模型或启动抽取 worker。`maxApplications` 默认为 32，可配置 1～1000，包括该租户保留的静态应用占位。
 
 配置管理令牌后重启 Hub 一次。之后新建、修改或停用应用均不要求重启 Hub。旧 `MEMORY_CLIENTS_JSON` 应用可继续使用，但不能由这些接口覆盖、迁移或删除，列表只包含 API 创建的应用。保留包装密钥及 Hub 数据库；更换包装密钥将影响已有生命周期和创建回执解密。凭据用途及库占位会持久保留，静态凭据轮换不会释放旧令牌供其他应用或管理用途复用。
 
@@ -51,7 +51,7 @@ MEMORY_MANAGERS_JSON=[{"token":"<至少32字节的随机租户管理令牌>","te
 
 `applicationId` 在租户内唯一。`operationId` 在租户内唯一；同应用、同操作、同请求精确重放返回原结果，不再发建库 POST。重复应用换操作、同操作换输入或静态应用冲突返回 `409`。名称为 1～64 个 Unicode 字符，描述最多 1024 个字符，不含控制字符；标识最多 128 字节。
 
-Hub 在调用 MultiRAG 前持久保存不可预测库名和模型配置。原生建库接口没有幂等键，重名时还可能自动更名，因此 Hub 对一个创建操作只派发一次 POST。超时、响应丢失、进程中断或无法核对配置时，状态为 `provisioning` 或 `unknown`；创建可能返回 `202` 及原令牌，但此时令牌不能进入聊天链路。调用原创建请求或 `/provisioning` 只执行原生列表及配置读取，核对唯一精确库名、私有权限、类型及模型后才转为 `active`。
+Hub 在调用底层记忆模块前持久保存不可预测库名和模型配置。原生建库接口没有幂等键，重名时还可能自动更名，因此 Hub 对一个创建操作只派发一次 POST。超时、响应丢失、进程中断或无法核对配置时，状态为 `provisioning` 或 `unknown`；创建可能返回 `202` 及原令牌，但此时令牌不能进入聊天链路。调用原创建请求或 `/provisioning` 只执行原生列表及配置读取，核对唯一精确库名、私有权限、类型及模型后才转为 `active`。
 
 查询不到库、分页不完整、同名歧义或配置不符均不会重建。即使进程在持久受理后、实际发送前退出，也需要运维核实；本期不提供强制重发、重绑或自动补偿删除，以免误建第二个库。未知状态不表示已失败，也不表示库不存在。
 
@@ -68,7 +68,7 @@ Hub 在调用 MultiRAG 前持久保存不可预测库名和模型配置。原生
 
 至少提供一个修改字段。版本过期或库尚未确认绑定返回 `409`。不能修改应用 ID、租户、后台委托、政策、模型或原生库；需要不同配置时创建新应用。每次成功修改增加 `version`。
 
-`disabled` 会拒绝之后的应用令牌请求，后台和租户管理接口仍可查看，使用最新版本和 `enabled=true` 可恢复。获委托 Hub 管理员仍保留原有诊断和记忆状态管理权限。不取消已经受理的请求或 MultiRAG 后台任务，不改变用户生命周期，也不代表遗忘、删除或副本清理完成。
+`disabled` 会拒绝之后的应用令牌请求，后台和租户管理接口仍可查看，使用最新版本和 `enabled=true` 可恢复。获委托 Hub 管理员仍保留原有诊断和记忆状态管理权限。不取消已经受理的请求或底层记忆模块后台任务，不改变用户生命周期，也不代表遗忘、删除或副本清理完成。
 
 错误沿用业务接口的 `error.reason`，包含 `MEMORY_MANAGER_UNAUTHORIZED`（401）、`MEMORY_APPLICATION_INVALID`（400）、`MEMORY_APPLICATION_NOT_FOUND`（404）、`MEMORY_APPLICATION_CONFLICT`／`MEMORY_APPLICATION_QUOTA`（409）及 `MEMORY_APPLICATION_UNAVAILABLE`（503）。所有响应为 `Cache-Control: no-store`；不得记录创建返回的令牌或包含凭据的配置。
 
@@ -78,4 +78,4 @@ Hub 在调用 MultiRAG 前持久保存不可预测库名和模型配置。原生
 
 真实 MySQL 检查使用 `MEMORY_APPLICATION_TEST_MYSQL_DSN`，仅接受 loopback TCP 及空的 `hub_memory_app_test_<8～32位hex>` 专用 schema；创建和清理由调用方负责。CI 会准备并移除此测试 schema。
 
-真实 MultiRAG 建库验收需预先登记独立资源目录，在目录中保存 `resources.json`，设置 `HUB_MEMORY_LIVE_DIRECTORY`、唯一的 `HUB_MEMORY_LIVE_RUN`、`MEMORY_MULTIRAG_URL`、`MEMORY_MULTIRAG_KEY`、`MEMORY_WRAPPING_KEY`、`HUB_MEMORY_LIVE_CHAT_MODEL`、`HUB_MEMORY_LIVE_EMBEDDING_MODEL`，可选 `HUB_MEMORY_LIVE_OWNER`，再运行 `go test ./cmd/server -run '^TestMemoryApplicationsLive$' -count=1 -timeout=120s`。凭据使用环境变量或受限文件，避免放入 shell 历史。该检查创建两个空库及四个合成生命周期，保存私有创建回执，验证独立读回和新注册表实例的准入，最后停用应用并保留空库；不写入对话，不证明模型执行或抽取效果。已受理后不得更换 run 编号盲目重跑；按原持久记录核对。
+真实底层记忆模块建库验收需预先登记独立资源目录，在目录中保存 `resources.json`，设置 `HUB_MEMORY_LIVE_DIRECTORY`、唯一的 `HUB_MEMORY_LIVE_RUN`、`MEMORY_MULTIRAG_URL`、`MEMORY_MULTIRAG_KEY`、`MEMORY_WRAPPING_KEY`、`HUB_MEMORY_LIVE_CHAT_MODEL`、`HUB_MEMORY_LIVE_EMBEDDING_MODEL`，可选 `HUB_MEMORY_LIVE_OWNER`，再运行 `go test ./cmd/server -run '^TestMemoryApplicationsLive$' -count=1 -timeout=120s`。凭据使用环境变量或受限文件，避免放入 shell 历史。该检查创建两个空库及四个合成生命周期，保存私有创建回执，验证独立读回和新注册表实例的准入，最后停用应用并保留空库；不写入对话，不证明模型执行或抽取效果。已受理后不得更换 run 编号盲目重跑；按原持久记录核对。

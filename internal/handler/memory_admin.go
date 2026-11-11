@@ -31,6 +31,23 @@ func NewMemoryAdminHandler(bindings []MemoryBinding, recorder *services.AuditRec
 	return &MemoryAdminHandler{bindings: append([]MemoryBinding(nil), bindings...), audit: recorder}
 }
 
+// Disabled management requests retain authentication and the manager boundary
+// instead of falling through to the HTML SPA redirect.
+func RegisterDisabledMemoryAdminRoutes(readGroup *gin.RouterGroup) {
+	registerUnavailableMemoryAdminRoutes(readGroup, "memory_disabled", "记忆服务未启用，请联系管理员启用后重试")
+}
+
+func RegisterUnconfiguredMemoryAdminRoutes(readGroup *gin.RouterGroup) {
+	registerUnavailableMemoryAdminRoutes(readGroup, "memory_not_configured", "记忆服务尚未配置，请联系管理员完成服务接入")
+}
+
+func registerUnavailableMemoryAdminRoutes(readGroup *gin.RouterGroup, code, message string) {
+	readGroup.Group("/memory", middleware.RequireManager()).GET("/applications", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		respondError(c, 503, code, message)
+	})
+}
+
 func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *MemoryAdminHandler) {
 	// The general admin read group also admits members. Memory identity and
 	// evidence are manager-only even if this helper receives that broad group.
@@ -42,6 +59,7 @@ func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *Memory
 	read.GET("/native-messages", h.nativeMessages)
 	read.GET("/native-config", h.nativeConfiguration)
 	write.PATCH("/native-messages/:messageId", h.setNativeStatus)
+	write.POST("/native-messages/:messageId/forget", h.forgetNativeMessage)
 	write.POST("/native-search", h.nativeSearch)
 	write.POST("/native-context", h.nativeContext)
 	read.GET("/operations/:operationId", h.operation)

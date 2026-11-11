@@ -140,6 +140,28 @@ beforeEach(() => {
 })
 
 describe('native memory capabilities', () => {
+  it.each([
+    ['memory_disabled', '记忆服务未启用，请联系管理员启用后重试'],
+    ['memory_not_configured', '记忆服务尚未配置，请联系管理员完成服务接入']
+  ])(
+    'shows %s without retrying or requesting account records',
+    async (code, error) => {
+      vi.mocked(memoryApi.applications).mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          status: 503,
+          data: {
+            code,
+            error
+          }
+        }
+      })
+      renderPage()
+      await screen.findByText(error)
+      expect(memoryApi.applications).toHaveBeenCalledTimes(1)
+      expect(memoryApi.subjects).not.toHaveBeenCalled()
+    }
+  )
   it('defaults to the automatic application while preserving explicit application choices', async () => {
     const oldApp = {
       tenantId: scope.tenantId,

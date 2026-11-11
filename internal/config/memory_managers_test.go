@@ -147,7 +147,7 @@ func TestMemoryManagerConfigurationStrictValidationAndCredentialIsolation(t *tes
 
 func TestMemoryRegistryOnlyConfigurationPreservesBackendPrerequisitesAndStaticLimit(t *testing.T) {
 	for _, mutate := range []func(*MemoryConfig){
-		func(c *MemoryConfig) { c.WrappingKey = "" },
+		func(c *MemoryConfig) { c.WrappingKey = "invalid" },
 		func(c *MemoryConfig) { c.MultiragURL = "" },
 		func(c *MemoryConfig) { c.MultiragURL = "https://PRIVATE_URL_USER@example.invalid" },
 		func(c *MemoryConfig) { c.MultiragKey = "" },

@@ -14,6 +14,8 @@ type NativeMessage struct {
 	ValidAt             string  `json:"validAt,omitempty"`
 	InvalidAt           string  `json:"invalidAt,omitempty"`
 	Status              bool    `json:"status"`
+	ForgottenAt         string  `json:"forgottenAt,omitempty"`
+	ParentForgottenAt   string  `json:"parentForgottenAt,omitempty"`
 	NativeStatus        bool    `json:"nativeStatus"`
 	ParentStatus        *bool   `json:"parentStatus,omitempty"`
 	StatusChangeAllowed bool    `json:"statusChangeAllowed"`

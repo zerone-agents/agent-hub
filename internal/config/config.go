@@ -223,6 +223,7 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8081)
 	viper.SetDefault("auth.mode", "builtin")
+	viper.SetDefault("memory.enabled", true)
 	viper.SetDefault("database.max_idle", 10)
 	viper.SetDefault("database.max_open", 100)
 	viper.SetDefault("database.max_lifetime", 3600)
@@ -274,6 +275,9 @@ func LoadConfig() (*Config, error) {
 	// internal probes: only ever derived from a valid deployer URL. No
 	// explicit config, no PublicHost fallback (spec 3.5).
 	cfg.Deployer.DeployerURLHost = deriveDeployerURLHost(cfg.Deployer.URL)
+	if err := cfg.Memory.ResolveConnection(cfg.Knowledge); err != nil {
+		return nil, err
+	}
 	if _, err := cfg.Memory.Clients(); err != nil {
 		return nil, err
 	}

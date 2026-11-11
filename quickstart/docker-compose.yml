@@ -71,6 +71,13 @@ services:
       KONG_ADMIN_URL: ${KONG_ADMIN_URL:-}
       MULTIRAG_BASE_URL: ${MULTIRAG_BASE_URL:-}
       MULTIRAG_API_KEY: ${MULTIRAG_API_KEY:-}
+      # Memory reuses the knowledge-service connection above unless both overrides are set.
+      MEMORY_ENABLED: ${MEMORY_ENABLED:-true}
+      MEMORY_MULTIRAG_URL: ${MEMORY_MULTIRAG_URL:-}
+      MEMORY_MULTIRAG_KEY: ${MEMORY_MULTIRAG_KEY:-}
+      MEMORY_WRAPPING_KEY: ${MEMORY_WRAPPING_KEY:-}
+      MEMORY_CLIENTS_JSON: ${MEMORY_CLIENTS_JSON:-[]}
+      MEMORY_MANAGERS_JSON: ${MEMORY_MANAGERS_JSON:-[]}
       # Full Hub MCP endpoint reachable from runtime containers. For Linux
       # deployments, use the host IP/domain (not localhost inside a container).
       KNOWLEDGE_MCP_URL: ${KNOWLEDGE_MCP_URL:-}

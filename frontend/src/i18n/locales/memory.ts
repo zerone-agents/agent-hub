@@ -1,4 +1,23 @@
 export const memoryZh = {
+  nativeDiagnosticHint:
+    '展示当前账户经来源校验的原生检索命中，不补入最近原文。来源已停用或遗忘时，派生记忆会被排除。',
+  nativeForgotten: '已遗忘',
+  sourceForgotten: '来源已遗忘',
+  forgottenAt: '遗忘时间',
+  forgetNativeRecord: '遗忘此条',
+  forgetNativeTitle: '遗忘这条记忆？',
+  forgetNativeExplanation:
+    '遗忘后，这条记录将被记忆服务的后续正常检索排除。管理页面保留内容供核对，当前不提供撤销；这不表示物理删除或备份清除。',
+  forgetSourceExplanation:
+    '本次仅遗忘这条原文。Hub 同时停止供给同源派生记忆，但不会逐条将派生记忆标记为已遗忘。',
+  forgottenExplanation:
+    '这条记录已被遗忘，不再参与正常检索；内容仍保留，不能通过启用开关恢复。',
+  sourceForgottenExplanation:
+    '来源原文已遗忘，Hub 不再供给此派生记忆。本条记录尚未被单独标记为遗忘。',
+  nativeForgottenSaved: '已确认遗忘，后续正常检索将排除此条记忆。',
+  forgetUnconfirmed:
+    '遗忘结果尚未确认，请刷新记录核对遗忘状态，避免直接重复提交。',
+  statusManagementWithForget: '可启用、停用及逐条遗忘；物理删除未开放',
   noNativeTitle: '暂无对话记忆',
   noMatchingNativeTitle: '没有匹配的记忆',
   noRecallNativeTitle: '本轮未召回记忆',
@@ -24,6 +43,7 @@ export const memoryZh = {
     all: '全部状态',
     enabled: '可供给',
     disabled: '不供给',
+    forgotten: '已遗忘 / 来源已遗忘',
     completed: '提取完成',
     pending: '提取待确认',
     failed: '提取失败'
@@ -32,7 +52,7 @@ export const memoryZh = {
   autoMode: '聊天自动提取',
   ledgerMode: '已审核事实',
   managementAutoHint:
-    '对话自动形成记忆。原文与模型派生内容分别管理，遗忘和删除暂不开放。',
+    '对话自动形成记忆。原文与模型派生内容分别管理，可按应用能力停用或逐条遗忘。',
   managementLedgerHint: '查看已审核事实、版本和同步状态，按应用能力管理。',
   applicationConfiguration: '应用配置',
   subjectsTitle: '用户与账户',
@@ -64,7 +84,7 @@ export const memoryZh = {
   capacityPolicy: '原生容量策略',
   configurationCreatedAt: '创建时间',
   capacityAndPolicyHint:
-    '容量是配置上限，不代表已用空间。原生容量策略仅展示配置，不表示本次开放主动遗忘或删除。',
+    '容量是配置上限，不代表已用空间。容量淘汰策略与逐条遗忘分别管理，物理删除及备份清理未开放。',
   currentScopeOnly: '仅统计当前账户范围',
   currentScopeStatistics: '当前账户记忆统计',
   currentLifecycle: '账户生命周期：',
@@ -136,7 +156,7 @@ export const memoryZh = {
   subtitle: '查看用户记忆，并按当前应用能力处理纠正与管理。',
   autoTitle: '原生记忆 · 聊天自动提取',
   autoScope:
-    '真实对话完成后自动提交原文，异步提取语义、情节及流程记忆。提取状态与来源可查看；本期不开放遗忘、删除、授权撤回及注销清理。',
+    '真实对话完成后自动提交原文，异步提取语义、情节及流程记忆。可按应用能力停用或逐条遗忘；物理删除、授权撤回及注销清理未开放。',
   nativeMessagesTitle: '对话形成的记忆',
   nativeRefreshExtraction: '刷新提取状态',
   nativeExtractionHint:
@@ -265,6 +285,27 @@ export const memoryZh = {
 }
 
 export const memoryEn = {
+  nativeDiagnosticHint:
+    'Shows native hits verified against the current account and their source, without adding recent originals. Derived memories are excluded when their source is disabled or forgotten.',
+  nativeForgotten: 'Forgotten',
+  sourceForgotten: 'Source forgotten',
+  forgottenAt: 'Forgotten at',
+  forgetNativeRecord: 'Forget this record',
+  forgetNativeTitle: 'Forget this memory?',
+  forgetNativeExplanation:
+    'The memory service will exclude this record from subsequent normal retrieval. Its content remains visible here for review. Undo is unavailable; physical deletion and backup cleanup are not performed.',
+  forgetSourceExplanation:
+    'Only this original is marked forgotten. Hub also stops supplying its derived memories, without individually marking them forgotten.',
+  forgottenExplanation:
+    'This record is forgotten and excluded from normal retrieval. Content is retained and cannot be restored using the enable switch.',
+  sourceForgottenExplanation:
+    'The original is forgotten, so Hub no longer supplies this derived record. This record has not been individually marked forgotten.',
+  nativeForgottenSaved:
+    'Forgetting confirmed. Subsequent normal retrieval will exclude this record.',
+  forgetUnconfirmed:
+    'The outcome is unconfirmed. Refresh and inspect the forget state before submitting again.',
+  statusManagementWithForget:
+    'Enable, disable and forget individual records; physical deletion unavailable',
   noNativeTitle: 'No conversation memories',
   noMatchingNativeTitle: 'No matching memories',
   noRecallNativeTitle: 'No memories recalled',
@@ -290,6 +331,7 @@ export const memoryEn = {
     all: 'All states',
     enabled: 'Available',
     disabled: 'Not supplied',
+    forgotten: 'Forgotten / source forgotten',
     completed: 'Extraction completed',
     pending: 'Extraction unconfirmed',
     failed: 'Extraction failed'
@@ -298,7 +340,7 @@ export const memoryEn = {
   autoMode: 'Automatic chat extraction',
   ledgerMode: 'Reviewed facts',
   managementAutoHint:
-    'Conversations form memories automatically. Originals and model-derived content are managed separately. Forgetting and deletion are unavailable.',
+    'Conversations form memories automatically. Manage originals and derived content separately; disable or forget individual records when supported.',
   managementLedgerHint:
     'Review approved facts, versions and synchronization within the application capabilities.',
   applicationConfiguration: 'Application settings',
@@ -334,7 +376,7 @@ export const memoryEn = {
   capacityPolicy: 'Native capacity policy',
   configurationCreatedAt: 'Created at',
   capacityAndPolicyHint:
-    'Capacity is a configured limit, not measured usage. Showing the native policy does not make active forgetting or deletion available.',
+    'Capacity is a configured limit, not measured usage. Capacity eviction and individual forgetting are separate. Physical deletion and backup cleanup are unavailable.',
   currentScopeOnly: 'Current account scope only',
   currentScopeStatistics: 'Current account memory statistics',
   currentLifecycle: 'Account lifecycle: ',
@@ -411,7 +453,7 @@ export const memoryEn = {
     'Review user memories and manage them within the application’s supported capabilities.',
   autoTitle: 'Native memory · Automatic chat extraction',
   autoScope:
-    'Completed conversations are submitted automatically for asynchronous semantic, episodic and procedural extraction. Inspect extraction status and provenance here. Forgetting, deletion, consent withdrawal and account cleanup are unavailable in this phase.',
+    'Completed conversations are submitted for asynchronous semantic, episodic and procedural extraction. Disable or forget records when supported by the application. Physical deletion, consent withdrawal and account cleanup are unavailable.',
   nativeMessagesTitle: 'Memories from conversations',
   nativeRefreshExtraction: 'Refresh extraction status',
   nativeExtractionHint:
@@ -569,11 +611,13 @@ export const memoryErrorsZh = {
   memoryAdminUnauthorized: '需要登录后台后操作记忆',
   memoryInvalidRequest: '记忆请求字段无效，请检查后重试',
   memoryUnavailable: '记忆服务暂不可用',
+  memoryDisabled: '记忆服务未启用，请联系管理员启用后重试',
+  memoryNotConfigured: '记忆服务尚未配置，请联系管理员完成服务接入',
   memoryAdminApplicationForbidden: '当前后台租户无权管理该记忆应用',
   memoryNotFound: '记忆记录不存在',
   memoryConflict: '记忆版本、任务或幂等键冲突，请刷新后重试',
   memoryScopeInactive: '当前账户生命周期不可用',
-  memoryOutcomeUnknown: '检索副本清理或同步尚未确认，请查询操作状态',
+  memoryOutcomeUnknown: '记忆操作结果尚未确认，请刷新记录或查询操作状态',
   memoryTimeout: '记忆读取已超时，请重试'
 }
 
@@ -587,6 +631,10 @@ export const memoryErrorsEn = {
   memoryInvalidRequest:
     'Invalid memory request. Check the fields and try again.',
   memoryUnavailable: 'Memory service is temporarily unavailable',
+  memoryDisabled:
+    'Memory service is disabled. Contact an administrator to enable it.',
+  memoryNotConfigured:
+    'Memory service is not configured. Contact an administrator to complete the integration.',
   memoryAdminApplicationForbidden:
     'Your console tenant cannot manage this memory application',
   memoryNotFound: 'Memory record does not exist',
@@ -594,6 +642,6 @@ export const memoryErrorsEn = {
     'The memory version, task or operation ID conflicts. Refresh before retrying.',
   memoryScopeInactive: 'This account lifecycle is unavailable',
   memoryOutcomeUnknown:
-    'Retrieval cleanup or synchronization is unconfirmed. Check the operation status.',
+    'The memory operation outcome is unconfirmed. Refresh records or check the operation status.',
   memoryTimeout: 'Memory retrieval timed out. Try again.'
 } satisfies typeof memoryErrorsZh

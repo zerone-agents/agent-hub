@@ -1,15 +1,15 @@
 # 原生记忆接入（实验性）
 
-当前接法直接复用 **MultiRAG 原生聊天自动提取和四种记忆类型**。业务对话入口在一次真实回复完成后，把实际 `userInput` 与 `agentResponse` 提交给 AgentHub；Hub 绑定可信租户、应用、用户和账户生命周期，持久化幂等回执后调用原生消息接口。原文同步写入，语义、情节和流程记忆由 MultiRAG 的原生 worker 异步提取。用户不需要手动添加记忆。
+当前接法直接复用 **底层记忆模块原生聊天自动提取和四种记忆类型**。业务对话入口在一次真实回复完成后，把实际 `userInput` 与 `agentResponse` 提交给 AgentHub；Hub 绑定可信租户、应用、用户和账户生命周期，持久化幂等回执后调用原生消息接口。原文同步写入，语义、情节和流程记忆由底层记忆模块的原生 worker 异步提取。用户不需要手动添加记忆。
 
-合同 `memory-v1-synthetic` 默认关闭，仅用于隔离的合成数据。遗忘、物理删除、授权撤回和注销清理不开放；原生应用对应操作返回 `501/MEMORY_OPERATION_UNSUPPORTED`，不产生删除成功回执。管理接口见 [management.md](management.md)。
+合同 `memory-v1-synthetic` 默认开启，配置好底层知识服务连接后可用，仅用于隔离的合成数据。后台支持原生记录逐条遗忘：写入 `forget_at` 后从正常检索排除，管理列表保留内容，不能通过启用开关恢复。物理删除、授权撤回和注销清理仍不开放；业务侧原有删除/清理接口仍返回 `501/MEMORY_OPERATION_UNSUPPORTED`。管理接口见 [management.md](management.md)。
 
 ## 数据流与职责
 
 1. Java 或配套业务对话入口认证用户，提供当前账户生命周期、授权引用与适用政策。
 2. 读取 `POST /native-context`，将有来源和时间的原生记忆作为当前请求的资料注入 runtime。原生派生内容属于模型输出，不是逐字核验的 Hub `Fact`。
 3. 实际回复完成后，提交 `POST /conversations`，完整保存真实收发文本，不编造 assistant 回复以触发抽取。
-4. MultiRAG 保存 `raw` 原文并执行原生异步提取，生成 `semantic`、`episodic`、`procedural`。是否生成各类型取决于对话内容，不保证每轮四类都有内容。
+4. 底层记忆模块保存 `raw` 原文并执行原生异步提取，生成 `semantic`、`episodic`、`procedural`。是否生成各类型取决于对话内容，不保证每轮四类都有内容。
 5. 调用 `GET /conversations/{operationId}` 只读核对状态，或在 Hub「记忆管理」中按应用及用户查看原文、派生类型、源记录、时间与提取状态。
 6. 新建 runtime 会话保持相同业务生命周期，继续读取此前记忆。
 
@@ -17,7 +17,7 @@
 | --- | --- |
 | Java / 业务对话入口 | 用户认证、实际收发历史、授权与敏感类别政策、聊天前读取和回复后提交 |
 | AgentHub | 可信应用边界、生命周期、加密回执、同轮幂等、未知写入只读对账、类型与来源展示、上下文预算 |
-| MultiRAG | 原生原文存储、真实 embedding、异步抽取、四类记忆与检索 |
+| 底层记忆模块 | 原生原文存储、真实 embedding、异步抽取、四类记忆与检索 |
 | Runtime | 使用当前请求的临时资料生成真实回复；会话历史与长期记忆分别管理 |
 
 自动记忆编排由已对接这些 API 的业务入口执行。仅配置一个普通 Hub Agent 不会自动获得业务生命周期或授权；接入方应明确完成读取和回复后提交两个步骤。
@@ -29,16 +29,20 @@
 为每个自动记忆应用配置独立原生 Memory bank：`permissions=me`，`memory_type=[raw,semantic,episodic,procedural]`，有效的真实聊天模型与 embedding 模型，以及已运行的原生抽取 worker。不要修改已有数据的 bank 类型，也不要将不同应用的 bank 混用。
 
 ```text
-MEMORY_ENABLED=true
-MEMORY_MULTIRAG_URL=http://isolated-multirag:9380
-MEMORY_MULTIRAG_KEY=<仅服务端持有的MultiRAG SDK API token>
-MEMORY_WRAPPING_KEY=<32随机字节的64位十六进制包装密钥>
+MULTIRAG_BASE_URL=http://isolated-knowledge:9380
+MULTIRAG_API_KEY=<仅服务端持有的底层记忆模块 SDK API token>
 MEMORY_CLIENTS_JSON=[{"token":"<至少32字节的随机Java服务令牌>","tenantId":"example-tenant","applicationId":"memory-demo","backend":"multirag-memory","memoryId":"<四类型专用Memory-ID>","automaticExtraction":true,"policyVersion":"synthetic-v1","hubTenantId":"<获委托的Hub租户>"}]
 ```
 
+记忆模块默认开启，无需设置 `MEMORY_ENABLED=true`；设置 `MEMORY_ENABLED=false` 可关闭。默认复用 Hub 的 `MULTIRAG_BASE_URL / MULTIRAG_API_KEY`。需要另一套服务或独立账号时，同时设置 `MEMORY_MULTIRAG_URL / MEMORY_MULTIRAG_KEY`；只设置其中一个会拒绝启动，避免将共享凭据发送到不同地址。共用连接不会合并应用记忆库或租户权限。
+
+新部署可省略 `MEMORY_WRAPPING_KEY`：Hub 自动生成独立的 32 字节随机密钥，持久化到 `system_settings.memory_wrapping_key`，重启后复用。它与 JWT、知识库签名及 provider 密钥分别管理，仍是合成数据包装器，不是 KMS；须保护并备份数据库。显式配置的 64 位十六进制密钥仍优先使用且不写库；已有部署必须保留原显式密钥，存在旧密文却没有持久化密钥时不会生成替代密钥。不要随意切换已有应用的密钥。
+
+使用 quickstart Compose 时，模板已透传 `MEMORY_*`；修改 `.env` 后重新创建 Hub 容器。显式关闭时，后台应用列表返回 `503/memory_disabled`；缺少底层记忆模块连接且没有应用配置时，Hub 正常启动，列表返回 `503/memory_not_configured`。页面分别提示未启用或尚未配置，不重定向到 HTML 页面；已配置应用却缺少后端时仍拒绝启动。
+
 `automaticExtraction=true` 仅适用于原生 Memory 后端。`memoryId` 与 `datasetId` 不能同时设置。`hubTenantId` 可选，省略时只有同名 Hub 租户获管理权。服务凭据不能交给浏览器或 App。错误配置阻止启动，调用不符合 bank、权限、来源或业务码约定时不确认成功。
 
-`MEMORY_MULTIRAG_KEY` 必须使用 MultiRAG SDK API token（`SDK_API_TOKEN` 认证），以保留 Hub 提交的外部 `user_id`。Web session/JWT 使用平台用户身份，不能代替该服务凭据。Hub 会严格读回并核对 bank、user、agent、session 及父来源；身份不匹配时拒绝确认，不放宽范围检查、不伪造认证字段，也不重发结果未知的对话。
+`MEMORY_MULTIRAG_KEY` 必须使用底层记忆模块 SDK API token（`SDK_API_TOKEN` 认证），以保留 Hub 提交的外部 `user_id`。Web session/JWT 使用平台用户身份，不能代替该服务凭据。Hub 会严格读回并核对 bank、user、agent、session 及父来源；身份不匹配时拒绝确认，不放宽范围检查、不伪造认证字段，也不重发结果未知的对话。
 
 原生 bank ID 参与持久应用范围。已有应用换 bank 不会自动继承其生命周期或回执，应配置新应用并分别管理。保留的已审核事实仍可通过原有事实管理 API 访问，不把它们伪装成实际聊天，也不凭空填补历史回复。
 

@@ -9,6 +9,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (h *MemoryAdminHandler) forgetNativeMessage(c *gin.Context) {
+	var in struct {
+		Scope memory.Scope `json:"scope"`
+	}
+	if !memoryAdminBody(c, &in) || !memoryAdminSubjectScope(c, in.Scope) {
+		return
+	}
+	svc, ok := h.selectService(c, in.Scope)
+	if !ok {
+		return
+	}
+	c.Set("memory.admin.action", "memory.admin.native.forget")
+	id := c.Param("messageId")
+	if parsed, err := strconv.ParseInt(id, 10, 64); err == nil && parsed > 0 && strconv.FormatInt(parsed, 10) == id {
+		c.Set("memory.admin.native.messageId", id)
+		sum := sha256.Sum256([]byte(c.GetString("memory.admin.target") + "\x00" + id))
+		c.Set("memory.admin.target", hex.EncodeToString(sum[:]))
+	}
+	out, err := svc.ForgetNativeMessage(c.Request.Context(), in.Scope, id)
+	memoryAdminResult(c, out, err)
+}
+
 func (h *MemoryAdminHandler) nativeConfiguration(c *gin.Context) {
 	scope, ok := memoryAdminQuery(c, false)
 	if !ok {

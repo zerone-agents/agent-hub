@@ -12,6 +12,7 @@ type BackendCapabilities struct {
 	Backend                          string   `json:"backend"`
 	NativeConfigurationSupported     bool     `json:"nativeConfigurationSupported"`
 	NativeStatusSupported            bool     `json:"nativeStatusSupported"`
+	NativeForgetSupported            bool     `json:"nativeForgetSupported"`
 	NativeDiagnosticsSupported       bool     `json:"nativeDiagnosticsSupported"`
 	AutomaticExtractionSupported     bool     `json:"automaticExtractionSupported"`
 	ConversationCorrectionsSupported bool     `json:"conversationCorrectionsSupported"`
@@ -38,6 +39,8 @@ func (s *Service) Capabilities() BackendCapabilities {
 	_, managementErr := s.nativeManagement()
 	caps.NativeConfigurationSupported = managementErr == nil
 	caps.NativeStatusSupported = auto && managementErr == nil
+	_, forgetAvailable := s.cfg.Native.(NativeForget)
+	caps.NativeForgetSupported = auto && forgetAvailable
 	_, diagnosticsAvailable := s.cfg.Native.(NativeDiagnostics)
 	caps.NativeDiagnosticsSupported = auto && diagnosticsAvailable
 	if auto {

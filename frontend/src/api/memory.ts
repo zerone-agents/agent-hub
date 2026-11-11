@@ -8,6 +8,7 @@ export interface MemoryApplication {
   backend?: 'multirag-memory' | 'multirag-knowledge'
   nativeConfigurationSupported?: boolean
   nativeStatusSupported?: boolean
+  nativeForgetSupported?: boolean
   nativeDiagnosticsSupported?: boolean
   nativeMaxContextChars?: number
   nativeDefaultMessages?: number
@@ -66,6 +67,8 @@ export interface NativeMemoryMessage {
   validAt?: string
   invalidAt?: string
   status: boolean
+  forgottenAt?: string
+  parentForgottenAt?: string
   nativeStatus?: boolean
   parentStatus?: boolean
   statusChangeAllowed?: boolean
@@ -99,7 +102,11 @@ export interface NativeMemoryConfiguration {
 export interface NativeMemorySearchResult {
   status: string
   messages: NativeMemoryMessage[]
-  options: { limit: number; similarityThreshold: number; keywordWeight: number }
+  options: {
+    limit: number
+    similarityThreshold: number
+    keywordWeight: number
+  }
 }
 
 export interface MemoryOperation {
@@ -167,6 +174,12 @@ export const memoryApi = {
   ) =>
     apiClient
       .patch(base + '/native-messages/' + encodeURIComponent(id), request)
+      .then((res) => unwrapResponse<NativeMemoryMessage>(res)),
+  forgetNativeMessage: (id: string, scope: MemoryScope) =>
+    apiClient
+      .post(base + '/native-messages/' + encodeURIComponent(id) + '/forget', {
+        scope
+      })
       .then((res) => unwrapResponse<NativeMemoryMessage>(res)),
   nativeSearch: (request: {
     scope: MemoryScope

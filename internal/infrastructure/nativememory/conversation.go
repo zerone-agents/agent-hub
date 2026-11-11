@@ -118,12 +118,14 @@ func (a *Adapter) typedMessage(raw json.RawMessage, scope nativeScope, requireCo
 		result.Status = false
 	}
 	result.StatusChangeAllowed = result.forgotten == ""
+	result.ForgottenAt = result.forgotten
 	return result, nil
 }
 
 func withParentStatus(child, parent nativeRecord) nativeRecord {
 	active := parent.Status
 	child.ParentStatus = &active
+	child.ParentForgottenAt = parent.ForgottenAt
 	child.Status = child.Status && active
 	child.StatusChangeAllowed = child.StatusChangeAllowed && parent.forgotten == ""
 	return child

@@ -23,6 +23,10 @@ type conversationFixture struct {
 	rows                    []map[string]any
 	posts                   int
 	puts                    int
+	deletes                 int
+	lostDeleteResponse      bool
+	skipForgetWrite         bool
+	mutateAfterDelete       func(map[string]any)
 	requests                int
 	postBodies              []map[string]string
 	putIDs                  []string
@@ -129,6 +133,29 @@ func (f *conversationFixture) serve(w http.ResponseWriter, r *http.Request) {
 				respond(row)
 				return
 			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	case strings.HasPrefix(r.URL.Path, "/api/v1/messages/"+testBank+":") && r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/messages/"+testBank+":")
+		for _, row := range f.rows {
+			if fmt.Sprint(row["message_id"]) != id {
+				continue
+			}
+			f.deletes++
+			if !f.skipForgetWrite {
+				row["forget_at"] = "2026-11-09 12:00:00"
+			}
+			if f.mutateAfterDelete != nil {
+				f.mutateAfterDelete(row)
+			}
+			if f.lostDeleteResponse {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				require.NoError(f.t, err)
+				_ = conn.Close()
+				return
+			}
+			respond(true)
+			return
 		}
 		w.WriteHeader(http.StatusNotFound)
 	case strings.HasPrefix(r.URL.Path, "/api/v1/messages/"+testBank+":") && r.Method == http.MethodPut:

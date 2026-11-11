@@ -12,7 +12,8 @@ import (
 	"unicode/utf8"
 )
 
-// Memory is an opt-in, synthetic-data integration service. Production admission
+// Memory is enabled by default and reuses the Hub connection when configured.
+// It remains a synthetic-data integration service. Production admission
 // (including KMS and protection of the retrieval replica) is deliberately not a
 // configurable bypass in this release.
 type MemoryConfig struct {
@@ -49,13 +50,50 @@ type MemoryManager struct {
 	MaxApplications int    `json:"maxApplications,omitempty"`
 }
 
+// ResolveConnection reuses the Hub connection unless a complete memory-specific
+// pair is supplied. Never forward the shared credential to an overridden URL.
+func (m *MemoryConfig) ResolveConnection(shared KnowledgeConfig) error {
+	if !m.Enabled {
+		return nil
+	}
+	if m.MultiragURL == "" && m.MultiragKey == "" {
+		// A deployment without a complete shared connection can still run Hub.
+		// Do not inherit half a credential pair or initialize native clients.
+		if shared.MultiragBaseURL != "" && shared.MultiragAPIKey != "" {
+			m.MultiragURL, m.MultiragKey = shared.MultiragBaseURL, shared.MultiragAPIKey
+		}
+		return nil
+	}
+	if m.MultiragURL == "" || m.MultiragKey == "" {
+		return fmt.Errorf("MEMORY_MULTIRAG_URL and MEMORY_MULTIRAG_KEY must be configured together; omit both to reuse MULTIRAG_BASE_URL and MULTIRAG_API_KEY")
+	}
+	return nil
+}
+
+// RuntimeEnabled describes configuration readiness, not upstream health.
+func (m MemoryConfig) RuntimeEnabled() bool {
+	return m.Enabled && m.MultiragURL != "" && m.MultiragKey != ""
+}
+
+func emptyMemoryBindings(raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return true
+	}
+	var values []json.RawMessage
+	return json.Unmarshal([]byte(raw), &values) == nil && values != nil && len(values) == 0
+}
+
 func (m MemoryConfig) Clients() ([]MemoryClient, error) {
 	if !m.Enabled {
 		return nil, nil
 	}
 	key, err := hex.DecodeString(m.WrappingKey)
-	if err != nil || len(key) != 32 {
+	// An omitted key is provisioned from system_settings after DB migration.
+	if m.WrappingKey != "" && (err != nil || len(key) != 32) {
 		return nil, fmt.Errorf("MEMORY_WRAPPING_KEY must be 64 hexadecimal characters")
+	}
+	if m.MultiragURL == "" && m.MultiragKey == "" && emptyMemoryBindings(m.ClientsJSON) && emptyMemoryBindings(m.ManagersJSON) {
+		return []MemoryClient{}, nil
 	}
 	u, err := url.Parse(m.MultiragURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || m.MultiragKey == "" {
@@ -100,7 +138,8 @@ func (m MemoryConfig) Clients() ([]MemoryClient, error) {
 
 // Managers validates its own credential namespace against static clients as
 // well as other managers. Enabled registry-only deployments may have no static
-// clients; backend credentials and the wrapping key remain mandatory.
+// clients; backend credentials remain mandatory. A missing wrapping key is
+// provisioned from system_settings before constructing the runtime services.
 func (m MemoryConfig) Managers() ([]MemoryManager, error) {
 	if !m.Enabled {
 		return nil, nil
