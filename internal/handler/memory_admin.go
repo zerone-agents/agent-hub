@@ -14,17 +14,21 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/audit"
+	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/memory"
+	"control-panel/internal/memoryapp"
 	"control-panel/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 type MemoryAdminHandler struct {
-	bindings []MemoryBinding
-	source   MemoryBindingSource
-	audit    *services.AuditRecorder
+	bindings             []MemoryBinding
+	source               MemoryBindingSource
+	audit                *services.AuditRecorder
+	applicationsRegistry *memoryapp.Registry
+	applicationModels    provider.MultiRAGMyLLMsSource
 }
 
 func NewMemoryAdminHandler(bindings []MemoryBinding, recorder *services.AuditRecorder) *MemoryAdminHandler {
@@ -42,10 +46,15 @@ func RegisterUnconfiguredMemoryAdminRoutes(readGroup *gin.RouterGroup) {
 }
 
 func registerUnavailableMemoryAdminRoutes(readGroup *gin.RouterGroup, code, message string) {
-	readGroup.Group("/memory", middleware.RequireManager()).GET("/applications", func(c *gin.Context) {
+	g := readGroup.Group("/memory", middleware.RequireManager())
+	unavailable := func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		respondError(c, 503, code, message)
-	})
+	}
+	g.GET("/applications", unavailable)
+	g.POST("/applications", unavailable)
+	g.GET("/application-models", unavailable)
+	g.GET("/applications/:applicationId/provisioning", unavailable)
 }
 
 func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *MemoryAdminHandler) {
@@ -54,6 +63,9 @@ func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *Memory
 	read := readGroup.Group("/memory", h.observe, middleware.RequireManager())
 	write := writeGroup.Group("/memory", h.observe, middleware.RequireManager())
 	read.GET("/applications", h.applications)
+	read.GET("/application-models", h.listApplicationModels)
+	read.GET("/applications/:applicationId/provisioning", h.applicationProvisioning)
+	write.POST("/applications", h.createApplication)
 	read.GET("/subjects", h.subjects)
 	read.GET("/facts", h.facts)
 	read.GET("/native-messages", h.nativeMessages)
@@ -76,6 +88,7 @@ type memoryAdminApplication struct {
 	PolicyVersion string `json:"policyVersion"`
 	DataClass     string `json:"dataClass"`
 	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
 	Status        string `json:"status,omitempty"`
 	Origin        string `json:"origin,omitempty"`
 }
@@ -229,7 +242,7 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 		return
 	}
 	out := []memoryAdminApplication{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	bindings, ok := h.currentBindings(c, hubTenant)
 	if !ok {
 		return
@@ -239,15 +252,29 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 			continue
 		}
 		key := binding.Client.TenantID + "\x00" + binding.Client.ApplicationID
-		if seen[key] {
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[key] = true
+		seen[key] = len(out)
 		capabilities := memory.BackendCapabilities{}
 		if binding.Service != nil {
 			capabilities = binding.Service.Capabilities()
 		}
 		out = append(out, memoryAdminApplication{BackendCapabilities: capabilities, TenantID: binding.Client.TenantID, ApplicationID: binding.Client.ApplicationID, PolicyVersion: binding.Client.PolicyVersion, DataClass: "synthetic", Name: binding.Name, Status: binding.Status, Origin: binding.Origin})
+	}
+	if h.applicationsRegistry != nil {
+		apps, err := h.applicationsRegistry.ApplicationsForHubTenant(c.Request.Context(), hubTenant)
+		if err != nil {
+			adminApplicationError(c, err)
+			return
+		}
+		for _, app := range apps {
+			if i, exists := seen[app.TenantID+"\x00"+app.ApplicationID]; exists {
+				out[i].Description = app.Description
+			} else if app.Status == "unknown" || app.Status == "provisioning" {
+				out = append(out, memoryAdminApplication{TenantID: app.TenantID, ApplicationID: app.ApplicationID, PolicyVersion: app.PolicyVersion, DataClass: "synthetic", Name: app.Name, Description: app.Description, Status: app.Status, Origin: app.Origin})
+			}
+		}
 	}
 	respondSuccess(c, out)
 }

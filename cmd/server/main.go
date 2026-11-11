@@ -472,6 +472,7 @@ func main() {
 	if cfg.Memory.RuntimeEnabled() {
 		memoryAdmin := handler.NewMemoryAdminHandler(memoryBindings, auditRecorder)
 		memoryAdmin.SetBindingSource(memorySource)
+		memoryAdmin.SetApplicationManagement(memorySource.registry, multirag.NewClient(cfg.Memory.MultiragURL, cfg.Memory.MultiragKey))
 		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, memoryAdmin)
 	} else if cfg.Memory.Enabled {
 		handler.RegisterUnconfiguredMemoryAdminRoutes(adminRead)

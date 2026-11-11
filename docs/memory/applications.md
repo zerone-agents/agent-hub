@@ -2,7 +2,24 @@
 
 业务服务可自行创建多个应用。每个应用由 Hub 创建并绑定独立的底层记忆模块原生记忆库，并获得独立应用令牌；用户及账户生命周期继续在应用内部隔离。全部接口仍限隔离环境的合成数据，沿用 [原生聊天接入合同](README.md)。后台可逐条遗忘原生记录；物理删除、撤权和注销清理仍未开放。
 
-## 一次性配置
+## 从后台创建（推荐）
+
+Hub 已配置底层知识服务连接时，管理员或维护者打开「记忆管理 → 创建记忆应用」，填写名称、应用标识和说明，选择可用的提取模型、向量模型即可。Hub 自动创建私有记忆库、绑定当前登录租户并生成独立应用令牌，配置存入数据库，立即生效。无需设置 `MEMORY_MANAGERS_JSON`、`MEMORY_CLIENTS_JSON` 或重启容器。
+
+创建后在关闭弹窗前复制应用令牌，只交给可信业务服务端。列表和配置详情不返回令牌。创建结果未确认时，使用原操作核对，不另建应用来重试。记忆库模型在创建后固定；已有应用配置仍为只读。
+
+后台接口使用已有 Hub 登录 JWT 和管理员/维护者权限，不接受请求体指定租户、委托关系或现有记忆库。普通成员无权创建。业务租户和管理租户均为当前登录租户；每个租户最多创建 32 个应用（计入静态占位）。应用隔离和合成数据合同保持不变。
+
+| 方法 | 后台路径 | 用途 |
+|---|---|---|
+| GET | `/api/v1/admin/memory/application-models` | 从当前记忆服务账号读取已启用的提取和向量模型，保留模型实例引用 |
+| POST | `/api/v1/admin/memory/applications` | 请求 `operationId/applicationId/name/description/chatModel/embeddingModel`，创建并返回 `application/applicationToken` |
+| GET | `/api/v1/admin/memory/applications` | 返回当前后台租户可管理的应用，包括待确认状态，不返回令牌 |
+| GET | `/api/v1/admin/memory/applications/{applicationId}/provisioning` | 只读核对当前租户创建的应用状态，不重发建库请求、不返回令牌 |
+
+创建返回 Hub 标准 `{success:true,data:…}` 信封，成功为 HTTP 200，待确认为 HTTP 202。原创建请求的精确重放可读取同一回执和令牌，不重复创建库；修改同一操作的模型或其他参数返回冲突。即使模型目录后来不可用，已有回执仍可核对。页面仅在当前弹窗内存中保留令牌，不写入浏览器持久存储。
+
+## 业务服务自动创建的可选配置
 
 ```text
 MULTIRAG_BASE_URL=http://isolated-knowledge:9380
@@ -11,7 +28,7 @@ MEMORY_CLIENTS_JSON=[]
 MEMORY_MANAGERS_JSON=[{"token":"<至少32字节的随机租户管理令牌>","tenantId":"example-tenant","hubTenantId":"example-hub-tenant","chatModel":"<对应服务账号的聊天模型引用>","embeddingModel":"<对应服务账号的embedding模型引用>","maxApplications":32}]
 ```
 
-已配置 Hub 的底层知识服务连接时，只需配置租户管理凭据；记忆默认开启，无需额外设置启用开关。连接默认复用；独立服务/账号需要同时配置 `MEMORY_MULTIRAG_URL` 和 `MEMORY_MULTIRAG_KEY`。新部署包装密钥默认自动生成并持久化，旧部署保留原显式密钥；详细规则见[接入配置](README.md#配置)。动态应用、记忆库绑定及 Hub 生成的应用令牌继续存入数据库，无需逐个增加环境变量；管理令牌仍作为租户级服务端启动授权配置。
+只有业务服务需要脱离后台登录、自行批量开通应用时，才配置上面的租户管理凭据。记忆默认开启，连接默认复用；独立服务/账号需要同时配置 `MEMORY_MULTIRAG_URL` 和 `MEMORY_MULTIRAG_KEY`。新部署包装密钥默认自动生成并持久化，旧部署保留原显式密钥；详细规则见[接入配置](README.md#配置)。动态应用、记忆库绑定及 Hub 生成的应用令牌继续存入数据库，无需逐个增加环境变量；管理令牌仅用于以下机器接口的租户级启动授权，不是页面创建的前置条件。
 
 租户管理令牌仅交给可信业务服务端，不能交给浏览器或移动端。每个管理令牌固定绑定一个业务租户，`hubTenantId` 固定委托管理后台租户，省略时与业务租户相同。模型来自该底层记忆模块 SDK 账号可用的配置，推荐使用数值模型 ID；Hub 不替调用方创建模型或启动抽取 worker。`maxApplications` 默认为 32，可配置 1～1000，包括该租户保留的静态应用占位。
 

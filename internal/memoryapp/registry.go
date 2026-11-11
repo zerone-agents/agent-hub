@@ -220,11 +220,24 @@ func (r *Registry) ReserveStatic(ctx context.Context, entries []StaticReservatio
 }
 
 func (r *Registry) Create(ctx context.Context, owner Owner, in CreateInput) (CreateResult, error) {
+	return r.create(ctx, owner, in, false)
+}
+
+// CreateWithModels binds console-selected models to the idempotent request.
+// Legacy machine callers retain their original configuration-change semantics.
+func (r *Registry) CreateWithModels(ctx context.Context, owner Owner, in CreateInput) (CreateResult, error) {
+	return r.create(ctx, owner, in, true)
+}
+
+func (r *Registry) create(ctx context.Context, owner Owner, in CreateInput, selectedModels bool) (CreateResult, error) {
 	if !validID(owner.TenantID) || !validID(owner.HubTenantID) || !validID(in.ApplicationID) || !validID(in.OperationID) || !validID(in.PolicyVersion) || !textOK(in.Name, 64, true) || !textOK(in.Description, 1024, false) || !textOK(owner.ChatModel, 128, true) || !textOK(owner.EmbeddingModel, 128, true) || owner.MaxApplications < 1 || owner.MaxApplications > 1000 {
 		return CreateResult{}, ErrInvalid
 	}
 	request, _ := json.Marshal(in)
 	requestHash := hash(string(request))
+	if selectedModels {
+		requestHash = hash(string(request), owner.ChatModel, owner.EmbeddingModel)
+	}
 	id := hash(owner.TenantID, in.ApplicationID)
 	opKey := hash(owner.TenantID, in.OperationID)
 	var row applicationRow
@@ -477,6 +490,23 @@ func (r *Registry) ForHubTenant(ctx context.Context, tenant string) ([]Binding, 
 	out := make([]Binding, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, binding(row))
+	}
+	return out, nil
+}
+
+// ApplicationsForHubTenant includes unfinished provisioning receipts, but never
+// credentials. Only completed bindings are admitted by ForHubTenant.
+func (r *Registry) ApplicationsForHubTenant(ctx context.Context, tenant string) ([]Application, error) {
+	if !validID(tenant) {
+		return nil, ErrInvalid
+	}
+	var rows []applicationRow
+	if r.db.WithContext(ctx).Where("hub_tenant_key = ? AND origin = ?", hash(tenant), "managed").Order("created_at ASC, id ASC").Find(&rows).Error != nil {
+		return nil, ErrUnavailable
+	}
+	out := make([]Application, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, appView(row))
 	}
 	return out, nil
 }

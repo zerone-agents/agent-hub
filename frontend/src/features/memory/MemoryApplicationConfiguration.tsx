@@ -53,6 +53,16 @@ export default function MemoryApplicationConfiguration({
                 children: application.applicationId
               },
               {
+                key: 'name',
+                label: t('memory.applicationName'),
+                children: application.name ?? '—'
+              },
+              {
+                key: 'description',
+                label: t('memory.configurationDescription'),
+                children: application.description ?? '—'
+              },
+              {
                 key: 'policy',
                 label: t('memory.policyVersion'),
                 children: application.policyVersion

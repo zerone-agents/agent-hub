@@ -1,4 +1,25 @@
 export const memoryZh = {
+  createApplication: '创建记忆应用',
+  applicationName: '应用名称',
+  applicationId: '应用标识',
+  applicationIdHint: '用于服务接入，支持字母、数字及 - _ . :，创建后不可更改。',
+  extractionModel: '记忆提取模型',
+  embeddingModel: '向量模型',
+  applicationTenant: '所属租户',
+  createApplicationHint:
+    '选择模型后自动创建并绑定独立记忆库，归属当前登录租户，保存后立即生效。',
+  noCreationModels:
+    '请先在模型管理中配置并同步可用的聊天模型与向量模型，再刷新此列表。',
+  applicationCreated: '记忆应用已创建',
+  creationPending: '创建结果待确认',
+  creationUnconfirmed:
+    '请核对原创建操作。再次核对只读取已有结果，不会重复创建记忆库；也可刷新应用列表查看状态。',
+  checkCreation: '核对创建结果',
+  applicationToken: '应用令牌',
+  applicationTokenHint:
+    '请在关闭前复制并保存应用令牌，交给业务服务端用于记忆接入。列表不再展示此令牌，请勿放入前端代码。',
+  copyApplicationToken: '复制应用令牌',
+  creationDone: '已保存，完成',
   nativeDiagnosticHint:
     '展示当前账户经来源校验的原生检索命中，不补入最近原文。来源已停用或遗忘时，派生记忆会被排除。',
   nativeForgotten: '已遗忘',
@@ -203,7 +224,7 @@ export const memoryZh = {
   retry: '重试',
   synthetic: '合成数据',
   noApplications: '尚未配置记忆应用',
-  noApplicationsHint: '接入记忆服务后，应用会显示在这里。',
+  noApplicationsHint: '点击“创建记忆应用”，填写名称并选择模型后即可使用。',
   noSubjects: '该应用暂无可展示的用户账户',
   noSubjectsHint: '用户经业务对话入口提交记忆后，可在这里查看对应账户。',
   missingScopes:
@@ -285,6 +306,28 @@ export const memoryZh = {
 }
 
 export const memoryEn = {
+  createApplication: 'Create memory application',
+  applicationName: 'Application name',
+  applicationId: 'Application ID',
+  applicationIdHint:
+    'Use letters, numbers and - _ . : for service integration. Cannot be changed after creation.',
+  extractionModel: 'Memory extraction model',
+  embeddingModel: 'Embedding model',
+  applicationTenant: 'Tenant',
+  createApplicationHint:
+    'Select models to create and bind a dedicated memory bank owned by your signed-in tenant. No restart is needed.',
+  noCreationModels:
+    'Configure and sync an available chat model and embedding model in model management, then refresh this list.',
+  applicationCreated: 'Memory application created',
+  creationPending: 'Creation outcome unconfirmed',
+  creationUnconfirmed:
+    'Check the original operation. Checking again reads its existing outcome without creating another bank. You can also refresh the application list.',
+  checkCreation: 'Check creation outcome',
+  applicationToken: 'Application token',
+  applicationTokenHint:
+    'Copy and save this token before closing. Use it only in your business service. It is not shown in lists and must not be embedded in frontend code.',
+  copyApplicationToken: 'Copy application token',
+  creationDone: 'Saved, done',
   nativeDiagnosticHint:
     'Shows native hits verified against the current account and their source, without adding recent originals. Derived memories are excluded when their source is disabled or forgotten.',
   nativeForgotten: 'Forgotten',
@@ -508,7 +551,7 @@ export const memoryEn = {
   synthetic: 'Synthetic data',
   noApplications: 'No memory applications configured',
   noApplicationsHint:
-    'Applications appear here after memory service integration.',
+    'Choose “Create memory application”, enter a name and select models to get started.',
   noSubjects: 'This application has no displayable user accounts',
   noSubjectsHint:
     'Accounts appear here after memories are submitted through the business conversation flow.',
@@ -604,6 +647,13 @@ export const memoryEn = {
 } satisfies typeof memoryZh
 
 export const memoryErrorsZh = {
+  memoryModelsUnavailable: '无法加载记忆服务模型，请检查服务连接后重试',
+  memoryModelInvalid: '请选择当前可用的提取模型与向量模型',
+  memoryApplicationUnavailable: '记忆应用管理暂不可用，请核对原创建操作',
+  memoryApplicationInvalid: '应用标识、名称或创建参数无效',
+  memoryApplicationNotFound: '记忆应用不存在',
+  memoryApplicationConflict: '应用标识或创建操作冲突，请核对已有应用',
+  memoryApplicationQuota: '已达到当前租户的记忆应用数量上限',
   MEMORY_OPERATION_UNSUPPORTED:
     '本期暂不支持该记忆操作，请查看当前应用的能力说明',
   memoryOperationUnsupported:
@@ -622,6 +672,19 @@ export const memoryErrorsZh = {
 }
 
 export const memoryErrorsEn = {
+  memoryModelsUnavailable:
+    'Cannot load memory service models. Check the service connection and retry.',
+  memoryModelInvalid:
+    'Select an available extraction model and embedding model.',
+  memoryApplicationUnavailable:
+    'Memory application management is unavailable. Check the original creation operation.',
+  memoryApplicationInvalid:
+    'Invalid application ID, name or creation parameters.',
+  memoryApplicationNotFound: 'Memory application does not exist.',
+  memoryApplicationConflict:
+    'The application ID or creation operation conflicts. Check the existing application.',
+  memoryApplicationQuota:
+    'The tenant has reached its memory application limit.',
   MEMORY_OPERATION_UNSUPPORTED:
     'This memory operation is unavailable in the current phase.',
   memoryOperationUnsupported:
