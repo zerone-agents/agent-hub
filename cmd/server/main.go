@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -24,10 +25,12 @@ import (
 	"control-panel/internal/infrastructure/deployer"
 	knowledgeinfra "control-panel/internal/infrastructure/knowledge"
 	"control-panel/internal/infrastructure/kong"
+	"control-panel/internal/infrastructure/memoryindex"
 	"control-panel/internal/infrastructure/multirag"
 	ossinfra "control-panel/internal/infrastructure/oss"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/internal/infrastructure/runtime"
+	"control-panel/internal/memory"
 	"control-panel/internal/middleware"
 	"control-panel/pkg/database"
 
@@ -236,6 +239,36 @@ func main() {
 	knowledgeService.SetDatasetGuard(datasetGuard)
 	// Reservations are durable even when the memory HTTP service is disabled.
 	// They cover the shared KnowledgeService used by API, MCP and deployment.
+
+	// ── 记忆 MCP（Agent 自主记忆，spec docs/superpowers/specs/2026-11-11-
+	// memory-mcp-design.md）──依赖知识模块连接：检索副本落在知识 MultiRAG
+	// 的按租户保留 dataset（hub-agent-memory-<tenant>）。未配置时不注册
+	// 端点（部署注入亦以 Agent 开启记忆 + 连接可用为前提）。
+	var memoryMcpHandler *handler.MemoryMcpHandler
+	if cfg.Knowledge.MultiragBaseURL != "" && cfg.Knowledge.MultiragAPIKey != "" {
+		memoryCapSecret, err := systemsetting.EnsureMemoryCapabilitySecret(database.GetDB(), os.Getenv("MEMORY_CAPABILITY_SECRET"))
+		if err != nil {
+			log.Fatalf("Failed to provision memory capability secret: %v", err)
+		}
+		agentMemoryWrapSecret, err := systemsetting.EnsureAgentMemoryWrappingKey(database.GetDB(), os.Getenv("AGENT_MEMORY_WRAPPING_KEY"))
+		if err != nil {
+			log.Fatalf("Failed to provision agent memory wrapping key: %v", err)
+		}
+		agentMemoryWrapper, err := memory.NewSyntheticKeyWrapper(agentMemoryWrapSecret)
+		if err != nil {
+			log.Fatalf("Invalid agent memory wrapping key: %v", err)
+		}
+		agentMemoryEngine := knowledgeinfra.NewRemoteMultiragEngine(
+			cfg.Knowledge.MultiragBaseURL,
+			cfg.Knowledge.MultiragAPIKey,
+			time.Duration(cfg.Knowledge.TimeoutSeconds)*time.Second,
+			time.Duration(cfg.Knowledge.UploadTimeoutSeconds)*time.Second,
+		)
+		agentMemoryRegistry := services.NewAgentMemoryRegistry(database.GetDB(), agentMemoryWrapper, datasetGuard, memoryindex.New(agentMemoryEngine))
+		memoryMcpHandler = handler.NewMemoryMcpHandler(agentMemoryResolverAdapter{agentMemoryRegistry}, services.NewMemoryCapabilityService(memoryCapSecret), auditRecorder)
+	} else {
+		log.Println("memory-mcp: knowledge connection not configured; agent memory MCP disabled")
+	}
 	memoryBindings, err := configureMemory(cfg.Memory, datasetGuard)
 	if err != nil {
 		log.Fatalf("Failed to initialize memory service: %v", err)
@@ -604,6 +637,13 @@ func main() {
 	// This endpoint is called by the agent runtime with an Agent Runtime Token,
 	// not a user JWT, so it must not be under the JWTAuthWithCLI middleware group.
 	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
+
+	// ---------- Memory MCP 运行时（Agent 自主记忆，spec 2026-11-11）----------
+	// 同 knowledge MCP：Agent Runtime Token 认证，不挂 JWT 组；knowledge
+	// 连接未配置时组件为 nil，不注册路由。
+	if memoryMcpHandler != nil {
+		r.POST("/api/v1/memory/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), memoryMcpHandler.HandleMessage)
+	}
 
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组
