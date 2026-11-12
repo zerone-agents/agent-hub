@@ -24,9 +24,9 @@ import (
 )
 
 type MemoryAdminHandler struct {
-	bindings             []MemoryBinding
-	source               MemoryBindingSource
-	audit                *services.AuditRecorder
+	bindings []MemoryBinding
+	source   MemoryBindingSource
+	audit    *services.AuditRecorder
 	// agentMemory resolves the reserved hub-agent application's per-tenant
 	// ledger（spec 2026-11-11-memory-mcp-design §4）——管理台按 agent scope
 	// 查看 Agent 自主记忆，记录自带 source（写入者）。nil（knowledge 连接
