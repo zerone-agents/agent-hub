@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Tag, Tooltip, message } from 'antd'
+import { Button, Spin, Modal, Select, Empty, Input, AutoComplete, Switch, Tag, Tooltip, message } from 'antd'
 import NameSearch from '@/components/NameSearch'
 import { PlusIcon, SquaresFourIcon, PlugIcon, CheckSquareIcon, ChatCircleDotsIcon } from '@phosphor-icons/react'
 import { createStyles } from 'antd-style'
@@ -119,6 +119,9 @@ export default function AgentListPage() {
   const [selectedSelectionId, setSelectedSelectionId] = useState<string>('')
   // 推理强度（issue #226）：模型配置弹窗内的单值档位，'' = 未设置/清除
   const [selectedEffort, setSelectedEffort] = useState<string>('')
+  // 关闭思考（issue #257）：thinking.type 单值——'' = 未设置（provider 默认），
+  // 'disabled' = 关闭；budgetTokens 本次不暴露 UI（契约/存储已支持）
+  const [selectedThinkingType, setSelectedThinkingType] = useState<string>('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [initialApiKey, setInitialApiKey] = useState<string>('') // masked api_key from backend
   const [testPassed, setTestPassed] = useState(false)
@@ -348,6 +351,7 @@ export default function AgentListPage() {
     setSelectedModelId(mid)
     setSelectedSelectionId(sid)
     setSelectedEffort(agent.config.effort ?? '')
+    setSelectedThinkingType(agent.config.thinking?.type ?? '')
     setTestPassed(false)
     setTesting(false)
     setSaving(false)
@@ -412,6 +416,7 @@ export default function AgentListPage() {
     setSelectedModelId('')
     setSelectedSelectionId('')
     setSelectedEffort('')
+    setSelectedThinkingType('')
     setFieldValues(initial)
   }
 
@@ -493,6 +498,8 @@ export default function AgentListPage() {
             fieldOverrides: overrides,
             // 恒带 key：'' = 显式清除（hub 对 absent key 不变更，丢 key 会让清除静默失效）
             effort: selectedEffort,
+            // thinking 恒带 key：null = 显式清除（hub unpack 对 absent key 不变更）
+            thinking: selectedThinkingType ? { type: selectedThinkingType } : null,
           }
         }
       })
@@ -1038,6 +1045,20 @@ export default function AgentListPage() {
                   onChange={(value) => { setSelectedEffort(value) }}
                   options={declaredModelEfforts.map((e) => ({ value: e }))}
                   allowClear
+                />
+              </div>
+            )}
+
+            {/* 关闭思考（issue #257）：thinking.type=disabled；与推理强度独立（语义正交） */}
+            {selectedProviderId && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  <Tooltip title={t('agents.modals.thinkingTip')}>{t('agents.modals.thinking')}</Tooltip>
+                </label>
+                <Switch
+                  checked={selectedThinkingType === 'disabled'}
+                  onChange={(v) => { setSelectedThinkingType(v ? 'disabled' : '') }}
+                  disabled={!canWrite}
                 />
               </div>
             )}

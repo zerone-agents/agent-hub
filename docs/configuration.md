@@ -218,6 +218,8 @@ openssl rand -hex 32
 
 **推理强度 effort（issue #226）**：Agent 配置支持 `effort` 单值档位（SDK `AgentOptions.effort` 透传，预设 `low|medium|high|xhigh|max` + 自定义值），属运行时全局字段、仅 root 携带（child 声明会被 deployer 400 拒绝）。**版本前提：声明 effort 要求 agent-runtime ≥ v2.9.0**（runtime #77 引入该键，低版本静默 strip 不生效）——deployer 侧对声明 effort 的部署按镜像版本拒绝（503），因此凡需使用 effort 的环境，`AGENT_DEPLOYER_RUNTIME_IMAGE` 必须指向 v2.9.0+ 镜像 tag（或配置 `AGENT_DEPLOYER_RUNTIME_IMAGE_ASSUME_LATEST=true`，自担漂移风险）。**升级顺序：先升级 agent-deployer 至含 effort 契约的版本（agent-deployer#23），再升级 hub 并重新部署存量 Agent**——旧 deployer 解析部署请求时未知字段会被静默忽略，hub 先行升级会让 effort 存得下但不生效且无任何报错。值校验在 hub 完成：模型声明了 `provider_models.efforts` 时取值必须在该候选列表内（保存与部署两侧均校验），无声明时允许任意非空自定义值透传。`thinking`（思考预算）为独立字段、无额外版本门槛，与 effort 语义不同不可互相替代。
 
+**关闭思考 thinking（issue #257）**：Agent 配置支持 `thinking` 嵌套对象（`{type, budgetTokens?}`，SDK `AgentOptions.thinking`）——`type` 为 SDK 枚举 `adaptive|enabled|disabled`，`disabled` 即「关闭思考」（模型跳过显式扩展思考，响应更快、成本更低）；`budgetTokens` 为思考预算（1..128000 整数，上限是 hub 防呆边界，deployer 纯透传）。与 effort 一样属运行时全局字段、仅 root 携带（deployer 拒 child 声明）；**type 枚举外值在 hub 保存侧即拒绝**（deployer fail-fast，非法值会炸 runtime 容器启动期的 Zod 整体解析）。**无额外 runtime 版本门槛**（thinking 自 runtime v2.4.0 起在基础门槛内，早于 effort 的 v2.9.0）。显式 `null` = 清除（回 provider/SDK 默认行为）。**与 effort 语义正交**：effort 控制推理档位、thinking 控制是否扩展思考，二者独立设置、不可互相替代；UI 入口统一在 Agent「配置模型」弹窗（推理强度下方）。
+
 ## Knowledge module connection
 
 | Variable | Required | Default | Description |

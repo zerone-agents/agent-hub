@@ -87,6 +87,10 @@ const (
 	// effort 推理强度（issue #226）：单形态码（zh/en 键逐字契约）。
 	CodeEffortTooLong     StableCode = "effort_too_long"
 	CodeEffortNotDeclared StableCode = "effort_not_declared"
+	// thinking 扩展思考（issue #257）：单形态码（zh/en 键逐字契约）。
+	CodeThinkingInvalid       StableCode = "thinking_invalid"
+	CodeThinkingTypeInvalid   StableCode = "thinking_type_invalid"
+	CodeThinkingBudgetInvalid StableCode = "thinking_budget_invalid"
 )
 
 // ErrAgentNotFound Agent 行不存在：service 层依据 gorm.ErrRecordNotFound 按

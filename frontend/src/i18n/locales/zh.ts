@@ -458,6 +458,8 @@ const zh = {
       mcpHint: '选择此代理可使用的 MCP 服务器（在 MCP 配置页面管理可用列表）：',
       mcpEmpty: '请先在 MCP 配置页面添加服务器',
       modelEmpty: '请先在模型管理添加模型服务',
+      thinking: '关闭思考',
+      thinkingTip: '开启后模型跳过显式扩展思考（thinking.type=disabled），响应更快、成本更低；与推理强度独立设置。',
       subagentPh: '选择子代理',
       toolPh: '选择工具',
       skillPh: '选择技能',

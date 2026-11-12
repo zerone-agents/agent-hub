@@ -962,8 +962,8 @@ func (s *AgentDeployerService) validateEffortForDeploy(providerID uint64, cfg *a
 
 // definitionOpts carries graph-position context into buildAgentDefinition.
 // The root node is the only node allowed to carry the runtime-global fields
-// (Model, MaxSessionQueries, PermissionMode, Effort) — the deployer v3
-// rejects them on children. Root and child nodes all carry bare runtime
+// (Model, MaxSessionQueries, PermissionMode, Effort, Thinking) — the deployer
+// v3 rejects them on children. Root and child nodes all carry bare runtime
 // names (issue #114); the tenant-scoped identity lives in the dedicated
 // deploymentKey.
 type definitionOpts struct {
@@ -999,6 +999,12 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		// Effort（issue #226）：root-only（deployer 拒 child 声明）；空串
 		// 走 DTO omitempty = 未声明。
 		def.Effort = cfg.Effort
+		// thinking（issue #257）：root-only；type 非空才下发——validator 已拦
+		// 半态，此处是下发侧防御（无 type 的对象会炸 runtime Zod 必填与
+		// deployer fail-fast）。
+		if cfg.ThinkingType != "" {
+			def.Thinking = &deployer.ThinkingConfig{Type: cfg.ThinkingType, BudgetTokens: cfg.ThinkingBudgetTokens}
+		}
 	}
 	// Agent-local deny list (issue #111): root and children are isomorphic —
 	// each node carries exactly its own user-configured disallowedTools on top

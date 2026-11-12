@@ -457,6 +457,8 @@ const en = {
       mcpHint: 'Select the MCP servers this agent can use (manage the list on the MCP page):',
       mcpEmpty: 'Add servers on the MCP page first',
       modelEmpty: 'Add a provider on the Models page first',
+      thinking: 'Disable Thinking',
+      thinkingTip: 'When on, the model skips explicit extended thinking (thinking.type=disabled) — faster and cheaper. Independent of reasoning effort.',
       subagentPh: 'Select subagents',
       toolPh: 'Select tools',
       skillPh: 'Select skills',

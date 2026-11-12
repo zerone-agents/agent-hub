@@ -48,6 +48,10 @@ func TestErrcodes_RegistryPinsDomainAgentCodes(t *testing.T) {
 		// #226 effort 推理强度（单形态码）
 		{ErrCodeEffortTooLong, agent.CodeEffortTooLong},
 		{ErrCodeEffortNotDeclared, agent.CodeEffortNotDeclared},
+		// #257 thinking 扩展思考（单形态码）
+		{ErrCodeThinkingInvalid, agent.CodeThinkingInvalid},
+		{ErrCodeThinkingTypeInvalid, agent.CodeThinkingTypeInvalid},
+		{ErrCodeThinkingBudgetInvalid, agent.CodeThinkingBudgetInvalid},
 	}
 	for _, p := range pairs {
 		if string(p.domain) != p.registry {
