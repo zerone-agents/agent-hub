@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"control-panel/internal/application/services"
@@ -78,7 +79,7 @@ func memoryMcpTokenFP(token string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-var memoryMcpAllTools = []string{"memory_remember", "memory_recall", "memory_list", "memory_update"}
+var memoryMcpAllTools = services.AgentMemoryToolNames
 
 func memoryMcpCapability(t *testing.T, caps *services.MemoryCapabilityService, agentName, scopeMode string) string {
 	t.Helper()
@@ -145,6 +146,32 @@ func memoryMcpResultText(t *testing.T, resp jsonRPCResponse) string {
 }
 
 // ── 测试 ──────────────────────────────────────────────────────────
+
+func TestMemoryMcpToolNamesPinned(t *testing.T) {
+	// 防漂移钉住（review 重要项 9）：schema 广播集 == 单一来源 == switch
+	// 接受集——任一漂移即红（schema 仍广播、运行时 deny 的失败模式）。
+	require.ElementsMatch(t, services.AgentMemoryToolNames, memoryMcpAllTools)
+	caps := services.NewMemoryCapabilityService("unit-secret")
+	router := setupMemoryMcpRouter(&fakeAgentMemoryStore{}, caps, nil)
+	rec := memoryMcpPost(t, router, "tools/list", nil, nil)
+	var listResp struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listResp))
+	broadcast := make([]string, 0, len(listResp.Result.Tools))
+	for _, tl := range listResp.Result.Tools {
+		broadcast = append(broadcast, tl.Name)
+	}
+	require.ElementsMatch(t, services.AgentMemoryToolNames, broadcast, "schema 广播集与单一来源一致")
+	for _, tool := range services.AgentMemoryToolNames {
+		short := strings.TrimPrefix(tool, "memory_")
+		require.Equal(t, "memory.mcp."+short, string(memoryMcpAction(tool)), "audit action 映射一致")
+	}
+}
 
 func TestMemoryMcpInitializeAndToolsList(t *testing.T) {
 	caps := services.NewMemoryCapabilityService("unit-secret")

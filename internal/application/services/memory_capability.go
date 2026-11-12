@@ -108,6 +108,14 @@ func (s *MemoryCapabilityService) VerifyWithToken(raw, agentName, bearerToken st
 	return s.Verify(raw, agentName, tokenFingerprint(bearerToken))
 }
 
+// AgentMemoryToolNames is the single source of the memory MCP tool set —
+// the handler's tools/list schema, the switch dispatch, the deployer's
+// capability payload, and tests all derive from this list (review 重要项 9):
+// drift between a broadcast schema and runtime denial is the failure mode
+// this consolidation eliminates. Add-only contract; pinned by
+// TestAgentMemoryToolNamesComplete in the handler tests.
+var AgentMemoryToolNames = []string{"memory_remember", "memory_recall", "memory_list", "memory_update"}
+
 // Verify runs the full chain for one presented capability: format (three
 // dot-separated segments, v1 prefix), HMAC over the payload bytes, and the
 // agent-name / token-fingerprint bindings. Tenant / scopeMode / tools are

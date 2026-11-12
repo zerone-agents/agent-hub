@@ -318,16 +318,52 @@ func memoryStoreErrorResult(id interface{}, err error) jsonRPCResponse {
 	}
 }
 
+// memoryMcpAction maps a tool name to its audit action constant. The switch
+// set is pinned to AgentMemoryToolNames by TestMemoryMcpToolNamesComplete.
+func memoryMcpAction(tool string) audit.Action {
+	switch tool {
+	case "memory_remember":
+		return audit.ActionMemoryMcpRemember
+	case "memory_recall":
+		return audit.ActionMemoryMcpRecall
+	case "memory_list":
+		return audit.ActionMemoryMcpList
+	case "memory_update":
+		return audit.ActionMemoryMcpUpdate
+	}
+	return audit.Action(tool)
+}
+
+// pinnedMemoryScope reconstructs the server-pinned scope shape from the
+// authenticated context — used for deny-path audit rows where the capability
+// chain rejected before the scope was returned. The actor identity (tenant +
+// agent name) comes from the auth middleware, which is trusted regardless of
+// capability validity.
+func pinnedMemoryScope(c *gin.Context) memory.Scope {
+	agentCfg, _ := middleware.AgentFromContext(c)
+	return memory.Scope{
+		TenantID:      tenant.GetTenantID(c),
+		ApplicationID: memoryAppReserved,
+		UserID:        "agent:" + agentCfg.Name,
+		LifecycleID:   memoryLifecycleConst,
+	}
+}
+
 func (h *MemoryMcpHandler) handleMemoryTool(ctx context.Context, c *gin.Context, id interface{}, p toolCallParams) (jsonRPCResponse, error) {
 	scope, store, deny, err := h.resolveMemoryScope(c, id, p.Name)
 	if err != nil {
 		return jsonRPCResponse{}, err
 	}
+	action := memoryMcpAction(p.Name)
 	if deny != nil {
+		// Deny 也落行（review 重要 4）：spec §5「每次调用审计」覆盖失败
+		// 形态——身份链拒绝同样是一次调用，StatusFailure。
+		h.recordAudit(c, pinnedMemoryScope(c), action, "", 0, 0, true)
 		return *deny, nil
 	}
 	if err := store.EnsureAgentLifecycle(ctx, scope); err != nil {
 		log.Printf("memory-mcp: ensure lifecycle failed (tenant=%s agent-scope=%s): %v", scope.TenantID, scope.UserID, err)
+		h.recordAudit(c, scope, action, "", 0, 0, true)
 		return memoryStoreErrorResult(id, err), nil
 	}
 
@@ -335,65 +371,77 @@ func (h *MemoryMcpHandler) handleMemoryTool(ctx context.Context, c *gin.Context,
 	case "memory_remember":
 		var args memoryRememberArgs
 		if err := json.Unmarshal(p.Arguments, &args); err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return mcpCodedErrorResult(id, mcpErrMemoryInvalidArgs, "记忆参数不合法"), nil
 		}
 		record, err := store.RememberAgentFact(ctx, scope, memory.AgentMemoryInput{
 			Subject: args.Subject, Category: args.Category, Content: args.Content, Quote: args.Quote, TurnID: args.SourceTurnID,
 		})
 		if err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return memoryStoreErrorResult(id, err), nil
 		}
-		h.recordAudit(c, scope, "memory.mcp.remember", record.ID, record.Version, 0)
+		h.recordAudit(c, scope, action, record.ID, record.Version, 0, false)
 		return mcpJSONResult(id, map[string]interface{}{"memoryId": record.ID, "version": record.Version})
 
 	case "memory_recall":
 		var args memoryRecallArgs
 		if err := json.Unmarshal(p.Arguments, &args); err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return mcpCodedErrorResult(id, mcpErrMemoryInvalidArgs, "记忆参数不合法"), nil
 		}
 		if strings.TrimSpace(args.Query) == "" {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return mcpCodedErrorResult(id, mcpErrMemoryInvalidArgs, "query 不能为空"), nil
 		}
 		records, err := store.RecallAgentMemories(ctx, scope, args.Query, args.Limit)
 		if err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return memoryStoreErrorResult(id, err), nil
 		}
-		h.recordAudit(c, scope, "memory.mcp.recall", "", 0, len(records))
+		h.recordAudit(c, scope, action, "", 0, len(records), false)
 		return mcpJSONResult(id, map[string]interface{}{"memories": records})
 
 	case "memory_list":
 		var args memoryListArgs
 		if err := json.Unmarshal(p.Arguments, &args); err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return mcpCodedErrorResult(id, mcpErrMemoryInvalidArgs, "记忆参数不合法"), nil
 		}
 		records, err := store.ListAgentMemories(ctx, scope, args.Category, args.MemoryID, 50)
 		if err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return memoryStoreErrorResult(id, err), nil
 		}
-		h.recordAudit(c, scope, "memory.mcp.list", "", 0, len(records))
+		h.recordAudit(c, scope, action, "", 0, len(records), false)
 		return mcpJSONResult(id, map[string]interface{}{"memories": records})
 
 	case "memory_update":
 		var args memoryUpdateArgs
 		if err := json.Unmarshal(p.Arguments, &args); err != nil {
+			h.recordAudit(c, scope, action, "", 0, 0, true)
 			return mcpCodedErrorResult(id, mcpErrMemoryInvalidArgs, "记忆参数不合法"), nil
 		}
 		record, err := store.UpdateAgentFact(ctx, scope, args.MemoryID, args.ExpectedVersion, memory.AgentMemoryInput{
 			Content: args.Content, Quote: args.Quote, Category: args.Category,
 		})
 		if err != nil {
+			h.recordAudit(c, scope, action, args.MemoryID, 0, 0, true)
 			return memoryStoreErrorResult(id, err), nil
 		}
-		h.recordAudit(c, scope, "memory.mcp.update", record.ID, record.Version, 0)
+		h.recordAudit(c, scope, action, record.ID, record.Version, 0, false)
 		return mcpJSONResult(id, map[string]interface{}{"memoryId": record.ID, "version": record.Version})
 	}
 	return jsonRPCResponse{}, fmt.Errorf("工具不存在: %s", p.Name)
 }
 
-// recordAudit writes one audit row per tool call: scope hash + memory
-// metadata only — content and quotes never appear (spec §7, NotContains
-// 钉住于测试)。
-func (h *MemoryMcpHandler) recordAudit(c *gin.Context, scope memory.Scope, action, memoryID string, version uint64, count int) {
+// recordAudit writes one audit row per tool call — success, deny, and error
+// alike (review 重要 4): the scope hash + memory metadata only; content and
+// quotes never appear (spec §7, NotContains pinned in tests). Detail is the
+// strongly-typed MemoryMcpDetail (audit spec §5.4 whitelist — review 重要 5);
+// failure semantics ride the explicit Failed flag (MCP errors are HTTP 200
+// with an embedded isError result, so writer-status checks are dead code).
+func (h *MemoryMcpHandler) recordAudit(c *gin.Context, scope memory.Scope, action audit.Action, memoryID string, version uint64, count int, failed bool) {
 	if h.audit == nil {
 		return
 	}
@@ -401,21 +449,13 @@ func (h *MemoryMcpHandler) recordAudit(c *gin.Context, scope memory.Scope, actio
 	digest := sha256.Sum256(scopeJSON)
 	entry := audit.SimpleEvent(
 		audit.Actor{TenantID: scope.TenantID, UserID: scope.UserID},
-		audit.Action(action),
+		action,
 		audit.TargetType("memory"),
 		hex.EncodeToString(digest[:]),
 		"",
 	)
-	detail := map[string]any{"tool": action}
-	if memoryID != "" {
-		detail["memoryId"] = memoryID
-		detail["version"] = version
-	}
-	if count > 0 {
-		detail["count"] = count
-	}
-	entry.Detail = detail
-	if c.Writer.Status() >= 400 {
+	entry.Detail = audit.MemoryMcpDetail{Tool: string(action), MemoryID: memoryID, Version: version, Count: count, Failed: failed}
+	if failed {
 		entry.Status = audit.StatusFailure
 	}
 	h.audit.Record(c, entry)

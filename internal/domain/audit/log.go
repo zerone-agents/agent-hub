@@ -67,6 +67,13 @@ const (
 	ActionMcpCreate Action = "mcp.create"
 	ActionMcpUpdate Action = "mcp.update"
 	ActionMcpDelete Action = "mcp.delete"
+
+	// 记忆 MCP（spec 2026-11-11-memory-mcp §5）：Agent 自主记忆工具调用，
+	// 每次调用一行（含 deny/错误——失败也落行，StatusFailure）。
+	ActionMemoryMcpRemember Action = "memory.mcp.remember"
+	ActionMemoryMcpRecall   Action = "memory.mcp.recall"
+	ActionMemoryMcpList     Action = "memory.mcp.list"
+	ActionMemoryMcpUpdate   Action = "memory.mcp.update"
 )
 
 const (

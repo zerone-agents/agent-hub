@@ -11,6 +11,9 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -68,33 +71,38 @@ func (m *MemoryInjector) BuildSummary(ctx context.Context, tenantID, agentName, 
 	if query == "" {
 		return "", nil
 	}
-	recaller, err := m.source.AgentMemoryRecaller(tenantID)
-	if err != nil {
-		m.skip(agentName, "resolve recaller failed", err)
-		return "", nil
-	}
 	scope := memory.Scope{
 		TenantID:      tenantID,
 		ApplicationID: AgentMemoryApplication,
 		UserID:        "agent:" + agentName,
 		LifecycleID:   agentMemoryLifecycleConst,
 	}
+	recaller, err := m.source.AgentMemoryRecaller(tenantID)
+	if err != nil {
+		m.skip(scope, "resolve recaller failed", err)
+		return "", nil
+	}
 	tctx, cancel := context.WithTimeout(ctx, memorySummaryTimeout)
 	defer cancel()
 	if err := recaller.EnsureAgentLifecycle(tctx, scope); err != nil {
-		m.skip(agentName, "ensure lifecycle failed", err)
+		m.skip(scope, "ensure lifecycle failed", err)
 		return "", nil
 	}
 	records, err := recaller.RecallAgentMemories(tctx, scope, query, memorySummaryMaxItems)
 	if err != nil {
-		m.skip(agentName, "recall failed or timed out", err)
+		m.skip(scope, "recall failed or timed out", err)
 		return "", nil
 	}
 	return renderMemorySummary(records), nil
 }
 
-func (m *MemoryInjector) skip(agentName, reason string, err error) {
-	log.Printf("memory-mcp: summary injection skipped (agent=%s): %s: %v", agentName, reason, err)
+func (m *MemoryInjector) skip(sc memory.Scope, reason string, err error) {
+	// scope 哈希而非明文：日志可关联同一 scope 的多次跳过，不泄露租户/
+	// agent 身份组合（spec §4「agent 名 + scope 哈希」——review 建议级 13
+	// 提为重要后补齐）。
+	raw, _ := json.Marshal(sc)
+	sum := sha256.Sum256(raw)
+	log.Printf("memory-mcp: summary injection skipped (agent=%s scope=%s): %s: %v", sc.UserID, hex.EncodeToString(sum[:])[:16], reason, err)
 }
 
 // renderMemorySummary applies the data-framing template and the shape

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,3 +129,74 @@ func TestMemoryAdminAgentFactsUnavailableWithoutRegistry(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body=%s", rec.Body.String())
 }
+
+func adminAgentRouter(h *MemoryAdminHandler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		tenant.SetTenantID(c, "t1")
+		c.Set("roles", []string{"admin"})
+		c.Set("user_id", "manager-1")
+	})
+	RegisterMemoryAdminRoutes(r.Group("/api/v1/admin"), r.Group("/api/v1/admin"), h)
+	return r
+}
+
+func TestMemoryAdminAgentMemorySubjectUpdateDelete(t *testing.T) {
+	h, registry := newAdminAgentMemoryEnv(t)
+	h.SetAgentMemoryRegistry(registry)
+	r := adminAgentRouter(h)
+
+	// applications 含保留应用条目（前端导航可达——review 阻塞②）
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/memory/applications", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), services.AgentMemoryApplication, "保留应用出现在 applications 列表")
+
+	// subjects：经 selectService 的 registry 分支列出 agent scope
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/memory/subjects?tenantId=t1&applicationId="+services.AgentMemoryApplication, nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "agent:counselor", "agent scope 列为 subject")
+
+	// 修正（quote 宽松的管理通道变体）+ 物理删除（池满腾位闭环）
+	scope := `{"tenantId":"t1","applicationId":"` + services.AgentMemoryApplication + `","userId":"agent:counselor","accountLifecycleId":"agent-memory-v1"}`
+	svc, err := registry.Service("t1")
+	require.NoError(t, err)
+	sc := memory.Scope{TenantID: "t1", ApplicationID: services.AgentMemoryApplication, UserID: "agent:counselor", LifecycleID: "agent-memory-v1"}
+	records, err := svc.ListAgentMemories(context.Background(), sc, "", "", 50)
+	require.NoError(t, err)
+	require.NotEmpty(t, records)
+	fact := records[len(records)-1]
+
+	updateBody := `{"scope":` + scope + `,"operationId":"op-u","expectedVersion":` + strconvItoa(int(fact.Version)) + `,"content":"管理员修正"}`
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/memory/facts/"+fact.ID, strings.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "管理员修正", "修正生效")
+
+	// 删除（先取修正后的新版本）
+	records, err = svc.ListAgentMemories(context.Background(), sc, "", fact.ID, 50)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	updated := records[0]
+	deleteBody := `{"scope":` + scope + `,"operationId":"op-d","expectedVersion":` + strconvItoa(int(updated.Version)) + `}`
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/admin/memory/facts/"+fact.ID, strings.NewReader(deleteBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "physical", "物理删除语义可见")
+	var cnt int64
+	// 物理删除断言走 facts 视图：直取该 id 返回空
+	gone, err := svc.ListAgentMemories(context.Background(), sc, "", fact.ID, 50)
+	require.NoError(t, err)
+	require.Empty(t, gone, "行已物理删除（直取为空）")
+	_ = cnt
+}
+
+func strconvItoa(v int) string { return fmt.Sprintf("%d", v) }

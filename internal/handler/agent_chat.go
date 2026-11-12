@@ -224,7 +224,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// URL, and a resolve failure must not leave a persisted user turn (or an
 	// orphan system error message) behind — the client keeps its input and
 	// can simply retry.
-	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
+	baseURL, apiKey, containerID, memoryEnabled, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
 		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
@@ -302,7 +302,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// 记忆首轮注入（spec 2026-11-11 §4）：仅未绑定 runtime 会话的首轮
 	//（后续轮次由 Agent 经 memory MCP 自主 recall）；query 为本轮用户
 	// 消息；Agent 未开启记忆 / 空记忆 / 任何失败 → 不注入，不阻断对话。
-	if sess.RuntimeSessionID == "" && h.memory != nil && h.svc.AgentMemoryEnabled(tenantID, agentName) {
+	if sess.RuntimeSessionID == "" && h.memory != nil && memoryEnabled {
 		if summary, _ := h.memory.BuildSummary(c.Request.Context(), tenantID, agentName, req.Content); summary != "" {
 			body.AppendSystemPrompt = summary
 		}

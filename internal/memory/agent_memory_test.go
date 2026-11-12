@@ -47,16 +47,22 @@ func TestRememberAgentFactValidation(t *testing.T) {
 	s, sc := memoryTestService(t)
 	require.NoError(t, s.EnsureAgentLifecycle(testCtx, sc))
 	for name, in := range map[string]AgentMemoryInput{
-		"无 quote":     {Content: "c"},
-		"无 content":   {Quote: "q"},
-		"正文超长":        {Content: string(make([]rune, 2001)), Quote: "q"},
-		"quote 超长":    {Content: "c", Quote: string(make([]rune, 601))},
-		"subject 超长":  {Content: "c", Quote: "q", Subject: string(make([]byte, 129))},
-		"category 超长": {Content: "c", Quote: "q", Category: string(make([]byte, 65))},
+		"无 quote":         {Content: "c"},
+		"无 content":       {Quote: "q"},
+		"正文超长":            {Content: string(make([]rune, 2001)), Quote: "q"},
+		"quote 超长":        {Content: "c", Quote: string(make([]rune, 601))},
+		"subject 超长（码点）":  {Content: "c", Quote: "q", Subject: string(make([]rune, 129))},
+		"category 超长（码点）": {Content: "c", Quote: "q", Category: string(make([]rune, 65))},
 	} {
 		_, err := s.RememberAgentFact(testCtx, sc, in)
 		require.ErrorIs(t, err, ErrInvalid, name)
 	}
+	// CJK 按码点计（review 重要项 8）：50 个汉字 subject = 150 字节 ≤128 码点，
+	// 字节判定会误拒合法主体。
+	_, err := s.RememberAgentFact(testCtx, sc, AgentMemoryInput{
+		Content: "c", Quote: "q", Subject: string(make([]rune, 50)), Category: string(make([]rune, 20)),
+	})
+	require.NoError(t, err, "50 CJK subject / 20 CJK category（码点内）应通过")
 }
 
 func TestUpdateAgentFactCASAndSourceGuard(t *testing.T) {
@@ -118,4 +124,64 @@ func TestListAndRecallAgentMemories(t *testing.T) {
 		}
 	}
 	require.True(t, found, "recall 须能按 chunk 反查到刚写入的记忆")
+}
+
+func TestListAgentMemoriesCategoryFilterBeforeWindow(t *testing.T) {
+	s, sc := memoryTestService(t)
+	require.NoError(t, s.EnsureAgentLifecycle(testCtx, sc))
+	// 55 条噪音（其他类）+ 1 条目标（偏好）：目标在 50 条窗口之外——
+	// category 过滤必须在 LIMIT 之前（review 重要项 7），否则被噪音挤出。
+	for i := 0; i < 55; i++ {
+		_, err := s.RememberAgentFact(testCtx, sc, AgentMemoryInput{Content: "噪音-" + strconv.Itoa(i), Quote: "q", Subject: "s", Category: "其他"})
+		require.NoError(t, err)
+	}
+	target, err := s.RememberAgentFact(testCtx, sc, AgentMemoryInput{Content: "目标记忆", Quote: "q", Subject: "s", Category: "偏好"})
+	require.NoError(t, err)
+	list, err := s.ListAgentMemories(testCtx, sc, "偏好", "", 50)
+	require.NoError(t, err)
+	require.Len(t, list, 1, "类目过滤在窗口之前——窗口外的目标仍可命中")
+	require.Equal(t, target.ID, list[0].ID)
+}
+
+func TestDeleteAgentFactPhysicalRemovalFreesPool(t *testing.T) {
+	s, sc := memoryTestService(t)
+	require.NoError(t, s.EnsureAgentLifecycle(testCtx, sc))
+	rec, err := s.RememberAgentFact(testCtx, sc, AgentMemoryInput{Content: "待删除", Quote: "q", Subject: "s", Category: "c"})
+	require.NoError(t, err)
+
+	// 灌满至池满
+	for i := 0; ; i++ {
+		_, err = s.RememberAgentFact(testCtx, sc, AgentMemoryInput{Content: "fill-" + strconv.Itoa(i), Quote: "q", Subject: "s", Category: "c"})
+		if err != nil {
+			require.ErrorIs(t, err, ErrPoolFull)
+			break
+		}
+	}
+	// 物理删除一条 → 池满解除（review 阻塞②：管理台腾位可执行）；
+	// 删除后的唯一空位写一条，后续守卫与 CAS 复用同一条记录。
+	require.NoError(t, s.DeleteAgentFact(testCtx, sc, rec.ID, rec.Version))
+	other, err := s.RememberAgentFact(testCtx, sc, AgentMemoryInput{Content: "after-free", Quote: "q", Subject: "s", Category: "c"})
+	require.NoError(t, err, "物理删除释放 maxRecords 预算")
+
+	// 删除守卫与 CAS（独立空 scope：灌满队列的 1000+ 积压 job 会让小轮次
+	// syncAll 处理不到队尾，守卫段不受干扰）
+	s2, sc2 := memoryTestService(t)
+	require.NoError(t, s2.EnsureAgentLifecycle(testCtx, sc2))
+	other, err = s2.RememberAgentFact(testCtx, sc2, AgentMemoryInput{Content: "guard", Quote: "q", Subject: "s", Category: "c"})
+	require.NoError(t, err)
+	_, err = s2.UpdateAgentFact(testCtx, sc2, other.ID, other.Version, AgentMemoryInput{Content: "x", Quote: "q"})
+	require.NoError(t, err)
+	// 版本错 → 冲突；不存在 → NotFound
+	require.ErrorIs(t, s2.DeleteAgentFact(testCtx, sc2, other.ID, other.Version+5), ErrConflict, "CAS 版本错")
+	require.ErrorIs(t, s2.DeleteAgentFact(testCtx, sc2, "no-such", 1), ErrNotFound)
+	// 删除后 remove 对账清 chunk：先确认有 chunk 再删再对账
+	syncAll(t, s2)
+	var chunked recordRow
+	require.NoError(t, s2.db.Where("id = ?", other.ID).First(&chunked).Error)
+	require.NotEmpty(t, chunked.ChunkID, "put 对账后 chunk 已置位")
+	require.NoError(t, s2.DeleteAgentFact(testCtx, sc2, other.ID, other.Version+1))
+	syncAll(t, s2)
+	var cnt int64
+	require.NoError(t, s2.db.Model(&recordRow{}).Where("id = ?", other.ID).Count(&cnt).Error)
+	require.Zero(t, cnt, "行已物理删除")
 }

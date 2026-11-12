@@ -56,6 +56,10 @@ type DeploymentDTO struct {
 	Message     string `json:"message"`
 	HostPort    int    `json:"hostPort"`
 	APIKey      string `json:"apiKey"`
+	// MemoryEnabled rides the status lookup for the chat first-turn injection
+	//（review 重要 11）：GetStatus already loaded the agent row, so callers
+	// (ResolveRuntime → SendMessage) get the flag with zero extra queries.
+	MemoryEnabled bool `json:"memoryEnabled,omitempty"`
 
 	// PendingArtifactUpdates 是该 Agent 相对最近一次成功部署的待更新工件
 	// （issue #86）：nil = 未部署/无快照（JSON null）；恒数组结构
@@ -702,7 +706,7 @@ func (s *AgentDeployerService) attachMemoryCapabilities(req *deployer.CreateAgen
 			TenantID:         tenantID,
 			AgentName:        a.Name,
 			ScopeMode:        "agent",
-			Tools:            []string{"memory_remember", "memory_recall", "memory_list", "memory_update"},
+			Tools:            AgentMemoryToolNames,
 			TokenFingerprint: fp,
 		})
 		if err != nil {
@@ -881,6 +885,7 @@ func (s *AgentDeployerService) GetStatus(tenantID, name string) (*DeploymentDTO,
 	}
 
 	dto := s.toDTO(tenantID, name, statusResp.Status, health, statusResp.ContainerName, statusResp.ContainerID, statusResp.HostPort, agentCfg.DeployedAt, gatewayMessage)
+	dto.MemoryEnabled = agentCfg.MemoryEnabled
 	if statusResp.Status == "running" && statusResp.HostPort > 0 {
 		apiKey := ""
 		if agentCfg.RuntimeToken != "" {

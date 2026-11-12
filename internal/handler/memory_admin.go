@@ -155,6 +155,27 @@ func (h *MemoryAdminHandler) selectService(c *gin.Context, scope memory.Scope) (
 		respondError(c, 400, "memory_invalid_request", "需要有效的业务租户和应用标识")
 		return nil, false
 	}
+	// 保留应用 hub-agent（Agent 自主记忆，spec 2026-11-11 §4）：走
+	// per-tenant registry 解析，subjects/facts/update/delete 全部经此
+	//（review 阻塞②——仅 facts 有分支时其余端点 403，处置路径断裂）。
+	// Agent 记忆归属 hub 租户自身：管理租户须与记忆租户一致；registry
+	// 未接线（knowledge 连接未配置的部署形态）时 503。
+	if scope.ApplicationID == services.AgentMemoryApplication {
+		if hubTenant != scope.TenantID {
+			respondError(c, 403, "memory_admin_forbidden", "无权查看该租户的 Agent 记忆")
+			return nil, false
+		}
+		if h.agentMemory == nil {
+			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
+			return nil, false
+		}
+		svc, err := h.agentMemory.Service(scope.TenantID)
+		if err != nil {
+			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
+			return nil, false
+		}
+		return svc, true
+	}
 	bindings, ok := h.currentBindings(c, hubTenant)
 	if !ok {
 		return nil, false
@@ -287,6 +308,19 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 			}
 		}
 	}
+	// 保留应用 hub-agent（Agent 自主记忆）：registry 已接线时补固定条目
+	// ——前端 applications→subjects→facts 导航由此可达（review 阻塞②）。
+	// subjects 按 ?tenantId=<hub 租户>&applicationId=hub-agent 查询，
+	// 经 selectService 的 registry 分支列出该租户全部 agent scope。
+	if h.agentMemory != nil {
+		out = append(out, memoryAdminApplication{
+			TenantID: hubTenant, ApplicationID: services.AgentMemoryApplication,
+			PolicyVersion: services.AgentMemoryPolicy, DataClass: "synthetic",
+			Name:        "Agent 自主记忆",
+			Description: "Agent 经记忆 MCP 自主写入的记忆（保留应用）",
+			Status:      "active", Origin: "reserved",
+		})
+	}
 	respondSuccess(c, out)
 }
 func (h *MemoryAdminHandler) subjects(c *gin.Context) {
@@ -308,32 +342,19 @@ func (h *MemoryAdminHandler) facts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// 保留应用 hub-agent（Agent 自主记忆，spec 2026-11-11 §4）：走 per-tenant
-	// registry 而非业务应用绑定；ListAgentMemories 返回的记录自带 source
-	//（写入者）。Agent 记忆归属 hub 租户自身——管理租户须与记忆租户一致。
+	// 保留应用 hub-agent（Agent 自主记忆，spec 2026-11-11 §4）：经
+	// selectService 的 registry 分支解析；ListAgentMemories 返回的记录
+	// 映射为管理台既有 facts 契约形状并扩展 source（写入者）/quote。
 	if scope.ApplicationID == services.AgentMemoryApplication {
-		hubTenant := tenant.GetTenantID(c)
-		if hubTenant == "" || hubTenant != scope.TenantID {
-			respondError(c, 403, "memory_admin_forbidden", "无权查看该租户的 Agent 记忆")
+		service, ok := h.selectService(c, scope)
+		if !ok {
 			return
 		}
-		if h.agentMemory == nil {
-			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
-			return
-		}
-		svc, err := h.agentMemory.Service(scope.TenantID)
-		if err != nil {
-			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
-			return
-		}
-		records, err := svc.ListAgentMemories(c.Request.Context(), scope, "", "", 50)
+		records, err := service.ListAgentMemories(c.Request.Context(), scope, "", "", 50)
 		if err != nil {
 			memoryAdminResult(c, nil, err)
 			return
 		}
-		// 映射为管理台既有 facts 契约形状（factId 键控动作弹窗），扩展
-		// source（写入者）与 quote（来源摘录）两键——业务应用 facts 无此
-		// 二键，前端按可选字段渲染。
 		out := make([]map[string]any, 0, len(records))
 		for _, r := range records {
 			out = append(out, map[string]any{
@@ -371,6 +392,25 @@ func (h *MemoryAdminHandler) update(c *gin.Context) {
 	if !memoryAdminBody(c, &req) || !memoryAdminSubjectScope(c, req.Scope) {
 		return
 	}
+	// 保留应用 hub-agent：Agent 记忆修正走 UpdateAgentFactAdmin——管理
+	// 通道无对话佐证，content 必填、quote 宽松（review 阻塞②）；权属
+	// 与 CAS 守卫不变。
+	if req.Scope.ApplicationID == services.AgentMemoryApplication {
+		service, ok := h.selectService(c, req.Scope)
+		if !ok {
+			return
+		}
+		rec, err := service.UpdateAgentFactAdmin(c.Request.Context(), req.Scope, c.Param("factId"), req.ExpectedVersion, req.Content, "")
+		if err != nil {
+			memoryAdminResult(c, nil, err)
+			return
+		}
+		memoryAdminResult(c, map[string]any{
+			"factId": rec.ID, "version": rec.Version, "content": rec.Content,
+			"subject": rec.Subject, "category": rec.Category, "source": rec.Source,
+		}, nil)
+		return
+	}
 	service, ok := h.selectService(c, req.Scope)
 	if !ok {
 		return
@@ -382,6 +422,21 @@ func (h *MemoryAdminHandler) delete(c *gin.Context) {
 	c.Set("memory.admin.action", "memory.admin.fact.delete")
 	var req memoryAdminMutation
 	if !memoryAdminBody(c, &req) || !memoryAdminSubjectScope(c, req.Scope) {
+		return
+	}
+	// 保留应用 hub-agent：Agent 记忆删除走 DeleteAgentFact——物理删行并经
+	// outbox remove 清检索副本 chunk，是池满「可经管理台清理腾位」的可
+	// 执行路径（review 阻塞② / spec §7）。
+	if req.Scope.ApplicationID == services.AgentMemoryApplication {
+		service, ok := h.selectService(c, req.Scope)
+		if !ok {
+			return
+		}
+		if err := service.DeleteAgentFact(c.Request.Context(), req.Scope, c.Param("factId"), req.ExpectedVersion); err != nil {
+			memoryAdminResult(c, nil, err)
+			return
+		}
+		memoryAdminResult(c, map[string]any{"memoryId": c.Param("factId"), "status": "deleted", "physical": true}, nil)
 		return
 	}
 	service, ok := h.selectService(c, req.Scope)

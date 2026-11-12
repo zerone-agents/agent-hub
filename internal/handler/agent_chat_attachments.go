@@ -58,7 +58,7 @@ func (h *AgentChatHandler) UploadAttachments(c *gin.Context) {
 	// containerID 在上传请求发起前取得：记录天然绑定实际处理上传的容器
 	// 代次（上传中途重建=连接失败无记录；上传后重建=记录标旧代随后失效
 	// ——两个竞态方向都封死，issue #94 review R3）。
-	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
+	baseURL, apiKey, containerID, _, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] upload resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
 		respondError(c, http.StatusConflict, ErrCodeAgentUnavailable, "Agent 暂不可用，请稍后重试")
@@ -320,7 +320,7 @@ func (h *AgentChatHandler) AttachmentContent(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, chat.ErrCodeInvalidAttachment, "附件信息无效")
 		return
 	}
-	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
+	baseURL, apiKey, containerID, _, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		log.Printf("[chat] attachment content resolve runtime failed: tenant=%s agent=%s err=%v", tenantID, agentName, err)
 		respondError(c, http.StatusConflict, ErrCodeAgentUnavailable, "Agent 暂不可用，请稍后重试")

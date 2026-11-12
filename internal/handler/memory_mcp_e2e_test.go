@@ -188,6 +188,22 @@ func TestMemoryMcpEndToEndAndAcceptanceCounterexamples(t *testing.T) {
 		require.Contains(t, memoryMcpResultText(t, resp), "E2E_PRIVATE_CONTENT")
 	})
 
+	t.Run("2b worker drain 装配（不手动 Sync——review 阻塞①的生产形态）", func(t *testing.T) {
+		// 新 agent scope 写一条，不经手动 svc.Sync，而是按 main.go 的
+		// runMemoryWorker 装配语义遍历 registry.Services() 排空——生产中
+		// 该路径缺失时 outbox 永不排空、chunk 永不置位、recall 恒空。
+		ws := e.scopeOf("worker-drain")
+		require.NoError(t, svc.EnsureAgentLifecycle(ctx, ws))
+		_, err := svc.RememberAgentFact(ctx, ws, memory.AgentMemoryInput{Content: "worker-drain 记忆", Quote: "q"})
+		require.NoError(t, err)
+		for _, s := range e.registry.Services() {
+			require.NoError(t, s.Sync(ctx, 100), "registry 服务集 drain")
+		}
+		resp := e.call(t, "worker-drain", "memory_recall", `{"query":"worker","limit":5}`)
+		require.False(t, isErrorResult(resp.Result), memoryMcpResultText(t, resp))
+		require.Contains(t, memoryMcpResultText(t, resp), "worker-drain 记忆", "不经手动 svc.Sync 的 drain 后 recall 命中")
+	})
+
 	t.Run("3 update CAS 与越权 deny", func(t *testing.T) {
 		records, err := svc.ListAgentMemories(ctx, sc, "", "", 50)
 		require.NoError(t, err)

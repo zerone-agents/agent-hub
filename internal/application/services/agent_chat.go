@@ -277,20 +277,6 @@ func (s *AgentChatService) saveMessage(tenantID, userID, sessionID, role, conten
 }
 
 // GetSession returns a session owned by userID.
-// AgentMemoryEnabled 报告该 Agent 是否开启记忆 MCP 首轮注入（spec
-// 2026-11-11-memory-mcp-design §4）。repo 未注入（部分测试路径构造）或
-// 查询失败一律 false——注入跳过，绝不阻断对话。
-func (s *AgentChatService) AgentMemoryEnabled(tenantID, agentName string) bool {
-	if s.agentRepo == nil {
-		return false
-	}
-	cfg, err := s.agentRepo.GetByName(tenantID, agentName)
-	if err != nil || cfg == nil {
-		return false
-	}
-	return cfg.MemoryEnabled
-}
-
 func (s *AgentChatService) GetSession(tenantID, userID, sessionID string) (*chat.Session, error) {
 	return s.chatRepo.GetSessionForUser(tenantID, sessionID, userID)
 }
@@ -372,22 +358,25 @@ func (s *AgentChatService) resolveBaseURL(kongEnabled bool, runtimeURL string, h
 // 生命周期一致。调用方上传时绑定、发送/下载时复检，存量代际记录
 // fail-closed，零时间容忍；空 containerID（deployer 未报告）须按
 // 「代际未知」处理。
-func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, string, error) {
+// ResolveRuntime resolves the runtime address plus the deployment's
+// memory flag（review 重要 11——MemoryEnabled 搭 GetStatus 顺风车，首轮
+// 注入不再独立查库）。
+func (s *AgentChatService) ResolveRuntime(tenantID, agentName string) (string, string, string, bool, error) {
 	status, err := s.deployerSvc.GetStatus(tenantID, agentName)
 	if err != nil {
-		return "", "", "", fmt.Errorf("get deployment status: %w", err)
+		return "", "", "", false, fmt.Errorf("get deployment status: %w", err)
 	}
 	if status.Status != "running" {
-		return "", "", "", fmt.Errorf("agent not running (status=%s)", status.Status)
+		return "", "", "", false, fmt.Errorf("agent not running (status=%s)", status.Status)
 	}
 	if status.HostPort == 0 {
-		return "", "", "", fmt.Errorf("agent running but no host port")
+		return "", "", "", false, fmt.Errorf("agent running but no host port")
 	}
 	baseURL, err := s.resolveBaseURL(s.kongEnabledForChat(), status.RuntimeURL, status.HostPort)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", false, err
 	}
-	return baseURL, status.APIKey, status.ContainerID, nil
+	return baseURL, status.APIKey, status.ContainerID, status.MemoryEnabled, nil
 }
 
 // attachmentProbe caches one capability probe result.
@@ -437,7 +426,7 @@ func (s *AgentChatService) AttachmentsAvailable(ctx context.Context, tenantID, a
 	// runtime #61 Hub 跟进契约：capability && deployer containerId 非空，二者
 	// 缺一即关闭（不探测）。containerId 在此处门控——deployer 未报告容器 id
 	//（空代次）时上传记录的代次绑定无从谈起，capability 探测通过也不能开入口。
-	if baseURL, _, containerID, err := s.ResolveRuntime(tenantID, agentName); err == nil && containerID != "" {
+	if baseURL, _, containerID, _, err := s.ResolveRuntime(tenantID, agentName); err == nil && containerID != "" {
 		ok = s.AttachmentsSupportedAt(ctx, baseURL)
 	}
 	s.probeMu.Lock()

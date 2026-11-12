@@ -121,9 +121,9 @@ Agent 经内建 MCP 端点 `/api/v1/memory/mcp`（JSON-RPC，Agent Runtime Token
 部署侧配置：
 
 - `MEMORY_MCP_URL`：runtime 容器可达的端点完整地址（含 `/api/v1/memory/mcp`）——hub 自身监听地址对容器不可达，同 `KNOWLEDGE_MCP_URL` 的理由；未设置时开启记忆的 Agent 部署会明确报错指路
-- `MEMORY_CAPABILITY_SECRET` / `AGENT_MEMORY_WRAPPING_KEY`：capability 签发与账本 payload 加密密钥，缺省启动时自动生成并持久化
-- 前提：知识模块连接（`MULTIRAG_BASE_URL`/`MULTIRAG_API_KEY`）可用——检索副本落在按租户预留的 dataset（`hub-agent-memory-<tenant>`）
+- `MEMORY_CAPABILITY_SECRET` / `AGENT_MEMORY_WRAPPING_KEY`：capability 签发与账本 payload 加密密钥，缺省启动时自动生成并持久化（与业务应用记忆的 wrapping key 互相独立，泄露面互不影响）
+- 前提：知识模块连接（`MULTIRAG_BASE_URL`/`MULTIRAG_API_KEY`）可用——检索副本落在按租户预留的 dataset（`hub-agent-mem-<sha256(tenant)[:16]>`，总长 30 恒在 MultiRAG 标识符 32 字符限内）；记忆 outbox 由共享 worker 排空（含 hub-agent 服务集）
 
 冷启动说明：dataset 索引未建或为空时 recall 恒空属正常初期形态，不告警不阻断；新写入的记忆经 outbox 异步入索引，稍后可检索。
 
-管理台：记忆管理页 facts 视图按 `applicationId=hub-agent`、`userId=agent:<Agent 名>` 查询即可查看各 Agent 写入的记忆（含「写入者」列，跨租户查询被拒）；审计动作 `memory.mcp.remember/recall/list/update` 只记 scope 哈希与 memoryId/版本，不含正文与摘录。
+管理台：记忆管理页 applications 列表含「Agent 自主记忆」保留应用，选中后按 `userId=agent:<Agent 名>` 查看 facts（含「写入者」列，跨租户查询被拒）；管理台对 Agent 记忆开放修正（管理通道无对话佐证，quote 宽松）与**物理删除**（池满腾位的可执行路径）；审计动作 `memory.mcp.remember/recall/list/update` 每次调用一行（含 deny/失败），只记 scope 哈希与 memoryId/版本，不含正文与摘录。

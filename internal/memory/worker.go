@@ -111,6 +111,12 @@ func (s *Service) syncOne(ctx context.Context, j *outboxRow, unknown bool) error
 	if j.Action == "put" {
 		var r recordRow
 		if e := s.db.WithContext(ctx).First(&r, "id = ? AND scope_key = ?", j.RecordID, l.ID).Error; e != nil {
+			// 行已物理删除（DeleteAgentFact：remove job 先行入队，put 积压
+			// 已无意义）——取消该 job，不是错误。人工账本无物理删除，该
+			// 分支仅 agent-memory 处置路径触达。
+			if errors.Is(e, gorm.ErrRecordNotFound) {
+				return s.jobState(ctx, j, "cancelled")
+			}
 			return e
 		}
 		current := l.State == "active" && l.Fence == j.Fence && r.Status == "active" && r.Version == j.Version

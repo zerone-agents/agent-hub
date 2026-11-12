@@ -296,7 +296,7 @@ func main() {
 		handler.RegisterMemoryApplicationRoutes(r, handler.NewMemoryApplicationHandler(memorySource.registry, memoryManagers, auditRecorder))
 		workerCtx, stopMemoryWorker := context.WithCancel(context.Background())
 		defer stopMemoryWorker()
-		go runMemoryWorker(workerCtx, memoryBindings)
+		go runMemoryWorker(workerCtx, memoryBindings, agentMemoryRegistry)
 		log.Println("Memory: synthetic integration service enabled; production data admission is unavailable")
 	}
 

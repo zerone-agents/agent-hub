@@ -62,10 +62,19 @@ func TestAgentMemoryRegistryPerTenantIsolation(t *testing.T) {
 	sb, err := r.Service("tenant-b")
 	require.NoError(t, err)
 	require.NotSame(t, sa, sb, "每租户独立 Service 实例")
-	// dataset 名按租户派生并各自预留：MultiRAG 库名全局唯一，同名会跨租户
-	// 混检索副本（spec §6「按租户预留」）
+	// dataset 名按租户派生并各自预留：MultiRAG 标识符上限 32 字符
+	// [A-Za-z0-9_-]（review 阻塞③），租户分量用 16-hex 摘要——总长 30
+	// 恒在限内，长租户名不再静默失效。
 	require.NotEqual(t, AgentMemoryDatasetID("tenant-a"), AgentMemoryDatasetID("tenant-b"))
-	for _, tenant := range []string{"tenant-a", "tenant-b"} {
+	// 长租户名（org 上限 63）只验名长恒定与互异——预留行随 Service() 惰性落。
+	names := []string{"tenant-a", "tenant-b", "a-very-long-organization-name-exceeding-fifteen-chars", strings.Repeat("x", 63)}
+	for i, tenant := range names {
+		require.Len(t, AgentMemoryDatasetID(tenant), 30, "总长 30 恒定（13 前缀+1 连字符+16 hex ≤32）")
+		for j := i + 1; j < len(names); j++ {
+			require.NotEqual(t, AgentMemoryDatasetID(tenant), AgentMemoryDatasetID(names[j]))
+		}
+	}
+	for _, tenant := range names[:2] {
 		var n int64
 		require.NoError(t, db.Model(&knowledge.ReservedDataset{}).
 			Where("dataset_id = ?", AgentMemoryDatasetID(tenant)).Count(&n).Error)
@@ -75,6 +84,11 @@ func TestAgentMemoryRegistryPerTenantIsolation(t *testing.T) {
 	again, err := r.Service("tenant-a")
 	require.NoError(t, err)
 	require.Same(t, sa, again)
+	// Services() 快照（阻塞①：worker 排空 hub-agent outbox 的服务集来源）
+	all := r.Services()
+	require.Len(t, all, 2)
+	require.Contains(t, all, sa)
+	require.Contains(t, all, sb)
 }
 
 func TestAgentMemoryRegistryRejectsEmptyTenant(t *testing.T) {

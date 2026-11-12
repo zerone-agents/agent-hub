@@ -10,6 +10,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,13 +24,18 @@ import (
 const (
 	// 保留标识（spec §3/§6），勿改值。
 	AgentMemoryApplication   = "hub-agent"
-	AgentMemoryDatasetPrefix = "hub-agent-memory"
+	AgentMemoryDatasetPrefix = "hub-agent-mem"
 	AgentMemoryPolicy        = "agent-mcp-v1"
 )
 
 // AgentMemoryDatasetID derives the per-tenant reserved dataset name.
+// MultiRAG identifiers cap at 32 chars of [A-Za-z0-9_-] (memoryindex adapter
+// identifier regexp) and org names may be up to 63 — so the tenant component
+// is a 16-hex digest, keeping the total at 29 (review 阻塞③): raw tenant
+// names would silently fail validation and degrade recall to always-empty.
 func AgentMemoryDatasetID(tenantID string) string {
-	return AgentMemoryDatasetPrefix + "-" + strings.ToLower(tenantID)
+	sum := sha256.Sum256([]byte(tenantID))
+	return AgentMemoryDatasetPrefix + "-" + hex.EncodeToString(sum[:])[:16]
 }
 
 // AgentMemoryRegistry lazily builds and caches per-tenant memory services.
@@ -84,4 +91,20 @@ func (r *AgentMemoryRegistry) Service(tenantID string) (*memory.Service, error) 
 // satisfies AgentMemoryRecaller structurally.
 func (r *AgentMemoryRegistry) AgentMemoryRecaller(tenantID string) (AgentMemoryRecaller, error) {
 	return r.Service(tenantID)
+}
+
+// Services returns a snapshot of every per-tenant service created so far.
+// The memory outbox worker consumes this: hub-agent services live outside
+// the business memoryBindings, and without draining them the agent-memory
+// outbox never empties (chunk_id never set → recall always empty — review
+// 阻塞①). Lazy creation still works: a service created by the first tool
+// call appears on the next worker tick.
+func (r *AgentMemoryRegistry) Services() []*memory.Service {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*memory.Service, 0, len(r.cache))
+	for _, svc := range r.cache {
+		out = append(out, svc)
+	}
+	return out
 }
