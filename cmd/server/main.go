@@ -255,6 +255,7 @@ func main() {
 		log.Fatalf("Failed to provision agent memory wrapping key: %v", err)
 	}
 	var memoryMcpHandler *handler.MemoryMcpHandler
+	var memoryInjector *services.MemoryInjector
 	if cfg.Knowledge.MultiragBaseURL != "" && cfg.Knowledge.MultiragAPIKey != "" {
 		agentMemoryWrapper, err := memory.NewSyntheticKeyWrapper(agentMemoryWrapSecret)
 		if err != nil {
@@ -268,6 +269,7 @@ func main() {
 		)
 		agentMemoryRegistry := services.NewAgentMemoryRegistry(database.GetDB(), agentMemoryWrapper, datasetGuard, memoryindex.New(agentMemoryEngine))
 		memoryMcpHandler = handler.NewMemoryMcpHandler(agentMemoryResolverAdapter{agentMemoryRegistry}, services.NewMemoryCapabilityService(memoryCapSecret), auditRecorder)
+		memoryInjector = services.NewMemoryInjector(agentMemoryRegistry)
 	} else {
 		log.Println("memory-mcp: knowledge connection not configured; agent memory MCP disabled")
 	}
@@ -325,7 +327,7 @@ func main() {
 		cfg.Deployer.RuntimeAPIKey,
 		cfg.Deployer.DeployerURLHost,
 	)
-	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
+	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, memoryInjector)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
@@ -762,7 +764,7 @@ func main() {
 	// register /runtime/* (falls to NoRoute → 302 /static).
 	if cfg.Kong.AdminURL == "" {
 		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
-		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()))
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()), memoryInjector)
 	}
 
 	// 未匹配路由重定向到前端 SPA

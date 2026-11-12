@@ -277,6 +277,20 @@ func (s *AgentChatService) saveMessage(tenantID, userID, sessionID, role, conten
 }
 
 // GetSession returns a session owned by userID.
+// AgentMemoryEnabled 报告该 Agent 是否开启记忆 MCP 首轮注入（spec
+// 2026-11-11-memory-mcp-design §4）。repo 未注入（部分测试路径构造）或
+// 查询失败一律 false——注入跳过，绝不阻断对话。
+func (s *AgentChatService) AgentMemoryEnabled(tenantID, agentName string) bool {
+	if s.agentRepo == nil {
+		return false
+	}
+	cfg, err := s.agentRepo.GetByName(tenantID, agentName)
+	if err != nil || cfg == nil {
+		return false
+	}
+	return cfg.MemoryEnabled
+}
+
 func (s *AgentChatService) GetSession(tenantID, userID, sessionID string) (*chat.Session, error) {
 	return s.chatRepo.GetSessionForUser(tenantID, sessionID, userID)
 }
