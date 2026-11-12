@@ -78,3 +78,10 @@ func (r *AgentMemoryRegistry) Service(tenantID string) (*memory.Service, error) 
 	r.cache[tenantID] = svc
 	return svc, nil
 }
+
+// AgentMemoryRecaller returns the tenant's narrowed recall surface — the
+// injector's dependency seam (memory_injection.go). *memory.Service
+// satisfies AgentMemoryRecaller structurally.
+func (r *AgentMemoryRegistry) AgentMemoryRecaller(tenantID string) (AgentMemoryRecaller, error) {
+	return r.Service(tenantID)
+}
