@@ -33,6 +33,30 @@ func TestValidateConfig_Thinking(t *testing.T) {
 		require.Contains(t, err.Error(), "thinking 必须是对象或 null")
 	})
 
+	t.Run("空对象拒绝（type 必填，评审重要 1）", func(t *testing.T) {
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "thinking": map[string]interface{}{},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "thinking.type 必填")
+	})
+
+	t.Run("type 空白拒绝", func(t *testing.T) {
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "thinking": map[string]interface{}{"type": "  "},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "thinking.type 必填")
+	})
+
+	t.Run("type 非字符串拒绝（形态洞收口）", func(t *testing.T) {
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "thinking": map[string]interface{}{"type": float64(123)},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "thinking.type 必填")
+	})
+
 	t.Run("三枚举值放行", func(t *testing.T) {
 		for _, typ := range []string{"adaptive", "enabled", "disabled"} {
 			require.NoError(t, ValidateConfig(map[string]interface{}{
@@ -73,7 +97,8 @@ func TestValidateConfig_Thinking(t *testing.T) {
 			"thinking":     map[string]interface{}{"budgetTokens": float64(4096)},
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "设置 thinking.budgetTokens 必须同时提供 thinking.type")
+		// 评审重要 2：半态与缺 type 统一收口 thinking_type_required 单形态码
+		require.Contains(t, err.Error(), "thinking.type 必填")
 	})
 }
 
@@ -107,6 +132,26 @@ func TestThinkingConfigKeys(t *testing.T) {
 			"systemPrompt": "p",
 		}, cfg, ""))
 		require.Equal(t, "disabled", cfg.ThinkingType)
+	})
+
+	t.Run("unpack 整对象替换：budget absent = 清除（评审重要 1 同族）", func(t *testing.T) {
+		cfg := &agent.AgentConfig{ThinkingType: "enabled", ThinkingBudgetTokens: intPtr(8192)}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{
+			"systemPrompt": "p",
+			"thinking":     map[string]interface{}{"type": "disabled"},
+		}, cfg, ""))
+		require.Equal(t, "disabled", cfg.ThinkingType)
+		require.Nil(t, cfg.ThinkingBudgetTokens, "省略 budget 必须清除旧预算，防下发带过期预算")
+	})
+
+	t.Run("unpack type 空 = 整体清除（防半态入库死循环）", func(t *testing.T) {
+		cfg := &agent.AgentConfig{ThinkingType: "disabled", ThinkingBudgetTokens: intPtr(4096)}
+		require.NoError(t, unpackConfigToModel(map[string]interface{}{
+			"systemPrompt": "p",
+			"thinking":     map[string]interface{}{"type": ""},
+		}, cfg, ""))
+		require.Empty(t, cfg.ThinkingType)
+		require.Nil(t, cfg.ThinkingBudgetTokens)
 	})
 
 	t.Run("pack 未设置为 nil", func(t *testing.T) {

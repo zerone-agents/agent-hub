@@ -235,6 +235,74 @@ describe('AgentListPage', () => {
     mutableUpdateAgent = null
   })
 
+  it('模型弹窗关闭思考 off→null 显式清除（评审重要 5：key-presence 语义命门）', async () => {
+    const user = userEvent.setup()
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    // 存量 thinking=disabled → 打开弹窗时 Switch 为 on
+    mutableAgents = [
+      {
+        id: 1, name: 'general',
+        config: { title: { zh: '通用助手' }, providerId: 1, modelId: 'GLM-5-Turbo', thinking: { type: 'disabled' } },
+        subagents: [], tools: [], skills: [],
+        desktopEnabled: true, isDefault: true, createdAt: '2026-06-10T10:00:00Z',
+      },
+    ]
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    expect(screen.getByRole('switch')).toBeChecked()
+
+    // 显式关掉开关 = 清除意图 → 保存必须发 thinking:null（absent 会让清除静默失效）
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.thinking).toBeNull()
+    const serialized = JSON.parse(JSON.stringify(payload.data.config)) as AgentConfig
+    expect(serialized).toHaveProperty('thinking', null)
+    mutableUpdateAgent = null
+    mutableAgents = null
+  })
+
+  it('API 直连的 adaptive thinking 未触碰开关时保存原样回传（评审重要 4：touched 保护）', async () => {
+    const user = userEvent.setup()
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    // Switch 只表达 disabled 两态；API 直连存的 adaptive+budget 在 UI 显示为 off
+    mutableAgents = [
+      {
+        id: 1, name: 'general',
+        config: { title: { zh: '通用助手' }, providerId: 1, modelId: 'GLM-5-Turbo', thinking: { type: 'adaptive', budgetTokens: 8192 } },
+        subagents: [], tools: [], skills: [],
+        desktopEnabled: true, isDefault: true, createdAt: '2026-06-10T10:00:00Z',
+      },
+    ]
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    expect(screen.getByRole('switch')).not.toBeChecked()
+
+    // 不触碰 Switch 直接保存 → spread 原样回传存量（adaptive+budget 不被抹掉；
+    // 旧实现在此场景会发 null 连带清除 API 设置）
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.thinking).toEqual({ type: 'adaptive', budgetTokens: 8192 })
+    mutableUpdateAgent = null
+    mutableAgents = null
+  })
+
   it('shows model modal with test and confirm buttons', async () => {
     const user = userEvent.setup()
     renderPage()

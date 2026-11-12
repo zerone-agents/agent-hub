@@ -753,23 +753,32 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MemoryScopeMode = mode
 	}
 
-	// Handle thinking（issue #257）：显式 null = 清除（两字段归零）；对象 =
-	// 按字段解包（type trim；budgetTokens 取整）；absent key 保持不动（与
-	// effort 同惯例）。形态与半态校验在 ValidateConfig 已拦，这里只做忠实解包。
+	// Handle thinking（issue #257，评审修复）：**整对象替换语义**——提供
+	// thinking 对象 = 完整声明该配置：budgetTokens absent = 清除（防
+	// {type:'disabled'} 省略 budget 时残留旧预算、下发带过期预算）；type
+	// 缺失/空白/非字符串 = 整体清除（对齐显式 null-clear，防半态入库——
+	// validator 已在保存边界拒绝这些形态，此处是解包侧防御）。absent 顶层
+	// key 保持不动（与 effort 同惯例）。
 	if v, ok := config["thinking"]; ok {
 		if v == nil {
 			cfg.ThinkingType = ""
 			cfg.ThinkingBudgetTokens = nil
 		} else if th, ok := v.(map[string]interface{}); ok {
-			if t, ok := th["type"].(string); ok {
-				cfg.ThinkingType = strings.TrimSpace(t)
+			t := ""
+			if raw, isStr := th["type"].(string); isStr {
+				t = strings.TrimSpace(raw)
 			}
-			if bt, ok := th["budgetTokens"]; ok {
-				if n, ok := bt.(float64); ok {
-					i := int(n)
-					cfg.ThinkingBudgetTokens = &i
-				} else if bt == nil {
-					cfg.ThinkingBudgetTokens = nil
+			if t == "" {
+				cfg.ThinkingType = ""
+				cfg.ThinkingBudgetTokens = nil
+			} else {
+				cfg.ThinkingType = t
+				cfg.ThinkingBudgetTokens = nil
+				if bt, ok := th["budgetTokens"]; ok {
+					if n, ok := bt.(float64); ok {
+						i := int(n)
+						cfg.ThinkingBudgetTokens = &i
+					}
 				}
 			}
 		}

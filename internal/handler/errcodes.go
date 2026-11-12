@@ -57,8 +57,10 @@ const (
 	// 构造（码常量见 domain/agent/errors.go），注册表钉死测试同步收录。
 	ErrCodeEffortTooLong     = "effort_too_long"
 	ErrCodeEffortNotDeclared = "effort_not_declared"
-	// thinking 扩展思考（issue #257）：同上双注册表约定。
+	// thinking 扩展思考（issue #257）：同上双注册表约定。thinking_type_required
+	// 为评审拆分的半态/缺 type 收口码（单形态）。
 	ErrCodeThinkingInvalid        = "thinking_invalid"
+	ErrCodeThinkingTypeRequired   = "thinking_type_required"
 	ErrCodeThinkingTypeInvalid    = "thinking_type_invalid"
 	ErrCodeThinkingBudgetInvalid  = "thinking_budget_invalid"
 	ErrCodeAgentNameInvalid       = "agent_name_invalid"

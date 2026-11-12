@@ -50,6 +50,7 @@ func TestErrcodes_RegistryPinsDomainAgentCodes(t *testing.T) {
 		{ErrCodeEffortNotDeclared, agent.CodeEffortNotDeclared},
 		// #257 thinking 扩展思考（单形态码）
 		{ErrCodeThinkingInvalid, agent.CodeThinkingInvalid},
+		{ErrCodeThinkingTypeRequired, agent.CodeThinkingTypeRequired},
 		{ErrCodeThinkingTypeInvalid, agent.CodeThinkingTypeInvalid},
 		{ErrCodeThinkingBudgetInvalid, agent.CodeThinkingBudgetInvalid},
 	}

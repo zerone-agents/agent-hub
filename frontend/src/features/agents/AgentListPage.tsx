@@ -122,6 +122,11 @@ export default function AgentListPage() {
   // 关闭思考（issue #257）：thinking.type 单值——'' = 未设置（provider 默认），
   // 'disabled' = 关闭；budgetTokens 本次不暴露 UI（契约/存储已支持）
   const [selectedThinkingType, setSelectedThinkingType] = useState<string>('')
+  // touched 保护（评审重要 4）：Switch 只表达 disabled 两态，API 直连存的
+  // adaptive/enabled+budget 在 UI 显示为 off——未触碰开关时保存**不发
+  // thinking key**（hub absent 不变更），避免连带抹掉 API 设置；触碰后
+  // 按开关值提交（on={type:'disabled'}，off=null 显式清除）。
+  const [thinkingTouched, setThinkingTouched] = useState(false)
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [initialApiKey, setInitialApiKey] = useState<string>('') // masked api_key from backend
   const [testPassed, setTestPassed] = useState(false)
@@ -352,6 +357,7 @@ export default function AgentListPage() {
     setSelectedSelectionId(sid)
     setSelectedEffort(agent.config.effort ?? '')
     setSelectedThinkingType(agent.config.thinking?.type ?? '')
+    setThinkingTouched(false)
     setTestPassed(false)
     setTesting(false)
     setSaving(false)
@@ -417,6 +423,7 @@ export default function AgentListPage() {
     setSelectedSelectionId('')
     setSelectedEffort('')
     setSelectedThinkingType('')
+    setThinkingTouched(false)
     setFieldValues(initial)
   }
 
@@ -498,8 +505,10 @@ export default function AgentListPage() {
             fieldOverrides: overrides,
             // 恒带 key：'' = 显式清除（hub 对 absent key 不变更，丢 key 会让清除静默失效）
             effort: selectedEffort,
-            // thinking 恒带 key：null = 显式清除（hub unpack 对 absent key 不变更）
-            thinking: selectedThinkingType ? { type: selectedThinkingType } : null,
+            // thinking touched 保护（评审重要 4）：未触碰开关不发 key（absent
+            // 不变更，保住 API 直连的 adaptive/enabled+budget）；触碰后
+            // on={type:'disabled'}、off=null 显式清除
+            ...(thinkingTouched ? { thinking: selectedThinkingType ? { type: selectedThinkingType } : null } : {}),
           }
         }
       })
@@ -1057,7 +1066,10 @@ export default function AgentListPage() {
                 </label>
                 <Switch
                   checked={selectedThinkingType === 'disabled'}
-                  onChange={(v) => { setSelectedThinkingType(v ? 'disabled' : '') }}
+                  onChange={(v) => {
+                    setSelectedThinkingType(v ? 'disabled' : '')
+                    setThinkingTouched(true)
+                  }}
                   disabled={!canWrite}
                 />
               </div>

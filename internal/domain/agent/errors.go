@@ -88,7 +88,11 @@ const (
 	CodeEffortTooLong     StableCode = "effort_too_long"
 	CodeEffortNotDeclared StableCode = "effort_not_declared"
 	// thinking 扩展思考（issue #257）：单形态码（zh/en 键逐字契约）。
+	// thinking_type_required 为评审重要 1/2 拆分：对象缺 type/空白/非字符串
+	// 与「带 budget 无 type」半态统一收口这一码（一条消息一种参数形态），
+	// thinking_type_invalid 仅枚举外值（带 {value}）。
 	CodeThinkingInvalid       StableCode = "thinking_invalid"
+	CodeThinkingTypeRequired  StableCode = "thinking_type_required"
 	CodeThinkingTypeInvalid   StableCode = "thinking_type_invalid"
 	CodeThinkingBudgetInvalid StableCode = "thinking_budget_invalid"
 )

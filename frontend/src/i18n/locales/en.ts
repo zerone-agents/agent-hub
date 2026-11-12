@@ -32,6 +32,11 @@ const en = {
     // effort (issue #226): en translations for the stable codes (zh mode passes the backend's Chinese original through)
     effortTooLong: 'effort must not exceed 32 characters',
     effortNotDeclared: "effort '{{effort}}' is not in the declared candidate list of model {{model}}",
+    // thinking (issue #257, review P3): en translations for the stable codes (zh mode passes the backend's Chinese original through)
+    thinkingInvalid: 'thinking must be an object or null',
+    thinkingTypeRequired: 'thinking.type is required (allowed values: adaptive, enabled, disabled)',
+    thinkingTypeInvalid: "invalid thinking.type: {{value}}, allowed values: adaptive, enabled, disabled",
+    thinkingBudgetInvalid: 'thinking.budgetTokens must be an integer between 1 and {{limit}}',
     unauthorized: 'Session expired, please sign in again',
     forbidden: 'You do not have permission to perform this action',
     notFound: 'Resource does not exist or has been deleted',
