@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 
 	"control-panel/internal/application/services"
@@ -244,7 +245,7 @@ func (h *MemoryMcpHandler) resolveMemoryScope(c *gin.Context, id interface{}, to
 		log.Printf("memory-mcp: capability assertion mismatch (tenant=%s agent=%s)", tenantID, agentCfg.Name)
 		return memory.Scope{}, nil, deny(), nil
 	}
-	if !containsString(payload.Tools, tool) {
+	if !slices.Contains(payload.Tools, tool) {
 		log.Printf("memory-mcp: tool not in capability set (tenant=%s agent=%s tool=%s)", tenantID, agentCfg.Name, tool)
 		return memory.Scope{}, nil, deny(), nil
 	}
@@ -259,15 +260,6 @@ func (h *MemoryMcpHandler) resolveMemoryScope(c *gin.Context, id interface{}, to
 		UserID:        "agent:" + agentCfg.Name,
 		LifecycleID:   memoryLifecycleConst,
 	}, store, nil, nil
-}
-
-func containsString(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
 }
 
 // 身份字段（userId/tenantId/applicationId）不出现在任何参数结构里：

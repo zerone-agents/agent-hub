@@ -294,10 +294,17 @@ func main() {
 		memoryHandler.SetBindingSource(memorySource)
 		handler.RegisterMemoryRoutes(r, memoryHandler)
 		handler.RegisterMemoryApplicationRoutes(r, handler.NewMemoryApplicationHandler(memorySource.registry, memoryManagers, auditRecorder))
+	}
+	// 记忆 outbox worker（复审残余①）：门控与 agent-memory 端点/registry 一致
+	//（knowledge 连接可用，agentMemoryRegistry != nil）——而非业务记忆模块
+	// 开关（cfg.Memory.RuntimeEnabled）。部署形态「knowledge 配置 + 业务记忆
+	// 模块关闭」下端点活、写入成功，drain 若挂在业务块内则 outbox 永不排空，
+	// 检索死链复现（阻塞①的窄形态）。业务 bindings 为空时 worker 仅排空
+	// agent-memory 服务集，行为正确。
+	if agentMemoryRegistry != nil || len(memoryBindings) > 0 {
 		workerCtx, stopMemoryWorker := context.WithCancel(context.Background())
 		defer stopMemoryWorker()
 		go runMemoryWorker(workerCtx, memoryBindings, agentMemoryRegistry)
-		log.Println("Memory: synthetic integration service enabled; production data admission is unavailable")
 	}
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
