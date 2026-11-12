@@ -25,10 +25,21 @@ type MemoryAdminHandler struct {
 	bindings []MemoryBinding
 	source   MemoryBindingSource
 	audit    *services.AuditRecorder
+	// agentMemory resolves the reserved hub-agent application's per-tenant
+	// ledger（spec 2026-11-11-memory-mcp-design §4）——管理台按 agent scope
+	// 查看 Agent 自主记忆，记录自带 source（写入者）。nil（knowledge 连接
+	// 未配置的部署形态）时该分支返回 503。
+	agentMemory *services.AgentMemoryRegistry
 }
 
 func NewMemoryAdminHandler(bindings []MemoryBinding, recorder *services.AuditRecorder) *MemoryAdminHandler {
 	return &MemoryAdminHandler{bindings: append([]MemoryBinding(nil), bindings...), audit: recorder}
+}
+
+// SetAgentMemoryRegistry wires the per-tenant agent-memory registry; main.go
+// 注入于 knowledge 连接可用时（registry 依赖检索引擎）。
+func (h *MemoryAdminHandler) SetAgentMemoryRegistry(r *services.AgentMemoryRegistry) {
+	h.agentMemory = r
 }
 
 func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *MemoryAdminHandler) {
@@ -250,6 +261,44 @@ func (h *MemoryAdminHandler) facts(c *gin.Context) {
 	c.Set("memory.admin.action", "memory.admin.facts.read")
 	scope, ok := memoryAdminQuery(c, true)
 	if !ok {
+		return
+	}
+	// 保留应用 hub-agent（Agent 自主记忆，spec 2026-11-11 §4）：走 per-tenant
+	// registry 而非业务应用绑定；ListAgentMemories 返回的记录自带 source
+	//（写入者）。Agent 记忆归属 hub 租户自身——管理租户须与记忆租户一致。
+	if scope.ApplicationID == services.AgentMemoryApplication {
+		hubTenant := tenant.GetTenantID(c)
+		if hubTenant == "" || hubTenant != scope.TenantID {
+			respondError(c, 403, "memory_admin_forbidden", "无权查看该租户的 Agent 记忆")
+			return
+		}
+		if h.agentMemory == nil {
+			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
+			return
+		}
+		svc, err := h.agentMemory.Service(scope.TenantID)
+		if err != nil {
+			respondError(c, 503, "memory_unavailable", "记忆服务暂不可用")
+			return
+		}
+		records, err := svc.ListAgentMemories(c.Request.Context(), scope, "", "", 50)
+		if err != nil {
+			memoryAdminResult(c, nil, err)
+			return
+		}
+		// 映射为管理台既有 facts 契约形状（factId 键控动作弹窗），扩展
+		// source（写入者）与 quote（来源摘录）两键——业务应用 facts 无此
+		// 二键，前端按可选字段渲染。
+		out := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			out = append(out, map[string]any{
+				"factId": r.ID, "version": r.Version, "content": r.Content,
+				"quote": r.Quote, "subject": r.Subject, "temporal": "",
+				"category": r.Category, "status": "active", "syncStatus": "",
+				"source": r.Source, "updatedAt": r.UpdatedAt,
+			})
+		}
+		memoryAdminResult(c, out, nil)
 		return
 	}
 	service, ok := h.selectService(c, scope)

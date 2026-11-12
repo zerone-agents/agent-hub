@@ -54,6 +54,10 @@ export interface MemoryFact {
   syncStatus: string
   consentRef?: string
   updatedAt: string
+  /** 写入者（Agent 自主记忆专属，业务应用 facts 无此键） */
+  source?: string
+  /** 来源摘录（Agent 自主记忆专属） */
+  quote?: string
 }
 
 export interface NativeMemoryMessage {

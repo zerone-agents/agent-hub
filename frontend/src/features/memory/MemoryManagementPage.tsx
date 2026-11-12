@@ -726,6 +726,13 @@ function SubjectMemory({
       )
     },
     {
+      title: t('memory.columns.source'),
+      dataIndex: 'source',
+      key: 'source',
+      width: 140,
+      render: (source?: string) => (source ? <Tag>{source}</Tag> : '—')
+    },
+    {
       title: t('memory.columns.version'),
       dataIndex: 'version',
       key: 'version',

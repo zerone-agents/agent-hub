@@ -256,6 +256,7 @@ func main() {
 	}
 	var memoryMcpHandler *handler.MemoryMcpHandler
 	var memoryInjector *services.MemoryInjector
+	var agentMemoryRegistry *services.AgentMemoryRegistry
 	if cfg.Knowledge.MultiragBaseURL != "" && cfg.Knowledge.MultiragAPIKey != "" {
 		agentMemoryWrapper, err := memory.NewSyntheticKeyWrapper(agentMemoryWrapSecret)
 		if err != nil {
@@ -267,7 +268,7 @@ func main() {
 			time.Duration(cfg.Knowledge.TimeoutSeconds)*time.Second,
 			time.Duration(cfg.Knowledge.UploadTimeoutSeconds)*time.Second,
 		)
-		agentMemoryRegistry := services.NewAgentMemoryRegistry(database.GetDB(), agentMemoryWrapper, datasetGuard, memoryindex.New(agentMemoryEngine))
+		agentMemoryRegistry = services.NewAgentMemoryRegistry(database.GetDB(), agentMemoryWrapper, datasetGuard, memoryindex.New(agentMemoryEngine))
 		memoryMcpHandler = handler.NewMemoryMcpHandler(agentMemoryResolverAdapter{agentMemoryRegistry}, services.NewMemoryCapabilityService(memoryCapSecret), auditRecorder)
 		memoryInjector = services.NewMemoryInjector(agentMemoryRegistry)
 	} else {
@@ -503,6 +504,7 @@ func main() {
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
 	if cfg.Memory.Enabled {
 		memoryAdmin := handler.NewMemoryAdminHandler(memoryBindings, auditRecorder)
+		memoryAdmin.SetAgentMemoryRegistry(agentMemoryRegistry)
 		memoryAdmin.SetBindingSource(memorySource)
 		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, memoryAdmin)
 	}
