@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -24,10 +25,12 @@ import (
 	"control-panel/internal/infrastructure/deployer"
 	knowledgeinfra "control-panel/internal/infrastructure/knowledge"
 	"control-panel/internal/infrastructure/kong"
+	"control-panel/internal/infrastructure/memoryindex"
 	"control-panel/internal/infrastructure/multirag"
 	ossinfra "control-panel/internal/infrastructure/oss"
 	repository "control-panel/internal/infrastructure/persistence"
 	"control-panel/internal/infrastructure/runtime"
+	"control-panel/internal/memory"
 	"control-panel/internal/middleware"
 	"control-panel/pkg/database"
 
@@ -243,6 +246,41 @@ func main() {
 		}
 		cfg.Memory.WrappingKey = key
 	}
+
+	// ── 记忆 MCP（Agent 自主记忆，spec docs/superpowers/specs/2026-11-11-
+	// memory-mcp-design.md）──secrets 启动供给（与上方 knowledge capability
+	// secret 同模式）：capability 签发 + 账本 wrapping key，均独立成键。
+	// 端点依赖知识模块连接：检索副本落在知识 MultiRAG 的按租户保留
+	// dataset（hub-agent-memory-<tenant>）；未配置时不注册端点（部署注入
+	// 以 Agent 开启记忆 + MEMORY_MCP_URL 为前提）。
+	memoryCapSecret, err := systemsetting.EnsureMemoryCapabilitySecret(database.GetDB(), os.Getenv("MEMORY_CAPABILITY_SECRET"))
+	if err != nil {
+		log.Fatalf("Failed to provision memory capability secret: %v", err)
+	}
+	agentMemoryWrapSecret, err := systemsetting.EnsureAgentMemoryWrappingKey(database.GetDB(), os.Getenv("AGENT_MEMORY_WRAPPING_KEY"))
+	if err != nil {
+		log.Fatalf("Failed to provision agent memory wrapping key: %v", err)
+	}
+	var memoryMcpHandler *handler.MemoryMcpHandler
+	var memoryInjector *services.MemoryInjector
+	var agentMemoryRegistry *services.AgentMemoryRegistry
+	if cfg.Knowledge.MultiragBaseURL != "" && cfg.Knowledge.MultiragAPIKey != "" {
+		agentMemoryWrapper, err := memory.NewSyntheticKeyWrapper(agentMemoryWrapSecret)
+		if err != nil {
+			log.Fatalf("Invalid agent memory wrapping key: %v", err)
+		}
+		agentMemoryEngine := knowledgeinfra.NewRemoteMultiragEngine(
+			cfg.Knowledge.MultiragBaseURL,
+			cfg.Knowledge.MultiragAPIKey,
+			time.Duration(cfg.Knowledge.TimeoutSeconds)*time.Second,
+			time.Duration(cfg.Knowledge.UploadTimeoutSeconds)*time.Second,
+		)
+		agentMemoryRegistry = services.NewAgentMemoryRegistry(database.GetDB(), agentMemoryWrapper, datasetGuard, memoryindex.New(agentMemoryEngine))
+		memoryMcpHandler = handler.NewMemoryMcpHandler(agentMemoryResolverAdapter{agentMemoryRegistry}, services.NewMemoryCapabilityService(memoryCapSecret), auditRecorder)
+		memoryInjector = services.NewMemoryInjector(agentMemoryRegistry)
+	} else {
+		log.Println("memory-mcp: knowledge connection not configured; agent memory MCP disabled")
+	}
 	memoryBindings, err := configureMemory(cfg.Memory, datasetGuard)
 	if err != nil {
 		log.Fatalf("Failed to initialize memory service: %v", err)
@@ -256,28 +294,37 @@ func main() {
 		memoryHandler.SetBindingSource(memorySource)
 		handler.RegisterMemoryRoutes(r, memoryHandler)
 		handler.RegisterMemoryApplicationRoutes(r, handler.NewMemoryApplicationHandler(memorySource.registry, memoryManagers, auditRecorder))
+	}
+	// 记忆 outbox worker（复审残余①）：门控与 agent-memory 端点/registry 一致
+	//（knowledge 连接可用，agentMemoryRegistry != nil）——而非业务记忆模块
+	// 开关（cfg.Memory.RuntimeEnabled）。部署形态「knowledge 配置 + 业务记忆
+	// 模块关闭」下端点活、写入成功，drain 若挂在业务块内则 outbox 永不排空，
+	// 检索死链复现（阻塞①的窄形态）。业务 bindings 为空时 worker 仅排空
+	// agent-memory 服务集，行为正确。
+	if agentMemoryRegistry != nil || len(memoryBindings) > 0 {
 		workerCtx, stopMemoryWorker := context.WithCancel(context.Background())
 		defer stopMemoryWorker()
-		go runMemoryWorker(workerCtx, memoryBindings)
-		log.Println("Memory: synthetic integration service enabled; production data admission is unavailable")
+		go runMemoryWorker(workerCtx, memoryBindings, agentMemoryRegistry)
 	}
 
 	aigcConfigSvc := services.NewAigcConfigService(database.GetDB(), cfg.Provider.EncryptionKey, repository.NewProviderRepository())
 	aigcConfigHandler := handler.NewAigcConfigHandler(aigcConfigSvc, auditRecorder)
 	deployerService := services.NewAgentDeployerService(services.AgentDeployerConfig{
-		Client:            deployerClient,
-		PublicHost:        cfg.Deployer.PublicHost,
-		UpstreamHost:      cfg.Deployer.DeployerURLHost,
-		CDNHost:           cfg.OSS.CDNHost,
-		EncryptionKey:     cfg.Provider.EncryptionKey,
-		RuntimeAPIKey:     cfg.Deployer.RuntimeAPIKey,
-		CapabilitySecret:  capabilitySecret, // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
-		KnowledgeSvc:      knowledgeService,
-		KongSvc:           kongService,
-		AigcSvc:           aigcConfigSvc,
-		ChatPushAPIKey:    cfg.ChatPush.APIKey,
-		ChatPushPublicURL: cfg.ChatPush.PublicURL,
-		AuthMode:          services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
+		Client:                 deployerClient,
+		PublicHost:             cfg.Deployer.PublicHost,
+		UpstreamHost:           cfg.Deployer.DeployerURLHost,
+		CDNHost:                cfg.OSS.CDNHost,
+		EncryptionKey:          cfg.Provider.EncryptionKey,
+		RuntimeAPIKey:          cfg.Deployer.RuntimeAPIKey,
+		CapabilitySecret:       capabilitySecret,            // knowledge capability 签发 secret（与 encryptionKey 解耦，两侧同源）
+		MemoryMcpURL:           os.Getenv("MEMORY_MCP_URL"), // runtime 可达的 memory MCP 地址（含 /api/v1/memory/mcp）；空则开启记忆的 Agent 部署时报错指路
+		MemoryCapabilitySecret: memoryCapSecret,             // 记忆 MCP capability 签发 secret（与 knowledge 侧解耦，同源自 systemsetting）
+		KnowledgeSvc:           knowledgeService,
+		KongSvc:                kongService,
+		AigcSvc:                aigcConfigSvc,
+		ChatPushAPIKey:         cfg.ChatPush.APIKey,
+		ChatPushPublicURL:      cfg.ChatPush.PublicURL,
+		AuthMode:               services.AuthModeFromConfig(cfg.Auth.IsBuiltin()),
 	})
 
 	agentService := services.NewAgentService(cfg.Provider.EncryptionKey, capabilitySecret)
@@ -295,7 +342,7 @@ func main() {
 		cfg.Deployer.RuntimeAPIKey,
 		cfg.Deployer.DeployerURLHost,
 	)
-	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc)
+	agentChatHandler := handler.NewAgentChatHandler(agentChatSvc, memoryInjector)
 	agentDetailHandler := handler.NewAgentDetailHandler(agentChatSvc)
 	agentFilesHandler := handler.NewAgentFilesHandler(agentChatSvc)
 
@@ -471,6 +518,7 @@ func main() {
 	adminRead := v1group.Group("/admin", middleware.RequireRole("admin", "maintainer", "member"))
 	if cfg.Memory.RuntimeEnabled() {
 		memoryAdmin := handler.NewMemoryAdminHandler(memoryBindings, auditRecorder)
+		memoryAdmin.SetAgentMemoryRegistry(agentMemoryRegistry)
 		memoryAdmin.SetBindingSource(memorySource)
 		memoryAdmin.SetApplicationManagement(memorySource.registry, multirag.NewClient(cfg.Memory.MultiragURL, cfg.Memory.MultiragKey))
 		handler.RegisterMemoryAdminRoutes(adminWrite, adminRead, memoryAdmin)
@@ -617,6 +665,13 @@ func main() {
 	// not a user JWT, so it must not be under the JWTAuthWithCLI middleware group.
 	r.POST("/api/v1/knowledge/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), knowledgeMcpHandler.HandleMessage)
 
+	// ---------- Memory MCP 运行时（Agent 自主记忆，spec 2026-11-11）----------
+	// 同 knowledge MCP：Agent Runtime Token 认证，不挂 JWT 组；knowledge
+	// 连接未配置时组件为 nil，不注册路由。
+	if memoryMcpHandler != nil {
+		r.POST("/api/v1/memory/mcp", middleware.AgentRuntimeAuthMiddleware(cfg.Provider.EncryptionKey), memoryMcpHandler.HandleMessage)
+	}
+
 	// ---------- Knowledge 领域 ----------
 	// 非敏感 GET（datasets/documents/chunks/images 等）→ read 组（member 只读），写方法与 POST /retrieval → write 组
 	handler.RegisterKnowledgeRoutes(adminWrite, adminRead, knowledgeHandler)
@@ -730,7 +785,7 @@ func main() {
 	// register /runtime/* (falls to NoRoute → 302 /static).
 	if cfg.Kong.AdminURL == "" {
 		runtimeProxySvc := services.NewRuntimeProxyService(repository.NewAgentRepository(), cfg.Deployer.DeployerURLHost)
-		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()))
+		handler.RegisterRuntimeProxyRoutes(r, runtimeProxySvc, services.AuthModeFromConfig(cfg.Auth.IsBuiltin()), memoryInjector)
 	}
 
 	// 未匹配路由重定向到前端 SPA

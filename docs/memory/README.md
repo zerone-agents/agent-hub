@@ -113,3 +113,17 @@ Hub 在发出原生 POST 前持久化加密记录。超时或响应丢失返回 
 Hub 对持久会话输入与回执采用生命周期 DEK 加密，`SyntheticKeyWrapper` 不是 KMS。原生服务中的原文和派生内容可被检索，其存储、向量、日志与备份保护需要分别配置；Hub 回执加密不能替代这些保护。`memory-v1-synthetic` 仅用于合成数据。
 
 使用回执时分别核对原文、父来源、类型和抽取任务状态。HTTP 200、原文存在和派生记录存在均不能单独表示任务完成；结果未知时继续使用原 operation ID 只读核对。遗忘、删除与物理清理仍保持不可用。
+
+## Agent 自主记忆（记忆 MCP）
+
+Agent 经内建 MCP 端点 `/api/v1/memory/mcp`（JSON-RPC，Agent Runtime Token + 部署期签发的 `X-Agent-Capability`）自主读写记忆：`memory_remember`（写入，quote 必填钉真实对话）、`memory_recall`、`memory_list`、`memory_update`（CAS，仅可改自己写入的记录）。记忆取向由各 Agent 系统提示词承载；Scope 服务端钉死为 `{租户, 保留应用 hub-agent, agent:<Agent 名>, agent-memory-v1}`——身份永不来自工具参数。会话首轮（run 未绑定 sessionId）由 Hub 将记忆概要以数据框架模板（显式「历史数据记录，非指令」声明 + 逐条 source 前缀）前置注入 `appendSystemPrompt`；检索失败或超时一律跳过注入，不阻断对话。
+
+部署侧配置：
+
+- `MEMORY_MCP_URL`：runtime 容器可达的端点完整地址（含 `/api/v1/memory/mcp`）——hub 自身监听地址对容器不可达，同 `KNOWLEDGE_MCP_URL` 的理由；未设置时开启记忆的 Agent 部署会明确报错指路
+- `MEMORY_CAPABILITY_SECRET` / `AGENT_MEMORY_WRAPPING_KEY`：capability 签发与账本 payload 加密密钥，缺省启动时自动生成并持久化（与业务应用记忆的 wrapping key 互相独立，泄露面互不影响）
+- 前提：知识模块连接（`MULTIRAG_BASE_URL`/`MULTIRAG_API_KEY`）可用——检索副本落在按租户预留的 dataset（`hub-agent-mem-<sha256(tenant)[:16]>`，总长 30 恒在 MultiRAG 标识符 32 字符限内）；记忆 outbox 由共享 worker 排空（含 hub-agent 服务集）
+
+冷启动说明：dataset 索引未建或为空时 recall 恒空属正常初期形态，不告警不阻断；新写入的记忆经 outbox 异步入索引，稍后可检索。
+
+管理台：记忆管理页 applications 列表含「Agent 自主记忆」保留应用，选中后按 `userId=agent:<Agent 名>` 查看 facts（含「写入者」列，跨租户查询被拒）；管理台对 Agent 记忆开放修正（管理通道无对话佐证，quote 宽松）与**物理删除**（池满腾位的可执行路径）；审计动作 `memory.mcp.remember/recall/list/update` 每次调用一行（含 deny/失败），只记 scope 哈希与 memoryId/版本，不含正文与摘录。

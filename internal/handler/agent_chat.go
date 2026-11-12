@@ -23,10 +23,17 @@ import (
 
 type AgentChatHandler struct {
 	svc *services.AgentChatService
+	// memory 非空时对会话首轮 run 注入记忆概要（spec 2026-11-11 §4）；
+	// 变参注入保持既有构造调用兼容（main 与测试）。
+	memory *services.MemoryInjector
 }
 
-func NewAgentChatHandler(svc *services.AgentChatService) *AgentChatHandler {
-	return &AgentChatHandler{svc: svc}
+func NewAgentChatHandler(svc *services.AgentChatService, injectors ...*services.MemoryInjector) *AgentChatHandler {
+	h := &AgentChatHandler{svc: svc}
+	if len(injectors) > 0 {
+		h.memory = injectors[0]
+	}
+	return h
 }
 
 // blockGuestInvisibleAgent: guest 访问未开放 Agent 时写中性 404（与
@@ -153,11 +160,13 @@ type sendMessageReq struct {
 }
 
 // runRequestBody is the POST /v1/agents/{agentId}/runs JSON body. attachments
-// are relayed verbatim (runtime re-validates name/size/path).
+// are relayed verbatim (runtime re-validates name/size/path); appendSystemPrompt
+// carries the first-turn memory summary (hub-injected, per-run ephemeral).
 type runRequestBody struct {
-	Message     string                    `json:"message"`
-	SessionID   string                    `json:"sessionId,omitempty"`
-	Attachments []services.AttachmentDesc `json:"attachments,omitempty"`
+	Message            string                    `json:"message"`
+	SessionID          string                    `json:"sessionId,omitempty"`
+	Attachments        []services.AttachmentDesc `json:"attachments,omitempty"`
+	AppendSystemPrompt string                    `json:"appendSystemPrompt,omitempty"`
 }
 
 // SendMessage is the SSE streaming endpoint.
@@ -215,7 +224,7 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	// URL, and a resolve failure must not leave a persisted user turn (or an
 	// orphan system error message) behind — the client keeps its input and
 	// can simply retry.
-	baseURL, apiKey, containerID, err := h.svc.ResolveRuntime(tenantID, agentName)
+	baseURL, apiKey, containerID, memoryEnabled, err := h.svc.ResolveRuntime(tenantID, agentName)
 	if err != nil {
 		// HTTP 响应只给中性中文文案，英文细节进日志（CONTRIBUTING Standards 1）。
 		log.Printf("[chat] resolve runtime failed: tenant=%s agent=%s session=%s err=%v",
@@ -289,6 +298,14 @@ func (h *AgentChatHandler) SendMessage(c *gin.Context) {
 	}
 	if len(req.Attachments) > 0 {
 		body.Attachments = req.Attachments
+	}
+	// 记忆首轮注入（spec 2026-11-11 §4）：仅未绑定 runtime 会话的首轮
+	//（后续轮次由 Agent 经 memory MCP 自主 recall）；query 为本轮用户
+	// 消息；Agent 未开启记忆 / 空记忆 / 任何失败 → 不注入，不阻断对话。
+	if sess.RuntimeSessionID == "" && h.memory != nil && memoryEnabled {
+		if summary, _ := h.memory.BuildSummary(c.Request.Context(), tenantID, agentName, req.Content); summary != "" {
+			body.AppendSystemPrompt = summary
+		}
 	}
 	bodyBytes, _ := json.Marshal(body)
 

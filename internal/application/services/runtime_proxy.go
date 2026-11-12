@@ -35,6 +35,10 @@ type ProxyDecision struct {
 	CanonicalPath string        // decoded, validated runtime path (prefix stripped)
 	Timeout       time.Duration // 0 = no overall deadline (SSE)
 	IsSSE         bool
+	// AgentMemoryEnabled rides on the resolve-time agent lookup (free) so the
+	// handler can condition the first-turn memory injection (spec 2026-11-11
+	// §4) without a second query.
+	AgentMemoryEnabled bool
 }
 
 type proxyRoute struct {
@@ -117,7 +121,7 @@ func (s *RuntimeProxyService) Resolve(org, agentName, method, escapedRemainder, 
 		return nil, &ProxyError{Code: 502, Reason: "runtime upstream unavailable"}
 	}
 	base := "http://" + net.JoinHostPort(s.upstreamHost, strconv.Itoa(cfg.RuntimePort))
-	return &ProxyDecision{UpstreamBase: base, CanonicalPath: canon, Timeout: route.timeout, IsSSE: route.sse}, nil
+	return &ProxyDecision{UpstreamBase: base, CanonicalPath: canon, Timeout: route.timeout, IsSSE: route.sse, AgentMemoryEnabled: cfg.MemoryEnabled}, nil
 }
 
 // canonicalizePath rejects encoded slashes/dots (case-insensitive) in the

@@ -239,6 +239,7 @@ export const memoryZh = {
   factCount: '{{count}} 条',
   columns: {
     content: '记忆内容',
+    source: '写入者',
     version: '版本',
     sync: '同步状态',
     updated: '更新时间',
@@ -570,6 +571,7 @@ export const memoryEn = {
   factCount: '{{count}} memories',
   columns: {
     content: 'Memory',
+    source: 'Writer',
     version: 'Version',
     sync: 'Sync status',
     updated: 'Updated',

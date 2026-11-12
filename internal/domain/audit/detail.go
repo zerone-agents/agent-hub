@@ -55,3 +55,15 @@ type BindingDetail struct {
 type AgentUpdateDetail struct {
 	Fields []string `json:"fields"`
 }
+
+// MemoryMcpDetail：记忆 MCP 工具调用（spec 2026-11-11-memory-mcp §5）。
+// Tool 为调用的工具名（成功与 deny/失败共用此 Detail）；MemoryID/Version
+// 仅写路径有值；Count 仅读路径有值。正文字段在类型层面不存在（§5.4 白名单
+// 原则——NotContains 钉住于 handler 测试）。
+type MemoryMcpDetail struct {
+	Tool     string `json:"tool"`
+	MemoryID string `json:"memoryId,omitempty"`
+	Version  uint64 `json:"version,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Failed   bool   `json:"failed,omitempty"`
+}

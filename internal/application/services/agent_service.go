@@ -61,6 +61,20 @@ type CreateAgentInput struct {
 	IsDefault      *bool
 }
 
+// validateMemoryScopeMode 记忆归属模式校验（spec 2026-11-11-memory-mcp
+// -design §3）：Phase 1 只放行 "agent" 与空串（未启用语义按 agent）；
+// "user" 依赖 runtime#95 会话身份透传，属二期，保存期即拒绝——不给
+// 「配了但工具 fail closed」的中间态，也不存在静默降级路径。
+func validateMemoryScopeMode(mode string) error {
+	if mode == "" || mode == "agent" {
+		return nil
+	}
+	if mode == "user" {
+		return agent.NewValidationErrorf("scopeMode=user 将于二期开放（依赖会话身份透传），当前请使用 agent")
+	}
+	return agent.NewValidationErrorf("scopeMode 必须为 agent 或留空")
+}
+
 // UpdateAgentInput holds the optional parameters for updating an existing agent.
 type UpdateAgentInput struct {
 	Config         *map[string]interface{}
@@ -725,6 +739,20 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.Effort = strings.TrimSpace(v)
 	}
 
+	// 记忆 MCP（spec 2026-11-11）：memoryEnabled 显式传 bool 即写；
+	// memoryScopeMode trim 后经 validateMemoryScopeMode 校验（absent key
+	// 保持不动，与 effort/maxSessionQueries 同惯例）。
+	if v, ok := config["memoryEnabled"].(bool); ok {
+		cfg.MemoryEnabled = v
+	}
+	if v, ok := config["memoryScopeMode"].(string); ok {
+		mode := strings.TrimSpace(v)
+		if err := validateMemoryScopeMode(mode); err != nil {
+			return err
+		}
+		cfg.MemoryScopeMode = mode
+	}
+
 	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
 	if v, ok := config["zeroTools"].(bool); ok {
 		cfg.ZeroTools = v
@@ -817,6 +845,8 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 	// effort（issue #226）：无条件携带，空串 = 未设置（前端按空串显示未配置）。
 	m["effort"] = cfg.Effort
 	m["zeroTools"] = cfg.ZeroTools
+	m["memoryEnabled"] = cfg.MemoryEnabled
+	m["memoryScopeMode"] = cfg.MemoryScopeMode
 
 	if cfg.DisallowedTools != nil {
 		m["disallowedTools"] = cfg.DisallowedTools

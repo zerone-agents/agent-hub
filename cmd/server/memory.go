@@ -57,7 +57,14 @@ func configureMemory(cfg config.MemoryConfig, guard *services.DatasetGuard) ([]h
 	return out, nil
 }
 
-func runMemoryWorker(ctx context.Context, bindings []handler.MemoryBinding) {
+// runMemoryWorker drains both the business memory bindings and the
+// agent-memory registry's per-tenant services（review 阻塞①）：hub-agent
+// services live outside memoryBindings, and an undrained agent-memory
+// outbox means chunk_id is never set — recall and first-turn injection
+// would be permanently empty in production. Registry may be nil (knowledge
+// connection unconfigured); lazy per-tenant services appear on the next
+// tick after their first tool call.
+func runMemoryWorker(ctx context.Context, bindings []handler.MemoryBinding, agentMemory *services.AgentMemoryRegistry) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -67,6 +74,16 @@ func runMemoryWorker(ctx context.Context, bindings []handler.MemoryBinding) {
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				log.Println("Memory: index reconciliation remains pending; inspect operation status")
+			}
+		}
+		if agentMemory != nil {
+			for _, svc := range agentMemory.Services() {
+				attempt, cancel := context.WithTimeout(ctx, 20*time.Second)
+				err := svc.Sync(attempt, 20)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Println("Memory: agent-memory index reconciliation remains pending; inspect operation status")
+				}
 			}
 		}
 		select {

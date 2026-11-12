@@ -51,6 +51,8 @@ func setupAgentRepoTestDB(t *testing.T) *gorm.DB {
 			disallowed_tools TEXT,
             zero_tools BOOLEAN NOT NULL DEFAULT false,
 			runtime_port INTEGER DEFAULT 0,
+			memory_enabled BOOLEAN NOT NULL DEFAULT false,
+			memory_scope_mode VARCHAR(16) NOT NULL DEFAULT '',
 			deployment_status VARCHAR(32) DEFAULT '',
 			deployed_at DATETIME,
 			runtime_token TEXT,

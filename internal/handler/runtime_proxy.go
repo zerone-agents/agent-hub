@@ -27,18 +27,25 @@ import (
 type RuntimeProxyHandler struct {
 	svc       *services.RuntimeProxyService
 	transport *http.Transport
+	// memory 非空时对首轮 run body 合并注入记忆概要（spec 2026-11-11 §4）；
+	// 变参注入保持既有构造调用兼容。
+	memory *services.MemoryInjector
 }
 
-func NewRuntimeProxyHandler(svc *services.RuntimeProxyService) *RuntimeProxyHandler {
+func NewRuntimeProxyHandler(svc *services.RuntimeProxyService, injectors ...*services.MemoryInjector) *RuntimeProxyHandler {
 	// One shared transport: ResponseHeaderTimeout gives every endpoint fast
 	// first-byte failure; overall deadlines are per-request contexts
 	// (ReverseProxy.Transport is a RoundTripper — no Client.Timeout exists).
 	// MaxIdleConnsPerHost: 32 — 单一共享 transport 服务于 chat/SSH/文件/
 	// 清单全部代理链路，Go 默认 2 在并发负载下连接 churn（issue #91 批次三）。
-	return &RuntimeProxyHandler{
+	h := &RuntimeProxyHandler{
 		svc:       svc,
 		transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second, MaxIdleConnsPerHost: 32},
 	}
+	if len(injectors) > 0 {
+		h.memory = injectors[0]
+	}
+	return h
 }
 
 // RegisterRuntimeProxyRoutes mounts the proxy. Called only when Kong is NOT
@@ -47,8 +54,8 @@ func NewRuntimeProxyHandler(svc *services.RuntimeProxyService) *RuntimeProxyHand
 // "/runtime/<agent>" — the implicit default tenant never appears in the URL.
 // The two shapes can't be mounted together: gin forbids conflicting wildcard
 // names at the same prefix position.
-func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService, authMode services.AuthMode) {
-	h := NewRuntimeProxyHandler(svc)
+func RegisterRuntimeProxyRoutes(r *gin.Engine, svc *services.RuntimeProxyService, authMode services.AuthMode, injectors ...*services.MemoryInjector) {
+	h := NewRuntimeProxyHandler(svc, injectors...)
 	if authMode == services.ModeBuiltin {
 		rg := r.Group("/runtime/:agent")
 		rg.Any("/*path", h.ProxyBuiltin)
@@ -116,6 +123,13 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 				return
 			}
 		}
+		// 记忆首轮注入（spec 2026-11-11 §4）：Agent 开启记忆 + 注入器就绪。
+		// 首轮信号 = body 无 sessionId（runtime 将新建会话）；与 turnContext
+		// 互斥（上方上下文检查先行且两者不允许并存）。读改失败一律降级
+		// 透传原文——injectMemorySummary 内部恢复 body。
+		if decision.AgentMemoryEnabled && h.memory != nil {
+			h.injectMemorySummary(c, org, agentName)
+		}
 	}
 	upstream, err := url.Parse(decision.UpstreamBase)
 	if err != nil { // unreachable: base is JoinHostPort-built from validated parts
@@ -182,6 +196,79 @@ func (h *RuntimeProxyHandler) proxyResolved(c *gin.Context, org, agentName, esca
 	}
 	proxy.ServeHTTP(c.Writer, outReq)
 	auditRuntimeProxy(c, org, agentName, c.Writer.Status(), start, upstreamErr)
+}
+
+// injectMemorySummary merges the first-turn memory summary into a proxied run
+// body's appendSystemPrompt（记忆段前置，业务自带值保留——spec §4）。
+// Degrade-only：任一跳过条件（ContentLength 未知/超限、JSON 不可解析、
+// 含 turnContext（互斥）、含非空 sessionId（非首轮）、message 为空、
+// summary 为空、序列化失败）都原样恢复 body 透传，绝不阻断代理。
+// 仅在 ContentLength 已知且 ≤ proxyContextBodyLimit 时读改——上方的
+// inspectProxyContext 已重写 body 并校正 ContentLength，此时读取是完整
+// 的；更大或未知长度的 run 不做注入（聊天首轮正文量级远低于该限）。
+func (h *RuntimeProxyHandler) injectMemorySummary(c *gin.Context, org, agentName string) {
+	if c.Request.ContentLength <= 0 || c.Request.ContentLength > proxyContextBodyLimit {
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, c.Request.ContentLength))
+	c.Request.Body.Close()
+	restore := func() {
+		c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+		c.Request.ContentLength = int64(len(raw))
+	}
+	if err != nil {
+		restore()
+		return
+	}
+	var body map[string]json.RawMessage
+	if json.Unmarshal(raw, &body) != nil {
+		restore()
+		return
+	}
+	if _, has := body["turnContext"]; has {
+		restore()
+		return
+	}
+	if sid, has := body["sessionId"]; has {
+		var s string
+		if json.Unmarshal(sid, &s) == nil && s != "" {
+			restore()
+			return
+		}
+	}
+	var msg string
+	if m, has := body["message"]; has {
+		_ = json.Unmarshal(m, &msg)
+	}
+	if strings.TrimSpace(msg) == "" {
+		restore()
+		return
+	}
+	summary, _ := h.memory.BuildSummary(c.Request.Context(), org, agentName, msg)
+	if summary == "" {
+		restore()
+		return
+	}
+	merged := summary
+	if exist, has := body["appendSystemPrompt"]; has {
+		var s string
+		if json.Unmarshal(exist, &s) == nil && strings.TrimSpace(s) != "" {
+			merged = summary + "\n" + s
+		}
+	}
+	mergedRaw, err := json.Marshal(merged)
+	if err != nil {
+		restore()
+		return
+	}
+	body["appendSystemPrompt"] = mergedRaw
+	out, err := json.Marshal(body)
+	if err != nil {
+		restore()
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(out))
+	c.Request.ContentLength = int64(len(out))
 }
 
 // escapedRemainder extracts the escaped wildcard remainder INCLUDING the

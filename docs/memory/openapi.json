@@ -3454,6 +3454,23 @@
           }
         }
       }
+    },
+    "/mcp": {
+      "post": {
+        "summary": "Agent autonomous memory MCP endpoint (JSON-RPC 2.0)",
+        "operationId": "memory_mcp",
+        "description": "Built-in MCP endpoint for agent-autonomous memory (spec 2026-11-11-memory-mcp): JSON-RPC methods initialize / tools/list / tools/call. Auth: Bearer agent runtime token + X-Agent-Capability (HMAC-signed per-agent capability armed at deploy time). Tools: memory_remember / memory_recall / memory_list / memory_update. Scope is server-pinned to {tenant, hub-agent, agent:<name>, agent-memory-v1}; identity never travels in tool arguments. See docs/memory/README.md (Agent autonomous memory section) for the full contract, env vars (MEMORY_MCP_URL / MEMORY_CAPABILITY_SECRET / AGENT_MEMORY_WRAPPING_KEY) and deployment notes.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON-RPC 2.0 response (tool results and errors are HTTP 200 with embedded isError)"
+          }
+        }
+      }
     }
   },
   "components": {

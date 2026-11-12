@@ -99,6 +99,23 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	// 记忆 MCP（spec 2026-11-11）：类型与枚举前置校验，枚举语义的唯一
+	// 来源是 validateMemoryScopeMode（Phase 1 拒绝 user，fail fast）。
+	if v, present := config["memoryEnabled"]; present {
+		if _, ok := v.(bool); !ok {
+			return agent.NewValidationErrorf("memoryEnabled 必须是布尔值")
+		}
+	}
+	if v, present := config["memoryScopeMode"]; present {
+		s, ok := v.(string)
+		if !ok {
+			return agent.NewValidationErrorf("memoryScopeMode 必须是字符串")
+		}
+		if err := validateMemoryScopeMode(strings.TrimSpace(s)); err != nil {
+			return err
+		}
+	}
+
 	// maxTurnsUpperBound is the shared upper limit for maxTurns; the frontend
 	// form (AgentForm InputNumber) enforces the same value. 0 keeps the
 	// runtime default, so only the negative range and values above the bound
