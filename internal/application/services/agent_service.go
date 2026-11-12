@@ -753,6 +753,28 @@ func unpackConfigToModel(config map[string]interface{}, cfg *agent.AgentConfig, 
 		cfg.MemoryScopeMode = mode
 	}
 
+	// Handle thinking（issue #257）：显式 null = 清除（两字段归零）；对象 =
+	// 按字段解包（type trim；budgetTokens 取整）；absent key 保持不动（与
+	// effort 同惯例）。形态与半态校验在 ValidateConfig 已拦，这里只做忠实解包。
+	if v, ok := config["thinking"]; ok {
+		if v == nil {
+			cfg.ThinkingType = ""
+			cfg.ThinkingBudgetTokens = nil
+		} else if th, ok := v.(map[string]interface{}); ok {
+			if t, ok := th["type"].(string); ok {
+				cfg.ThinkingType = strings.TrimSpace(t)
+			}
+			if bt, ok := th["budgetTokens"]; ok {
+				if n, ok := bt.(float64); ok {
+					i := int(n)
+					cfg.ThinkingBudgetTokens = &i
+				} else if bt == nil {
+					cfg.ThinkingBudgetTokens = nil
+				}
+			}
+		}
+	}
+
 	// Handle disallowedTools (issue #111 agent-local deny list): parsing,
 	if v, ok := config["zeroTools"].(bool); ok {
 		cfg.ZeroTools = v
@@ -844,6 +866,21 @@ func modelToConfigMap(cfg *agent.AgentConfig, encryptionKey string) map[string]i
 
 	// effort（issue #226）：无条件携带，空串 = 未设置（前端按空串显示未配置）。
 	m["effort"] = cfg.Effort
+
+	// thinking（issue #257）：未设置 → nil；已设置 → 嵌套对象（对齐 SDK/
+	// deployer 契约形态）。budgetTokens 仅在已设置时携带。
+	if cfg.ThinkingType == "" && cfg.ThinkingBudgetTokens == nil {
+		m["thinking"] = nil
+	} else {
+		th := map[string]interface{}{}
+		if cfg.ThinkingType != "" {
+			th["type"] = cfg.ThinkingType
+		}
+		if cfg.ThinkingBudgetTokens != nil {
+			th["budgetTokens"] = float64(*cfg.ThinkingBudgetTokens)
+		}
+		m["thinking"] = th
+	}
 	m["zeroTools"] = cfg.ZeroTools
 	m["memoryEnabled"] = cfg.MemoryEnabled
 	m["memoryScopeMode"] = cfg.MemoryScopeMode

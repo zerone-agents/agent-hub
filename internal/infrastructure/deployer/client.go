@@ -17,7 +17,8 @@ import (
 // Subagents are pure id references to other entries in the same graph;
 // mounted agents never inherit or fall back to parent capabilities — an
 // empty field stays empty. Runtime-global fields (Model, MaxSessionQueries,
-// PermissionMode, Effort) are root-only: the deployer rejects them on children.
+// PermissionMode, Effort, Thinking) are root-only: the deployer rejects them
+// on children.
 type AgentDefinition struct {
 	Name         string `json:"name"`
 	Description  string `json:"description"`
@@ -35,9 +36,16 @@ type AgentDefinition struct {
 	// (agent-deployer#23), which rejects blank values and child declarations.
 	// Root-only; declaring it raises the runtime image floor to >= v2.9.0
 	// (runtime #77 — older runtimes silently strip the key).
-	Effort    string   `json:"effort,omitempty"`
-	Tools     []string `json:"tools,omitempty"`
-	ZeroTools bool     `json:"zeroTools,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	// Thinking is the extended-thinking configuration (SDK
+	// AgentOptions.thinking, issue #257). Mirrors the deployer's
+	// model.AgentDefinition.Thinking (agent-deployer#23): the deployer
+	// fail-fasts on types outside the SDK enum (adaptive|enabled|disabled)
+	// and rejects child declarations. Root-only; no runtime image floor
+	// beyond the base (thinking exists since runtime v2.4.0).
+	Thinking  *ThinkingConfig `json:"thinking,omitempty"`
+	Tools     []string        `json:"tools,omitempty"`
+	ZeroTools bool            `json:"zeroTools,omitempty"`
 	// DisallowedTools is the agent-local deny list (issue #111): a
 	// user-configured tool-name blacklist (built-in names like "Bash" or
 	// MCP-qualified names, no referential integrity) applied on top of the
@@ -54,6 +62,17 @@ type AgentDefinition struct {
 	Subagents      []string                   `json:"subagents,omitempty"`
 	McpServers     map[string]McpServerConfig `json:"mcpServers,omitempty"`
 	Datasets       map[string]string          `json:"datasets,omitempty"`
+}
+
+// ThinkingConfig mirrors the deployer's model.ThinkingConfig
+// (agent-deployer#23, issue #257): SDK AgentOptions.thinking. Type is the
+// SDK enum (adaptive|enabled|disabled) — the deployer fail-fasts on anything
+// else because an invalid value would break the runtime's whole-config Zod
+// parse. BudgetTokens passes through unconstrained on the deployer side; the
+// hub bounds it at save time.
+type ThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens *int   `json:"budgetTokens,omitempty"`
 }
 
 // McpServerConfig defines the configuration for a single MCP server.

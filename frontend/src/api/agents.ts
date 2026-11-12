@@ -10,6 +10,8 @@ export interface AgentConfig {
   maxSessionQueries?: number
   /** 推理强度档位（issue #226）：SDK AgentOptions.effort 透传；'' = 未设置 */
   effort?: string
+  /** 扩展思考（issue #257）：SDK AgentOptions.thinking；null = 未设置/显式清除 */
+  thinking?: { type?: string; budgetTokens?: number } | null
   disallowedTools?: string[]
   zeroTools?: boolean
   title?: Record<string, string>

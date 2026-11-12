@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,6 +19,22 @@ var validPermissionModes = map[string]bool{
 	"plan":              true,
 	"bypassPermissions": true,
 }
+
+// validThinkingTypes mirrors the SDK ThinkingConfig.type enum (issue #257);
+// the deployer fail-fasts on anything else because an invalid value would
+// break the runtime's whole-config Zod parse at container startup — hub must
+// reject earlier at the save boundary.
+var validThinkingTypes = map[string]bool{
+	"adaptive": true,
+	"enabled":  true,
+	"disabled": true,
+}
+
+// thinkingBudgetUpperBound is the anti-footgun ceiling for
+// thinking.budgetTokens (issue #257): 128K matches the largest extended
+// thinking budget tier among mainstream providers. The deployer passes the
+// value through unconstrained, so the bound lives here.
+const thinkingBudgetUpperBound = 128000
 
 // invalidNameChars mirrors deployer's naming.SanitizeName regex: any run of
 // non-alphanumeric characters collapses to a single hyphen.
@@ -143,6 +160,15 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	// thinking 扩展思考（issue #257）：形态校验（对象或 null、type 枚举、
+	// budgetTokens 范围、半态拦截）。无模型能力白名单——thinking 是通用行为
+	// 开关，与 provider_models 声明无关，ValidateConfig 纯函数即终态。
+	if v, ok := config["thinking"]; ok {
+		if err := validateThinking(v); err != nil {
+			return err
+		}
+	}
+
 	// disallowedTools（issue #111 agent-local deny list）: 形态校验全部
 	// 收在 parseDisallowedTools 单一来源，与 unpackConfigToModel 共享，
 	// 防两处规则漂移。
@@ -216,6 +242,40 @@ func ValidateConfig(config map[string]interface{}) error {
 		}
 	}
 
+	return nil
+}
+
+// validateThinking 校验 thinking 配置形态（issue #257）：显式 null = 清除
+// （合法）；对象时 type 必须命中 SDK 枚举（adaptive|enabled|disabled，空串
+// = 未设置合法）、budgetTokens 为 1..上限 的整数、且带 budgetTokens 必须带
+// type（半态对象无 type 会炸 runtime Zod 必填与 deployer fail-fast）。
+func validateThinking(v interface{}) error {
+	if v == nil {
+		return nil // 显式 null = 清除
+	}
+	th, ok := v.(map[string]interface{})
+	if !ok {
+		return agent.NewCodedValidationErrorf(agent.CodeThinkingInvalid, nil,
+			"thinking 必须是对象或 null")
+	}
+	t, _ := th["type"].(string)
+	t = strings.TrimSpace(t)
+	if t != "" && !validThinkingTypes[t] {
+		return agent.NewCodedValidationErrorf(agent.CodeThinkingTypeInvalid,
+			map[string]string{"value": t}, "无效的 thinking.type: %s，可选值: adaptive, enabled, disabled", t)
+	}
+	if bt, hasBT := th["budgetTokens"]; hasBT && bt != nil {
+		n, ok := bt.(float64)
+		if !ok || n != math.Trunc(n) || n < 1 || n > thinkingBudgetUpperBound {
+			return agent.NewCodedValidationErrorf(agent.CodeThinkingBudgetInvalid,
+				map[string]string{"limit": strconv.Itoa(thinkingBudgetUpperBound)},
+				"thinking.budgetTokens 必须是 1 到 %d 的整数", thinkingBudgetUpperBound)
+		}
+		if t == "" {
+			return agent.NewCodedValidationErrorf(agent.CodeThinkingTypeInvalid, nil,
+				"设置 thinking.budgetTokens 必须同时提供 thinking.type")
+		}
+	}
 	return nil
 }
 

@@ -210,6 +210,31 @@ describe('AgentListPage', () => {
     mutableUpdateAgent = null
   })
 
+  it('模型弹窗保存携带关闭思考（issue #257）', async () => {
+    const user = userEvent.setup()
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    // canConfirm 门控要求先测试通过：probe mock 返回 success envelope
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    expect(screen.getByText('设置模型')).toBeInTheDocument()
+
+    // 「关闭思考」开关（role=switch，label 文本不可点）→ 点击开启
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    // 恒带 key：开启 → {type:'disabled'}
+    expect(payload.data.config.thinking).toEqual({ type: 'disabled' })
+    mutableUpdateAgent = null
+  })
+
   it('shows model modal with test and confirm buttons', async () => {
     const user = userEvent.setup()
     renderPage()
