@@ -1,8 +1,9 @@
-// Package systemsetting 提供系统级配置的持久化存储。当前用于持久化两类
+// Package systemsetting 提供系统级配置的持久化存储。当前用于持久化三类
 // 启动时自动生成的 secret：builtin 模式下未显式配置 AUTH_JWT_SECRET 时
 // 的 JWT secret（重启、容器重建、镜像升级均不丢失，登录态保持），以及
 // 未显式配置 KNOWLEDGE_CAPABILITY_SECRET 时的 knowledge capability 签名
-// secret（issue #111 重开：与 provider 凭证加密密钥解耦的独立 secret）。
+// secret（issue #111 重开：与 provider 凭证加密密钥解耦的独立 secret），
+// 以及实验性记忆模块未显式配置时的独立 wrapping key。
 package systemsetting
 
 import (

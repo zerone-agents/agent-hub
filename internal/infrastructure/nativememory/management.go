@@ -13,6 +13,7 @@ import (
 
 var _ memory.NativeManagement = (*Adapter)(nil)
 var _ memory.NativeDiagnostics = (*Adapter)(nil)
+var _ memory.NativeForget = (*Adapter)(nil)
 
 // BankInfo copies only safe, typed metadata from the configured private bank.
 // Prompt bodies, avatar, owner/tenant IDs, credentials, and unknown fields never
@@ -68,6 +69,41 @@ func (a *Adapter) managedRecord(ctx context.Context, scope nativeScope, id strin
 		return nativeRecord{}, memory.ErrIndexUnknown
 	}
 	return withParentStatus(row, parent), nil
+}
+
+// ForgetMessage uses the memory module's logical forget endpoint and confirms the
+// scoped marker independently. An uncertain DELETE is never blindly replayed.
+func (a *Adapter) ForgetMessage(ctx context.Context, token, id string) (memory.NativeMessage, error) {
+	scope, err := a.scope(a.bank, token)
+	if err != nil {
+		return memory.NativeMessage{}, err
+	}
+	if parsed, ok := messageID(json.RawMessage(id), false); !ok || parsed != id {
+		return memory.NativeMessage{}, memory.ErrInvalid
+	}
+	if err = a.checkBankMode(ctx, true); err != nil {
+		return memory.NativeMessage{}, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	before, err := a.managedRecord(ctx, scope, id)
+	if err != nil {
+		return memory.NativeMessage{}, err
+	}
+	if before.ForgottenAt != "" {
+		return before.NativeMessage, nil
+	}
+	_, _ = a.request(ctx, http.MethodDelete, "/messages/"+a.bank+":"+id, nil, nil)
+	after, err := a.managedRecord(ctx, scope, id)
+	if err != nil || after.ForgottenAt == "" || after.Status || before.NativeStatus != after.NativeStatus {
+		return memory.NativeMessage{}, memory.ErrIndexUnknown
+	}
+	// Only the forget marker may change. Preserve text and provenance.
+	before.forgotten = after.forgotten
+	if !unchangedMessage(before, after) {
+		return memory.NativeMessage{}, memory.ErrIndexUnknown
+	}
+	return after.NativeMessage, nil
 }
 
 func unchangedMessage(before, after nativeRecord) bool {

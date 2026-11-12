@@ -26,7 +26,8 @@ import {
   UserCircleIcon,
   MagnifyingGlassIcon,
   SlidersHorizontalIcon,
-  CaretDownIcon
+  CaretDownIcon,
+  PlusIcon
 } from '@phosphor-icons/react'
 import { isAxiosError } from 'axios'
 import {
@@ -41,6 +42,7 @@ import {
 import { parseApiError } from '@/api/client'
 import NativeMemoryPanel from './NativeMemoryPanel'
 import MemoryApplicationConfiguration from './MemoryApplicationConfiguration'
+import CreateMemoryApplicationModal from './CreateMemoryApplicationModal'
 import './memory-management.css'
 import { useAuthStore } from '@/stores/auth'
 import { useCanWrite } from '@/hooks/useCanWrite'
@@ -174,9 +176,17 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
   const queryPrefix = ['admin', 'memory', principalId, workspaceId] as const
   const [applicationChoice, setApplicationChoice] = useState<string>()
   const [subjectChoice, setSubjectChoice] = useState<string>()
+  const [createOpen, setCreateOpen] = useState(false)
   const applications = useQuery({
     queryKey: [...queryPrefix, 'applications'],
     queryFn: ({ signal }) => memoryApi.applications(signal),
+    retry: (failureCount, error) =>
+      !(
+        isAxiosError<{ code?: string } | undefined>(error) &&
+        ['memory_disabled', 'memory_not_configured'].includes(
+          error.response?.data?.code ?? ''
+        )
+      ) && failureCount < 1,
     gcTime: 0
   })
   const application =
@@ -186,6 +196,8 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
     applications.data?.find((app) => app.automaticExtractionSupported) ??
     applications.data?.at(0)
   const applicationKey = application ? memoryApplicationKey(application) : ''
+  const provisioning =
+    application?.status === 'unknown' || application?.status === 'provisioning'
   const subjects = useQuery({
     queryKey: [...queryPrefix, 'subjects', applicationKey],
     queryFn: ({ signal }) => {
@@ -198,7 +210,7 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
         signal
       )
     },
-    enabled: !!application,
+    enabled: !!application && !provisioning,
     gcTime: 0
   })
   const entries = subjects.data?.subjects ?? []
@@ -215,6 +227,11 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: queryPrefix })
   }
+  const checkProvisioning = useMutation({
+    mutationFn: () =>
+      memoryApi.applicationProvisioning(application?.applicationId ?? ''),
+    onSuccess: refresh
+  })
   const configuration = application ? (
     <MemoryApplicationConfiguration
       application={application}
@@ -311,16 +328,20 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
     <div className="memory-toolbar">
       <Select
         aria-label={t('memory.application')}
+        placeholder={t('memory.selectApplication')}
         className="memory-toolbar-application"
         value={applicationKey || undefined}
         options={applications.data?.map((app) => ({
           value: memoryApplicationKey(app),
           label: t('memory.applicationOption', {
-            application: app.applicationId,
+            application: app.name
+              ? `${app.name} (${app.applicationId})`
+              : app.applicationId,
             tenant: app.tenantId
           })
         }))}
         onChange={(value) => {
+          checkProvisioning.reset()
           setApplicationChoice(value)
           setSubjectChoice(undefined)
           setSubjectSearch('')
@@ -345,6 +366,7 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
         >
           <Button
             className="memory-toolbar-account"
+            disabled={!application || provisioning}
             aria-label={t('memory.chooseAccount')}
             icon={<UserCircleIcon size={18} />}
           >
@@ -353,24 +375,32 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
           </Button>
         </Tooltip>
       </Popover>
-      <Tooltip
-        title={t(
-          application?.automaticExtractionSupported
-            ? 'memory.managementAutoHint'
-            : 'memory.managementLedgerHint'
-        )}
-      >
-        <Tag
-          className="memory-toolbar-mode"
-          color={application?.automaticExtractionSupported ? 'blue' : 'default'}
-        >
-          {t(
-            application?.automaticExtractionSupported
-              ? 'memory.autoMode'
-              : 'memory.ledgerMode'
+      {application && (
+        <Tooltip
+          title={t(
+            provisioning
+              ? 'memory.creationUnconfirmed'
+              : application.automaticExtractionSupported
+                ? 'memory.managementAutoHint'
+                : 'memory.managementLedgerHint'
           )}
-        </Tag>
-      </Tooltip>
+        >
+          <Tag
+            className="memory-toolbar-mode"
+            color={
+              application.automaticExtractionSupported ? 'blue' : 'default'
+            }
+          >
+            {t(
+              provisioning
+                ? 'memory.creationPending'
+                : application.automaticExtractionSupported
+                  ? 'memory.autoMode'
+                  : 'memory.ledgerMode'
+            )}
+          </Tag>
+        </Tooltip>
+      )}
       <Tooltip
         title={application?.memoryTypes
           ?.map((type) => t('memory.nativeTypes.' + type, type))
@@ -396,12 +426,22 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
         <Button
           type="text"
           aria-label={t('memory.applicationConfiguration')}
+          disabled={!application || provisioning}
           icon={<SlidersHorizontalIcon size={17} />}
           onClick={() => {
             setConfigOpen(true)
           }}
         />
       </Tooltip>
+      <PrimaryButton
+        icon={<PlusIcon size={16} />}
+        disabled={!applications.isSuccess}
+        onClick={() => {
+          setCreateOpen(true)
+        }}
+      >
+        {t('memory.createApplication')}
+      </PrimaryButton>
     </div>
   )
   return (
@@ -428,6 +468,27 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
         <NoRecords
           title={t('memory.noApplications')}
           hint={t('memory.noApplicationsHint')}
+        />
+      ) : provisioning ? (
+        <Alert
+          type="warning"
+          showIcon
+          title={t('memory.creationPending')}
+          description={
+            checkProvisioning.isError
+              ? parseApiError(checkProvisioning.error)
+              : t('memory.creationUnconfirmed')
+          }
+          action={
+            <Button
+              loading={checkProvisioning.isPending}
+              onClick={() => {
+                checkProvisioning.mutate()
+              }}
+            >
+              {t('memory.checkCreation')}
+            </Button>
+          }
         />
       ) : (
         <>
@@ -518,6 +579,19 @@ function MemoryWorkspace({ principalId }: { principalId: string }) {
             {configuration}
           </Drawer>
         </>
+      )}
+      {createOpen && (
+        <CreateMemoryApplicationModal
+          queryPrefix={queryPrefix}
+          onChanged={(app) => {
+            setApplicationChoice(memoryApplicationKey(app))
+            setSubjectChoice(undefined)
+            refresh()
+          }}
+          onClose={() => {
+            setCreateOpen(false)
+          }}
+        />
       )}
     </div>
   )

@@ -53,6 +53,16 @@ export default function MemoryApplicationConfiguration({
                 children: application.applicationId
               },
               {
+                key: 'name',
+                label: t('memory.applicationName'),
+                children: application.name ?? '—'
+              },
+              {
+                key: 'description',
+                label: t('memory.configurationDescription'),
+                children: application.description ?? '—'
+              },
+              {
                 key: 'policy',
                 label: t('memory.policyVersion'),
                 children: application.policyVersion
@@ -94,7 +104,9 @@ export default function MemoryApplicationConfiguration({
                 label: t('memory.managementCapabilities'),
                 children: t(
                   application.nativeStatusSupported
-                    ? 'memory.statusManagementEnabled'
+                    ? application.nativeForgetSupported
+                      ? 'memory.statusManagementWithForget'
+                      : 'memory.statusManagementEnabled'
                     : 'memory.statusManagementReadOnly'
                 )
               }
@@ -137,7 +149,10 @@ export default function MemoryApplicationConfiguration({
                 {
                   key: 'description',
                   label: t('memory.configurationDescription'),
-                  children: value?.description === '' ? '—' : (value?.description ?? '—')
+                  children:
+                    value?.description === ''
+                      ? '—'
+                      : (value?.description ?? '—')
                 },
                 {
                   key: 'chat',
@@ -170,8 +185,7 @@ export default function MemoryApplicationConfiguration({
                 {
                   key: 'temperature',
                   label: t('memory.extractionTemperature'),
-                  children:
-                    value?.temperature ?? '—'
+                  children: value?.temperature ?? '—'
                 },
                 {
                   key: 'policy',

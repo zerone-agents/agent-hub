@@ -5,9 +5,14 @@ export interface MemoryApplication {
   applicationId: string
   policyVersion: string
   dataClass: string
+  name?: string
+  description?: string
+  status?: string
+  origin?: string
   backend?: 'multirag-memory' | 'multirag-knowledge'
   nativeConfigurationSupported?: boolean
   nativeStatusSupported?: boolean
+  nativeForgetSupported?: boolean
   nativeDiagnosticsSupported?: boolean
   nativeMaxContextChars?: number
   nativeDefaultMessages?: number
@@ -70,6 +75,8 @@ export interface NativeMemoryMessage {
   validAt?: string
   invalidAt?: string
   status: boolean
+  forgottenAt?: string
+  parentForgottenAt?: string
   nativeStatus?: boolean
   parentStatus?: boolean
   statusChangeAllowed?: boolean
@@ -103,7 +110,11 @@ export interface NativeMemoryConfiguration {
 export interface NativeMemorySearchResult {
   status: string
   messages: NativeMemoryMessage[]
-  options: { limit: number; similarityThreshold: number; keywordWeight: number }
+  options: {
+    limit: number
+    similarityThreshold: number
+    keywordWeight: number
+  }
 }
 
 export interface MemoryOperation {
@@ -130,7 +141,48 @@ export interface MemoryFactMutation {
 
 const base = '/api/v1/admin/memory'
 
+export interface MemoryApplicationModel {
+  fullId: string
+  name: string
+  factory: string
+  instanceName?: string
+}
+
+export interface CreateMemoryApplication {
+  operationId: string
+  applicationId: string
+  name: string
+  description?: string
+  chatModel: string
+  embeddingModel: string
+}
+
+export interface MemoryApplicationReceipt {
+  application: MemoryApplication
+  applicationToken: string
+}
+
 export const memoryApi = {
+  applicationModels: (signal?: AbortSignal) =>
+    apiClient.get(base + '/application-models', { signal }).then((res) =>
+      unwrapResponse<{
+        chat: MemoryApplicationModel[]
+        embedding: MemoryApplicationModel[]
+      }>(res)
+    ),
+  createApplication: (request: CreateMemoryApplication) =>
+    apiClient
+      .post(base + '/applications', request)
+      .then((res) => unwrapResponse<MemoryApplicationReceipt>(res)),
+  applicationProvisioning: (applicationId: string) =>
+    apiClient
+      .get(
+        base +
+          '/applications/' +
+          encodeURIComponent(applicationId) +
+          '/provisioning'
+      )
+      .then((res) => unwrapResponse<MemoryApplication>(res)),
   applications: (signal?: AbortSignal) =>
     apiClient
       .get(base + '/applications', { signal })
@@ -171,6 +223,12 @@ export const memoryApi = {
   ) =>
     apiClient
       .patch(base + '/native-messages/' + encodeURIComponent(id), request)
+      .then((res) => unwrapResponse<NativeMemoryMessage>(res)),
+  forgetNativeMessage: (id: string, scope: MemoryScope) =>
+    apiClient
+      .post(base + '/native-messages/' + encodeURIComponent(id) + '/forget', {
+        scope
+      })
       .then((res) => unwrapResponse<NativeMemoryMessage>(res)),
   nativeSearch: (request: {
     scope: MemoryScope

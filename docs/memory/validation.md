@@ -1,6 +1,6 @@
 # 记忆功能验证指南
 
-该功能默认关闭，当前合同只接收 `dataClass=synthetic`。以下检查覆盖 Hub 的接口与消费规则；不代表生产准入、敏感数据保护、跨引擎一致性或性能承诺。
+该功能默认开启，配置好底层知识服务连接后可用；当前合同只接收 `dataClass=synthetic`。以下检查覆盖 Hub 的接口与消费规则；不代表生产准入、敏感数据保护、跨引擎一致性或性能承诺。
 
 ## 自动化检查
 
@@ -24,7 +24,7 @@ MySQL 集成测试使用专用测试实例。`TEST_MYSQL_DSN` 用于已有数据
 | --- | --- |
 | 应用配置、凭据与生命周期 | `internal/config/memory_test.go`、`internal/memory/service_test.go`、`internal/memory/subjects_test.go` |
 | 原生对话、幂等及未知写入恢复 | `internal/memory/conversations_test.go`、`internal/infrastructure/nativememory/conversation_test.go` |
-| 原生配置、启停及召回诊断 | `internal/handler/memory_management_test.go`、`internal/infrastructure/nativememory/management_test.go`、`diagnostics_test.go` |
+| 原生配置、启停、遗忘及召回诊断 | `internal/handler/memory_management_test.go`、`memory_forget_test.go`、`internal/infrastructure/nativememory/management_test.go`、`forget_test.go`、`diagnostics_test.go` |
 | 后台角色、租户委托与审计 | `internal/handler/memory_admin_test.go`、`memory_management_test.go` |
 | 临时上下文、会话历史及明确零工具 | `internal/handler/runtime_proxy_context_test.go`、`runtime_proxy_history_test.go`、`internal/application/services/agent_zero_tools_test.go` |
 | 管理界面、状态与范围切换 | `frontend/src/features/memory/*.test.tsx`、`memoryApi.test.ts` |
@@ -41,7 +41,10 @@ MySQL 集成测试使用专用测试实例。`TEST_MYSQL_DSN` 用于已有数据
 6. 在管理页核对类型、正文、父来源、异步状态与配置；比较聊天供给和纯原生检索。后者不额外补最近原文，也不制造分数。
 7. 在专用测试数据上停用单个派生，确认不影响兄弟；停用父原文，确认 Hub 不再供给父子内容。恢复父原文后，单独停用的子项仍停用。记录自身开关与实际供给状态分别核对。
 8. 测试外用户、外生命周期、外应用及无委托管理员均无法读取或操作目标，拒绝后原生记录无变动。
-9. 恢复测试前开关，独立读回正文、类型、来源、记录数与遗忘字段。原生遗忘、删除、授权撤回及注销清理保持不支持；不要用这些接口清理验收数据。
+9. 对本次专门创建的可遗忘合成记录，先保存原生直接检索、Hub 检索与聊天上下文的命中 ID，再从管理页遗忘原文。独立读回 `forget_at`，确认原文不再被底层记忆模块正常检索命中。原生接口不会级联打标派生记录：直接检索可能仍命中它们；Hub 因来源已遗忘而排除其供给，页面应区分“已遗忘”与“来源已遗忘”。
+10. 从页面单独遗忘派生记录，再用同一查询、同一 bank/user/agent 范围复查：被遗忘的派生 ID 不再出现在原生命中中，Hub 检索与聊天上下文同样排除。管理列表保留记录并展示遗忘时间，启停开关和重复遗忘按钮禁用。刷新页面后状态应保持。不要把单次空结果代替“遗忘前可命中”的正向基线。
+
+物理删除、授权撤回及注销清理仍不支持；不要调用这些接口清理验收数据。保留原始读回、查询参数、资源归属、实际模型回复和 worker 状态，不将仅 Hub 过滤后的空结果当作底层级联遗忘证明。
 
 原生自动链路没有用户删除闭环，测试资源由隔离环境的管理员按其正常环境管理流程处理。上游模型、worker、SQL、向量存储和队列需要分别确认；Hub 单元测试或 HTTP 200 不能代替上述证明。
 

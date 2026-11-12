@@ -14,22 +14,26 @@ import (
 
 	"control-panel/internal/application/services"
 	"control-panel/internal/domain/audit"
+	"control-panel/internal/domain/provider"
 	"control-panel/internal/domain/tenant"
 	"control-panel/internal/memory"
+	"control-panel/internal/memoryapp"
 	"control-panel/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 type MemoryAdminHandler struct {
-	bindings []MemoryBinding
-	source   MemoryBindingSource
-	audit    *services.AuditRecorder
+	bindings             []MemoryBinding
+	source               MemoryBindingSource
+	audit                *services.AuditRecorder
 	// agentMemory resolves the reserved hub-agent application's per-tenant
 	// ledger（spec 2026-11-11-memory-mcp-design §4）——管理台按 agent scope
 	// 查看 Agent 自主记忆，记录自带 source（写入者）。nil（knowledge 连接
 	// 未配置的部署形态）时该分支返回 503。
-	agentMemory *services.AgentMemoryRegistry
+	agentMemory          *services.AgentMemoryRegistry
+	applicationsRegistry *memoryapp.Registry
+	applicationModels    provider.MultiRAGMyLLMsSource
 }
 
 func NewMemoryAdminHandler(bindings []MemoryBinding, recorder *services.AuditRecorder) *MemoryAdminHandler {
@@ -42,17 +46,43 @@ func (h *MemoryAdminHandler) SetAgentMemoryRegistry(r *services.AgentMemoryRegis
 	h.agentMemory = r
 }
 
+// Disabled management requests retain authentication and the manager boundary
+// instead of falling through to the HTML SPA redirect.
+func RegisterDisabledMemoryAdminRoutes(readGroup *gin.RouterGroup) {
+	registerUnavailableMemoryAdminRoutes(readGroup, "memory_disabled", "记忆服务未启用，请联系管理员启用后重试")
+}
+
+func RegisterUnconfiguredMemoryAdminRoutes(readGroup *gin.RouterGroup) {
+	registerUnavailableMemoryAdminRoutes(readGroup, "memory_not_configured", "记忆服务尚未配置，请联系管理员完成服务接入")
+}
+
+func registerUnavailableMemoryAdminRoutes(readGroup *gin.RouterGroup, code, message string) {
+	g := readGroup.Group("/memory", middleware.RequireManager())
+	unavailable := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		respondError(c, 503, code, message)
+	}
+	g.GET("/applications", unavailable)
+	g.POST("/applications", unavailable)
+	g.GET("/application-models", unavailable)
+	g.GET("/applications/:applicationId/provisioning", unavailable)
+}
+
 func RegisterMemoryAdminRoutes(writeGroup, readGroup *gin.RouterGroup, h *MemoryAdminHandler) {
 	// The general admin read group also admits members. Memory identity and
 	// evidence are manager-only even if this helper receives that broad group.
 	read := readGroup.Group("/memory", h.observe, middleware.RequireManager())
 	write := writeGroup.Group("/memory", h.observe, middleware.RequireManager())
 	read.GET("/applications", h.applications)
+	read.GET("/application-models", h.listApplicationModels)
+	read.GET("/applications/:applicationId/provisioning", h.applicationProvisioning)
+	write.POST("/applications", h.createApplication)
 	read.GET("/subjects", h.subjects)
 	read.GET("/facts", h.facts)
 	read.GET("/native-messages", h.nativeMessages)
 	read.GET("/native-config", h.nativeConfiguration)
 	write.PATCH("/native-messages/:messageId", h.setNativeStatus)
+	write.POST("/native-messages/:messageId/forget", h.forgetNativeMessage)
 	write.POST("/native-search", h.nativeSearch)
 	write.POST("/native-context", h.nativeContext)
 	read.GET("/operations/:operationId", h.operation)
@@ -69,6 +99,7 @@ type memoryAdminApplication struct {
 	PolicyVersion string `json:"policyVersion"`
 	DataClass     string `json:"dataClass"`
 	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
 	Status        string `json:"status,omitempty"`
 	Origin        string `json:"origin,omitempty"`
 }
@@ -222,7 +253,7 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 		return
 	}
 	out := []memoryAdminApplication{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	bindings, ok := h.currentBindings(c, hubTenant)
 	if !ok {
 		return
@@ -232,15 +263,29 @@ func (h *MemoryAdminHandler) applications(c *gin.Context) {
 			continue
 		}
 		key := binding.Client.TenantID + "\x00" + binding.Client.ApplicationID
-		if seen[key] {
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[key] = true
+		seen[key] = len(out)
 		capabilities := memory.BackendCapabilities{}
 		if binding.Service != nil {
 			capabilities = binding.Service.Capabilities()
 		}
 		out = append(out, memoryAdminApplication{BackendCapabilities: capabilities, TenantID: binding.Client.TenantID, ApplicationID: binding.Client.ApplicationID, PolicyVersion: binding.Client.PolicyVersion, DataClass: "synthetic", Name: binding.Name, Status: binding.Status, Origin: binding.Origin})
+	}
+	if h.applicationsRegistry != nil {
+		apps, err := h.applicationsRegistry.ApplicationsForHubTenant(c.Request.Context(), hubTenant)
+		if err != nil {
+			adminApplicationError(c, err)
+			return
+		}
+		for _, app := range apps {
+			if i, exists := seen[app.TenantID+"\x00"+app.ApplicationID]; exists {
+				out[i].Description = app.Description
+			} else if app.Status == "unknown" || app.Status == "provisioning" {
+				out = append(out, memoryAdminApplication{TenantID: app.TenantID, ApplicationID: app.ApplicationID, PolicyVersion: app.PolicyVersion, DataClass: "synthetic", Name: app.Name, Description: app.Description, Status: app.Status, Origin: app.Origin})
+			}
+		}
 	}
 	respondSuccess(c, out)
 }

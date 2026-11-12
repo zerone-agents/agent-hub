@@ -3,7 +3,7 @@
   "info": {
     "title": "AgentHub synthetic memory integration",
     "version": "memory-v1-synthetic",
-    "description": "AgentHub合成数据原生自动记忆接入。真实聊天完成后提交完整实际userInput/agentResponse，复用MultiRAG raw/semantic/episodic/procedural异步提取。派生内容与逐字核验Fact分开；自动应用须automaticExtraction=true。未知写入只读恢复不重放。原生遗忘、物理删除、授权撤回、注销清理本期返回501，不产生成功清理回执。 Business-service routes only; delegated administration routes are documented in management.md."
+    "description": "AgentHub合成数据原生自动记忆接入。真实聊天完成后提交完整实际userInput/agentResponse，复用底层记忆模块 raw/semantic/episodic/procedural异步提取。派生内容与逐字核验Fact分开；自动应用须automaticExtraction=true。未知写入只读恢复不重放。业务侧原生删除、授权撤回、注销清理本期返回501，不产生成功清理回执；后台逐条遗忘属于独立管理接口，见management.md。 Business-service routes only; delegated administration routes are documented in management.md."
   },
   "servers": [
     {
@@ -4152,6 +4152,22 @@
               0,
               20
             ]
+          },
+          "nativeConfigurationSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeStatusSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeDiagnosticsSupported": {
+            "type": "boolean",
+            "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeForgetSupported": {
+            "type": "boolean",
+            "description": "Whether delegated administrators can forget individual native records through the separate management API. This does not enable business-side deletion or physical cleanup."
           }
         },
         "required": [
@@ -4330,6 +4346,10 @@
           "nativeDiagnosticsSupported": {
             "type": "boolean",
             "description": "Availability of this native administration capability for the configured application; admin routes require a delegated Hub manager JWT."
+          },
+          "nativeForgetSupported": {
+            "type": "boolean",
+            "description": "Whether delegated administrators can forget individual native records through the separate management API. This does not enable business-side deletion or physical cleanup."
           }
         },
         "required": [
@@ -4518,6 +4538,14 @@
           "statusChangeAllowed": {
             "type": "boolean",
             "description": "Whether native status management is allowed; false for forgotten targets or parents."
+          },
+          "forgottenAt": {
+            "type": "string",
+            "description": "Native per-record forget marker. The record is excluded from normal retrieval; content may remain available to managers."
+          },
+          "parentForgottenAt": {
+            "type": "string",
+            "description": "Forget marker of the source original. Hub blocks derived supply without marking this child individually forgotten."
           }
         },
         "required": [

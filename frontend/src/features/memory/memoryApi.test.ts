@@ -17,6 +17,23 @@ afterEach(() => {
 })
 
 describe('memory admin HTTP contract', () => {
+  it('forgets a scoped native record through the dedicated logical-forget endpoint', async () => {
+    const post = vi
+      .spyOn(apiClient, 'post')
+      .mockResolvedValue(
+        response({ id: '1', status: false, forgottenAt: '2026-11-09 12:00:00' })
+      )
+    await expect(
+      memoryApi.forgetNativeMessage('record/1', scope)
+    ).resolves.toMatchObject({
+      status: false,
+      forgottenAt: '2026-11-09 12:00:00'
+    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/admin/memory/native-messages/record%2F1/forget',
+      { scope }
+    )
+  })
   it('lists the delegated applications and actual subjects using their dedicated envelope', async () => {
     const applications = [
       {

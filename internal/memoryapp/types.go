@@ -41,7 +41,8 @@ type BankProvisioner interface {
 	Find(context.Context, BankSpec) (Bank, error)
 }
 
-// Owner is trusted server configuration, never a caller-selected tenant.
+// Owner identity comes from server configuration or an authenticated Hub tenant,
+// never a caller-selected tenant. Console managers may select available models.
 type Owner struct {
 	TenantID        string
 	HubTenantID     string

@@ -52,7 +52,10 @@ import {
 } from './nativeMemoryView'
 import './memory-management.css'
 
-interface StatusIntent { item: NativeMemoryMessage; enabled: boolean }
+interface StatusIntent {
+  item: NativeMemoryMessage
+  enabled: boolean
+}
 
 function NativeMemoryEmpty({
   title,
@@ -102,6 +105,7 @@ export default function NativeMemoryPanel({
   const { t } = useTranslation()
   const qc = useQueryClient()
   const primaryStyle = usePrimaryButtonStyle()
+  const [messageApi, messageContext] = message.useMessage()
   const [query, setQuery] = useState('')
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState('all')
@@ -115,6 +119,8 @@ export default function NativeMemoryPanel({
   const [recallLimit, setRecallLimit] = useState(5)
   const [selected, setSelected] = useState<NativeMemoryMessage>()
   const [intent, setIntent] = useState<StatusIntent>()
+  const [forgetIntent, setForgetIntent] = useState<NativeMemoryMessage>()
+  const [supplyVersion, setSupplyVersion] = useState(0)
   const active = subject.state === 'active'
   const scopeKey = memoryScopeKey(subject.scope)
   const queryKey = [...queryPrefix, 'native', scopeKey]
@@ -129,6 +135,7 @@ export default function NativeMemoryPanel({
       question: string
       mode: 'supply' | 'native'
       limit: number
+      version: number
     }) => {
       if (request.mode === 'native') {
         const result = await memoryApi.nativeSearch({
@@ -156,7 +163,12 @@ export default function NativeMemoryPanel({
   const currentRecall =
     recall.variables?.question === query &&
     recall.variables.mode === recallMode &&
-    recall.variables.limit === recallLimit
+    recall.variables.limit === recallLimit &&
+    recall.variables.version === supplyVersion
+  const invalidateRecall = () => {
+    setSupplyVersion((version) => version + 1)
+    recall.reset()
+  }
   const toggle = useMutation({
     mutationFn: (request: StatusIntent) => {
       if (typeof request.item.nativeStatus !== 'boolean')
@@ -169,10 +181,43 @@ export default function NativeMemoryPanel({
     },
     retry: false,
     gcTime: 0,
+    onMutate: invalidateRecall,
     onSuccess: () => {
+      invalidateRecall()
       setIntent(undefined)
       void qc.invalidateQueries({ queryKey })
-      void message.success(t('memory.nativeStatusSaved'))
+      void messageApi.success(t('memory.nativeStatusSaved'))
+    },
+    onError: () => {
+      void qc.invalidateQueries({ queryKey })
+    }
+  })
+  const forget = useMutation({
+    mutationFn: (item: NativeMemoryMessage) =>
+      memoryApi.forgetNativeMessage(item.id, subject.scope),
+    retry: false,
+    gcTime: 0,
+    onMutate: invalidateRecall,
+    onSuccess: (item) => {
+      invalidateRecall()
+      qc.setQueryData<NativeMemoryMessage[]>(queryKey, (previous) =>
+        previous?.map((row) =>
+          row.id === item.id
+            ? item
+            : item.type === 'raw' && row.sourceId === item.id
+              ? {
+                  ...row,
+                  status: false,
+                  parentStatus: false,
+                  parentForgottenAt: item.forgottenAt,
+                  statusChangeAllowed: false
+                }
+              : row
+        )
+      )
+      setForgetIntent(undefined)
+      void qc.invalidateQueries({ queryKey })
+      void messageApi.success(t('memory.nativeForgottenSaved'))
     },
     onError: () => {
       void qc.invalidateQueries({ queryKey })
@@ -195,6 +240,8 @@ export default function NativeMemoryPanel({
   )
   const matches = (item: NativeMemoryMessage) => {
     if (type !== 'all' && item.type !== type) return false
+    if (status === 'forgotten' && !item.forgottenAt && !item.parentForgottenAt)
+      return false
     const source =
       item.type === 'raw' ? item : all.find((row) => row.id === item.sourceId)
     if (
@@ -249,15 +296,21 @@ export default function NativeMemoryPanel({
     typeof item.nativeStatus === 'boolean' ? (
       <Tooltip
         title={
-          !item.nativeStatus && item.parentStatus === false
-            ? t('memory.parentDisabledHint')
-            : t('memory.statusSwitchHint')
+          item.forgottenAt
+            ? t('memory.forgottenExplanation')
+            : item.parentForgottenAt
+              ? t('memory.sourceForgottenExplanation')
+              : !item.nativeStatus && item.parentStatus === false
+                ? t('memory.parentDisabledHint')
+                : t('memory.statusSwitchHint')
         }
       >
         <Switch
           size="small"
           checked={item.nativeStatus}
-          disabled={!changeAllowed(item) || toggle.isPending}
+          disabled={
+            !changeAllowed(item) || toggle.isPending || forget.isPending
+          }
           aria-label={t(
             inDrawer ? 'memory.nativeDetailSwitch' : 'memory.nativeSwitch',
             { id: item.id }
@@ -289,13 +342,23 @@ export default function NativeMemoryPanel({
   const statusLabel = (item: NativeMemoryMessage) => (
     <Tooltip
       title={
-        item.nativeStatus && item.parentStatus === false
-          ? t('memory.parentDisabledHint')
-          : undefined
+        item.parentForgottenAt
+          ? t('memory.sourceForgottenExplanation')
+          : item.nativeStatus && item.parentStatus === false
+            ? t('memory.parentDisabledHint')
+            : undefined
       }
     >
       <Tag color={item.status ? 'green' : 'default'}>
-        {t(item.status ? 'memory.nativeActive' : 'memory.nativeDisabled')}
+        {t(
+          item.forgottenAt
+            ? 'memory.nativeForgotten'
+            : item.parentForgottenAt
+              ? 'memory.sourceForgotten'
+              : item.status
+                ? 'memory.nativeActive'
+                : 'memory.nativeDisabled'
+        )}
       </Tag>
     </Tooltip>
   )
@@ -445,6 +508,7 @@ export default function NativeMemoryPanel({
     'all',
     'enabled',
     'disabled',
+    'forgotten',
     'completed',
     'pending',
     'failed'
@@ -623,7 +687,13 @@ export default function NativeMemoryPanel({
       className="memory-recall-pane"
       aria-label={t('memory.nativeRecallTitle')}
     >
-      <p className="memory-native-help">{t('memory.recallDiagnosticHint')}</p>
+      <p className="memory-native-help">
+        {t(
+          recallMode === 'native'
+            ? 'memory.nativeDiagnosticHint'
+            : 'memory.recallDiagnosticHint'
+        )}
+      </p>
       {application?.nativeDiagnosticsSupported && (
         <Space style={{ marginBottom: 16 }} wrap>
           <Segmented
@@ -678,11 +748,17 @@ export default function NativeMemoryPanel({
         className="memory-recall-form"
         onSubmit={(event) => {
           event.preventDefault()
-          if (query.trim() && !recall.isPending)
+          if (
+            query.trim() &&
+            !recall.isPending &&
+            !forget.isPending &&
+            !toggle.isPending
+          )
             recall.mutate({
               question: query,
               mode: recallMode,
-              limit: recallLimit
+              limit: recallLimit,
+              version: supplyVersion
             })
         }}
       >
@@ -698,7 +774,7 @@ export default function NativeMemoryPanel({
         />
         <PrimaryButton
           htmlType="submit"
-          disabled={!query.trim()}
+          disabled={!query.trim() || forget.isPending || toggle.isPending}
           loading={recall.isPending}
         >
           {t('memory.recallAction')}
@@ -755,6 +831,7 @@ export default function NativeMemoryPanel({
     )
   return (
     <div className="memory-native-workspace">
+      {messageContext}
       <Tabs
         className="memory-native-tabs"
         activeKey={tab}
@@ -782,7 +859,29 @@ export default function NativeMemoryPanel({
         }}
         size={680}
         destroyOnHidden
-        extra={selectedItem && switchFor(selectedItem, true)}
+        extra={
+          selectedItem && (
+            <Space>
+              {switchFor(selectedItem, true)}
+              {application?.nativeForgetSupported && (
+                <Button
+                  danger
+                  disabled={
+                    !!selectedItem.forgottenAt ||
+                    forget.isPending ||
+                    toggle.isPending
+                  }
+                  onClick={() => {
+                    forget.reset()
+                    setForgetIntent(selectedItem)
+                  }}
+                >
+                  {t('memory.forgetNativeRecord')}
+                </Button>
+              )}
+            </Space>
+          )
+        }
       >
         {selectedItem && (
           <>
@@ -844,6 +943,11 @@ export default function NativeMemoryPanel({
                   )
                 },
                 {
+                  key: 'forgotten',
+                  label: t('memory.forgottenAt'),
+                  children: selectedItem.forgottenAt ?? '—'
+                },
+                {
                   key: 'created',
                   label: t('memory.recordCreatedAt'),
                   children: selectedItem.createdAt || '—'
@@ -860,14 +964,33 @@ export default function NativeMemoryPanel({
                 }
               ]}
             />
-            {selectedItem.parentStatus === false && (
+            {(!!selectedItem.forgottenAt ||
+              !!selectedItem.parentForgottenAt) && (
               <Alert
                 style={{ marginTop: 12 }}
                 type="info"
                 showIcon
-                title={t('memory.parentDisabledHint')}
+                title={t(
+                  selectedItem.forgottenAt
+                    ? 'memory.nativeForgotten'
+                    : 'memory.sourceForgotten'
+                )}
+                description={t(
+                  selectedItem.forgottenAt
+                    ? 'memory.forgottenExplanation'
+                    : 'memory.sourceForgottenExplanation'
+                )}
               />
             )}
+            {selectedItem.parentStatus === false &&
+              !selectedItem.parentForgottenAt && (
+                <Alert
+                  style={{ marginTop: 12 }}
+                  type="info"
+                  showIcon
+                  title={t('memory.parentDisabledHint')}
+                />
+              )}
             {selectedSource?.extractionStatus === 'failed' && (
               <Alert
                 style={{ marginTop: 12 }}
@@ -921,6 +1044,46 @@ export default function NativeMemoryPanel({
           </>
         )}
       </Drawer>
+      <Modal
+        title={t('memory.forgetNativeTitle')}
+        open={!!forgetIntent}
+        onCancel={() => {
+          if (!forget.isPending) {
+            setForgetIntent(undefined)
+            forget.reset()
+          }
+        }}
+        okText={t('memory.forgetNativeRecord')}
+        cancelText={t('memory.cancel')}
+        okButtonProps={{
+          className: primaryStyle.root,
+          disabled: forget.isError
+        }}
+        confirmLoading={forget.isPending}
+        onOk={() => {
+          if (forgetIntent) forget.mutate(forgetIntent)
+        }}
+        destroyOnHidden
+      >
+        <p>{t('memory.forgetNativeExplanation')}</p>
+        {forgetIntent?.type === 'raw' && (
+          <p>{t('memory.forgetSourceExplanation')}</p>
+        )}
+        <p className="memory-native-help">
+          {t('memory.statusSupplyScopeHint')}
+        </p>
+        <div className="memory-source-content">
+          {forgetIntent && memoryPreview(forgetIntent.content)}
+        </div>
+        {forget.isError && (
+          <Alert
+            type="error"
+            showIcon
+            title={parseApiError(forget.error)}
+            description={t('memory.forgetUnconfirmed')}
+          />
+        )}
+      </Modal>
       <Modal
         title={t(
           intent?.enabled

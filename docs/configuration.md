@@ -218,14 +218,28 @@ openssl rand -hex 32
 
 **推理强度 effort（issue #226）**：Agent 配置支持 `effort` 单值档位（SDK `AgentOptions.effort` 透传，预设 `low|medium|high|xhigh|max` + 自定义值），属运行时全局字段、仅 root 携带（child 声明会被 deployer 400 拒绝）。**版本前提：声明 effort 要求 agent-runtime ≥ v2.9.0**（runtime #77 引入该键，低版本静默 strip 不生效）——deployer 侧对声明 effort 的部署按镜像版本拒绝（503），因此凡需使用 effort 的环境，`AGENT_DEPLOYER_RUNTIME_IMAGE` 必须指向 v2.9.0+ 镜像 tag（或配置 `AGENT_DEPLOYER_RUNTIME_IMAGE_ASSUME_LATEST=true`，自担漂移风险）。**升级顺序：先升级 agent-deployer 至含 effort 契约的版本（agent-deployer#23），再升级 hub 并重新部署存量 Agent**——旧 deployer 解析部署请求时未知字段会被静默忽略，hub 先行升级会让 effort 存得下但不生效且无任何报错。值校验在 hub 完成：模型声明了 `provider_models.efforts` 时取值必须在该候选列表内（保存与部署两侧均校验），无声明时允许任意非空自定义值透传。`thinking`（思考预算）为独立字段、无额外版本门槛，与 effort 语义不同不可互相替代。
 
-## Multirag (Knowledge Base)
+## Knowledge module connection
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `MULTIRAG_BASE_URL` | Required for KB module | — | multirag service address, e.g. `http://multirag:8000`; if missing, the service still starts, and knowledge base APIs return 503 |
+| `MULTIRAG_BASE_URL` | Required for KB module | — | knowledge-service address, e.g. `http://knowledge-module:8000`; if missing, the service still starts, and knowledge base APIs return 503 |
 | `KNOWLEDGE_MCP_URL` | Required when agents use knowledge bases | — | Hub 的完整知识库 MCP 地址，必须包含 `/api/v1/knowledge/mcp`，并且可从 agent-runtime 容器访问（例如 `http://10.0.0.10:8081/api/v1/knowledge/mcp`；不要误用容器内的 `localhost`）。启动时会自动写入或回填内置 `knowledge` MCP；修改后需重启 Hub 并重新部署 Agent。 |
-| `MULTIRAG_API_KEY` | Required for KB module | — | Bearer token for the agent-hub service account to access multirag; not exposed to the browser |
-| `MULTIRAG_TIMEOUT_SECONDS` | No | `30` | Timeout for agent-hub calling standard multirag APIs |
-| `MULTIRAG_UPLOAD_TIMEOUT_SECONDS` | No | `3600` | Timeout (seconds) for agent-hub streaming document uploads to multirag |
+| `MULTIRAG_API_KEY` | Required for KB module | — | Bearer token for the agent-hub service account to access the knowledge module; not exposed to the browser |
+| `MULTIRAG_TIMEOUT_SECONDS` | No | `30` | Timeout for agent-hub calling standard knowledge-module APIs |
+| `MULTIRAG_UPLOAD_TIMEOUT_SECONDS` | No | `3600` | Timeout (seconds) for agent-hub streaming document uploads to the knowledge module |
 
-> Large file uploads are streamed from the browser to multirag and are not buffered entirely within agent-hub. The reverse proxy or Kong Route in production must also permit the target file size, disable full-request-body buffering, and set upstream timeouts to no less than `MULTIRAG_UPLOAD_TIMEOUT_SECONDS`.
+> Large file uploads are streamed from the browser to the knowledge module and are not buffered entirely within agent-hub. The reverse proxy or Kong Route in production must also permit the target file size, disable full-request-body buffering, and set upstream timeouts to no less than `MULTIRAG_UPLOAD_TIMEOUT_SECONDS`.
+
+## Memory integration (experimental)
+
+Memory reuses `MULTIRAG_BASE_URL` and `MULTIRAG_API_KEY` by default; the shared credential must be a service SDK API token. Memory is enabled by default; set `MEMORY_ENABLED=false` to opt out. Without a complete connection and with no application bindings, Hub still starts and the management list returns `503/memory_not_configured`. Shared connectivity does not grant cross-tenant access or reuse a knowledge dataset as a native memory bank.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MEMORY_ENABLED` | `true` | Enabled by default; `false` explicitly disables memory. Data remains limited to isolated synthetic integration |
+| `MEMORY_MULTIRAG_URL` / `MEMORY_MULTIRAG_KEY` | Shared knowledge-service connection | Optional complete override pair; a partial override fails startup |
+| `MEMORY_WRAPPING_KEY` | Generate and persist on new deployments | Independent 32-byte wrapping key encoded as 64 hex characters; existing external-key deployments must retain the original key |
+| `MEMORY_CLIENTS_JSON` | Empty | Legacy static application/bank bindings |
+| `MEMORY_MANAGERS_JSON` | Empty | Tenant-scoped bootstrap credentials, model references and quota for the existing application-management API |
+
+Dynamic applications and Hub-issued application tokens are persisted in the database. Automatically generated wrapping keys live in `system_settings`; database protection and backups remain required. Existing encrypted memory without its external or persisted wrapping key prevents automatic generation. See [memory configuration](memory/README.md#配置) and [application management](memory/applications.md).

@@ -32,6 +32,9 @@ vi.mock('@/api/memory', async (original) => ({
   ...(await original<typeof import('@/api/memory')>()),
   memoryApi: {
     applications: vi.fn(),
+    applicationModels: vi.fn(),
+    createApplication: vi.fn(),
+    applicationProvisioning: vi.fn(),
     nativeMessages: vi.fn(),
     nativeContext: vi.fn(),
     nativeConfig: vi.fn(),
@@ -74,6 +77,43 @@ const pendingOperation: MemoryOperation = {
   ledgerRetained: true
 }
 const clients: QueryClient[] = []
+
+it('offers page creation when no applications are configured', async () => {
+  vi.mocked(memoryApi.applications).mockResolvedValue([])
+  vi.mocked(memoryApi.applicationModels).mockResolvedValue({
+    chat: [],
+    embedding: []
+  })
+  renderPage()
+  const create = await screen.findByRole('button', { name: '创建记忆应用' })
+  await waitFor(() => {
+    expect(create).toBeEnabled()
+  })
+  fireEvent.click(create)
+  expect(await screen.findByLabelText('应用名称')).toBeInTheDocument()
+  expect(memoryApi.applicationModels).toHaveBeenCalledOnce()
+  expect(memoryApi.createApplication).not.toHaveBeenCalled()
+})
+
+it('shows unfinished provisioning without querying user memories', async () => {
+  vi.mocked(memoryApi.applications).mockResolvedValue([
+    {
+      tenantId: 'default',
+      applicationId: 'pending-app',
+      policyVersion: 'synthetic-v1',
+      dataClass: 'synthetic',
+      status: 'unknown',
+      origin: 'managed'
+    }
+  ])
+  renderPage()
+  const alert = await screen.findByRole('alert')
+  expect(within(alert).getByText('创建结果待确认')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '核对创建结果' })).toBeEnabled()
+  expect(memoryApi.subjects).not.toHaveBeenCalled()
+  expect(memoryApi.facts).not.toHaveBeenCalled()
+  expect(memoryApi.nativeMessages).not.toHaveBeenCalled()
+})
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -140,6 +180,28 @@ beforeEach(() => {
 })
 
 describe('native memory capabilities', () => {
+  it.each([
+    ['memory_disabled', '记忆服务未启用，请联系管理员启用后重试'],
+    ['memory_not_configured', '记忆服务尚未配置，请联系管理员完成服务接入']
+  ])(
+    'shows %s without retrying or requesting account records',
+    async (code, error) => {
+      vi.mocked(memoryApi.applications).mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          status: 503,
+          data: {
+            code,
+            error
+          }
+        }
+      })
+      renderPage()
+      await screen.findByText(error)
+      expect(memoryApi.applications).toHaveBeenCalledTimes(1)
+      expect(memoryApi.subjects).not.toHaveBeenCalled()
+    }
+  )
   it('defaults to the automatic application while preserving explicit application choices', async () => {
     const oldApp = {
       tenantId: scope.tenantId,

@@ -1,7 +1,7 @@
 # Native Memory adapter
 
 `New(Config{BaseURL, APIKey, BankID})` binds an application to one dedicated,
-private MultiRAG Memory bank. The adapter implements `memory.NativeConversations`,
+private memory module bank. The adapter implements `memory.NativeConversations`,
 `memory.NativeManagement`, `memory.NativeDiagnostics`, and the quote-ledger
 `memory.Index` interface. It does not use a knowledge-base fallback.
 
@@ -10,7 +10,7 @@ Application configuration and business API usage are described in
 
 ## Configuration and identity
 
-Use a MultiRAG SDK API token with `SDK_API_TOKEN` authentication. External
+Use a module SDK API token with `SDK_API_TOKEN` authentication. External
 `user_id` attribution must remain unchanged; a platform Web session or JWT
 cannot replace this credential. Every read checks the configured bank and the
 expected user, agent, session, and source identity. Credentials remain on the
@@ -151,7 +151,14 @@ independent confirmation with unchanged content. It does not implement user
 deletion, consent withdrawal, or account erasure. `DropDocument` returns
 `memory.ErrUnsupported`.
 
-No interface here calls native Forget, message DELETE, or bank DELETE.
-Disabling supply is not physical deletion. Native searchable content and its
+`ForgetMessage` separately calls native message DELETE, which writes `forget_at`
+and excludes that record from normal provider retrieval. It verifies scoped
+content and provenance before writing and reads the marker back independently.
+Confirmed repeated calls are read-only; uncertain DELETE responses are not
+blindly replayed. The DTO exposes `forgottenAt` and `parentForgottenAt` so a
+forgotten source is distinguishable from a separately forgotten child. It does
+not cascade native markers, erase data, or provide undo. No interface calls
+bank DELETE. Disabling supply and native forgetting are not physical deletion.
+Native searchable content and its
 vectors, logs, and backups require their own storage protection; Hub receipt
 encryption does not encrypt those stores.

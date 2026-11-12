@@ -25,6 +25,7 @@ import (
 type memoryManagementNative struct {
 	bankCalls, statusCalls int
 	diagnosticCalls        int
+	forgetCalls            int
 	listCalls, recallCalls int
 	scope, id              string
 	query                  string
@@ -33,6 +34,12 @@ type memoryManagementNative struct {
 	enabled, expected      bool
 	current                bool
 	statusErr              error
+}
+
+func (f *memoryManagementNative) ForgetMessage(_ context.Context, scope, id string) (memory.NativeMessage, error) {
+	f.forgetCalls++
+	f.scope, f.id = scope, id
+	return memory.NativeMessage{ID: id, SourceID: "0", Type: "raw", Content: "PRIVATE_SYNTHETIC_CHAT_BODY", NativeStatus: true, ForgottenAt: "2026-11-09 12:00:00"}, f.statusErr
 }
 
 func (f *memoryManagementNative) BankInfo(context.Context) (memory.NativeBankInfo, error) {
