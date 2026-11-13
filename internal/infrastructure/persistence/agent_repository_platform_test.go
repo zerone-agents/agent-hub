@@ -43,6 +43,8 @@ func setupPlatformTestDB(t *testing.T) *gorm.DB {
 		group_name VARCHAR(64) DEFAULT '',
 		max_session_queries INTEGER,
 		effort TEXT DEFAULT '',
+		thinking_type TEXT DEFAULT '',
+		thinking_budget_tokens INTEGER,
 		disallowed_tools TEXT,
             zero_tools BOOLEAN NOT NULL DEFAULT false,
 		runtime_port INTEGER DEFAULT 0,

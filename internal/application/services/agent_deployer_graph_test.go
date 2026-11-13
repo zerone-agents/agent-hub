@@ -170,6 +170,8 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.PermissionMode = "plan"
 		c.MaxSessionQueries = intPtr(42)
 		c.Effort = "high"
+		c.ThinkingType = "disabled"
+		c.ThinkingBudgetTokens = intPtr(4096)
 		c.Description = map[string]string{"zh": "父 Agent", "en": "parent agent"}
 		c.DisallowedTools = []string{"Bash"}
 	})
@@ -180,6 +182,8 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.PermissionMode = "bypassPermissions"
 		c.MaxSessionQueries = intPtr(99)
 		c.Effort = "child-a-effort-must-not-leak"
+		c.ThinkingType = "enabled"
+		c.ThinkingBudgetTokens = intPtr(8192)
 		// Agent-local deny list (issue #111 F3a): children carry their own.
 		c.DisallowedTools = []string{"WebSearch", "mcp__knowledge__lookup"}
 	})
@@ -363,7 +367,7 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		}
 	})
 
-	t.Run("4: model/maxSessionQueries/permissionMode/effort are root-only", func(t *testing.T) {
+	t.Run("4: model/maxSessionQueries/permissionMode/effort/thinking are root-only", func(t *testing.T) {
 		body, _ := deployGraphParent(t, buildGraphFixture(t))
 		nodes := graphAgents(t, body)
 		root := nodes[0]
@@ -372,8 +376,11 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		// effort（issue #226）：root 携带 DB 值；child 的值被 deployer 视为
 		// runtime-global 声明而 400，所以 wire 上必须缺席。
 		require.Equal(t, "high", root["effort"])
+		// thinking（issue #257）：同族 root-only；嵌套对象携带 type +
+		// budgetTokens（JSON number 反序列化为 float64）。
+		require.Equal(t, map[string]any{"type": "disabled", "budgetTokens": float64(4096)}, root["thinking"])
 		for _, child := range nodes[1:] {
-			for _, key := range []string{"model", "maxSessionQueries", "permissionMode", "effort"} {
+			for _, key := range []string{"model", "maxSessionQueries", "permissionMode", "effort", "thinking"} {
 				require.NotContains(t, child, key, "child node must not declare root-only key %q", key)
 			}
 		}

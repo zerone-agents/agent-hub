@@ -34,10 +34,19 @@ type AgentConfig struct {
 	// Effort 推理强度档位（issue #226）：SDK AgentOptions.effort 的单值透传
 	// （预设 low|medium|high|xhigh|max 或自定义值）；空串 = 未设置。下发
 	// root-only（deployer 拒 child 声明），声明 effort 要求 runtime >= v2.9.0。
-	Effort          string   `gorm:"column:effort;type:varchar(32);default:''"`
-	DisallowedTools []string `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
-	ZeroTools       bool     `gorm:"column:zero_tools;not null;default:false"`
-	RuntimePort     int      `gorm:"column:runtime_port;default:0"`
+	Effort string `gorm:"column:effort;type:varchar(32);default:''"`
+	// ThinkingType 扩展思考开关（issue #257）：SDK AgentOptions.thinking.type
+	// （adaptive|enabled|disabled），空串 = 未设置（provider/SDK 默认行为）。
+	// 下发 root-only（deployer 拒 child 声明并对枚举外值 fail-fast）；无额外
+	// runtime 版本门槛（v2.4.0 起基础门槛内）。与 Effort 语义正交不可互代。
+	ThinkingType string `gorm:"column:thinking_type;type:varchar(16);default:''"`
+	// ThinkingBudgetTokens 思考预算（issue #257）：thinking.budgetTokens，
+	// deployer 纯透传、runtime Zod optional number；nil = 未设置。仅当
+	// ThinkingType 非空时有意义（validator 拦半态，防无 type 的对象炸 runtime）。
+	ThinkingBudgetTokens *int     `gorm:"column:thinking_budget_tokens;type:int;default:null"`
+	DisallowedTools      []string `gorm:"column:disallowed_tools;type:text;serializer:json"` // agent-local 工具名黑名单（issue #111），JSON 字符串数组；条目无需引用已挂载工具
+	ZeroTools            bool     `gorm:"column:zero_tools;not null;default:false"`
+	RuntimePort          int      `gorm:"column:runtime_port;default:0"`
 	// 记忆 MCP（spec docs/superpowers/specs/2026-11-11-memory-mcp-design.md）：
 	// 按 Agent 开启自主记忆读写。MemoryScopeMode 一期仅 "agent"（记忆跟
 	// Agent，全体用户共享池）；"user" 属二期（依赖 runtime#95 会话身份
