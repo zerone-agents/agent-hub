@@ -8,10 +8,52 @@ import (
 	"strings"
 	"testing"
 
+	"control-panel/internal/domain/agent"
 	"control-panel/internal/domain/provider"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestBuildProbeChatOptions 钉死三态装配（issue #263 评审重要 2）：
+// 未触碰回落存量；显式清空（&” / provided+”）不复活——用户关掉开关
+// 或清空 effort 后，probe 测的必须是表单终态而非存量。
+func TestBuildProbeChatOptions(t *testing.T) {
+	high := "high"
+	empty := ""
+	stored := &agent.AgentConfig{
+		ModelID: "stored-model", Effort: "stored-effort",
+		ThinkingType: "disabled", ThinkingBudgetTokens: intPtr(4096),
+	}
+
+	t.Run("未触碰回落存量（含 disabled 与 budget）", func(t *testing.T) {
+		opts := buildProbeChatOptions(ProbeAgentInput{}, stored)
+		require.Equal(t, "stored-model", opts.ModelID)
+		require.Equal(t, "stored-effort", opts.Effort)
+		require.Equal(t, "disabled", opts.ThinkingType)
+		require.Equal(t, 4096, *opts.ThinkingBudget)
+	})
+
+	t.Run("显式清空 effort 不复活", func(t *testing.T) {
+		opts := buildProbeChatOptions(ProbeAgentInput{Effort: &empty}, stored)
+		require.Empty(t, opts.Effort)
+	})
+
+	t.Run("显式 effort 值优先", func(t *testing.T) {
+		opts := buildProbeChatOptions(ProbeAgentInput{Effort: &high}, stored)
+		require.Equal(t, "high", opts.Effort)
+	})
+
+	t.Run("触碰关开关 provided+'' 不复活存量 disabled（评审场景）", func(t *testing.T) {
+		opts := buildProbeChatOptions(ProbeAgentInput{ThinkingProvided: true, ThinkingType: ""}, stored)
+		require.Empty(t, opts.ThinkingType)
+		require.Nil(t, opts.ThinkingBudget)
+	})
+
+	t.Run("请求 modelID 优先于存量", func(t *testing.T) {
+		opts := buildProbeChatOptions(ProbeAgentInput{ModelID: "form-model"}, stored)
+		require.Equal(t, "form-model", opts.ModelID)
+	})
+}
 
 // TestBuildProbeChatBody 锁定 probe 请求体契约（issue #261）：互斥与下发
 // 同源（disabled 不带 effort）、adaptive 不下发 thinking 字段、预算上限

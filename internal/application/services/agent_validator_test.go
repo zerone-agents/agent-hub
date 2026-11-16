@@ -623,4 +623,46 @@ func TestValidateConfig_Effort(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	// 互斥规则三侧同源（issue #263 评审重要 1）：thinking=disabled 时
+	// effort 在部署与探测都不会发送，保存侧白名单复验必须同步跳过——
+	// 「不校验一个不会发送的值」；仅显式 type=disabled 跳过。
+	t.Run("disabled 时白名单跳过（评审重要 1）", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh", "thinking": map[string]interface{}{"type": "disabled"},
+		})
+		require.NoError(t, err, "disabled 时 effort 不下发，白名单不得拦")
+	})
+
+	t.Run("无 thinking 时白名单照拦（对称基线）", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "effort 'xhigh' 不在模型 glm-4 声明的候选列表内")
+	})
+
+	t.Run("enabled/adaptive 不跳过白名单", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		for _, typ := range []string{"enabled", "adaptive"} {
+			err := ValidateConfig(map[string]interface{}{
+				"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+				"effort": "xhigh", "thinking": map[string]interface{}{"type": typ},
+			})
+			require.Error(t, err, "type=%s 时 effort 仍会发送，白名单必须照拦", typ)
+		}
+	})
+
+	t.Run("thinking null 显式清除不跳过白名单", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh", "thinking": nil,
+		})
+		require.Error(t, err, "null = 无 thinking（effort 照发），不是 disabled")
+	})
 }

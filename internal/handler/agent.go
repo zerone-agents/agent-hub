@@ -317,10 +317,11 @@ type probeAgentReq struct {
 	ProviderID *uint64 `json:"providerId"`
 	APIKey     string  `json:"apiKey"`
 	BaseURL    string  `json:"baseUrl"`
-	// issue #261：测试未保存的表单态——modelId/effort/thinking 请求值优先、
-	// 空回落存量 cfg。
-	ModelID  string `json:"modelId"`
-	Effort   string `json:"effort"`
+	// issue #261/#263：测试未保存的表单态。三态语义——Effort 指针区分
+	// 「未触碰（nil，回落存量）vs 显式清空（&''，不复活）」；Thinking
+	// 对象出现即视为触碰（Type 可为 ''=显式清除），缺席回落存量。
+	ModelID  string  `json:"modelId"`
+	Effort   *string `json:"effort"`
 	Thinking *struct {
 		Type         string `json:"type"`
 		BudgetTokens *int   `json:"budgetTokens"`
@@ -347,6 +348,7 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 		Effort:     req.Effort,
 	}
 	if req.Thinking != nil {
+		input.ThinkingProvided = true
 		input.ThinkingType = req.Thinking.Type
 		input.ThinkingBudget = req.Thinking.BudgetTokens
 	}

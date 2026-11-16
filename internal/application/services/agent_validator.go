@@ -220,8 +220,20 @@ func ValidateConfig(config map[string]interface{}) error {
 		effort = strings.TrimSpace(v)
 	}
 
+	// 互斥规则三侧同源（issue #263 评审重要 1）：thinking=disabled 时
+	// effort 在部署（#260 压制）与探测（#261 剥离）都不会发送，保存侧
+	// 白名单复验同步跳过——「不校验一个不会发送的值」。仅显式
+	// type=disabled 跳过；null/absent/enabled/adaptive 照常校验（那些
+	// 场景 effort 仍会发送）。
+	thinkingDisabled := false
+	if th, ok := config["thinking"].(map[string]interface{}); ok {
+		if t, ok := th["type"].(string); ok && strings.TrimSpace(t) == "disabled" {
+			thinkingDisabled = true
+		}
+	}
+
 	if providerID != nil {
-		if err := validateProviderModel(*providerID, modelID, modelSelectionID, effort); err != nil {
+		if err := validateProviderModel(*providerID, modelID, modelSelectionID, effort, thinkingDisabled); err != nil {
 			return err
 		}
 	}
@@ -360,7 +372,10 @@ func parseDisallowedTools(raw []interface{}) ([]string, error) {
 // effort（issue #226）：非空时随同一次模型行查询校验声明白名单——模型声明了
 // efforts（非空数组）则 effort 必须在其中，无声明按 SDK「预设+自定义透传」
 // 语义放行（checkEffortDeclared 为保存侧与部署侧共享的单一来源）。
-func validateProviderModel(providerID uint64, modelID, modelSelectionID, effort string) error {
+// thinkingDisabled（issue #263 评审重要 1）：thinking=disabled 时 effort
+// 根本不会下发（#260 压制 / #261 剥离同规则），白名单复验跳过——不校验
+// 一个不会发送的值。
+func validateProviderModel(providerID uint64, modelID, modelSelectionID, effort string, thinkingDisabled bool) error {
 	if database.DB == nil {
 		return nil
 	}
@@ -410,7 +425,7 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID, effort 
 			map[string]string{"model": modelID, "actual": modelType},
 			"模型 %s 不是 LLM/VLM 类型（实际: %s），无法绑定到 Agent", modelID, modelType)
 	}
-	if effort != "" {
+	if effort != "" && !thinkingDisabled {
 		displayModel := modelSelectionID
 		if displayModel == "" {
 			displayModel = modelID

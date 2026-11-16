@@ -81,6 +81,26 @@ func TestApplyUpdateConfig_EffortValidatesAgainstStoredBinding(t *testing.T) {
 		payload := map[string]interface{}{"systemPrompt": "p"}
 		require.NoError(t, newSvc().applyUpdateConfig("t", cfg, &UpdateAgentInput{Config: &payload}))
 	})
+
+	t.Run("存量 disabled 注入后白名单跳过（评审重要 1 注入侧）", func(t *testing.T) {
+		setupEffortDeployDB(t, `["low","high"]`)
+		cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-4", ThinkingType: "disabled"}
+		payload := map[string]interface{}{"effort": "xhigh", "systemPrompt": "p"}
+		// payload 无 providerId 也无 thinking——注入路径必须把存量
+		// disabled 一并注入，白名单复验才能与部署侧同规则跳过；
+		// 不注入会「校验一个不会发送的值」而 400。
+		require.NoError(t, newSvc().applyUpdateConfig("t", cfg, &UpdateAgentInput{Config: &payload}))
+		require.Equal(t, "xhigh", cfg.Effort)
+	})
+
+	t.Run("存量 enabled 注入后白名单照拦（对称基线）", func(t *testing.T) {
+		setupEffortDeployDB(t, `["low","high"]`)
+		cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-4", ThinkingType: "enabled"}
+		payload := map[string]interface{}{"effort": "xhigh", "systemPrompt": "p"}
+		err := newSvc().applyUpdateConfig("t", cfg, &UpdateAgentInput{Config: &payload})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "不在模型 glm-4 声明的候选列表内")
+	})
 }
 
 // newSvc builds a bare AgentService for applyUpdateConfig-level tests; the

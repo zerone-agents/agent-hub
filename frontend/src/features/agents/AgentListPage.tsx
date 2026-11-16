@@ -468,8 +468,12 @@ export default function AgentListPage() {
           apiKey: fieldValues.api_key || '',
           baseUrl: fieldValues.base_url || '',
           modelId: selectedModelId || undefined,
-          effort: selectedThinkingType === 'disabled' ? undefined : (selectedEffort || undefined),
-          thinking: selectedThinkingType ? { type: selectedThinkingType } : undefined,
+          // 三态提交（#263 评审重要 2）：effort 恒发表单值（'' = 显式清空，
+          // 服务端不复活存量）；thinking 仅在触碰过开关时发送（触碰后
+          // {type:''} = 显式清除）——未触碰不发、服务端回落存量。
+          // disabled 时 effort 剥离（互斥，服务端 body 构建同规则兜底）。
+          effort: selectedThinkingType === 'disabled' ? undefined : selectedEffort,
+          thinking: thinkingTouched ? { type: selectedThinkingType } : undefined,
         },
       })
       const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
@@ -1059,6 +1063,9 @@ export default function AgentListPage() {
                   onChange={(v) => {
                     setSelectedThinkingType(v ? 'disabled' : '')
                     setThinkingTouched(true)
+                    // 测 A 存 B 防线（#263 评审重要 3）：配置变更后上次测试
+                    // 结果作废，必须重新测试才能确认保存。
+                    setTestPassed(false)
                   }}
                   disabled={!canWrite}
                 />
@@ -1078,7 +1085,10 @@ export default function AgentListPage() {
                   placeholder={t('agents.form.effortPh')}
                   disabled={!canWrite}
                   value={selectedEffort}
-                  onChange={(value) => { setSelectedEffort(value) }}
+                  onChange={(value) => {
+                    setSelectedEffort(value)
+                    setTestPassed(false) // 同 Switch：配置变更使上次测试失效（#263）
+                  }}
                   options={declaredModelEfforts.map((e) => ({ value: e }))}
                   allowClear
                 />
