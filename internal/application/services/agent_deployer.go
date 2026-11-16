@@ -1093,7 +1093,13 @@ func (s *AgentDeployerService) buildAgentDefinition(ctx context.Context, tenantI
 		def.PermissionMode = cfg.PermissionMode
 		// Effort（issue #226）：root-only（deployer 拒 child 声明）；空串
 		// 走 DTO omitempty = 未声明。
-		def.Effort = cfg.Effort
+		// 互斥防御（issue #260）：thinking=disabled 时不下发 effort——
+		// 阿里云 OpenAI 兼容端点规定 enable_thinking:false 时 reasoning_effort
+		// 必须为 none（agent-sdk#170），API 直连存的冲突组合在部署侧兜底拆雷，
+		// 主 UI 路径已由 #260 隐藏+清空。
+		if cfg.ThinkingType != "disabled" {
+			def.Effort = cfg.Effort
+		}
 		// thinking（issue #257）：root-only；type 非空才下发——validator 已拦
 		// 半态，此处是下发侧防御（无 type 的对象会炸 runtime Zod 必填与
 		// deployer fail-fast）。
@@ -1310,7 +1316,9 @@ func (s *AgentDeployerService) buildCreateRequest(
 	// 切换 / efforts 声明改动后直接部署仍可能漂移——下发前按当前模型行复验。
 	// deployer 对 effort 不做枚举校验，白名单兜底必须在 hub 完成，否则非法值
 	// 会被透传到 provider 侧才失败（报错远离根因）。
-	if cfg.Effort != "" {
+	// #260 互斥防御同规则：thinking=disabled 时 effort 本就不下发，白名单
+	// 复验同步跳过（不校验一个不会发送的值）。
+	if cfg.Effort != "" && cfg.ThinkingType != "disabled" {
 		if err := s.validateEffortForDeploy(providerDTO.ID(), cfg); err != nil {
 			return nil, err
 		}

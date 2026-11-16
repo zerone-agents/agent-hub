@@ -6,6 +6,7 @@ import (
 
 	"control-panel/internal/domain/agent"
 	providerdomain "control-panel/internal/domain/provider"
+	"control-panel/internal/infrastructure/deployer"
 	"control-panel/pkg/database"
 
 	"github.com/glebarez/sqlite"
@@ -87,6 +88,46 @@ func TestApplyUpdateConfig_EffortValidatesAgainstStoredBinding(t *testing.T) {
 // the payload/cfg pair, no repo/encryption dependencies on this branch.
 func newSvc() *AgentService {
 	return &AgentService{}
+}
+
+// TestBuildCreateRequest_ThinkingDisabledSuppressesEffort 钉死下发互斥防御
+// （issue #260）：thinking=disabled 时，即使 DB 存有 effort（API 直连的冲突
+// 组合），wire 也必须不带 effort——阿里云 OpenAI 兼容端点规定
+// enable_thinking:false 时 reasoning_effort 必须为 none（agent-sdk#170），
+// 部署侧主动拆雷；主 UI 路径已由 #260 隐藏+清空。
+func TestBuildCreateRequest_ThinkingDisabledSuppressesEffort(t *testing.T) {
+	providerID := uint64(1)
+	provider := buildReqTestProvider(t, providerID)
+	agentRepo := &mockAgentRepo{getByNameFunc: func(tenantID, name string) (*agent.AgentConfig, error) {
+		return &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-4"}, nil
+	}}
+	providerSvc := &mockProviderSvc{
+		getByIDFunc:   func(id uint64) (providerdomain.Provider, error) { return buildReqTestProvider(t, id), nil },
+		getRawKeyFunc: func(id uint64) (string, error) { return "k", nil },
+	}
+	svc := newTestAgentDeployerService(t, "http://deployer.test", agentRepo, providerSvc)
+	svc.toolRepo = &mockToolRepo{}
+	svc.cdnHost = "https://cdn.example.com"
+	cfg := &agent.AgentConfig{ID: 1, Name: "general", ProviderID: &providerID, ModelID: "glm-4",
+		SystemPrompt: "p", Effort: "xhigh", ThinkingType: "disabled"}
+
+	// glm-4 声明了 ["low","high"]——xhigh 在声明外；若 disabled 没有跳过
+	// 白名单复验，这里会先以 effort 漂移错误失败。通过即同时证明复验跳过。
+	setupEffortDeployDB(t, `["low","high"]`)
+
+	req, err := svc.buildCreateRequest(context.Background(), "t", cfg, provider)
+	require.NoError(t, err)
+	var rootEffort string
+	var rootThinking *deployer.ThinkingConfig
+	for i := range req.Agents {
+		if req.Agents[i].Name == "general" {
+			rootEffort = req.Agents[i].Effort
+			rootThinking = req.Agents[i].Thinking
+		}
+	}
+	require.Empty(t, rootEffort, "disabled thinking must suppress effort on the wire")
+	require.NotNil(t, rootThinking, "disabled thinking itself must still be sent")
+	require.Equal(t, "disabled", rootThinking.Type)
 }
 
 // TestValidateEffortForDeploy 锁定下发兜底契约（issue #226）：按当前

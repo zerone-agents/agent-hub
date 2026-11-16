@@ -303,6 +303,61 @@ describe('AgentListPage', () => {
     mutableAgents = null
   })
 
+  it('关闭思考置上 + 打开后推理强度隐藏 + 保存 effort 清空（#260）', async () => {
+    const user = userEvent.setup()
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+
+    // 初始：推理强度输入框存在；关闭思考打开后整体不渲染（失效态消失，
+    // 不是灰置——防止用户误读 effort 仍生效）
+    expect(screen.getByText('推理强度')).toBeInTheDocument()
+    await user.click(screen.getByRole('switch'))
+    expect(screen.queryByText('推理强度')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.effort).toBe('') // 显式清空，不留残留
+    expect(payload.data.config.thinking).toEqual({ type: 'disabled' })
+    mutableUpdateAgent = null
+  })
+
+  it('probe 携带表单推理配置且 disabled 时剥离 effort（#261）', async () => {
+    const user = userEvent.setup()
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    const effortInput = screen.getByText('推理强度').closest<HTMLElement>('div')!
+    await user.type(within(effortInput).getByRole('combobox'), 'high')
+
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    let data = mutableProbeAgent.mock.calls[0][0].data as Record<string, unknown>
+    expect(data.modelId).toBe('GLM-5-Turbo')
+    expect(data.effort).toBe('high')
+    expect(data.thinking).toBeUndefined()
+
+    // 打开关闭思考 → effort 从 probe 载荷剥离（互斥，阿里云 400 规则）
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(2) })
+    data = mutableProbeAgent.mock.calls[1][0].data as Record<string, unknown>
+    expect(data.effort).toBeUndefined()
+    expect(data.thinking).toEqual({ type: 'disabled' })
+    mutableProbeAgent = null
+  })
+
   it('shows model modal with test and confirm buttons', async () => {
     const user = userEvent.setup()
     renderPage()

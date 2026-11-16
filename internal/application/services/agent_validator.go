@@ -395,9 +395,12 @@ func validateProviderModel(providerID uint64, modelID, modelSelectionID, effort 
 				map[string]string{"providerId": strconv.FormatUint(providerID, 10), "selectionId": modelSelectionID},
 				"providerId %d 下不存在 selection_id 为 %s 的模型", providerID, modelSelectionID)
 		}
-		return agent.NewCodedValidationErrorf(agent.CodeModelNotFound,
-			map[string]string{"providerId": strconv.FormatUint(providerID, 10), "model": modelID},
-			"providerId %d 下不存在模型 %s", providerID, modelID)
+		// 自定义模型放行（issue #262）：selectionId 为空 + modelId 不匹配
+		// catalog 行 → 用户自带模型（ModelModal 输入框本就接受任意值），
+		// id 原样向下透传完成测试与部署。model_type 无从校验（用户自负）；
+		// effort 白名单自然跳过（无声明 = 透传，#226 语义既立）。
+		// CodeModelNotFound 码退役：注册表常量与前端键保留兼容，无新触发路径。
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read provider_models failed: %w", err)

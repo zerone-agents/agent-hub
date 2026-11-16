@@ -141,7 +141,9 @@ export function useUpdateAgentKnowledgeDatasets() {
 
 export function useProbeAgent() {
   return useMutation({
-    mutationFn: ({ name, data }: { name: string; data: { providerId?: number; apiKey: string; baseUrl: string } }) =>
+    // issue #261：modelId/effort/thinking 携带未保存的表单态——服务端
+    // 请求值优先、空回落存量；全不传即旧连通性行为。
+    mutationFn: ({ name, data }: { name: string; data: { providerId?: number; apiKey: string; baseUrl: string; modelId?: string; effort?: string; thinking?: { type: string; budgetTokens?: number } } }) =>
       agentApi.probe(name, data),
     onError: (err) => message.error(parseApiError(err))
   })

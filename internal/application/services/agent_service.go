@@ -326,7 +326,23 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 	return &dto, nil
 }
 
-func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, apiKey, baseURL string) (*ProbeResult, error) {
+// ProbeAgentInput carries the ModelModal test payload (issue #261).
+// Request values win over stored config — the user is testing the form
+// state they have not saved yet; empty fields fall back to the agent's
+// stored rows. A fully empty input degenerates to the legacy provider
+// connectivity probe (catalog first chat model, no reasoning params).
+type ProbeAgentInput struct {
+	ProviderID     *uint64
+	APIKey         string
+	BaseURL        string
+	ModelID        string
+	Effort         string
+	ThinkingType   string
+	ThinkingBudget *int
+}
+
+func (s *AgentService) ProbeAgent(tenantID, name string, input ProbeAgentInput) (*ProbeResult, error) {
+	providerID, apiKey, baseURL := input.ProviderID, input.APIKey, input.BaseURL
 	a, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -394,7 +410,28 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 	}
 	models := toCatalogModels(modelRows)
 
-	return s.providerSvc.ProbeConfig(resolvedBaseURL, resolvedKey, p.Protocol, p.AuthStyle, models), nil
+	// ping 目标与推理参数（issue #261）：请求值（未保存表单态）优先、回落
+	// 存量 cfg；互斥（disabled 不带 effort）由 buildProbeChatBody 与下发侧
+	// （#260）同源处理。全空 input 时 opts 各字段为空，行为等同旧
+	// ProbeConfig（catalog 首模型、无推理参数）。
+	opts := &ProbeChatOptions{
+		ModelID:        input.ModelID,
+		Effort:         input.Effort,
+		ThinkingType:   input.ThinkingType,
+		ThinkingBudget: input.ThinkingBudget,
+	}
+	if opts.ModelID == "" {
+		opts.ModelID = a.ModelID
+	}
+	if opts.Effort == "" {
+		opts.Effort = a.Effort
+	}
+	if opts.ThinkingType == "" {
+		opts.ThinkingType = a.ThinkingType
+		opts.ThinkingBudget = a.ThinkingBudgetTokens
+	}
+
+	return s.providerSvc.ProbeChat(resolvedBaseURL, resolvedKey, p.Protocol, p.AuthStyle, models, opts), nil
 }
 
 // buildAgentDTO converts a single agent config into an AgentDTO.

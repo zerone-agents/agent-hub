@@ -134,17 +134,29 @@ func TestValidateConfig_FormPathStableCodes(t *testing.T) {
 		require.Equal(t, map[string]string{"providerId": "999"}, params)
 	})
 
-	t.Run("model not found carries providerId+model", func(t *testing.T) {
+	t.Run("custom model passthrough carries no error (issue #262)", func(t *testing.T) {
 		db := setupAgentValidatorTestDB(t)
 		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
 			Key: "glm", Name: "GLM", Protocol: "anthropic",
 			AuthStyle: "api_key", BaseURL: "http://x",
 		}).Error)
-		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+		// selectionId 空 + modelId 不在 catalog → 自定义模型放行（原
+		// model_not_found 断言随 #262 退役，码常量保留兼容）
+		require.NoError(t, ValidateConfig(map[string]interface{}{
 			"systemPrompt": "x", "providerId": float64(1), "modelId": "ghost",
 		}))
-		require.Equal(t, agent.StableCode("model_not_found"), code)
-		require.Equal(t, map[string]string{"providerId": "1", "model": "ghost"}, params)
+	})
+
+	t.Run("forged selectionId still rejected (issue #262 边界)", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		code, _ := codedCode(t, ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "modelSelectionId": "sel-fake",
+		}))
+		require.Equal(t, agent.StableCode("model_selection_not_found"), code)
 	})
 
 	t.Run("model type mismatch carries model+actual", func(t *testing.T) {
@@ -462,11 +474,12 @@ func TestValidateConfig_RejectsNonLLMModel(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "不是 LLM")
 
-	// Binding to non-existent model: rejected
+	// Binding to non-existent model: custom passthrough (issue #262)——
+	// selectionId 空且不匹配 catalog 行视为用户自带模型，放行透传
 	err = ValidateConfig(map[string]interface{}{
 		"systemPrompt": "x", "providerId": float64(providerID), "modelId": "ghost",
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
 }
 
 // TestValidateConfig_ProviderModelEdgeCases nails down the remaining
