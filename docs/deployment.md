@@ -50,7 +50,7 @@ SERVER_TRUSTED_PROXIES="10.0.0.0/8,172.16.0.0/12"
 - [ ] v2.0.0 升级演练：存量 agent 需逐个重新部署以落位租户限定部署键（三步迁移见 configuration.md「部署键与 runtime URL」）；仅当存量数据无法自动归属租户时，临时设置 `CASDOOR_ORGANIZATION` 作为一次性回填逃生舱（完成后移除）
 - [ ] 审批初始 admin：builtin 模式首访创建；casdoor 模式下 Casdoor 组织管理员登录自动成为 admin（无需在 Casdoor 创建任何 agent-hub 角色），其余用户登录后待审批分配角色
 - [ ] OSS 整体可选（`OSS_ENDPOINT` 留空即禁用）；启用时将 Bucket 设为公共读或配置 `OSS_CDN_HOST` CDN 加速 Skill 下载
-- [ ] ⚠️ **升级到含 `idx_messages_session_lookup` 的版本（≥ v2.25.1）前，生产大表建议先手动预建索引**（issue #264：`cloud_messages` 此前缺 session_id 索引，历史消息接口全租户扫描 + filesort，数据量增长后超前端 10s 超时）。hub 启动期 AutoMigrate 会同步建索引——百万行级表会显著拉长启动时间，升级前直接执行：
+- [ ] ⚠️ **升级到含 `idx_messages_session_lookup` 的版本（PR #265 合入后的首个发版）前，生产大表建议先手动预建索引**（issue #264：`cloud_messages` 此前缺 session_id 索引，历史消息接口全租户扫描 + filesort，数据量增长后超前端 10s 超时）。hub 启动期 AutoMigrate 会同步建索引——百万行级表会显著拉长启动时间，升级前直接执行：
   ```sql
   ALTER TABLE cloud_messages ADD INDEX idx_messages_session_lookup
     (tenant_id, session_id, sync_ordinal, created_at),
