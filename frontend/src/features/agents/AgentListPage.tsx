@@ -459,12 +459,21 @@ export default function AgentListPage() {
     try {
       // Send the current form values; backend resolves masked values against
       // the Agent's fieldOverrides or the Provider's stored key.
+      // issue #261：probe 同时携带表单当前模型与推理配置（未保存态）——
+      // 参数组合冲突在「测试」按钮即暴露，不再等真实聊天 400。
       const res = await probeAgent.mutateAsync({
         name: currentName,
         data: {
           providerId: selectedProviderId,
           apiKey: fieldValues.api_key || '',
           baseUrl: fieldValues.base_url || '',
+          modelId: selectedModelId || undefined,
+          // 三态提交（#263 评审重要 2）：effort 恒发表单值（'' = 显式清空，
+          // 服务端不复活存量）；thinking 仅在触碰过开关时发送（触碰后
+          // {type:''} = 显式清除）——未触碰不发、服务端回落存量。
+          // disabled 时 effort 剥离（互斥，服务端 body 构建同规则兜底）。
+          effort: selectedThinkingType === 'disabled' ? undefined : selectedEffort,
+          thinking: thinkingTouched ? { type: selectedThinkingType } : undefined,
         },
       })
       const result = (res.data as ApiEnvelope<{ success?: boolean; latencyMs?: number; error?: string }>).data
@@ -503,8 +512,10 @@ export default function AgentListPage() {
             modelId: selectedModelId,
             modelSelectionId: selectedSelectionId,
             fieldOverrides: overrides,
-            // 恒带 key：'' = 显式清除（hub 对 absent key 不变更，丢 key 会让清除静默失效）
-            effort: selectedEffort,
+            // 恒带 key：'' = 显式清除（hub 对 absent key 不变更，丢 key 会让清除静默失效）；
+            // 关闭思考打开时强制清空 effort（#260：disabled×effort 互斥，UI 已隐藏，
+            // 提交侧同步清除，防存量 effort 残留）
+            effort: selectedThinkingType === 'disabled' ? '' : selectedEffort,
             // thinking touched 保护（评审重要 4）：未触碰开关不发 key（absent
             // 不变更，保住 API 直连的 adaptive/enabled+budget）；触碰后
             // on={type:'disabled'}、off=null 显式清除
@@ -1039,26 +1050,9 @@ export default function AgentListPage() {
               </div>
             )}
 
-            {/* Effort（issue #226）：候选跟随当前模型声明的 efforts，无声明可自由输入 */}
-            {selectedProviderId && (
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
-                  <Tooltip title={t('agents.form.effortTip')}>{t('agents.form.effort')}</Tooltip>
-                </label>
-                <AutoComplete
-                  style={{ width: '100%' }}
-                  size="large"
-                  placeholder={t('agents.form.effortPh')}
-                  disabled={!canWrite}
-                  value={selectedEffort}
-                  onChange={(value) => { setSelectedEffort(value) }}
-                  options={declaredModelEfforts.map((e) => ({ value: e }))}
-                  allowClear
-                />
-              </div>
-            )}
-
-            {/* 关闭思考（issue #257）：thinking.type=disabled；与推理强度独立（语义正交） */}
+            {/* 关闭思考（issue #257/#260）：置于推理强度上方——先决定要不要
+                思考，再调强度；打开后推理强度整体隐藏（失效态不渲染，避免
+                误读），保存时 effort 显式清空（对齐下发互斥防御） */}
             {selectedProviderId && (
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -1069,8 +1063,34 @@ export default function AgentListPage() {
                   onChange={(v) => {
                     setSelectedThinkingType(v ? 'disabled' : '')
                     setThinkingTouched(true)
+                    // 测 A 存 B 防线（#263 评审重要 3）：配置变更后上次测试
+                    // 结果作废，必须重新测试才能确认保存。
+                    setTestPassed(false)
                   }}
                   disabled={!canWrite}
+                />
+              </div>
+            )}
+
+            {/* Effort（issue #226）：候选跟随当前模型声明的 efforts，无声明可自由输入；
+                关闭思考打开时不渲染（阿里云语义 disabled×effort 互斥，#260） */}
+            {selectedProviderId && selectedThinkingType !== 'disabled' && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  <Tooltip title={t('agents.form.effortTip')}>{t('agents.form.effort')}</Tooltip>
+                </label>
+                <AutoComplete
+                  style={{ width: '100%' }}
+                  size="large"
+                  placeholder={t('agents.form.effortPh')}
+                  disabled={!canWrite}
+                  value={selectedEffort}
+                  onChange={(value) => {
+                    setSelectedEffort(value)
+                    setTestPassed(false) // 同 Switch：配置变更使上次测试失效（#263）
+                  }}
+                  options={declaredModelEfforts.map((e) => ({ value: e }))}
+                  allowClear
                 />
               </div>
             )}

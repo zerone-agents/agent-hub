@@ -326,7 +326,53 @@ func (s *AgentService) GetAgent(tenantID, name string) (*AgentDTO, error) {
 	return &dto, nil
 }
 
-func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, apiKey, baseURL string) (*ProbeResult, error) {
+// ProbeAgentInput carries the ModelModal test payload (issue #261).
+// Request values win over stored config — the user is testing the form
+// state they have not saved yet; empty fields fall back to the agent's
+// stored rows. A fully empty input degenerates to the legacy provider
+// connectivity probe (catalog first chat model, no reasoning params).
+type ProbeAgentInput struct {
+	ProviderID *uint64
+	APIKey     string
+	BaseURL    string
+	ModelID    string
+	// Effort 三态（issue #263 评审重要 2）：nil = 未触碰（回落存量）；
+	// &"" = 表单显式清空（不复活）；&"xhigh" = 显式值。
+	Effort *string
+	// ThinkingProvided：请求带 thinking 对象即为 true（Type 可为 ''=显式
+	// 清除）；false = 未触碰（回落存量）。区分「未传 vs 显式清空」——
+	// 否则关掉开关的 probe 会复活存量 disabled，测的是旧配置。
+	ThinkingProvided bool
+	ThinkingType     string
+	ThinkingBudget   *int
+}
+
+// buildProbeChatOptions 装配 probe 参数（issue #263 评审重要 2）：请求值
+// 三态优先、未触碰回落存量——用户关掉开关（ThinkingProvided + Type=”）
+// 或清空 effort（&”）时，probe 必须按表单终态测试，不得复活存量值；
+// 保存路径发的就是这个终态，测 A 存 B 的错位就此消除。
+func buildProbeChatOptions(input ProbeAgentInput, stored *agent.AgentConfig) *ProbeChatOptions {
+	opts := &ProbeChatOptions{ModelID: input.ModelID}
+	if opts.ModelID == "" {
+		opts.ModelID = stored.ModelID
+	}
+	if input.Effort != nil {
+		opts.Effort = *input.Effort
+	} else {
+		opts.Effort = stored.Effort
+	}
+	if input.ThinkingProvided {
+		opts.ThinkingType = input.ThinkingType
+		opts.ThinkingBudget = input.ThinkingBudget
+	} else {
+		opts.ThinkingType = stored.ThinkingType
+		opts.ThinkingBudget = stored.ThinkingBudgetTokens
+	}
+	return opts
+}
+
+func (s *AgentService) ProbeAgent(tenantID, name string, input ProbeAgentInput) (*ProbeResult, error) {
+	providerID, apiKey, baseURL := input.ProviderID, input.APIKey, input.BaseURL
 	a, err := s.repo.GetByName(tenantID, name)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -394,7 +440,13 @@ func (s *AgentService) ProbeAgent(tenantID, name string, providerID *uint64, api
 	}
 	models := toCatalogModels(modelRows)
 
-	return s.providerSvc.ProbeConfig(resolvedBaseURL, resolvedKey, p.Protocol, p.AuthStyle, models), nil
+	// ping 目标与推理参数（issue #261，#263 评审重要 2 三态化）：
+	// buildProbeChatOptions 区分「未触碰回落」与「显式清空不复活」；
+	// 互斥（disabled 不带 effort）仍由 buildProbeChatBody 与下发侧
+	// （#260）同源处理。
+	opts := buildProbeChatOptions(input, a)
+
+	return s.providerSvc.ProbeChat(resolvedBaseURL, resolvedKey, p.Protocol, p.AuthStyle, models, opts), nil
 }
 
 // buildAgentDTO converts a single agent config into an AgentDTO.
@@ -568,6 +620,12 @@ func validateUpdateConfig(cfg *agent.AgentConfig, payload map[string]interface{}
 	}
 	if _, has := merged["modelSelectionId"]; !has {
 		merged["modelSelectionId"] = cfg.ModelSelectionID
+	}
+	// thinking 同规则注入（issue #263 评审重要 1）：payload 无 thinking key
+	// 时按存量终态注入——存量 disabled 下 effort 根本不下发，白名单复验
+	// 必须看到 disabled 才跳过；不注入会「校验一个不会发送的值」。
+	if _, has := merged["thinking"]; !has && cfg.ThinkingType != "" {
+		merged["thinking"] = map[string]interface{}{"type": cfg.ThinkingType}
 	}
 	return ValidateConfig(merged)
 }

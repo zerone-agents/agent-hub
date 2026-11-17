@@ -134,17 +134,29 @@ func TestValidateConfig_FormPathStableCodes(t *testing.T) {
 		require.Equal(t, map[string]string{"providerId": "999"}, params)
 	})
 
-	t.Run("model not found carries providerId+model", func(t *testing.T) {
+	t.Run("custom model passthrough carries no error (issue #262)", func(t *testing.T) {
 		db := setupAgentValidatorTestDB(t)
 		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
 			Key: "glm", Name: "GLM", Protocol: "anthropic",
 			AuthStyle: "api_key", BaseURL: "http://x",
 		}).Error)
-		code, params := codedCode(t, ValidateConfig(map[string]interface{}{
+		// selectionId 空 + modelId 不在 catalog → 自定义模型放行（原
+		// model_not_found 断言随 #262 退役，码常量保留兼容）
+		require.NoError(t, ValidateConfig(map[string]interface{}{
 			"systemPrompt": "x", "providerId": float64(1), "modelId": "ghost",
 		}))
-		require.Equal(t, agent.StableCode("model_not_found"), code)
-		require.Equal(t, map[string]string{"providerId": "1", "model": "ghost"}, params)
+	})
+
+	t.Run("forged selectionId still rejected (issue #262 边界)", func(t *testing.T) {
+		db := setupAgentValidatorTestDB(t)
+		require.NoError(t, db.Create(&providerdomain.ProviderSummary{
+			Key: "glm", Name: "GLM", Protocol: "anthropic",
+			AuthStyle: "api_key", BaseURL: "http://x",
+		}).Error)
+		code, _ := codedCode(t, ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4", "modelSelectionId": "sel-fake",
+		}))
+		require.Equal(t, agent.StableCode("model_selection_not_found"), code)
 	})
 
 	t.Run("model type mismatch carries model+actual", func(t *testing.T) {
@@ -462,11 +474,12 @@ func TestValidateConfig_RejectsNonLLMModel(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "不是 LLM")
 
-	// Binding to non-existent model: rejected
+	// Binding to non-existent model: custom passthrough (issue #262)——
+	// selectionId 空且不匹配 catalog 行视为用户自带模型，放行透传
 	err = ValidateConfig(map[string]interface{}{
 		"systemPrompt": "x", "providerId": float64(providerID), "modelId": "ghost",
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
 }
 
 // TestValidateConfig_ProviderModelEdgeCases nails down the remaining
@@ -609,5 +622,47 @@ func TestValidateConfig_Effort(t *testing.T) {
 			"systemPrompt": "x", "effort": "high",
 		})
 		require.NoError(t, err)
+	})
+
+	// 互斥规则三侧同源（issue #263 评审重要 1）：thinking=disabled 时
+	// effort 在部署与探测都不会发送，保存侧白名单复验必须同步跳过——
+	// 「不校验一个不会发送的值」；仅显式 type=disabled 跳过。
+	t.Run("disabled 时白名单跳过（评审重要 1）", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh", "thinking": map[string]interface{}{"type": "disabled"},
+		})
+		require.NoError(t, err, "disabled 时 effort 不下发，白名单不得拦")
+	})
+
+	t.Run("无 thinking 时白名单照拦（对称基线）", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "effort 'xhigh' 不在模型 glm-4 声明的候选列表内")
+	})
+
+	t.Run("enabled/adaptive 不跳过白名单", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		for _, typ := range []string{"enabled", "adaptive"} {
+			err := ValidateConfig(map[string]interface{}{
+				"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+				"effort": "xhigh", "thinking": map[string]interface{}{"type": typ},
+			})
+			require.Error(t, err, "type=%s 时 effort 仍会发送，白名单必须照拦", typ)
+		}
+	})
+
+	t.Run("thinking null 显式清除不跳过白名单", func(t *testing.T) {
+		seedModel(t, `["low","high"]`)
+		err := ValidateConfig(map[string]interface{}{
+			"systemPrompt": "x", "providerId": float64(1), "modelId": "glm-4",
+			"effort": "xhigh", "thinking": nil,
+		})
+		require.Error(t, err, "null = 无 thinking（effort 照发），不是 disabled")
 	})
 }

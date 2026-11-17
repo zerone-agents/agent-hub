@@ -317,6 +317,15 @@ type probeAgentReq struct {
 	ProviderID *uint64 `json:"providerId"`
 	APIKey     string  `json:"apiKey"`
 	BaseURL    string  `json:"baseUrl"`
+	// issue #261/#263：测试未保存的表单态。三态语义——Effort 指针区分
+	// 「未触碰（nil，回落存量）vs 显式清空（&''，不复活）」；Thinking
+	// 对象出现即视为触碰（Type 可为 ''=显式清除），缺席回落存量。
+	ModelID  string  `json:"modelId"`
+	Effort   *string `json:"effort"`
+	Thinking *struct {
+		Type         string `json:"type"`
+		BudgetTokens *int   `json:"budgetTokens"`
+	} `json:"thinking"`
 }
 
 func (h *AgentHandler) ProbeAgent(c *gin.Context) {
@@ -331,7 +340,20 @@ func (h *AgentHandler) ProbeAgent(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ProbeAgent(tenant.GetTenantID(c), name, req.ProviderID, req.APIKey, req.BaseURL)
+	input := services.ProbeAgentInput{
+		ProviderID: req.ProviderID,
+		APIKey:     req.APIKey,
+		BaseURL:    req.BaseURL,
+		ModelID:    req.ModelID,
+		Effort:     req.Effort,
+	}
+	if req.Thinking != nil {
+		input.ThinkingProvided = true
+		input.ThinkingType = req.Thinking.Type
+		input.ThinkingBudget = req.Thinking.BudgetTokens
+	}
+
+	result, err := h.service.ProbeAgent(tenant.GetTenantID(c), name, input)
 	if err != nil {
 		respondAgentError(c, err)
 		return

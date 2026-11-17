@@ -741,11 +741,33 @@ func (s *ProviderService) ProbeWithOverride(tenantID string, id uint64, override
 		models = toCatalogModels(rows)
 	}
 
-	return s.doProbe(baseURL, apiKey, protocol, authStyle, models), nil
+	// provider 级探测无 Agent 推理参数（issue #261 的 opts 仅 Agent 级
+	// ProbeChat 使用），传 nil 保持连通性语义不变。
+	return s.doProbe(baseURL, apiKey, protocol, authStyle, models, nil), nil
 }
 
 func (s *ProviderService) ProbeConfig(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {
-	return s.doProbe(baseURL, apiKey, protocol, authStyle, models)
+	return s.doProbe(baseURL, apiKey, protocol, authStyle, models, nil)
+}
+
+// ProbeChatOptions customizes the Agent-level probe (issue #261): ModelID
+// pins the ping target (including custom models outside the catalog), and
+// Effort/ThinkingType/ThinkingBudget mirror the Agent's reasoning config so
+// provider-side parameter conflicts — e.g. Bailian's OpenAI-compatible rule
+// that reasoning_effort must be none when enable_thinking is false
+// (agent-sdk#170) — surface at the "test" button instead of the first chat.
+// All-zero options keep the legacy connectivity behavior.
+type ProbeChatOptions struct {
+	ModelID        string
+	Effort         string
+	ThinkingType   string // adaptive|enabled|disabled; empty = not set
+	ThinkingBudget *int
+}
+
+// ProbeChat is the options-aware probe entry (issue #261). ProbeConfig stays
+// the connectivity-only wrapper for provider-level callers.
+func (s *ProviderService) ProbeChat(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel, opts *ProbeChatOptions) *ProbeResult {
+	return s.doProbe(baseURL, apiKey, protocol, authStyle, models, opts)
 }
 
 // firstChatModelID returns the id of the first chat-capable model (llm/vlm or
@@ -764,10 +786,72 @@ func firstChatModelID(models []provider.CatalogModel) (string, bool) {
 	return "", false
 }
 
+// probeThinkingMaxTokens leaves room for reasoning output when the probe
+// may trigger thinking (issue #261): Anthropic requires max_tokens >
+// thinking.budget_tokens (minimum budget 1024), and an effort value
+// implicitly enables thinking on Bailian's Anthropic-compatible endpoint —
+// a max_tokens:1 ping would 400 or truncate and mask the real verdict.
+const probeThinkingMaxTokens = 1200
+
+// buildProbeChatBody assembles the ping request body (issue #261): a minimal
+// chat request carrying the agent's reasoning parameters, so that
+// provider-side parameter conflicts (e.g., Bailian OpenAI-compatible
+// endpoint's rule that reasoning_effort must be none when
+// enable_thinking:false, agent-sdk#170) surface at the test button instead
+// of the first actual chat. json.Marshal also closes the injection surface
+// that fmt.Sprintf had for user-controllable model ids.
+//
+// Mutual exclusion mirrors the deploy-side defense (#260): when
+// thinking=disabled, effort is not sent.
+func buildProbeChatBody(modelID string, anthropic bool, opts *ProbeChatOptions) (string, error) {
+	body := map[string]any{
+		"model":      modelID,
+		"max_tokens": 1,
+		"messages":   []map[string]any{{"role": "user", "content": "ping"}},
+	}
+	if opts != nil {
+		disabled := opts.ThinkingType == "disabled"
+		if anthropic {
+			// adaptive: no thinking field — server default (mirrors SDK mapping).
+			if opts.ThinkingType != "" && opts.ThinkingType != "adaptive" {
+				th := map[string]any{"type": opts.ThinkingType}
+				if opts.ThinkingType == "enabled" && opts.ThinkingBudget != nil {
+					th["budget_tokens"] = *opts.ThinkingBudget
+				}
+				body["thinking"] = th
+			}
+			if !disabled && opts.Effort != "" {
+				body["output_config"] = map[string]any{"effort": opts.Effort}
+			}
+			if !disabled && (opts.Effort != "" || opts.ThinkingType == "enabled") {
+				mt := probeThinkingMaxTokens
+				if opts.ThinkingBudget != nil && *opts.ThinkingBudget+64 > mt {
+					mt = *opts.ThinkingBudget + 64
+				}
+				body["max_tokens"] = mt
+			}
+		} else {
+			if opts.ThinkingType == "enabled" || disabled {
+				body["enable_thinking"] = !disabled
+			}
+			if !disabled && opts.Effort != "" {
+				body["reasoning_effort"] = opts.Effort
+			}
+		}
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("build probe body failed: %w", err)
+	}
+	return string(b), nil
+}
+
 // doProbe performs the actual HTTP probe against the upstream provider.
 // It backs both the admin "test connection" buttons and the CLI
-// `provider probe/test` commands.
-func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel) *ProbeResult {
+// `provider probe/test` commands. opts is nil for provider-level probes
+// (connectivity only) and carries the agent's model + reasoning config for
+// the agent-level probe (issue #261).
+func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, models []provider.CatalogModel, opts *ProbeChatOptions) *ProbeResult {
 	start := time.Now()
 	base := strings.TrimSuffix(baseURL, "/")
 
@@ -779,9 +863,19 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 		// 已配置 chat-capable 模型时真实 ping 一次 /chat/completions：GET /models
 		// 只验证连通+鉴权，端点不支持 openai chat schema 时会假成功（真实调用才
 		// 400，用户实测反例）。无 chat-capable 模型时退化为 GET /models 连通性
-		// 检查（此时无法验证 chat schema）。
-		if modelID, ok := firstChatModelID(models); ok {
-			body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, modelID)
+		// 检查（此时无法验证 chat schema）。opts.ModelID 非空（#261，含目录外
+		// 自定义模型）时强制 POST ping 该模型，不再依赖 catalog。
+		modelID := ""
+		if opts != nil && opts.ModelID != "" {
+			modelID = opts.ModelID
+		} else if id, ok := firstChatModelID(models); ok {
+			modelID = id
+		}
+		if modelID != "" {
+			body, berr := buildProbeChatBody(modelID, false, opts)
+			if berr != nil {
+				return &ProbeResult{Success: false, Error: berr.Error()}
+			}
 			req, err = http.NewRequest("POST", base+"/chat/completions", strings.NewReader(body))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
@@ -797,10 +891,15 @@ func (s *ProviderService) doProbe(baseURL, apiKey, protocol, authStyle string, m
 		// Anthropic-compatible。handler 已做枚举校验，未知 protocol 在入站即被拒，
 		// 仅 anthropic 系列会走到 default。
 		modelID := "claude-sonnet-4-20250514"
-		if id, ok := firstChatModelID(models); ok {
+		if opts != nil && opts.ModelID != "" {
+			modelID = opts.ModelID
+		} else if id, ok := firstChatModelID(models); ok {
 			modelID = id
 		}
-		body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}`, modelID)
+		body, berr := buildProbeChatBody(modelID, true, opts)
+		if berr != nil {
+			return &ProbeResult{Success: false, Error: berr.Error()}
+		}
 		req, err = http.NewRequest("POST", base+"/v1/messages", strings.NewReader(body))
 		if err == nil {
 			req.Header.Set("Content-Type", "application/json")

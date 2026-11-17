@@ -170,7 +170,7 @@ func buildGraphFixture(t *testing.T) *graphFixture {
 		c.PermissionMode = "plan"
 		c.MaxSessionQueries = intPtr(42)
 		c.Effort = "high"
-		c.ThinkingType = "disabled"
+		c.ThinkingType = "enabled"
 		c.ThinkingBudgetTokens = intPtr(4096)
 		c.Description = map[string]string{"zh": "父 Agent", "en": "parent agent"}
 		c.DisallowedTools = []string{"Bash"}
@@ -377,8 +377,11 @@ func TestDeploy_AgentGraph(t *testing.T) {
 		// runtime-global 声明而 400，所以 wire 上必须缺席。
 		require.Equal(t, "high", root["effort"])
 		// thinking（issue #257）：同族 root-only；嵌套对象携带 type +
-		// budgetTokens（JSON number 反序列化为 float64）。
-		require.Equal(t, map[string]any{"type": "disabled", "budgetTokens": float64(4096)}, root["thinking"])
+		// budgetTokens（JSON number 反序列化为 float64）。enabled 而非
+		// disabled——disabled 会触发 #260 互斥压制（effort 不上 wire），
+		// 该场景由 TestBuildCreateRequest_ThinkingDisabledSuppressesEffort
+		// 单独钉死。
+		require.Equal(t, map[string]any{"type": "enabled", "budgetTokens": float64(4096)}, root["thinking"])
 		for _, child := range nodes[1:] {
 			for _, key := range []string{"model", "maxSessionQueries", "permissionMode", "effort", "thinking"} {
 				require.NotContains(t, child, key, "child node must not declare root-only key %q", key)

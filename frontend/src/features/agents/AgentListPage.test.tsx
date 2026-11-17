@@ -303,6 +303,125 @@ describe('AgentListPage', () => {
     mutableAgents = null
   })
 
+  it('关闭思考置上 + 打开后推理强度隐藏 + 保存 effort 清空（#260）', async () => {
+    const user = userEvent.setup()
+    mutableUpdateAgent = vi.fn().mockResolvedValue(undefined)
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+
+    // 初始：推理强度输入框存在；关闭思考打开后整体不渲染（失效态消失，
+    // 不是灰置——防止用户误读 effort 仍生效）
+    expect(screen.getByText('推理强度')).toBeInTheDocument()
+    await user.click(screen.getByRole('switch'))
+    expect(screen.queryByText('推理强度')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }))
+
+    await waitFor(() => { expect(mutableUpdateAgent).toHaveBeenCalledTimes(1) })
+    const payload = mutableUpdateAgent.mock.calls[0][0] as { name: string; data: { config: AgentConfig } }
+    expect(payload.data.config.effort).toBe('') // 显式清空，不留残留
+    expect(payload.data.config.thinking).toEqual({ type: 'disabled' })
+    mutableUpdateAgent = null
+  })
+
+  it('probe 携带表单推理配置且 disabled 时剥离 effort（#261）', async () => {
+    const user = userEvent.setup()
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    const effortInput = screen.getByText('推理强度').closest<HTMLElement>('div')!
+    await user.type(within(effortInput).getByRole('combobox'), 'high')
+
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    let data = mutableProbeAgent.mock.calls[0][0].data as Record<string, unknown>
+    expect(data.modelId).toBe('GLM-5-Turbo')
+    expect(data.effort).toBe('high')
+    expect(data.thinking).toBeUndefined()
+
+    // 打开关闭思考 → effort 从 probe 载荷剥离（互斥，阿里云 400 规则）
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(2) })
+    data = mutableProbeAgent.mock.calls[1][0].data as Record<string, unknown>
+    expect(data.effort).toBeUndefined()
+    expect(data.thinking).toEqual({ type: 'disabled' })
+    mutableProbeAgent = null
+  })
+
+  it('存量 disabled 关掉开关后 probe 显式发清除态不复活（#263 评审重要 2）', async () => {
+    const user = userEvent.setup()
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    mutableAgents = [
+      {
+        id: 1, name: 'general',
+        config: {
+          title: { zh: '通用助手' }, providerId: 1, modelId: 'GLM-5-Turbo',
+          effort: 'high', thinking: { type: 'disabled' },
+        },
+        subagents: [], tools: [], skills: [],
+        desktopEnabled: true, isDefault: true, createdAt: '2026-06-10T10:00:00Z',
+      },
+    ]
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+    expect(screen.getByRole('switch')).toBeChecked() // 存量 disabled = on
+
+    // 用户关掉开关 → touched-off → 显式发 {type:''}（清除），不复活存量
+    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+
+    const data = mutableProbeAgent.mock.calls[0][0].data as Record<string, unknown>
+    expect(data.thinking).toEqual({ type: '' })
+    expect(data.effort).toBe('high') // effort 未触碰，按表单回填值照发
+    mutableProbeAgent = null
+    mutableAgents = null
+  })
+
+  it('编辑推理配置后上次测试失效，必须重新测试（#263 评审重要 3）', async () => {
+    const user = userEvent.setup()
+    mutableProbeAgent = vi.fn().mockResolvedValue({
+      data: { data: { success: true, latencyMs: 12 } },
+    })
+    renderPage()
+
+    await user.click(screen.getByText('GLM-5-Turbo'))
+
+    // 先测一次通过 → canConfirm=true
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => { expect(mutableProbeAgent).toHaveBeenCalledTimes(1) })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /确\s*认/ })).toBeEnabled()
+    })
+
+    // 改 effort → 上次测试作废，确认按钮必须禁用（不能测 A 存 B）
+    const effortItem = screen.getByText('推理强度').closest<HTMLElement>('div')!
+    await user.type(within(effortItem).getByRole('combobox'), 'high')
+    expect(screen.getByRole('button', { name: /确\s*认/ })).toBeDisabled()
+
+    // 切换关闭思考同样失效（先重新测绿再切）
+    await user.click(screen.getByRole('button', { name: /测\s*试/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /确\s*认/ })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('switch'))
+    expect(screen.getByRole('button', { name: /确\s*认/ })).toBeDisabled()
+    mutableProbeAgent = null
+  })
+
   it('shows model modal with test and confirm buttons', async () => {
     const user = userEvent.setup()
     renderPage()
