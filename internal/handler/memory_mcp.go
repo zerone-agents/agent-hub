@@ -189,10 +189,12 @@ func (h *MemoryMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, 
 	if err := json.Unmarshal(params, &p); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("%w: %v", errMCPInvalidParams, err)
 	}
-	// name 是 tools/call 的必需字段（MCP 契约）——缺失属 invalid params
-	//（#256 follow-up），与「name 非空但未知工具」的 -32603 语义区分。
+	// name 是 tools/call 的必需字段（MCP 契约）——缺失**或空白**均属
+	// invalid params（#256 follow-up；空白工具名语义上等价缺失，测试
+	// 钉住 TrimSpace 语义防「简化」为 == "" 静默回退），与「name 非空
+	// 但未知工具」的 -32603 语义区分。
 	if strings.TrimSpace(p.Name) == "" {
-		return jsonRPCResponse{}, fmt.Errorf("%w: tools/call 的 params 必须包含工具名（name）", errMCPInvalidParams)
+		return jsonRPCResponse{}, fmt.Errorf("%w: tools/call 的 name 不能为空", errMCPInvalidParams)
 	}
 	switch p.Name {
 	case "memory_remember", "memory_recall", "memory_list", "memory_update":
