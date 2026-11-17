@@ -97,6 +97,12 @@ const (
 	mcpSearchMaxTopK     = 512
 )
 
+// errMCPInvalidParams 标记 tools/call 的参数解析类错误（issue #256）：JSON-RPC
+// 层按 errors.Is 分流为 -32602（invalid params）；其余错误（工具不存在、
+// 上下文缺失等）维持 -32603。knowledge_mcp 与 memory_mcp 两端点共用——
+// 两处必须同一次 PR 修改，避免行为分叉。
+var errMCPInvalidParams = errors.New("mcp invalid params")
+
 type listDocumentsArgs struct {
 	DatasetID string `json:"dataset_id"`
 	Page      *int   `json:"page"`
@@ -180,10 +186,14 @@ func (h *KnowledgeMcpHandler) HandleMessage(c *gin.Context) {
 	case "tools/call":
 		result, err := h.handleToolsCall(c.Request.Context(), c, req.ID, req.Params)
 		if err != nil {
+			code := -32603
+			if errors.Is(err, errMCPInvalidParams) {
+				code = -32602 // invalid params（issue #256）：参数类错误与内部错误分码
+			}
 			c.JSON(http.StatusOK, jsonRPCResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Error:   &jsonRPCError{Code: -32603, Message: err.Error()},
+				Error:   &jsonRPCError{Code: code, Message: err.Error()},
 			})
 			return
 		}
@@ -381,7 +391,7 @@ func (h *KnowledgeMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var p toolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("%w: 参数解析失败: %v", errMCPInvalidParams, err)
 	}
 
 	switch p.Name {
