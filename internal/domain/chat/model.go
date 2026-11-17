@@ -33,13 +33,17 @@ type Session struct {
 func (Session) TableName() string { return "cloud_sessions" }
 
 type Message struct {
-	UserID     string    `json:"user_id" gorm:"primaryKey;type:varchar(255);not null"`
-	TenantID   string    `json:"tenant_id" gorm:"type:varchar(64);not null;default:'';index"`
-	ID         string    `json:"id" gorm:"primaryKey;type:varchar(255);not null"`
-	SessionID  string    `json:"session_id" gorm:"primaryKey;type:varchar(255);not null"`
-	Role       string    `json:"role" gorm:"type:varchar(50)"`
-	Content    string    `json:"content" gorm:"type:longtext"`
-	CreatedAt  time.Time `json:"created_at"`
+	UserID    string `json:"user_id" gorm:"primaryKey;type:varchar(255);not null"`
+	TenantID  string `json:"tenant_id" gorm:"type:varchar(64);not null;default:'';index;index:idx_messages_session_lookup,priority:1"`
+	ID        string `json:"id" gorm:"primaryKey;type:varchar(255);not null"`
+	SessionID string `json:"session_id" gorm:"primaryKey;type:varchar(255);not null;index:idx_messages_session_lookup,priority:2"`
+	Role      string `json:"role" gorm:"type:varchar(50)"`
+	Content   string `json:"content" gorm:"type:longtext"`
+	// CreatedAt 参与 idx_messages_session_lookup priority:4——ListMessages 的
+	// ORDER BY (sync_ordinal, created_at) 前缀匹配索引（issue #264：缺此
+	// 索引时 WHERE tenant+session 走低基数 tenant_id 单列索引 → 全租户回表
+	// （longtext 溢出页）+ filesort，生产数据量下超前端 10s axios 超时）。
+	CreatedAt  time.Time `json:"created_at" gorm:"index:idx_messages_session_lookup,priority:4"`
 	Hidden     bool      `json:"hidden" gorm:"default:false"`
 	TokenUsage string    `json:"token_usage" gorm:"type:text"`
 	Feedback   string    `json:"feedback" gorm:"type:text"`
@@ -48,7 +52,8 @@ type Message struct {
 	// ordinal 决定，不靠 created_at）。v1 写入路径不设置（NULL），读路径
 	// 对 NULL（legacy 会话）回退 created_at 排序——会话要么全 v2 要么全
 	// legacy，混合形态不存在（v1 写入在 claim 后被拒）。
-	SyncOrdinal *int64 `json:"-" gorm:"column:sync_ordinal"`
+	// 参与 idx_messages_session_lookup priority:3（ORDER BY 前缀，#264）。
+	SyncOrdinal *int64 `json:"-" gorm:"column:sync_ordinal;index:idx_messages_session_lookup,priority:3"`
 }
 
 func (Message) TableName() string { return "cloud_messages" }
