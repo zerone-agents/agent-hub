@@ -402,6 +402,11 @@ func (h *KnowledgeMcpHandler) handleToolsCall(ctx context.Context, c *gin.Contex
 	if err := json.Unmarshal(params, &p); err != nil {
 		return jsonRPCResponse{}, fmt.Errorf("%w: %v", errMCPInvalidParams, err)
 	}
+	// name 是 tools/call 的必需字段（MCP 契约）——缺失属 invalid params
+	//（#256 follow-up），与「name 非空但未知工具」的 -32603 语义区分。
+	if strings.TrimSpace(p.Name) == "" {
+		return jsonRPCResponse{}, fmt.Errorf("%w: tools/call 的 params 必须包含工具名（name）", errMCPInvalidParams)
+	}
 
 	switch p.Name {
 	case "knowledge_search":

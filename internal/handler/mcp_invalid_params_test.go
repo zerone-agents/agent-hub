@@ -96,3 +96,30 @@ func TestMcpInvalidParamsMessageFormat(t *testing.T) {
 	require.NotContains(t, resp.Error.Message, "mcp invalid params", "英文 sentinel 文本不得泄入 wire message")
 	require.Contains(t, resp.Error.Message, "参数解析失败")
 }
+
+// TestMcpMissingToolName32602（#256 follow-up 备注）：tools/call 的 params
+// 缺 name 字段（`{}`）→ -32602 invalid params——MCP 契约 name 为必需字段，
+// 缺失属参数无效而非「工具不存在」（name 非空未知工具保持 -32603，
+// 既有 unknown-tool 测试钉住）。两端点同改，行为不分叉。
+func TestMcpMissingToolName32602(t *testing.T) {
+	t.Run("knowledge_mcp", func(t *testing.T) {
+		router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{})
+		rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`{}`), testValidToken)
+		var resp jsonRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error, "缺 name 走 JSON-RPC Error 对象")
+		require.Equal(t, -32602, resp.Error.Code, "缺必需字段 → invalid params")
+		require.Contains(t, resp.Error.Message, "参数解析失败")
+		require.Contains(t, resp.Error.Message, "工具名")
+	})
+	t.Run("memory_mcp", func(t *testing.T) {
+		router := setupMemoryMcpRouter(&fakeAgentMemoryStore{}, services.NewMemoryCapabilityService("unit-secret"), nil)
+		rec := memoryMcpPost(t, router, "tools/call", json.RawMessage(`{}`), nil)
+		var resp jsonRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error, "缺 name 走 JSON-RPC Error 对象")
+		require.Equal(t, -32602, resp.Error.Code, "缺必需字段 → invalid params")
+		require.Contains(t, resp.Error.Message, "参数解析失败")
+		require.Contains(t, resp.Error.Message, "工具名")
+	})
+}
