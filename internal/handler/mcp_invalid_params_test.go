@@ -11,6 +11,7 @@ import (
 
 	"control-panel/internal/application/services"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,4 +52,47 @@ func TestMemoryMcpUnknownToolStays32603(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.NotNil(t, resp.Error)
 	require.Equal(t, -32603, resp.Error.Code, "非参数类错误保持 internal error")
+}
+
+// TestKnowledgeMcpToolArgumentsInvalidParams：工具级 arguments 坏 → -32602
+// （评审发现 1：四处 bare 位点——documents/chunks/search 外层 map/search
+// typed，此前同文案「参数解析失败」却落 -32603，端点内部分叉）。
+func TestKnowledgeMcpToolArgumentsInvalidParams(t *testing.T) {
+	// typed 解析用例需带 dataset 绑定（search 的授权解析在 typed 解析之前，
+	// 空绑定会先落 no_dataset_bound 的 isError result 而非本测路径）
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{})
+	bound := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{datasets: []string{"kb-1"}})
+	cases := []struct {
+		name   string
+		router *gin.Engine
+		body   string
+	}{
+		{"knowledge_documents arguments 非对象", router, `{"name":"knowledge_documents","arguments":[]}`},
+		{"knowledge_chunks arguments 非对象", router, `{"name":"knowledge_chunks","arguments":[]}`},
+		{"knowledge_search arguments 非对象（外层 map 解析）", router, `{"name":"knowledge_search","arguments":[]}`},
+		{"knowledge_search query 类型错（typed 解析）", bound, `{"name":"knowledge_search","arguments":{"query":123}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := postJSONRPC(t, tc.router, "tools/call", json.RawMessage(tc.body), testValidToken)
+			var resp jsonRPCResponse
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+			require.NotNil(t, resp.Error, "参数解析失败走 JSON-RPC Error 对象")
+			require.Equal(t, -32602, resp.Error.Code)
+			require.Contains(t, resp.Error.Message, "参数解析失败")
+		})
+	}
+}
+
+// TestMcpInvalidParamsMessageFormat：wire message 保持纯中文旧格式
+// （评审发现 2：sentinel 文本曾是英文 "mcp invalid params"，以 %w 前缀
+// 泄入 message，违反 CONTRIBUTING「User-facing errors in Chinese」）。
+func TestMcpInvalidParamsMessageFormat(t *testing.T) {
+	router := setupKnowledgeMcpRouter(&fakeKnowledgeMcpService{}, &fakeAgentMcpService{})
+	rec := postJSONRPC(t, router, "tools/call", json.RawMessage(`[]`), testValidToken)
+	var resp jsonRPCResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Error)
+	require.NotContains(t, resp.Error.Message, "mcp invalid params", "英文 sentinel 文本不得泄入 wire message")
+	require.Contains(t, resp.Error.Message, "参数解析失败")
 }
