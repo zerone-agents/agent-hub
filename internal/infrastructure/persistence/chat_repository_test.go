@@ -46,6 +46,32 @@ func seedChatTenantData(t *testing.T, db *gorm.DB) {
 	}).Error)
 }
 
+// TestChatRepository_MessageSessionIndex 钉死 issue #264 的复合索引：
+// AutoMigrate 后必须存在 idx_messages_session_lookup 且列序恰为
+// (tenant_id, session_id, sync_ordinal, created_at)——ListMessages 的
+// WHERE 双等值 + ORDER BY 前缀完全匹配该顺序才能免回表/免 filesort；
+// 列序错一位就退化成半截索引，生产（console.zerone.life）的 10s 超时复发。
+func TestChatRepository_MessageSessionIndex(t *testing.T) {
+	db := setupChatRepoTestDB(t)
+
+	require.True(t, db.Migrator().HasIndex(&chat.Message{}, "idx_messages_session_lookup"),
+		"AutoMigrate 必须创建 idx_messages_session_lookup（缺失即 #264 回归）")
+
+	// sqlite PRAGMA index_info 返回按 seqno 的列清单——断言精确列序。
+	type indexCol struct {
+		Seqno int
+		Name  string
+	}
+	var cols []indexCol
+	require.NoError(t, db.Raw("PRAGMA index_info('idx_messages_session_lookup')").Scan(&cols).Error)
+	got := make([]string, len(cols))
+	for i, c := range cols {
+		got[i] = c.Name
+	}
+	require.Equal(t, []string{"tenant_id", "session_id", "sync_ordinal", "created_at"}, got,
+		"索引列序必须与 ListMessages 的 WHERE+ORDER BY 前缀完全匹配")
+}
+
 func TestChatRepository_ListSessions_TenantIsolation(t *testing.T) {
 	db := setupChatRepoTestDB(t)
 	seedChatTenantData(t, db)
