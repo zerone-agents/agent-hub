@@ -25,7 +25,7 @@ type mcpSearchPage struct {
 func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var supplied map[string]json.RawMessage
 	if err := json.Unmarshal(params, &supplied); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("%w: %v", errMCPInvalidParams, err)
 	}
 	allowed, deny, err := h.resolveAgentContext(c, id)
 	if err != nil {
@@ -44,7 +44,7 @@ func (h *KnowledgeMcpHandler) searchKnowledge(ctx context.Context, c *gin.Contex
 	}
 	var args knowledgeSearchArgs
 	if err := json.Unmarshal(params, &args); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("%w: %v", errMCPInvalidParams, err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {

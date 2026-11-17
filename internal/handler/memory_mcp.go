@@ -105,11 +105,7 @@ func (h *MemoryMcpHandler) HandleMessage(c *gin.Context) {
 	case "tools/call":
 		result, err := h.handleToolsCall(c.Request.Context(), c, req.ID, req.Params)
 		if err != nil {
-			c.JSON(http.StatusOK, jsonRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Error:   &jsonRPCError{Code: -32603, Message: err.Error()},
-			})
+			respondToolsCallError(c, req.ID, err)
 			return
 		}
 		c.JSON(http.StatusOK, result)
@@ -191,7 +187,7 @@ func (h *MemoryMcpHandler) handleToolsList(id interface{}) jsonRPCResponse {
 func (h *MemoryMcpHandler) handleToolsCall(ctx context.Context, c *gin.Context, id interface{}, params json.RawMessage) (jsonRPCResponse, error) {
 	var p toolCallParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return jsonRPCResponse{}, fmt.Errorf("参数解析失败: %w", err)
+		return jsonRPCResponse{}, fmt.Errorf("%w: %v", errMCPInvalidParams, err)
 	}
 	switch p.Name {
 	case "memory_remember", "memory_recall", "memory_list", "memory_update":
